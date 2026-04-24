@@ -1,11 +1,11 @@
 module github.com/gosidian/gosidian
 
-go 1.25.0
+go 1.25.5
 
 require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/fsnotify/fsnotify v1.7.0
-	github.com/mark3labs/mcp-go v0.47.1
+	github.com/mark3labs/mcp-go v0.49.0
 	github.com/pquerna/otp v1.5.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/yuin/goldmark v1.7.4
