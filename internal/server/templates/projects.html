@@ -1,0 +1,26 @@
+{{ define "body" }}
+<h1>{{ call .T "projects_page.h1" }}</h1>
+
+<section class="new-project">
+  <form method="post" action="/projects">
+    <input type="text" name="name" placeholder="{{ call .T "projects_page.name_placeholder" }}" required autofocus>
+    <button type="submit">+ {{ call .T "common.create_project" }}</button>
+  </form>
+  {{ if .Error }}<p class="error">{{ .Error }}</p>{{ end }}
+</section>
+
+{{ if .Projects }}
+<ul class="project-list">
+  {{ range .Projects }}
+  <li>
+    <a href="/projects/{{ .Name }}">{{ .Name }}</a>
+    <span class="muted">{{ call $.T "projects_page.notes_count" .NoteCount }}</span>
+  </li>
+  {{ end }}
+</ul>
+{{ else }}
+<p class="muted">{{ call .T "projects_page.none" }}</p>
+{{ end }}
+{{ end }}
+
+{{ define "projects.html" }}{{ template "body" . }}{{ end }}

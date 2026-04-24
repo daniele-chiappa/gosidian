@@ -1,0 +1,7 @@
+{
+  "_stub": "Scaffolding v1.10 — file vuoto, tutte le chiavi cadono in fallback EN. Contribuisci aggiungendo traduzioni: vedi CONTRIBUTING.md Translating gosidian section.",
+  "login": {
+    "bad_credentials": "Credenciales no válidas.",
+    "rate_limited": "Demasiados intentos fallidos, inténtalo más tarde."
+  }
+}

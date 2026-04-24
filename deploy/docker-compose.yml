@@ -1,0 +1,54 @@
+# Example self-hosted deployment of gosidian.
+#
+#   cd deploy && docker compose up -d
+#
+# The vault is persisted under ./vault (relative to this file). Put a reverse
+# proxy (Caddy, Traefik, nginx) in front for TLS — gosidian is bound to
+# 127.0.0.1 on purpose so it's only reachable via the proxy.
+
+services:
+  gosidian:
+    image: gosidian:dev
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        VERSION: dev
+    container_name: gosidian
+    restart: unless-stopped
+
+    ports:
+      # Web UI — put a reverse proxy in front for TLS
+      - "127.0.0.1:8080:8080"
+      # MCP server — auth via bearer token, safe to expose through the proxy
+      - "127.0.0.1:8765:8765"
+
+    volumes:
+      - ./vault:/vault
+
+    environment:
+      GOSIDIAN_VAULT: /vault
+      GOSIDIAN_ADDR: ":8080"
+      GOSIDIAN_MCP_ADDR: "0.0.0.0:8765"
+      GITEA_TOKEN: "${GITEA_TOKEN}"
+
+      # --- Git sync (optional) ----------------------------------------------
+      # Uncomment to enable auto-commit/push of the vault to a Gitea/GitHub
+      # remote. Set GITEA_TOKEN in a .env file next to this compose file.
+      #
+      # GOSIDIAN_GIT_ENABLED: "true"
+      # GOSIDIAN_GIT_REMOTE: "https://git.example.com/you/vault.git"
+      # GOSIDIAN_GIT_BRANCH: "main"
+      # GOSIDIAN_GIT_AUTHOR_NAME: "Gosidian"
+      # GOSIDIAN_GIT_AUTHOR_EMAIL: "gosidian@example.com"
+      # GOSIDIAN_GIT_DEBOUNCE: "30s"
+      # GOSIDIAN_GIT_PUSH: "true"
+      # GOSIDIAN_GIT_TOKEN_ENV: "GITEA_TOKEN"
+      # GITEA_TOKEN: "${GITEA_TOKEN}"
+
+    healthcheck:
+      test: ["CMD", "/gosidian", "healthcheck"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s

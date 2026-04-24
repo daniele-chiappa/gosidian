@@ -1,0 +1,32 @@
+{{ define "body" }}
+<h1>#{{ .Tag }}</h1>
+
+<form method="get" action="/tags/{{ .Tag }}" class="filter-form" style="margin-bottom:1rem">
+  <label>
+    {{ call .T "common.project" }}
+    <select name="project" onchange="this.form.submit()">
+      <option value="" {{ if eq .SelectedProject "" }}selected{{ end }}>{{ call $.T "tag_notes.filter_all_projects" }}</option>
+      {{ range .Projects }}
+      <option value="{{ . }}" {{ if eq $.SelectedProject . }}selected{{ end }}>{{ . }}</option>
+      {{ end }}
+    </select>
+  </label>
+  <noscript><button type="submit">{{ call .T "common.filter_button" }}</button></noscript>
+</form>
+
+{{ if .Notes }}
+<ul class="note-list">
+  {{ range .Notes }}
+  <li><a href="/notes/{{ .Path }}">{{ .Title }}</a> <span class="muted">{{ .Path }}</span></li>
+  {{ end }}
+</ul>
+{{ else }}
+  {{ if .SelectedProject }}
+  <p class="muted">{{ call .T "tags.no_notes_for_tag_in_project" .SelectedProject }}</p>
+  {{ else }}
+  <p class="muted">{{ call .T "tags.no_notes_for_tag" }}</p>
+  {{ end }}
+{{ end }}
+{{ end }}
+
+{{ define "tag_notes.html" }}{{ template "body" . }}{{ end }}

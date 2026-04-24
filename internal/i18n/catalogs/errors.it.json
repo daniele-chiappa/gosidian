@@ -1,0 +1,39 @@
+{
+  "tokens": {
+    "name_required": "nome richiesto",
+    "scope_required": "almeno uno scope richiesto (read o write)",
+    "ttl_invalid": "TTL non valido",
+    "unknown_action": "azione sconosciuta",
+    "id_required": "id richiesto",
+    "revoke_not_found": "revoke: token non trovato",
+    "revoke_not_owner": "revoke: non puoi revocare token di altri utenti",
+    "create_prefix": "create: %s",
+    "revoke_prefix": "revoke: %s",
+    "created_success": "Token creato. Copia il plaintext ora — non sarà più mostrato.",
+    "revoked_success": "Token revocato: %s"
+  },
+  "users": {
+    "forbidden": "forbidden: owner role required",
+    "auth_disabled": "auth disabled: nothing to administer",
+    "unknown_action": "azione sconosciuta",
+    "token_required": "token richiesto",
+    "id_required": "id richiesto",
+    "invite_created": "Invite creato. Copia il link ora — non sarà più mostrato.",
+    "invite_revoked": "Invite revocato.",
+    "user_disabled": "Utente disabilitato. Token MCP associati revocati.",
+    "create_invite_prefix": "create invite: %s",
+    "revoke_invite_prefix": "revoke invite: %s",
+    "disable_prefix": "disable: %s"
+  },
+  "login": {
+    "bad_credentials": "Credenziali non valide.",
+    "rate_limited": "Troppi tentativi falliti, riprova più tardi."
+  },
+  "signup": {
+    "username_required": "Username richiesto.",
+    "password_too_short": "La password deve avere almeno 8 caratteri.",
+    "password_mismatch": "Le due password non coincidono.",
+    "invite_invalid": "Invite non valido o scaduto.",
+    "signup_failed_prefix": "Registrazione fallita: %s"
+  }
+}

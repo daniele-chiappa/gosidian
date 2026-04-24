@@ -1,0 +1,91 @@
+name: Bug report
+description: Something is broken or doesn't behave as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please fill in the
+        fields below — the more concrete information you provide, the
+        faster the issue can be reproduced and fixed.
+
+  - type: input
+    id: version
+    attributes:
+      label: gosidian version
+      description: |
+        Run `docker exec <container> /gosidian --version` or check the
+        `/healthz` endpoint. Use `dev` if you built from source.
+      placeholder: "v1.0.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installation method
+      options:
+        - Docker (ghcr.io/daniele-chiappa/gosidian)
+        - Docker (built from source)
+        - Binary built from source
+        - Other (describe in repro steps)
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Host OS / arch
+      description: e.g. "Ubuntu 24.04, x86_64" or "macOS 15.2, arm64"
+      placeholder: "Linux 6.x, x86_64"
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      description: |
+        Numbered steps that someone with a fresh gosidian install can
+        follow to see the bug.
+      placeholder: |
+        1. Start container with `docker run ...`
+        2. Open `http://localhost:8080`
+        3. Click ...
+        4. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: Include screenshots if helpful.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: |
+        Output of `docker logs gosidian --tail 100` (or equivalent)
+        around the time of the bug. Strip any tokens / secrets first.
+      render: shell
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Pre-submission checks
+      options:
+        - label: I searched existing issues and didn't find a duplicate.
+          required: true
+        - label: I confirmed the logs above contain no secrets / personal data.
+          required: true

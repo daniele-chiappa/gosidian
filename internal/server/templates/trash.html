@@ -1,0 +1,51 @@
+{{ define "body" }}
+<h1>{{ call .T "trash.title" }}</h1>
+
+{{ if not .Enabled }}
+<p class="muted">{{ call .T "trash.disabled_header" }} <strong>{{ call .T "trash.disabled_state" }}</strong>{{ call .T "trash.disabled_prefix" }}
+<code>config.toml</code>:</p>
+<pre>[trash]
+enabled = true
+retention = "720h"</pre>
+<p class="muted">{{ call .T "trash.disabled_note" | safeHTML }}</p>
+{{ else }}
+
+{{ if .Entries }}
+<form method="post" action="/trash/purge-all"
+      onsubmit="return confirm('{{ call .T "confirm.empty_trash" }}');"
+      style="margin-bottom:1rem;">
+  <button type="submit" class="btn-sm danger">{{ call .T "common.empty_trash_button" }}</button>
+</form>
+
+<table class="audit-table">
+  <thead>
+    <tr><th>{{ call $.T "trash.col_when" }}</th><th>{{ call $.T "trash.col_origin" }}</th><th>{{ call $.T "trash.col_type" }}</th><th>{{ call $.T "trash.col_actions" }}</th></tr>
+  </thead>
+  <tbody>
+    {{ range .Entries }}
+    <tr>
+      <td>{{ .DiscardedAt.Format "2006-01-02 15:04:05" }}</td>
+      <td><code>{{ .OriginPath }}</code></td>
+      <td>{{ if .IsDir }}{{ call $.T "trash.type_project" }}{{ else }}{{ call $.T "trash.type_note" }}{{ end }}</td>
+      <td>
+        <form method="post" action="/trash/{{ .ID }}/restore" style="display:inline">
+          <button type="submit" class="btn-sm">{{ call .T "common.restore_button" }}</button>
+        </form>
+        <form method="post" action="/trash/{{ .ID }}/purge"
+              onsubmit="return confirm('{{ call $.T "confirm.purge_entry" }}');"
+              style="display:inline">
+          <button type="submit" class="btn-sm danger">{{ call .T "common.delete_button" }}</button>
+        </form>
+      </td>
+    </tr>
+    {{ end }}
+  </tbody>
+</table>
+{{ else }}
+<p class="muted">{{ call .T "trash.empty" }}</p>
+{{ end }}
+
+{{ end }}
+{{ end }}
+
+{{ define "trash.html" }}{{ template "body" . }}{{ end }}

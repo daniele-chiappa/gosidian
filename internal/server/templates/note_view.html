@@ -1,0 +1,65 @@
+{{ define "body" }}
+<style>main.content { max-width: none; padding: 1rem 1.5rem; }</style>
+<div class="note-with-outline">
+<article class="note" id="note">
+  <nav class="breadcrumb" aria-label="Breadcrumb">
+    {{ $segs := splitPath .Note.Path }}
+    {{ range $i, $s := $segs }}
+      {{ if $i }}<span class="breadcrumb-sep">›</span>{{ end }}
+      {{ if $s.IsFirst }}
+        <a href="/projects/{{ $s.Name }}" class="breadcrumb-link"><span class="tree-icon">{{ icon "folder" }}</span>{{ $s.Name }}</a>
+      {{ else if $s.IsLast }}
+        <span class="breadcrumb-current">{{ basename $s.Name }}</span>
+      {{ else }}
+        <span class="breadcrumb-folder"><span class="tree-icon">{{ icon "folder" }}</span>{{ $s.Name }}</span>
+      {{ end }}
+    {{ end }}
+  </nav>
+  <header class="note-header">
+    <h1>{{ .Note.Title }}</h1>
+    <button hx-get="/notes/{{ .Note.Path }}/edit"
+            hx-target="#note"
+            hx-swap="outerHTML">Edit</button>
+    <a class="btn-sm" href="/notes/{{ .Note.Path }}/history" title="History">History</a>
+    <form method="post"
+          action="/notes/{{ .Note.Path }}/rename"
+          onsubmit="var v=prompt('{{ call .T "confirm.rename_note_prompt" }}','{{ .Note.Path }}'); if(!v) return false; this.querySelector('[name=to]').value=v; return true;"
+          style="display:inline">
+      <input type="hidden" name="to" value="">
+      <button type="submit">Rename</button>
+    </form>
+    <form method="post"
+          action="/notes/{{ .Note.Path }}/delete"
+          onsubmit="return confirm('{{ call .T "confirm.delete_note" .Note.Title }}');"
+          style="display:inline">
+      <button type="submit" class="danger">Delete</button>
+    </form>
+  </header>
+  <div class="note-body">
+    {{ .HTML }}
+  </div>
+  {{ if .Backlinks }}
+  <section class="backlinks">
+    <h2>Backlinks</h2>
+    <ul>
+      {{ range .Backlinks }}
+      <li><a href="/notes/{{ .Path }}">{{ .Title }}</a></li>
+      {{ end }}
+    </ul>
+  </section>
+  {{ end }}
+</article>
+{{ if .Outline }}
+<aside class="outline">
+  <h3>Outline</h3>
+  <ul>
+    {{ range .Outline }}
+    <li class="lvl-{{ .Level }}"><a href="#{{ .ID }}">{{ .Text }}</a></li>
+    {{ end }}
+  </ul>
+</aside>
+{{ end }}
+</div>
+{{ end }}
+
+{{ define "note_view.html" }}{{ template "body" . }}{{ end }}

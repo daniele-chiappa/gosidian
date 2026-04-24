@@ -1,0 +1,18 @@
+{{ define "body" }}
+<h1>Risultati: {{ .Query }}</h1>
+{{ if .Hits }}
+<ul class="search-hits">
+  {{ range .Hits }}
+  <li>
+    <a href="/notes/{{ .Path }}">{{ .Title }}</a>
+    <div class="snippet">{{ .Snippet | safeHTML }}</div>
+    <div class="muted">{{ .Path }}</div>
+  </li>
+  {{ end }}
+</ul>
+{{ else }}
+<p class="muted">{{ call .T "search_results.none" }}</p>
+{{ end }}
+{{ end }}
+
+{{ define "search_results.html" }}{{ template "body" . }}{{ end }}

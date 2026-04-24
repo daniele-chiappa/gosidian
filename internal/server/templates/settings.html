@@ -1,0 +1,133 @@
+{{ define "body" }}
+<h1>{{ call .T "settings.title" }}</h1>
+<p class="muted">{{ call .T "settings.path_hint" .Path }}</p>
+
+{{ if .OK }}<p class="ok">{{ .OK }}</p>{{ end }}
+{{ if .Error }}<p class="error">{{ .Error }}</p>{{ end }}
+
+<form method="post" action="/settings" class="settings-form">
+  <!--
+    Marker field — tells the POST handler that this is a full form submission
+    (every checkbox is present on the wire even when unchecked, because the
+    browser submits the form in full). Without this marker, partial POSTs
+    (curl, scripts) would accidentally reset unchecked boxes to false. See
+    IMP-027.
+  -->
+  <input type="hidden" name="_form_version" value="settings_full">
+  <fieldset>
+    <legend>{{ call .T "settings.git_legend" }}</legend>
+
+    <label class="checkbox">
+      <input type="checkbox" name="git_enabled" {{ if .Git.Enabled }}checked{{ end }}>
+      Enable vault git sync
+    </label>
+
+    <label>
+      Remote URL
+      <input type="text" name="git_remote" value="{{ .Git.Remote }}" placeholder="https://gitea.example.com/user/vault.git">
+    </label>
+
+    <label>
+      Branch
+      <input type="text" name="git_branch" value="{{ .Git.Branch }}" placeholder="main">
+    </label>
+
+    <div class="row">
+      <label>
+        Author name
+        <input type="text" name="git_author_name" value="{{ .Git.AuthorName }}">
+      </label>
+      <label>
+        Author email
+        <input type="text" name="git_author_email" value="{{ .Git.AuthorEmail }}">
+      </label>
+    </div>
+
+    <label>
+      Debounce (30s, 2m…)
+      <input type="text" name="git_debounce" value="{{ .Debounce }}">
+    </label>
+
+    <label class="checkbox">
+      <input type="checkbox" name="git_push" {{ if .Git.Push }}checked{{ end }}>
+      Push to remote after every commit
+    </label>
+
+    <label>
+      Env var with HTTPS token
+      <input type="text" name="git_token_env" value="{{ .Git.TokenEnv }}" placeholder="GITEA_TOKEN">
+      <span class="muted">{{ call $.T "settings.token_not_persisted" }}</span>
+    </label>
+  </fieldset>
+
+  <fieldset>
+    <legend>{{ call .T "settings.theme_legend" }}</legend>
+    <p class="muted" style="margin-top:0">
+      {{ call .T "settings.theme_hint" }}
+    </p>
+
+    <label>
+      Preset
+      <select name="theme_preset" id="theme-preset-select">
+        <option value="midnight-luxury" {{ if eq .Theme.Preset "midnight-luxury" }}selected{{ end }}>Midnight Luxury (dark)</option>
+        <option value="light-clean" {{ if eq .Theme.Preset "light-clean" }}selected{{ end }}>Light clean</option>
+        <option value="high-contrast" {{ if eq .Theme.Preset "high-contrast" }}selected{{ end }}>High contrast (WCAG-AAA)</option>
+        <option value="custom" {{ if eq .Theme.Preset "custom" }}selected{{ end }}>Custom</option>
+      </select>
+    </label>
+
+    <div id="theme-custom-fields" {{ if ne .Theme.Preset "custom" }}hidden{{ end }}>
+      <div class="row">
+        <label>
+          Sfondo principale
+          <input type="color" name="theme_deep_space" value="{{ .Theme.DeepSpace }}">
+        </label>
+        <label>
+          Sfondo secondario
+          <input type="color" name="theme_gunmetal" value="{{ .Theme.Gunmetal }}">
+        </label>
+      </div>
+
+      <div class="row">
+        <label>
+          Testo secondario
+          <input type="color" name="theme_silver_mist" value="{{ .Theme.SilverMist }}">
+        </label>
+        <label>
+          Accento freddo
+          <input type="color" name="theme_electric_blue" value="{{ .Theme.ElectricBlue }}">
+        </label>
+      </div>
+
+      <div class="row">
+        <label>
+          Accento oro
+          <input type="color" name="theme_gold_leaf" value="{{ .Theme.GoldLeaf }}">
+        </label>
+        <label>&nbsp;</label>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        var sel = document.getElementById('theme-preset-select');
+        var fields = document.getElementById('theme-custom-fields');
+        if (!sel || !fields) return;
+        sel.addEventListener('change', function () {
+          if (sel.value === 'custom') {
+            fields.removeAttribute('hidden');
+          } else {
+            fields.setAttribute('hidden', '');
+          }
+        });
+      })();
+    </script>
+  </fieldset>
+
+  <div class="actions">
+    <button type="submit">{{ call .T "common.save" }}</button>
+  </div>
+</form>
+{{ end }}
+
+{{ define "settings.html" }}{{ template "body" . }}{{ end }}

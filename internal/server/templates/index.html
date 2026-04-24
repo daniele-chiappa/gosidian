@@ -1,0 +1,27 @@
+{{ define "body" }}
+<h1>{{ call .T "common.vault" }}</h1>
+
+<section id="recently-viewed"></section>
+
+{{ if .Projects }}
+<section>
+  <h2>{{ call .T "index.projects_h2" }}</h2>
+  <ul class="project-list">
+    {{ range .Projects }}
+    <li><a href="/projects/{{ .Name }}">{{ .Name }}</a> <span class="muted">{{ .NoteCount }} note</span></li>
+    {{ end }}
+  </ul>
+</section>
+{{ end }}
+
+<section>
+  <h2>{{ call .T "index.all_notes" }} ({{ len .Notes }})</h2>
+  <ul class="note-list">
+    {{ range .Notes }}
+    <li><a href="/notes/{{ .Path }}">{{ .Title }}</a> <span class="muted">{{ .Path }}</span></li>
+    {{ end }}
+  </ul>
+</section>
+{{ end }}
+
+{{ define "index.html" }}{{ template "body" . }}{{ end }}

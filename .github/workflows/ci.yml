@@ -1,0 +1,110 @@
+name: CI
+# Runs on PRs and pushes. PRs only test+build the binary. Pushes to main and
+# version tags also build and push the Docker image to GitHub Container
+# Registry (ghcr.io).
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE:    daniele-chiappa/gosidian
+  GO_VERSION: "1.25"
+
+jobs:
+  test:
+    name: Test & build binary
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -race -count=1 ./...
+
+      - name: go build
+        run: |
+          CGO_ENABLED=0 go build -trimpath \
+            -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}-${GITHUB_SHA::7}" \
+            -o gosidian ./cmd/gosidian
+          ./gosidian --help 2>&1 | head -5 || true
+
+  docker:
+    name: Build & push image
+    needs: test
+    runs-on: ubuntu-latest
+    # Only push images on main branch pushes or version tags, not on PRs.
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine tags
+        id: meta
+        run: |
+          set -eu
+          SHORT="${GITHUB_SHA:0:7}"
+          BASE="${REGISTRY}/${IMAGE}"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME}"
+            TAGS="${BASE}:${VERSION} ${BASE}:latest"
+          else
+            VERSION="main-${SHORT}"
+            TAGS="${BASE}:${VERSION} ${BASE}:main-latest"
+          fi
+          # Single-line, space-separated so bash for-loops expand correctly
+          # when interpolated inline as ${{ steps.meta.outputs.tags }}.
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        run: |
+          set -eu
+          FIRST_TAG=""
+          for T in ${{ steps.meta.outputs.tags }}; do
+            if [ -z "$FIRST_TAG" ]; then
+              FIRST_TAG="$T"
+              echo "Building $T"
+              docker build \
+                --build-arg VERSION="${{ steps.meta.outputs.version }}" \
+                -t "$T" \
+                .
+            else
+              echo "Tagging $T"
+              docker tag "$FIRST_TAG" "$T"
+            fi
+          done
+          for T in ${{ steps.meta.outputs.tags }}; do
+            echo "Pushing $T"
+            docker push "$T"
+          done
+
+      - name: Summary
+        run: |
+          echo "### Pushed images" >> "$GITHUB_STEP_SUMMARY"
+          for T in ${{ steps.meta.outputs.tags }}; do
+            echo "- \`$T\`" >> "$GITHUB_STEP_SUMMARY"
+          done

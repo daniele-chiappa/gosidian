@@ -1,0 +1,133 @@
+{{ define "layout.html" }}<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>{{ .Title }} — Gosidian</title>
+<link rel="stylesheet" href="/static/css/app.css">
+<link rel="stylesheet" href="/theme.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script src="https://unpkg.com/htmx.org@1.9.12"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script>
+// Server-rendered i18n dictionary consumed by JS widgets (command palette
+// etc.). html/template context-auto-escaping produces JS string literals, so
+// bare {{ call .T "key" }} yields a properly quoted and escaped value.
+window.GOSIDIAN_I18N = {
+  lang: {{ .Lang }},
+  palette: {
+    placeholder:           {{ call .T "palette.placeholder" }},
+    hint_navigate:         {{ call .T "palette.hint_navigate" }},
+    hint_execute:          {{ call .T "palette.hint_execute" }},
+    hint_close:            {{ call .T "palette.hint_close" }},
+    hint_reload:           {{ call .T "palette.hint_reload" }},
+    category_action:       {{ call .T "palette.category_action" }},
+    category_project:      {{ call .T "palette.category_project" }},
+    category_tag:          {{ call .T "palette.category_tag" }},
+    category_note:         {{ call .T "palette.category_note" }},
+    notes_count:           {{ call .T "palette.notes_count" }},
+    action_graph_label:    {{ call .T "palette.action_graph_label" }},
+    action_graph_desc:     {{ call .T "palette.action_graph_desc" }},
+    action_audit_label:    {{ call .T "palette.action_audit_label" }},
+    action_audit_desc:     {{ call .T "palette.action_audit_desc" }},
+    action_tags_label:     {{ call .T "palette.action_tags_label" }},
+    action_tags_desc:      {{ call .T "palette.action_tags_desc" }},
+    action_projects_label: {{ call .T "palette.action_projects_label" }},
+    action_projects_desc:  {{ call .T "palette.action_projects_desc" }},
+    action_trash_label:    {{ call .T "palette.action_trash_label" }},
+    action_trash_desc:     {{ call .T "palette.action_trash_desc" }},
+    action_settings_label: {{ call .T "palette.action_settings_label" }},
+    action_settings_desc:  {{ call .T "palette.action_settings_desc" }},
+    action_focus_label:    {{ call .T "palette.action_focus_label" }},
+    action_focus_desc:     {{ call .T "palette.action_focus_desc" }},
+    action_new_note_label: {{ call .T "palette.action_new_note_label" }},
+    action_new_note_desc:  {{ call .T "palette.action_new_note_desc" }}
+  }
+};
+</script>
+<script defer src="/static/js/wikilink-preview.js"></script>
+<script defer src="/static/js/sidebar-tree.js"></script>
+<script defer src="/static/js/recently-viewed.js"></script>
+<script defer src="/static/js/focus-mode.js"></script>
+<script defer src="/static/js/command-palette.js"></script>
+<script defer src="/static/js/sidebar-resize.js"></script>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+  window.__renderMermaidIn = (root) => {
+    root.querySelectorAll('pre > code.language-mermaid').forEach((codeEl, i) => {
+      const pre = codeEl.parentElement;
+      const div = document.createElement('div');
+      div.className = 'mermaid';
+      div.textContent = codeEl.textContent;
+      pre.replaceWith(div);
+    });
+    if (root.querySelectorAll('.mermaid').length) {
+      mermaid.run({ querySelector: '.mermaid' });
+    }
+  };
+  // First page-load run
+  window.addEventListener('DOMContentLoaded', () => window.__renderMermaidIn(document));
+  // Re-run after HTMX swaps (note view, edit preview, etc.)
+  document.body && document.body.addEventListener('htmx:afterSwap', (ev) => window.__renderMermaidIn(ev.target));
+</script>
+<script>
+  function renderKaTeX(root) {
+    if (!window.renderMathInElement) return;
+    window.renderMathInElement(root, {
+      delimiters: [
+        { left: '$$', right: '$$', display: true  },
+        { left: '\\(', right: '\\)', display: false },
+        { left: '\\[', right: '\\]', display: true  },
+        { left: '$',  right: '$',  display: false },
+      ],
+      throwOnError: false,
+    });
+  }
+  window.addEventListener('load', () => renderKaTeX(document.body));
+  document.addEventListener('htmx:afterSwap', (ev) => renderKaTeX(ev.target));
+</script>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/">Gosidian</a>
+  <form class="search" action="/search" method="get">
+    <input type="search" name="q" placeholder="{{ call .T "common.search_placeholder" }}">
+  </form>
+  <nav>
+    <a href="/projects">{{ call .T "nav.projects" }}</a>
+    <a href="/tags">{{ call .T "nav.tags" }}</a>
+    <a href="/graph">{{ call .T "nav.graph" }}</a>
+    <a href="/trash" title="{{ call .T "nav.trash" }}">{{ icon "trash-2" }}</a>
+    <a href="/audit" title="{{ call .T "nav.audit" }}">{{ icon "history" }}</a>
+    <a href="/settings" title="{{ call .T "nav.settings" }}">{{ icon "settings" }}</a>
+    <select class="lang-switcher" title="Language" onchange="location.href='/api/i18n?lang=' + this.value + '&next=' + encodeURIComponent(location.pathname + location.search)">
+      <option value="it" {{ if eq .Lang "it" }}selected{{ end }}>IT</option>
+      <option value="en" {{ if eq .Lang "en" }}selected{{ end }}>EN</option>
+      <option value="es" {{ if eq .Lang "es" }}selected{{ end }}>ES</option>
+      <option value="fr" {{ if eq .Lang "fr" }}selected{{ end }}>FR</option>
+      <option value="de" {{ if eq .Lang "de" }}selected{{ end }}>DE</option>
+    </select>
+    <a href="/logout" title="{{ call .T "common.logout" }}">{{ icon "log-out" }}</a>
+  </nav>
+</header>
+<div class="app{{ if .NoSidebar }} no-sidebar{{ end }}">
+  {{ if not .NoSidebar }}
+  <aside class="sidebar">
+    <div class="sidebar-actions">
+      <a class="btn-sm" href="/projects">+ {{ call .T "common.new_project" }}</a>
+    </div>
+    <div hx-get="/api/tree" hx-trigger="load" hx-swap="innerHTML">
+      <p class="muted">{{ call .T "common.loading" }}</p>
+    </div>
+  </aside>
+  <div class="sidebar-resizer" role="separator" aria-orientation="vertical" aria-label="{{ call .T "layout.sidebar_resize_label" }}" title="{{ call .T "layout.sidebar_resize_title" }}"></div>
+  {{ end }}
+  <main class="content">
+    {{ block "body" . }}{{ end }}
+  </main>
+</div>
+<button type="button" class="focus-toggle" aria-pressed="false" title="Toggle focus mode (F)">{{ icon "maximize" }}</button>
+</body>
+</html>
+{{ end }}

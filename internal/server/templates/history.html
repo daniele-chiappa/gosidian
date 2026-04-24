@@ -1,0 +1,38 @@
+{{ define "body" }}
+<style>main.content { max-width: none; padding: 1rem 1.5rem; }</style>
+<header class="note-header">
+  <h1>History — <code>{{ .Path }}</code></h1>
+  <a class="btn-sm" href="/notes/{{ .Path }}">← back to note</a>
+</header>
+
+<div class="history-wrap">
+  <aside class="history-list">
+    {{ if .Commits }}
+    <ul>
+      {{ range .Commits }}
+      <li{{ if eq .SHA $.Selected }} class="selected"{{ end }}>
+        <a href="/notes/{{ $.Path }}/history?sha={{ .SHA }}">
+          <code>{{ .ShortSHA }}</code>
+          <span class="date">{{ .Date.Format "2006-01-02 15:04" }}</span>
+          <div class="subj">{{ .Subject }}</div>
+          <div class="muted author">{{ .Author }}</div>
+        </a>
+        <form method="post" action="/notes/{{ $.Path }}/restore"
+              onsubmit="return confirm('{{ call $.T "confirm.restore_version" .ShortSHA }}');">
+          <input type="hidden" name="sha" value="{{ .SHA }}">
+          <button type="submit" class="btn-sm">restore</button>
+        </form>
+      </li>
+      {{ end }}
+    </ul>
+    {{ else }}
+    <p class="muted">Nessun commit per questa nota.</p>
+    {{ end }}
+  </aside>
+  <main class="history-diff">
+    <pre>{{ .Diff }}</pre>
+  </main>
+</div>
+{{ end }}
+
+{{ define "history.html" }}{{ template "body" . }}{{ end }}

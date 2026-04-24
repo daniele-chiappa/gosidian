@@ -1,0 +1,39 @@
+{{ define "tree.html" }}
+<div class="tree-wrap">
+  <div class="tree-filter">
+    <input type="search" id="tree-filter-input" placeholder="{{ call .T "tree.filter_placeholder" }}" autocomplete="off">
+    <button type="button" class="tree-btn" data-act="expand-all" title="{{ call .T "tree.expand_all" }}">{{ icon "chevrons-down" }}</button>
+    <button type="button" class="tree-btn" data-act="collapse-all" title="{{ call .T "tree.collapse_all" }}">{{ icon "chevrons-up" }}</button>
+  </div>
+  {{ template "treeNode" .Root }}
+</div>
+{{ end }}
+
+{{ define "treeNode" }}
+{{ if .Children }}
+<ul class="tree">
+  {{ range .Children }}
+    <li class="tree-item kind-{{ .Kind }}{{ if .InProgress }} in-progress{{ end }}"
+        data-name="{{ .Name | lower }}"
+        data-path="{{ .Path }}">
+      {{ if .IsDir }}
+        <details>
+          <summary>
+            <span class="tree-icon">{{ icon (kindIcon .Kind) }}</span>
+            <span class="tree-label">{{ .Name }}</span>
+            {{ if .NoteCount }}<span class="tree-count">{{ .NoteCount }}</span>{{ end }}
+          </summary>
+          {{ template "treeNode" . }}
+        </details>
+      {{ else }}
+        <a href="/notes/{{ .Path }}" class="tree-link">
+          <span class="tree-icon">{{ icon (kindIcon .Kind) }}</span>
+          <span class="tree-label">{{ basename .Path }}</span>
+          {{ if .InProgress }}<span class="tree-badge" title="plan in-progress">●</span>{{ end }}
+        </a>
+      {{ end }}
+    </li>
+  {{ end }}
+</ul>
+{{ end }}
+{{ end }}

@@ -1,0 +1,83 @@
+{{ define "body" }}
+<header class="project-header">
+  <h1>{{ .Project }} <span class="muted" style="font-size:0.7em">{{ call .T "project_dashboard.subtitle" }}</span></h1>
+  <a class="btn-sm" href="/projects/{{ .Project }}">←</a>
+  <a class="btn-sm" href="/graph?project={{ .Project }}">{{ call .T "project_dashboard.link_graph" }}</a>
+  <a class="btn-sm" href="/audit?project={{ .Project }}">{{ call .T "project_dashboard.link_audit" }}</a>
+  <span class="muted">{{ call .T "project_dashboard.notes_total" .NoteCount }}</span>
+</header>
+
+<div class="dashboard-grid">
+
+  <section class="dash-card">
+    <h2>{{ call .T "project_dashboard.active_plans_h2" }}</h2>
+    {{ if .ActivePlans }}
+      <ul class="note-list">
+        {{ range .ActivePlans }}
+          <li><a href="/notes/{{ .Path }}">{{ .Title }}</a> <span class="muted">{{ .Path }}</span></li>
+        {{ end }}
+      </ul>
+    {{ else }}
+      <p class="muted">{{ call $.T "project_dashboard.no_active_plans" }}</p>
+    {{ end }}
+  </section>
+
+  <section class="dash-card">
+    <h2>{{ call .T "project_dashboard.hot_files_h2" }}</h2>
+    {{ if .HotFiles }}
+      <ul class="note-list">
+        {{ range .HotFiles }}
+          <li>
+            <a href="/notes/{{ .Path }}">{{ .Title }}</a>
+            <span class="muted">{{ .Path }}</span>
+          </li>
+        {{ end }}
+      </ul>
+    {{ else }}
+      <p class="muted">{{ call $.T "project_dashboard.no_hot_files" }}</p>
+    {{ end }}
+  </section>
+
+  <section class="dash-card">
+    <h2>{{ call .T "project_dashboard.recent_activity_h2" }}</h2>
+    {{ if .RecentActions }}
+      <table class="audit-table">
+        <thead>
+          <tr><th>{{ call $.T "project_dashboard.col_when" }}</th><th>{{ call $.T "project_dashboard.col_action" }}</th><th>{{ call $.T "project_dashboard.col_path" }}</th><th>{{ call $.T "project_dashboard.col_actor" }}</th></tr>
+        </thead>
+        <tbody>
+          {{ range .RecentActions }}
+            <tr>
+              <td>{{ .TS.Format "01-02 15:04" }}</td>
+              <td>{{ .Action }}</td>
+              <td><code>{{ .Path }}</code></td>
+              <td>{{ .Actor }}</td>
+            </tr>
+          {{ end }}
+        </tbody>
+      </table>
+    {{ else }}
+      <p class="muted">{{ call $.T "project_dashboard.no_mutations" }}</p>
+    {{ end }}
+  </section>
+
+  <section class="dash-card">
+    <h2>{{ call .T "project_dashboard.open_todos_h2" }} ({{ .TodoCount }})</h2>
+    {{ if .TodoByNote }}
+      <ul class="note-list">
+        {{ range .TodoByNote }}
+          <li>
+            <a href="/notes/{{ .Path }}">{{ .Title }}</a>
+            <span class="muted">{{ call $.T "project_dashboard.open_count" .Count }}</span>
+          </li>
+        {{ end }}
+      </ul>
+    {{ else }}
+      <p class="muted">{{ call $.T "project_dashboard.no_open_todos" }}</p>
+    {{ end }}
+  </section>
+
+</div>
+{{ end }}
+
+{{ define "project_dashboard.html" }}{{ template "body" . }}{{ end }}

@@ -1,0 +1,26 @@
+name = "minimal"
+description = "Lightweight scaffold: hot.md + README.md + log.md only, no sub-folders. Fits one-off experiments, spike notes, or projects that have not yet earned the full Karpathy-Wiki-Stack layout."
+
+prompt = """
+Use this template for projects you're not yet sure will outlive a
+single session — experiments, spike investigations, throwaway
+sketches. You get the three core files and nothing else:
+
+- `hot.md`: quick notes on what you're working on right now
+- `README.md`: one-paragraph description + pointers to findings
+- `log.md`: append-only journal with ISO-date headings
+
+When the project matures and you need structure (plans, skills,
+formal ADRs), upgrade in place: create `memory/`, `plans/` etc. by
+hand, or scaffold a second project with `template=karpathy-wiki` and
+copy the content over. The migration is trivial because everything
+stays plain markdown.
+"""
+
+[[variables]]
+name = "PROJECT"
+required = true
+
+[[variables]]
+name = "TODAY"
+auto = "date"

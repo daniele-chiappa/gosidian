@@ -1,0 +1,39 @@
+{
+  "tokens": {
+    "name_required": "name is required",
+    "scope_required": "at least one scope is required (read or write)",
+    "ttl_invalid": "invalid TTL",
+    "unknown_action": "unknown action",
+    "id_required": "id is required",
+    "revoke_not_found": "revoke: token not found",
+    "revoke_not_owner": "revoke: cannot revoke tokens owned by other users",
+    "create_prefix": "create: %s",
+    "revoke_prefix": "revoke: %s",
+    "created_success": "Token created. Copy the plaintext now — it won't be shown again.",
+    "revoked_success": "Token revoked: %s"
+  },
+  "users": {
+    "forbidden": "forbidden: owner role required",
+    "auth_disabled": "auth disabled: nothing to administer",
+    "unknown_action": "unknown action",
+    "token_required": "token is required",
+    "id_required": "id is required",
+    "invite_created": "Invite created. Copy the link now — it won't be shown again.",
+    "invite_revoked": "Invite revoked.",
+    "user_disabled": "User disabled. Associated MCP tokens have been revoked.",
+    "create_invite_prefix": "create invite: %s",
+    "revoke_invite_prefix": "revoke invite: %s",
+    "disable_prefix": "disable: %s"
+  },
+  "login": {
+    "bad_credentials": "Invalid credentials.",
+    "rate_limited": "Too many failed attempts, try again later."
+  },
+  "signup": {
+    "username_required": "Username is required.",
+    "password_too_short": "Password must be at least 8 characters.",
+    "password_mismatch": "Passwords don't match.",
+    "invite_invalid": "Invalid or expired invite.",
+    "signup_failed_prefix": "Signup failed: %s"
+  }
+}

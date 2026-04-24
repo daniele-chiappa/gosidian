@@ -1,0 +1,31 @@
+{{ define "body" }}
+<h1>{{ call .T "signup.title" }}</h1>
+
+{{ if not .Valid }}
+<p class="error">{{ call .T "signup.invalid_invite" }}</p>
+<p><a href="/login">{{ call .T "common.back_to_login" }}</a></p>
+{{ else }}
+{{ if .Error }}<p class="error">{{ .Error }}</p>{{ end }}
+
+<form method="post" action="/signup" class="settings-form" style="max-width:420px">
+  <input type="hidden" name="token" value="{{ .Token }}">
+  <label>
+    {{ call .T "common.username" }}
+    <input type="text" name="username" required autofocus autocomplete="username">
+  </label>
+  <label>
+    {{ call .T "signup.password_hint" }}
+    <input type="password" name="password" required minlength="8" autocomplete="new-password">
+  </label>
+  <label>
+    {{ call .T "signup.password_confirm" }}
+    <input type="password" name="password_confirm" required minlength="8" autocomplete="new-password">
+  </label>
+  <div class="actions">
+    <button type="submit">{{ call .T "signup.create_account_button" }}</button>
+  </div>
+</form>
+{{ end }}
+{{ end }}
+
+{{ define "signup.html" }}{{ template "body" . }}{{ end }}

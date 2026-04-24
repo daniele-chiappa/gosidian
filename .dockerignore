@@ -1,0 +1,29 @@
+# VCS / tooling
+.git
+.gitea
+.gitignore
+.dockerignore
+
+# Local artefacts
+/tmp
+/bin
+/dist
+
+# testdata runtime state
+/testdata/vault/.gosidian
+/testdata/vault/Lavoro
+/testdata/vault/Studio
+
+# Editor
+.vscode
+.idea
+*.swp
+*.swo
+.DS_Store
+
+# Claude / plan artifacts
+.claude
+
+# Deployment extras (not needed inside the build context when the
+# Dockerfile is built from repo root)
+deploy

@@ -1,0 +1,14 @@
+{
+  "errors": {
+    "unauthorized": "non autorizzato",
+    "missing_token": "token mancante",
+    "token_expired": "token scaduto",
+    "invalid_token": "token non valido",
+    "lacks_read_scope": "il token non ha lo scope read",
+    "lacks_write_scope": "il token non ha lo scope write",
+    "project_required": "progetto richiesto",
+    "project_outside_scope": "il progetto %q è fuori dallo scope %q del token",
+    "path_outside_scope": "il path %q è fuori dallo scope del token",
+    "rate_limit": "limite di scrittura superato per il token (max %d/min)"
+  }
+}

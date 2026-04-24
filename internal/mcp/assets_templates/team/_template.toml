@@ -1,0 +1,31 @@
+name = "team"
+description = "Karpathy-Wiki-Stack with agents/ pre-populated for small-team workflows (backend, frontend, devops role stubs + handoff conventions)."
+
+prompt = """
+Use this template when the project will be worked on by more than one
+agent or by a team of humans + one or more specialised agents. Beyond
+the full Karpathy-Wiki-Stack layout, the scaffold pre-populates
+`agents/` with three canonical role stubs (backend, frontend, devops);
+duplicate them and edit when you introduce a new specialised role.
+
+Team-specific conventions:
+
+- Each agent has its own markdown file under `agents/<role>.md`. The
+  file holds the role's invariants (what it's responsible for, what
+  files it tends to read first, what rules it must follow).
+  `memory_bootstrap` surfaces `available_agents` from here.
+- Use `memory_create_handoff(from_agent, to_agent, summary,
+  pending_items)` when control passes between agents. The receiving
+  agent picks up handoffs via `memory_pending_handoffs(for_agent)`.
+- Multi-user web accounts (`/admin/users`) are expected: the `owner`
+  seeds the project; `member` accounts get their own MCP tokens via
+  `/admin/tokens` scoped to this project only.
+"""
+
+[[variables]]
+name = "PROJECT"
+required = true
+
+[[variables]]
+name = "TODAY"
+auto = "date"

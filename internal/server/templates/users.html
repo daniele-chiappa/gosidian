@@ -1,0 +1,86 @@
+{{ define "body" }}
+<h1>{{ call .T "users.title" }}</h1>
+<p class="muted">{{ call .T "users.intro" }}</p>
+
+{{ if .OK }}<p class="ok">{{ .OK }}</p>{{ end }}
+{{ if .Error }}<p class="error">{{ .Error }}</p>{{ end }}
+
+{{ if .CreatedInvite }}
+<section class="token-plaintext-box">
+  <p><strong>{{ call .T "users.invite_link_header" }}</strong></p>
+  <pre class="token-plaintext" id="invite-url-value">{{ .CreatedInviteURL }}</pre>
+  <button type="button" onclick="var el=document.getElementById('invite-url-value'); navigator.clipboard.writeText(el.textContent).then(()=>this.textContent={{ call $.T "common.copied" }})">{{ call .T "common.copy" }}</button>
+  <p class="muted">{{ call .T "users.invite_link_hint" }}</p>
+</section>
+{{ end }}
+
+<h2>{{ call .T "users.accounts_h2" }}</h2>
+<table class="tokens-table">
+  <thead>
+    <tr><th>{{ call .T "users.col_username" }}</th><th>{{ call .T "users.col_role" }}</th><th>{{ call .T "users.col_id" }}</th><th>{{ call .T "users.col_created" }}</th><th>{{ call .T "users.col_status" }}</th><th></th></tr>
+  </thead>
+  <tbody>
+    {{ range .Users }}
+    <tr {{ if .Disabled }}class="token-expired"{{ end }}>
+      <td>{{ .Username }}</td>
+      <td>{{ .Role }}</td>
+      <td><code>{{ .ID }}</code></td>
+      <td>{{ .Created }}</td>
+      <td>{{ if .Disabled }}{{ call $.T "users.col_disabled_on" .DisabledDate }}{{ else }}{{ call $.T "users.col_active" }}{{ end }}</td>
+      <td>
+        {{ if and (not .IsOwner) (not .Disabled) }}
+        <form method="post" action="/admin/users" onsubmit="return confirm('{{ call $.T "confirm.disable_user" .Username }}')" style="margin:0">
+          <input type="hidden" name="action" value="disable-user">
+          <input type="hidden" name="id" value="{{ .ID }}">
+          <button type="submit" class="danger">{{ call $.T "common.disable_button" }}</button>
+        </form>
+        {{ end }}
+      </td>
+    </tr>
+    {{ end }}
+  </tbody>
+</table>
+
+<h2>{{ call .T "users.invites_h2" }}</h2>
+{{ if .Invites }}
+<table class="tokens-table">
+  <thead>
+    <tr><th>{{ call .T "users.col_token" }}</th><th>{{ call .T "users.col_created_by" }}</th><th>{{ call .T "users.col_created" }}</th><th>{{ call .T "users.col_expires" }}</th><th>{{ call .T "users.col_status" }}</th><th></th></tr>
+  </thead>
+  <tbody>
+    {{ range .Invites }}
+    <tr>
+      <td><code>{{ .Token }}</code></td>
+      <td>{{ .CreatedBy }}</td>
+      <td>{{ .Created }}</td>
+      <td>{{ .Expires }}</td>
+      <td>
+        {{ .Status }}
+        {{ if eq .Status "consumed" }} ({{ .Consumer }}){{ end }}
+      </td>
+      <td>
+        <form method="post" action="/admin/users" onsubmit="return confirm('{{ call $.T "confirm.revoke_invite" .Token }}')" style="margin:0">
+          <input type="hidden" name="action" value="revoke-invite">
+          <input type="hidden" name="token" value="{{ .Token }}">
+          <button type="submit" class="danger">{{ call $.T "common.revoke_button" }}</button>
+        </form>
+      </td>
+    </tr>
+    {{ end }}
+  </tbody>
+</table>
+{{ else }}
+<p class="muted"><em>{{ call .T "users.no_invites" }}</em></p>
+{{ end }}
+
+<h2>{{ call .T "users.create_invite_h2" }}</h2>
+<form method="post" action="/admin/users" class="settings-form">
+  <input type="hidden" name="action" value="create-invite">
+  <p class="muted">{{ call .T "users.create_invite_hint" }}</p>
+  <div class="actions">
+    <button type="submit">{{ call .T "users.create_invite_button" }}</button>
+  </div>
+</form>
+{{ end }}
+
+{{ define "users.html" }}{{ template "body" . }}{{ end }}

@@ -1,0 +1,122 @@
+{{ define "body" }}
+<style>main.content { max-width: none; padding: 1rem 1.5rem; }</style>
+<article class="note" id="note">
+  <header class="note-header">
+    <h1>{{ .Note.Title }} <span class="muted">(edit)</span></h1>
+    <p class="muted">{{ .Note.Path }}</p>
+    <div class="edit-modes" role="tablist">
+      <button type="button" data-mode="editor">{{ call .T "note_edit.mode_editor" }}</button>
+      <button type="button" data-mode="split">{{ call .T "note_edit.mode_split" }}</button>
+      <button type="button" data-mode="stacked">{{ call .T "note_edit.mode_stacked" }}</button>
+      <button type="button" data-mode="preview">{{ call .T "note_edit.mode_preview" }}</button>
+    </div>
+  </header>
+
+  <form hx-post="/notes/{{ .Note.Path }}"
+        hx-target="#note"
+        hx-swap="outerHTML"
+        class="edit-form">
+
+    <div class="editor-wrap" id="editor-wrap">
+      <textarea name="content" class="editor" id="editor-area"
+                hx-post="/api/preview"
+                hx-trigger="keyup changed delay:400ms, load"
+                hx-target="#preview"
+                hx-swap="innerHTML"
+                hx-include="this">{{ .Body }}</textarea>
+      <div class="preview note-body" id="preview"></div>
+    </div>
+
+    <div class="actions">
+      <button type="submit">{{ call .T "note_edit.save" }}</button>
+      <button type="button"
+              hx-get="/notes/{{ .Note.Path }}"
+              hx-target="#note"
+              hx-swap="outerHTML">{{ call .T "common.cancel" }}</button>
+    </div>
+  </form>
+
+  <script>
+  (function () {
+    const wrap = document.getElementById('editor-wrap');
+    if (!wrap) return;
+    const KEY = 'gosidian.editMode';
+    const btns = document.querySelectorAll('.edit-modes button');
+    const apply = (mode) => {
+      wrap.classList.remove('mode-editor', 'mode-split', 'mode-stacked', 'mode-preview');
+      wrap.classList.add('mode-' + mode);
+      localStorage.setItem(KEY, mode);
+      btns.forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+    };
+    btns.forEach(b => b.addEventListener('click', () => apply(b.dataset.mode)));
+    apply(localStorage.getItem(KEY) || 'split');
+  })();
+
+  // Image paste / drag-and-drop → upload to /api/attach and inject markdown.
+  (function () {
+    const ta = document.getElementById('editor-area');
+    if (!ta) return;
+    const notePath = "{{ .Note.Path }}";
+    const project  = notePath.includes('/') ? notePath.split('/')[0] : '';
+
+    function insertAtCursor(text) {
+      const start = ta.selectionStart, end = ta.selectionEnd;
+      ta.value = ta.value.slice(0, start) + text + ta.value.slice(end);
+      ta.selectionStart = ta.selectionEnd = start + text.length;
+      // Trigger HTMX preview refresh
+      ta.dispatchEvent(new Event('keyup', { bubbles: true }));
+    }
+
+    async function uploadFile(file) {
+      const fd = new FormData();
+      fd.append('file', file, file.name || 'pasted.png');
+      const url = '/api/attach' + (project ? '?project=' + encodeURIComponent(project) : '');
+      const resp = await fetch(url, { method: 'POST', body: fd, credentials: 'same-origin' });
+      if (!resp.ok) {
+        alert('Upload failed: ' + resp.status + ' ' + (await resp.text()));
+        return null;
+      }
+      return resp.json();
+    }
+
+    // Extensions accepted by the server (keep in sync with internal/attach).
+    const allowedExt = new Set([
+      '.png','.jpg','.jpeg','.gif','.webp','.svg',
+      '.pdf','.csv','.json','.txt','.zip','.docx','.xlsx',
+    ]);
+    function isAllowed(file) {
+      const name = (file.name || '').toLowerCase();
+      const dot = name.lastIndexOf('.');
+      if (dot < 0) return file.type.startsWith('image/'); // clipboard paste fallback
+      return allowedExt.has(name.slice(dot));
+    }
+
+    ta.addEventListener('paste', async (ev) => {
+      if (!ev.clipboardData) return;
+      for (const item of ev.clipboardData.items) {
+        if (item.kind === 'file') {
+          const file = item.getAsFile();
+          if (!file || !isAllowed(file)) continue;
+          ev.preventDefault();
+          const data = await uploadFile(file);
+          if (data && data.markdown) insertAtCursor(data.markdown + '\n');
+        }
+      }
+    });
+
+    ta.addEventListener('dragover', (ev) => { ev.preventDefault(); });
+    ta.addEventListener('drop', async (ev) => {
+      if (!ev.dataTransfer || !ev.dataTransfer.files.length) return;
+      ev.preventDefault();
+      for (const file of ev.dataTransfer.files) {
+        if (!isAllowed(file)) continue;
+        const data = await uploadFile(file);
+        if (data && data.markdown) insertAtCursor(data.markdown + '\n');
+      }
+    });
+  })();
+  </script>
+</article>
+{{ end }}
+
+{{ define "note_edit.html" }}{{ template "body" . }}{{ end }}

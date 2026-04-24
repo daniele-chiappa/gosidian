@@ -1,0 +1,14 @@
+{{ define "backlinks.html" }}
+<section class="backlinks">
+  <h2>Backlinks</h2>
+  {{ if .Backlinks }}
+  <ul>
+    {{ range .Backlinks }}
+    <li><a href="/notes/{{ .Path }}">{{ .Title }}</a></li>
+    {{ end }}
+  </ul>
+  {{ else }}
+  <p class="muted">{{ call .T "backlinks.none" }}</p>
+  {{ end }}
+</section>
+{{ end }}

@@ -1,0 +1,65 @@
+name: Feature request
+description: Suggest a new feature or an enhancement to an existing one.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing a feature. The more concretely you can
+        describe the *use case* (not just the requested change), the
+        better.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: |
+        Describe the use case or pain point. Concrete scenario beats
+        abstract description.
+      placeholder: |
+        "When I'm using gosidian for X, I want to do Y, but currently I
+        have to do Z workaround which is awkward because ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How would you like gosidian to behave?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: |
+        Other approaches you thought about — even if you ruled them
+        out. Helps the maintainer understand the design space.
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which surface does this affect?
+      multiple: true
+      options:
+        - MCP tools
+        - Web UI
+        - CLI
+        - Vault format / conventions
+        - Configuration / env vars
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Pre-submission checks
+      options:
+        - label: I searched existing issues and didn't find a duplicate.
+          required: true
+        - label: I'm willing to discuss design trade-offs (this isn't a "must have exactly this" request).
+          required: false

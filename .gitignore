@@ -1,0 +1,24 @@
+# Build artifacts
+/gosidian
+/tmp/gosidian
+*.exe
+*.test
+*.out
+
+# Runtime state inside any vault (index, tokens)
+**/.gosidian/
+
+# Empty demo projects created during smoke tests
+/testdata/vault/Lavoro/
+/testdata/vault/Studio/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Claude Code session artefacts (if they land here)
+.claude/settings.local.json

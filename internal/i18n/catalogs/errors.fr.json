@@ -1,0 +1,7 @@
+{
+  "_stub": "Scaffolding v1.10 — minimal stub, most keys fall back to EN catalog. Contribute translations: see CONTRIBUTING.md Translating gosidian section.",
+  "login": {
+    "bad_credentials": "Identifiants non valides.",
+    "rate_limited": "Trop d'échecs, réessayez plus tard."
+  }
+}

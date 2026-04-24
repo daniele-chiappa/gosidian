@@ -1,0 +1,23 @@
+{{ define "body" }}
+<style>main.content { max-width: none; padding: 0.75rem 1rem; }</style>
+<div class="graph-wrap">
+  <div id="cy"></div>
+  <div class="graph-toolbar">
+    <select id="graph-project-filter" title="{{ call .T "graph.filter_title" }}">
+      <option value="">{{ call .T "graph.all_projects_option" }}</option>
+    </select>
+    <button type="button" data-act="zoom-in"  title="Zoom + (+)">{{ icon "zoom-in" }}</button>
+    <button type="button" data-act="zoom-out" title="Zoom − (−)">{{ icon "zoom-out" }}</button>
+    <button type="button" data-act="fit"      title="Adatta (0 / F)">{{ icon "scan" }}</button>
+    <button type="button" data-act="relayout" title="Ricalcola layout (L)">{{ icon "refresh-cw" }}</button>
+    <span id="graph-count" class="muted"></span>
+  </div>
+</div>
+<script src="/static/js/vendor/cytoscape.min.js"></script>
+<script src="/static/js/vendor/layout-base.js"></script>
+<script src="/static/js/vendor/cose-base.js"></script>
+<script src="/static/js/vendor/cytoscape-fcose.js"></script>
+<script src="/static/js/graph.js"></script>
+{{ end }}
+
+{{ define "graph.html" }}{{ template "body" . }}{{ end }}

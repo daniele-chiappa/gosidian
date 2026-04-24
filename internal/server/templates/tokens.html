@@ -1,0 +1,99 @@
+{{ define "body" }}
+<h1>{{ call .T "tokens.title" }}</h1>
+<p class="muted">{{ call .T "tokens.intro" }}</p>
+
+{{ if .OK }}<p class="ok">{{ .OK }}</p>{{ end }}
+{{ if .Error }}<p class="error">{{ .Error }}</p>{{ end }}
+
+{{ if .CreatedPlain }}
+<section class="token-plaintext-box">
+  <p><strong>{{ call .T "tokens.plaintext_box_header" .CreatedID }}</strong></p>
+  <pre class="token-plaintext" id="token-plaintext-value">{{ .CreatedPlain }}</pre>
+  <button type="button" onclick="var el=document.getElementById('token-plaintext-value'); navigator.clipboard.writeText(el.textContent).then(()=>this.textContent={{ call $.T "common.copied" }})">{{ call .T "common.copy" }}</button>
+  <p class="muted">
+    {{ call .T "tokens.plaintext_hint" "" }}
+    <code>claude mcp add gosidian http://127.0.0.1:8765/sse --transport sse --header &quot;Authorization: Bearer {{ .CreatedPlain }}&quot;</code>
+  </p>
+</section>
+{{ end }}
+
+<h2>{{ call .T "tokens.existing_h2" }}</h2>
+{{ if .Tokens }}
+<table class="tokens-table">
+  <thead>
+    <tr>
+      <th>{{ call .T "tokens.col_id" }}</th><th>{{ call .T "tokens.col_name" }}</th><th>{{ call .T "tokens.col_project" }}</th><th>{{ call .T "tokens.col_scope" }}</th>{{ if .ShowOwnerCol }}<th>{{ call $.T "tokens.col_owner" }}</th>{{ end }}<th>{{ call .T "tokens.col_created" }}</th><th>{{ call .T "tokens.col_expires" }}</th><th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {{ range .Tokens }}
+    <tr {{ if .Expired }}class="token-expired"{{ end }}>
+      <td><code>{{ .ID }}</code></td>
+      <td>{{ .Name }}</td>
+      <td>{{ .Project }}</td>
+      <td>{{ .Scopes }}</td>
+      {{ if $.ShowOwnerCol }}<td>{{ .Owner }}{{ if .Mine }} ★{{ end }}</td>{{ end }}
+      <td>{{ .Created }}</td>
+      <td>{{ .Expires }}{{ if .Expired }} {{ call $.T "tokens.expired_label" }}{{ end }}</td>
+      <td>
+        <form method="post" action="/admin/tokens" onsubmit="return confirm('{{ call $.T "confirm.revoke_token" .ID .Name }}')" style="margin:0">
+          <input type="hidden" name="action" value="revoke">
+          <input type="hidden" name="id" value="{{ .ID }}">
+          <button type="submit" class="danger">{{ call $.T "common.revoke_button" }}</button>
+        </form>
+      </td>
+    </tr>
+    {{ end }}
+  </tbody>
+</table>
+{{ else }}
+<p class="muted"><em>{{ call .T "tokens.none_provisioned" }}</em></p>
+{{ end }}
+
+<h2>{{ call .T "tokens.create_h2" }}</h2>
+<form method="post" action="/admin/tokens" class="settings-form">
+  <input type="hidden" name="action" value="create">
+
+  <label>
+    {{ call .T "tokens.col_name" }}
+    <input type="text" name="name" value="{{ .FormName }}" placeholder="claude-code-read" required>
+  </label>
+
+  <label>
+    {{ call .T "tokens.col_project" }}
+    <select name="project">
+      <option value="" {{ if eq .FormProject "" }}selected{{ end }}>{{ call $.T "tokens.project_admin" }}</option>
+      {{ range .Projects }}
+      <option value="{{ . }}" {{ if eq $.FormProject . }}selected{{ end }}>{{ . }}</option>
+      {{ end }}
+    </select>
+  </label>
+
+  <fieldset class="scope-box">
+    <legend>{{ call .T "tokens.scope_legend" }}</legend>
+    <label class="checkbox">
+      <input type="checkbox" name="scope_read" {{ if .FormRead }}checked{{ end }}>
+      {{ call $.T "tokens.scope_read" }}
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" name="scope_write" {{ if .FormWrite }}checked{{ end }}>
+      {{ call $.T "tokens.scope_write" }}
+    </label>
+  </fieldset>
+
+  <label>
+    {{ call .T "tokens.expiry" }}
+    <select name="ttl">
+      {{ range .TTLOptions }}
+      <option value="{{ .Value }}" {{ if eq $.FormTTL .Value }}selected{{ end }}>{{ .Label }}</option>
+      {{ end }}
+    </select>
+  </label>
+
+  <div class="actions">
+    <button type="submit">{{ call .T "tokens.create_button" }}</button>
+  </div>
+</form>
+{{ end }}
+
+{{ define "tokens.html" }}{{ template "body" . }}{{ end }}

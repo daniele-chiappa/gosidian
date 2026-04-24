@@ -1,0 +1,27 @@
+{{ define "body" }}
+<style>main.content { max-width: 420px; }</style>
+<h1>{{ call .T "login.title" }}</h1>
+{{ if .Error }}<p class="error">{{ .Error }}</p>{{ end }}
+<form method="post" action="/login" class="login-form">
+  <input type="hidden" name="next" value="{{ .Next }}">
+  <label>
+    Username
+    <input type="text" name="username" value="{{ .Username }}" autofocus autocomplete="username">
+  </label>
+  <label>
+    Password
+    <input type="password" name="password" autocomplete="current-password" required>
+  </label>
+  {{ if .TOTPEnabled }}
+  <label>
+    Codice TOTP
+    <input type="text" name="totp" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="one-time-code" required>
+  </label>
+  {{ end }}
+  <div class="actions">
+    <button type="submit">{{ call .T "login.submit" }}</button>
+  </div>
+</form>
+{{ end }}
+
+{{ define "login.html" }}{{ template "body" . }}{{ end }}

@@ -1,0 +1,79 @@
+{{ define "body" }}
+<h1>{{ call .T "audit.title" }}</h1>
+<p class="muted">{{ if .Path }}File: <code>{{ .Path }}</code>{{ else }}{{ call .T "audit.unavailable" }}{{ end }}</p>
+
+<form class="audit-filters" method="get" action="/audit">
+  <div class="row">
+    <label>
+      {{ call .T "common.project" }}
+      <input type="text" name="project" value="{{ .Project }}" placeholder="gosidian">
+    </label>
+    <label>
+      {{ call .T "audit.col_actor" }}
+      <input type="text" name="actor" value="{{ .Actor }}" placeholder="IP / token name">
+    </label>
+  </div>
+  <div class="row">
+    <label>
+      {{ call .T "audit.col_action" }}
+      <select name="action">
+        <option value="">—</option>
+        <option value="create"         {{ if eq .Action "create" }}selected{{ end }}>create</option>
+        <option value="update"         {{ if eq .Action "update" }}selected{{ end }}>update</option>
+        <option value="append"         {{ if eq .Action "append" }}selected{{ end }}>append</option>
+        <option value="delete"         {{ if eq .Action "delete" }}selected{{ end }}>delete</option>
+        <option value="rename"         {{ if eq .Action "rename" }}selected{{ end }}>rename</option>
+        <option value="create_project" {{ if eq .Action "create_project" }}selected{{ end }}>create_project</option>
+        <option value="delete_project" {{ if eq .Action "delete_project" }}selected{{ end }}>delete_project</option>
+        <option value="rename_project" {{ if eq .Action "rename_project" }}selected{{ end }}>rename_project</option>
+      </select>
+    </label>
+    <label>
+      Since
+      <input type="text" name="since" value="{{ .Since }}" placeholder="24h, 7d, 2026-04-15T00:00:00Z">
+    </label>
+  </div>
+  <div class="actions">
+    <button type="submit">{{ call .T "common.filter_button" }}</button>
+    <a class="btn-sm" href="/audit">Reset</a>
+  </div>
+  {{ if .SinceErr }}<p class="error">{{ .SinceErr }}</p>{{ end }}
+</form>
+
+<p class="muted">{{ call .T "audit.total_entries" .Total .Limit }}</p>
+
+{{ if .Entries }}
+<table class="audit-table">
+  <thead>
+    <tr>
+      <th>{{ call .T "audit.col_when" }}</th>
+      <th>{{ call .T "audit.col_origin" }}</th>
+      <th>Token</th>
+      <th>{{ call .T "audit.col_actor" }}</th>
+      <th>{{ call .T "audit.col_action" }}</th>
+      <th>{{ call .T "audit.col_path" }}</th>
+      <th>To</th>
+      <th>Size</th>
+    </tr>
+  </thead>
+  <tbody>
+    {{ range .Entries }}
+    <tr>
+      <td>{{ .TS.Format "2006-01-02 15:04:05" }}</td>
+      <td>{{ .Source }}</td>
+      <td>{{ .Token }}</td>
+      <td>{{ .Actor }}</td>
+      <td>{{ .Action }}</td>
+      <td><code>{{ .Path }}</code></td>
+      <td>{{ if .To }}<code>{{ .To }}</code>{{ end }}</td>
+      <td>{{ if .Size }}{{ .Size }}{{ end }}</td>
+    </tr>
+    {{ end }}
+  </tbody>
+</table>
+{{ else }}
+<p class="muted">{{ call .T "audit.none_matching" }}</p>
+{{ end }}
+{{ end }}
+
+{{ define "audit.html" }}{{ template "body" . }}{{ end }}

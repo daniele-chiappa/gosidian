@@ -1,0 +1,34 @@
+name = "karpathy-wiki"
+description = "Full Karpathy-Wiki-Stack layout — one folder per role (memory, plans, skills, docs, agents). Best fit for long-lived projects with evolving ADRs, reusable skills and agent handoffs."
+
+prompt = """
+Use this template when the project will host a real body of work over
+time: multiple plans, evolving ADRs in `memory/decisions.md`, reusable
+skills, accumulated `log.md` entries. The scaffold creates empty index
+READMEs for every standard role — agents are expected to populate them
+incrementally as work materialises, never all at once.
+
+Key conventions the scaffold expects you to follow:
+
+- Every plan goes under `plans/YYYYMMDD-<slug>.md` with a final
+  `Outcome` section after execution. Status cycle: draft →
+  in-progress → done (or archived).
+- ADRs are append-only under `memory/decisions.md` as `## ADR-NNN`
+  headings. Never rewrite a past ADR; supersede it with a new one.
+- Skills live as one file each under `skills/`, each with a `Trigger
+  phrase` section that the `memory_skills` MCP tool can filter on.
+- `hot.md` carries the session cache between agent runs. Keep it
+  short: current focus, active plans, last 5 decisions.
+- Tag vocabulary is closed: use `type:{plan,skill,memory,doc,agent,index}`,
+  `status:{draft,in-progress,done,archived}`, `topic:<area>`. Use
+  `pinned` as a frontmatter tag for notes that should always surface;
+  use `importance: 1..5` for a ranked preference.
+"""
+
+[[variables]]
+name = "PROJECT"
+required = true
+
+[[variables]]
+name = "TODAY"
+auto = "date"
