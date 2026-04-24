@@ -21,7 +21,7 @@ RUN CGO_ENABLED=0 GOOS=linux \
       -ldflags="-s -w -X main.version=${VERSION}" \
       -o /out/gosidian ./cmd/gosidian
 
-FROM alpine:3.20
+FROM alpine:3.23
 RUN apk add --no-cache git ca-certificates \
     && addgroup -g 65532 -S nonroot \
     && adduser -u 65532 -S nonroot -G nonroot \
