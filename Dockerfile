@@ -60,7 +60,7 @@ RUN CGO_ENABLED=0 GOOS=linux \
 # -----------------------------------------------------------------
 # 3. Runtime
 # -----------------------------------------------------------------
-FROM alpine:3.20
+FROM alpine:3.24
 RUN apk add --no-cache git ca-certificates \
     && addgroup -g 65532 -S nonroot \
     && adduser -u 65532 -S nonroot -G nonroot \
