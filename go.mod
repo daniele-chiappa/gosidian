@@ -4,7 +4,7 @@ go 1.25.5
 
 require (
 	github.com/BurntSushi/toml v1.6.0
-	github.com/boombuler/barcode v1.0.1-0.20190219062509-6c824513bacc
+	github.com/boombuler/barcode v1.1.0
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/go-ldap/ldap/v3 v3.4.13
 	github.com/mark3labs/mcp-go v0.55.0
