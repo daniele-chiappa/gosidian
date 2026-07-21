@@ -1,0 +1,68 @@
+name: Release binaries
+
+# Cross-compile prebuilt binaries and attach them to the GitHub release.
+# Runs automatically when a release is published; workflow_dispatch allows
+# (re)building assets for an existing tag.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to (re)build assets for"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  binaries:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.release.tag_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Build web UI (embedded into the binary)
+        run: |
+          cd web
+          npm ci
+          npm run build
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.25"
+
+      - name: Cross-compile matrix
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          mkdir -p dist-bin
+          for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            GOOS=${target%/*}; GOARCH=${target#*/}
+            BIN=gosidian; [ "$GOOS" = windows ] && BIN=gosidian.exe
+            NAME="gosidian_${VERSION}_${GOOS}_${GOARCH}"
+            mkdir -p "dist-bin/$NAME"
+            CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH \
+              go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
+              -o "dist-bin/$NAME/$BIN" ./cmd/gosidian
+            cp LICENSE README.md "dist-bin/$NAME/"
+            if [ "$GOOS" = windows ]; then
+              (cd dist-bin && zip -qr "$NAME.zip" "$NAME")
+            else
+              tar -C dist-bin -czf "dist-bin/$NAME.tar.gz" "$NAME"
+            fi
+            rm -rf "dist-bin/$NAME"
+          done
+          (cd dist-bin && sha256sum *.tar.gz *.zip > "gosidian_${VERSION}_checksums.txt")
+          ls -la dist-bin/
+
+      - name: Attach assets to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" dist-bin/*.tar.gz dist-bin/*.zip dist-bin/*checksums.txt --clobber
