@@ -1,26 +1,40 @@
 <script setup lang="ts">
 /**
- * GraphCanvas — Cytoscape 3.30 + fcose layout. The bulky Cytoscape
- * runtime (~250KB raw / ~80KB gz) is dynamically imported here so
- * routes that don't open /graph never pay for it. fcose handles
- * layouts up to ~500 nodes smoothly; larger vaults will need WebGL
- * (Sigma.js) — deferred to v2.1 per plan.
+ * GraphCanvas — force-graph (canvas 2D + live d3-force simulation).
+ * Replaces the former Cytoscape+fcose static layout: nodes are now
+ * draggable, collision-separated, colored per group and labelled with
+ * zoom-level LOD, which is what keeps a dense vault readable. The
+ * runtime is dynamically imported so routes that never open a graph
+ * window don't pay for it.
  *
  * The component is presentational: it receives `nodes` + `edges` and
  * emits `select(path)` when the user clicks a node. Filter state
  * lives in the parent (GraphView) so the URL stays sharable.
  *
- * Theme: Cytoscape doesn't resolve CSS `var(--color-x)` references
- * inside style values — they fall back to its internal default
- * (black). We resolve the tokens up front via getComputedStyle and
- * pass concrete `rgb(R G B)` strings instead. We re-resolve on
- * theme switching by watching the `data-preset` attribute on
- * <html>; that lets the user flip Mocha → Latte without remounting
- * the canvas.
+ * Layout stability: on every data change the current node positions
+ * are fed back as seeds (see adapter.toForceGraph), so tweaking a
+ * filter refines the picture instead of re-rolling it.
+ *
+ * Theme: canvas colors can't reference CSS `var(--color-x)`, so the
+ * tokens are resolved up front via getComputedStyle and re-resolved
+ * when the `data-preset` attribute on <html> changes (Mocha → Latte
+ * etc. without remounting). Group colors are HSL-generated from the
+ * group name, with lightness picked for the current bg luminance.
  */
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import type { Core, ElementDefinition } from 'cytoscape'
+import type ForceGraph from 'force-graph'
 import type { GraphEdge, GraphNode } from '@/api/graph'
+import {
+  buildAdjacency,
+  endpointId,
+  NODE_REL_SIZE,
+  nodeRadius,
+  toForceGraph,
+  nodeVal,
+  type FGLink,
+  type FGNode,
+} from './adapter'
+import { makeGroupColor, resolveTheme, withAlpha } from './theme'
 
 interface Props {
   nodes: GraphNode[]
@@ -32,239 +46,165 @@ const emit = defineEmits<{
 }>()
 
 const host = ref<HTMLDivElement | null>(null)
-let cy: Core | null = null
+let graph: ForceGraph<FGNode, FGLink> | null = null
 let presetObserver: MutationObserver | null = null
 let resizeObserver: ResizeObserver | null = null
 let resizeRaf = 0
+let fitTimer = 0
 
-function elementsFor(nodes: GraphNode[], edges: GraphEdge[]): ElementDefinition[] {
-  const els: ElementDefinition[] = []
-  for (const n of nodes) {
-    els.push({
-      group: 'nodes',
-      data: { id: n.id, label: n.label, project: n.project ?? '', degree: n.degree },
-    })
-  }
-  for (const e of edges) {
-    els.push({
-      group: 'edges',
-      data: {
-        id: `${e.source}__${e.target}`,
-        source: e.source,
-        target: e.target,
-        count: e.count,
-        cross: e.cross_project ?? false,
-      },
-    })
-  }
-  return els
-}
+// Labels fade in between these zoom levels; below the range the
+// canvas shows shape only (hover always reveals the full title).
+const LABEL_FADE_START = 1.0
+const LABEL_FADE_RANGE = 0.5
+const LABEL_MAX_CHARS = 28
 
-interface ThemeColors {
-  accent: string
-  warning: string
-  text: string
-  textMuted: string
-  bg: string
-}
+// Hover state, read by the per-frame paint accessors. force-graph
+// redraws on pointer interaction, so mutating these in onNodeHover is
+// enough — no explicit invalidation needed.
+let hoverNode: FGNode | null = null
+let highlightIds = new Set<string>()
+let adjacency = new Map<string, Set<string>>()
 
-// Tokens are stored as `R G B` triplets (Tailwind-alpha-friendly).
-// Cytoscape's internal color parser is older than CSS Color Module
-// 4 and refuses the space-separated `rgb(R G B)` form — it only
-// accepts `rgb(R, G, B)` with commas. We split + recompose on
-// commas so the painted labels actually use the theme colors.
-// Hard-coded comma-form fallbacks default to Catppuccin Mocha so
-// the canvas never falls back to black-on-black.
-function tripletToCommaRGB(triplet: string): string | null {
-  const parts = triplet.trim().split(/\s+/).filter(Boolean)
-  if (parts.length !== 3) return null
-  const nums = parts.map((p) => Number(p))
-  if (nums.some((n) => !Number.isFinite(n))) return null
-  return `rgb(${nums[0]}, ${nums[1]}, ${nums[2]})`
-}
-
-function resolveTheme(): ThemeColors {
-  const root = document.documentElement
-  const cs = getComputedStyle(root)
-  const get = (name: string, fallback: string): string => {
-    const raw = cs.getPropertyValue(name)
-    const rgb = tripletToCommaRGB(raw)
-    return rgb ?? fallback
-  }
-  return {
-    accent: get('--color-accent', 'rgb(137, 180, 250)'),
-    warning: get('--color-warning', 'rgb(250, 179, 135)'),
-    text: get('--color-text', 'rgb(205, 214, 244)'),
-    textMuted: get('--color-text-muted', 'rgb(166, 173, 200)'),
-    bg: get('--color-bg', 'rgb(30, 30, 46)'),
-  }
-}
-
-function styleSheet(t: ThemeColors) {
-  return [
-    {
-      selector: 'node',
-      style: {
-        'background-color': t.accent,
-        label: 'data(label)',
-        color: t.text,
-        'font-size': '10px',
-        'text-valign': 'bottom',
-        'text-margin-y': 4,
-        'text-outline-color': t.bg,
-        'text-outline-width': 2,
-        // Trim long labels by default; the hovered class below
-        // bumps the wrap width so the full title is readable.
-        'text-wrap': 'ellipsis',
-        'text-max-width': '120px',
-        width: 'mapData(degree, 0, 8, 8, 28)',
-        height: 'mapData(degree, 0, 8, 8, 28)',
-      },
-    },
-    {
-      selector: 'edge',
-      style: {
-        'curve-style': 'bezier',
-        'line-color': t.textMuted,
-        width: 'mapData(count, 1, 6, 1, 4)',
-        opacity: 0.6,
-      },
-    },
-    {
-      selector: 'edge[?cross]',
-      style: {
-        'line-style': 'dashed',
-        opacity: 0.4,
-      },
-    },
-    {
-      selector: 'node:selected',
-      style: {
-        'background-color': t.warning,
-        'border-width': 2,
-        'border-color': t.warning,
-      },
-    },
-    // Hover state — applied via mouseover handler in mount() (Cytoscape
-    // doesn't support :hover in selectors). The hovered node is
-    // brought to the foreground (z-index 999) and gets a larger,
-    // bolder, full-width label so the title is always readable even
-    // when neighbours overlap.
-    {
-      selector: 'node.hovered',
-      style: {
-        'background-color': t.warning,
-        'border-width': 2,
-        'border-color': t.warning,
-        'font-size': '14px',
-        'font-weight': 'bold',
-        'text-wrap': 'wrap',
-        'text-max-width': '240px',
-        'text-outline-width': 3,
-        'z-compound-depth': 'top',
-        'z-index': 999,
-      },
-    },
-    // Connected edges + neighbour nodes light up too — the typical
-    // graph-explore affordance: hover a node, see its neighbourhood.
-    {
-      selector: 'edge.connected',
-      style: {
-        'line-color': t.accent,
-        opacity: 1,
-        width: 'mapData(count, 1, 6, 2, 6)',
-        'z-index': 50,
-      },
-    },
-    {
-      selector: 'node.neighbour',
-      style: {
-        'border-width': 1,
-        'border-color': t.accent,
-        'z-index': 50,
-      },
-    },
-    // Everything else fades back so the hovered cluster pops.
-    {
-      selector: '.dimmed',
-      style: {
-        opacity: 0.25,
-      },
-    },
-  ]
-}
-
-async function ensureCytoscape() {
-  const [{ default: cytoscape }, { default: fcose }] = await Promise.all([
-    import('cytoscape'),
-    import('cytoscape-fcose'),
-  ])
-  if (!fcoseRegistered) {
-    cytoscape.use(fcose)
-    fcoseRegistered = true
-  }
-  return cytoscape
-}
-let fcoseRegistered = false
+let theme = resolveTheme()
+let groupColor = makeGroupColor(theme)
 
 function reapplyTheme() {
-  if (!cy) return
-  // Cytoscape's StylesheetJson type is internal; cast to satisfy
-  // its generic style() overload.
-  ;(cy as unknown as { style: (s: unknown) => void }).style(styleSheet(resolveTheme()))
+  theme = resolveTheme()
+  groupColor = makeGroupColor(theme)
+  // Any prop setter triggers a redraw; the accessors re-read `theme`.
+  graph?.nodeRelSize(NODE_REL_SIZE)
 }
+
+function trimLabel(label: string): string {
+  return label.length > LABEL_MAX_CHARS ? label.slice(0, LABEL_MAX_CHARS - 1) + '…' : label
+}
+
+function drawNode(node: FGNode, ctx: CanvasRenderingContext2D, scale: number) {
+  const r = nodeRadius(node)
+  const hovered = hoverNode !== null && hoverNode.id === node.id
+  const lit = highlightIds.has(node.id)
+  const dimmed = hoverNode !== null && !lit
+  const x = node.x ?? 0
+  const y = node.y ?? 0
+
+  ctx.globalAlpha = dimmed ? 0.15 : 1
+  ctx.beginPath()
+  ctx.arc(x, y, r, 0, 2 * Math.PI)
+  ctx.fillStyle = hovered ? theme.warning : groupColor(node.group)
+  ctx.fill()
+  if (hovered || lit) {
+    ctx.lineWidth = Math.max(1.5 / scale, 0.75)
+    ctx.strokeStyle = hovered ? theme.warning : theme.accent
+    ctx.stroke()
+  }
+
+  // Label LOD: fade in with zoom; hover shows the neighbourhood's
+  // full titles regardless of zoom level.
+  const zoomAlpha = Math.min(Math.max((scale - LABEL_FADE_START) / LABEL_FADE_RANGE, 0), 1)
+  const labelAlpha = hovered || (lit && hoverNode !== null) ? 1 : zoomAlpha
+  if (labelAlpha > 0 && !dimmed) {
+    const fontSize = (hovered ? 13 : 11) / scale
+    ctx.font = `${hovered ? 600 : 400} ${fontSize}px ui-sans-serif, system-ui, sans-serif`
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'top'
+    const label = hovered ? node.label : trimLabel(node.label)
+    const ty = y + r + 2 / scale
+    ctx.globalAlpha = labelAlpha
+    ctx.lineWidth = 3 / scale
+    ctx.strokeStyle = theme.bg
+    ctx.strokeText(label, x, ty)
+    ctx.fillStyle = theme.text
+    ctx.fillText(label, x, ty)
+  }
+  ctx.globalAlpha = 1
+}
+
+function linkTouchesHover(l: FGLink): boolean {
+  if (!hoverNode) return false
+  return endpointId(l.source) === hoverNode.id || endpointId(l.target) === hoverNode.id
+}
+
+function applyData(nodes: GraphNode[], edges: GraphEdge[]) {
+  if (!graph) return
+  const prev = new Map<string, { x: number; y: number }>()
+  for (const n of graph.graphData().nodes) {
+    if (n.x !== undefined && n.y !== undefined) prev.set(n.id, { x: n.x, y: n.y })
+  }
+  const data = toForceGraph(nodes, edges, prev)
+  adjacency = buildAdjacency(data)
+  hoverNode = null
+  highlightIds = new Set()
+  pendingFit = true
+  graph.graphData(data)
+}
+
+let pendingFit = false
 
 async function mount() {
   if (!host.value) return
-  const cytoscape = await ensureCytoscape()
-  cy = cytoscape({
-    container: host.value,
-    elements: elementsFor(props.nodes, props.edges),
-    minZoom: 0.2,
-    maxZoom: 4,
-    wheelSensitivity: 0.2,
-    // Cytoscape's StylesheetJson type is internal; cast through unknown.
-    style: styleSheet(resolveTheme()) as never,
-    layout: { name: 'fcose', animate: false, randomize: true } as unknown as { name: string },
-  })
-  cy.on('tap', 'node', (evt) => {
-    emit('select', evt.target.id())
-  })
+  const [{ default: ForceGraphCtor }, { forceCollide, forceX, forceY }] = await Promise.all([
+    import('force-graph'),
+    import('d3-force-3d'),
+  ])
+  if (!host.value) return // unmounted while the chunk loaded
 
-  // Hover affordance: bring the hovered node forward, light up its
-  // 1-hop neighbourhood, dim everything else. `.dimmed` is applied
-  // only to the *complement* of the hovered cluster — adding it to
-  // the cluster too would faded their opacity (the .dimmed style
-  // block sits after .hovered in the stylesheet, so its opacity
-  // declaration wins on overlap).
-  type Collection = {
-    addClass: (c: string) => Collection
-    removeClass: (c: string) => Collection
-    union: (c: Collection) => Collection
-    difference: (c: Collection) => Collection
-    neighborhood: () => Collection
-  }
-  cy.on('mouseover', 'node', (evt) => {
-    if (!cy) return
-    const node = evt.target as unknown as Collection
-    const nbrs = node.neighborhood()
-    const cluster = node.union(nbrs)
-    const others = (cy as unknown as { elements: () => Collection })
-      .elements()
-      .difference(cluster)
-    others.addClass('dimmed')
-    node.addClass('hovered')
-    nbrs.addClass('connected')
-    nbrs.addClass('neighbour')
-  })
-  cy.on('mouseout', 'node', () => {
-    if (!cy) return
-    const everything = (cy as unknown as { elements: () => Collection }).elements()
-    everything.removeClass('dimmed')
-    everything.removeClass('hovered')
-    everything.removeClass('connected')
-    everything.removeClass('neighbour')
-  })
+  const box = host.value.getBoundingClientRect()
+  graph = new ForceGraphCtor<FGNode, FGLink>(host.value)
+    .width(box.width)
+    .height(box.height)
+    .minZoom(0.2)
+    .maxZoom(8)
+    .nodeRelSize(NODE_REL_SIZE)
+    .nodeVal(nodeVal)
+    .nodeLabel(() => '') // we paint labels ourselves; suppress the tooltip
+    .nodeCanvasObjectMode(() => 'replace')
+    .nodeCanvasObject(drawNode)
+    .linkColor((l) => {
+      if (linkTouchesHover(l)) return theme.accent
+      const base = l.cross ? 0.25 : 0.45
+      return withAlpha(theme.textMuted, hoverNode ? base * 0.25 : base)
+    })
+    .linkWidth((l) => {
+      const w = 0.8 + Math.min(l.count, 6) * 0.4
+      return linkTouchesHover(l) ? w + 1 : w
+    })
+    .linkLineDash((l) => (l.cross ? [4, 3] : null))
+    .warmupTicks(60)
+    .cooldownTime(6000)
+    .d3AlphaMin(0.015)
+    .onNodeClick((node) => emit('select', node.id))
+    .onNodeHover((node) => {
+      hoverNode = node
+      if (node) {
+        highlightIds = new Set(adjacency.get(node.id) ?? [])
+        highlightIds.add(node.id)
+      } else {
+        highlightIds = new Set()
+      }
+    })
+    .onEngineStop(() => {
+      if (!pendingFit || !graph) return
+      pendingFit = false
+      graph.zoomToFit(300, 40)
+      // zoomToFit on a tiny ego graph can over-zoom past readability;
+      // clamp after the transition settles.
+      window.clearTimeout(fitTimer)
+      fitTimer = window.setTimeout(() => {
+        if (graph && graph.zoom() > 3) graph.zoom(3, 200)
+      }, 350)
+    })
+
+  // Spacing tuning — the "less hairball" knobs: stronger short-range
+  // repulsion, collision at label-friendly radii, and a weak pull
+  // toward the center so disconnected components don't drift apart.
+  graph.d3Force('charge')?.strength?.(-70)
+  graph.d3Force('charge')?.distanceMax?.(400)
+  graph.d3Force('link')?.distance?.(40)
+  graph.d3Force('collide', forceCollide<FGNode>((n) => nodeRadius(n) + 5))
+  graph.d3Force('x', forceX<FGNode>(0).strength(0.04))
+  graph.d3Force('y', forceY<FGNode>(0).strength(0.04))
+
+  applyData(props.nodes, props.edges)
 
   // React to preset switches (Mocha → Latte → Tokyo Night, etc.) so
   // the canvas reflects the new tokens without a remount.
@@ -274,14 +214,17 @@ async function mount() {
     attributeFilter: ['data-preset'],
   })
 
-  // Re-fit when the host resizes — e.g. a plancia window cycling its width
-  // step, or the sidebar drag. Cytoscape needs an explicit resize() to pick
-  // up the new container box; rAF-coalesced so a drag doesn't thrash layout.
+  // Track the host box — e.g. a plancia window cycling its width step,
+  // or the sidebar drag. force-graph sizes to the window by default,
+  // so the explicit width/height must follow the container; rAF-
+  // coalesced so a drag doesn't thrash.
   resizeObserver = new ResizeObserver(() => {
     if (resizeRaf) cancelAnimationFrame(resizeRaf)
     resizeRaf = requestAnimationFrame(() => {
-      cy?.resize()
-      cy?.fit(undefined, 30)
+      if (!graph || !host.value) return
+      const b = host.value.getBoundingClientRect()
+      graph.width(b.width).height(b.height)
+      graph.zoomToFit(200, 40)
     })
   })
   resizeObserver.observe(host.value)
@@ -294,22 +237,21 @@ onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   resizeObserver = null
   if (resizeRaf) cancelAnimationFrame(resizeRaf)
-  cy?.destroy()
-  cy = null
+  window.clearTimeout(fitTimer)
+  graph?._destructor()
+  graph = null
 })
 
 watch(
-  () => [props.nodes, props.edges],
-  () => {
-    if (!cy) return
-    cy.elements().remove()
-    cy.add(elementsFor(props.nodes, props.edges))
-    cy.layout({ name: 'fcose', animate: false, randomize: true } as unknown as { name: string }).run()
-  },
+  () => [props.nodes, props.edges] as const,
+  ([nodes, edges]) => applyData(nodes, edges),
   { deep: false },
 )
 </script>
 
 <template>
-  <div ref="host" class="w-full h-full bg-bg" />
+  <div
+    ref="host"
+    class="w-full h-full bg-bg overflow-hidden"
+  />
 </template>

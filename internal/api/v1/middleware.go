@@ -205,9 +205,12 @@ func observe(next http.Handler) http.Handler {
 		if d := time.Since(started); d > 500*time.Millisecond {
 			// EscapedPath, not Path: the decoded form can carry client-chosen
 			// control bytes (%0A → newline) that would forge log lines in the
-			// text format (CodeQL go/log-injection).
+			// text format. The newline strip on top is redundant in practice
+			// (the escaped form has no raw control bytes) but it is the
+			// sanitizer CodeQL's go/log-injection taint model recognizes.
+			path := strings.ReplaceAll(strings.ReplaceAll(r.URL.EscapedPath(), "\n", ""), "\r", "")
 			slog.Default().Warn("api/v1: slow handler",
-				"method", r.Method, "path", r.URL.EscapedPath(), "elapsed", d.String())
+				"method", r.Method, "path", path, "elapsed", d.String())
 		}
 	})
 }

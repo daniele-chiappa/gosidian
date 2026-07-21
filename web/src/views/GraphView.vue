@@ -18,8 +18,10 @@ import { suggestNoteTitles, type NoteTitleHit } from '@/api/noteTitles'
 import SearchSelect from '@/components/primitives/SearchSelect.vue'
 import { useWindowsStore, type OpenSpec } from 'plancia'
 import { planciaKey } from '@/composables/planciaKey'
+import { useUIStore, type GraphRenderMode } from '@/stores/ui'
 
 const GraphCanvas = defineAsyncComponent(() => import('@/components/graph/GraphCanvas.vue'))
+const Graph3DCanvas = defineAsyncComponent(() => import('@/components/graph/Graph3DCanvas.vue'))
 
 const props = defineProps<{
   project?: string
@@ -30,6 +32,16 @@ const props = defineProps<{
 
 const store = useWindowsStore()
 const openWindow = inject<(spec: OpenSpec) => string>('openWindow', (s) => store.open(s))
+
+// Renderer toggle: each window starts from the persisted global
+// default and switching updates it (2D stays the default on fresh
+// profiles; three.js loads only on the first switch to 3D).
+const ui = useUIStore()
+const mode = ref<GraphRenderMode>(ui.graphMode)
+function setMode(m: GraphRenderMode) {
+  mode.value = m
+  ui.setGraphMode(m)
+}
 
 const data = ref<GraphResponse | null>(null)
 const loading = ref(false)
@@ -182,7 +194,7 @@ onMounted(async () => {
           min="1"
           max="6"
           class="mt-1 w-full rounded bg-bg border border-border px-2 py-1.5 text-sm"
-        />
+        >
       </label>
       <label class="block text-sm">
         <span class="text-text-muted text-xs">Min degree (drop leaves below)</span>
@@ -192,7 +204,7 @@ onMounted(async () => {
           min="0"
           max="20"
           class="mt-1 w-full rounded bg-bg border border-border px-2 py-1.5 text-sm"
-        />
+        >
       </label>
       <label class="block text-sm">
         <span class="text-text-muted text-xs">Limit (cap nodes; top-degree wins)</span>
@@ -202,20 +214,35 @@ onMounted(async () => {
           min="0"
           max="2000"
           class="mt-1 w-full rounded bg-bg border border-border px-2 py-1.5 text-sm"
-        />
+        >
       </label>
 
       <button
         type="button"
         class="w-full text-xs px-2 py-1 rounded border border-border hover:bg-surface-hover"
         @click="reset"
-      >Reset</button>
+      >
+        Reset
+      </button>
 
-      <div v-if="data" class="text-xs text-text-muted space-y-1 pt-3 border-t border-border">
+      <div
+        v-if="data"
+        class="text-xs text-text-muted space-y-1 pt-3 border-t border-border"
+      >
         <p>Nodes: <strong class="text-text">{{ data.stats.node_count }}</strong></p>
         <p>Edges: <strong class="text-text">{{ data.stats.edge_count }}</strong></p>
-        <p v-if="data.stats.truncated" class="text-warning">Truncated by limit</p>
-        <p v-if="data.stats.filter" class="font-mono break-all">{{ data.stats.filter }}</p>
+        <p
+          v-if="data.stats.truncated"
+          class="text-warning"
+        >
+          Truncated by limit
+        </p>
+        <p
+          v-if="data.stats.filter"
+          class="font-mono break-all"
+        >
+          {{ data.stats.filter }}
+        </p>
       </div>
     </aside>
 
@@ -223,13 +250,55 @@ onMounted(async () => {
       <p
         v-if="loading"
         class="absolute top-3 left-3 z-10 text-xs text-text-muted bg-bg-elevated px-2 py-1 rounded border border-border"
-      >Loading…</p>
+      >
+        Loading…
+      </p>
       <p
         v-else-if="error"
         class="absolute top-3 left-3 z-10 text-xs text-danger bg-bg-elevated px-2 py-1 rounded border border-danger"
-      >{{ error }}</p>
-      <GraphCanvas v-if="data" :nodes="data.nodes" :edges="data.edges" @select="onSelect" />
-      <p v-else-if="!loading" class="p-8 text-text-muted text-sm">No data yet.</p>
+      >
+        {{ error }}
+      </p>
+      <div
+        class="absolute top-3 right-3 z-10 flex rounded border border-border overflow-hidden text-xs bg-bg-elevated"
+        role="group"
+        aria-label="Graph renderer"
+      >
+        <button
+          type="button"
+          class="px-2 py-1"
+          :class="mode === '2d' ? 'bg-surface-hover text-text font-semibold' : 'text-text-muted hover:bg-surface-hover'"
+          @click="setMode('2d')"
+        >
+          2D
+        </button>
+        <button
+          type="button"
+          class="px-2 py-1 border-l border-border"
+          :class="mode === '3d' ? 'bg-surface-hover text-text font-semibold' : 'text-text-muted hover:bg-surface-hover'"
+          @click="setMode('3d')"
+        >
+          3D
+        </button>
+      </div>
+      <GraphCanvas
+        v-if="data && mode === '2d'"
+        :nodes="data.nodes"
+        :edges="data.edges"
+        @select="onSelect"
+      />
+      <Graph3DCanvas
+        v-else-if="data && mode === '3d'"
+        :nodes="data.nodes"
+        :edges="data.edges"
+        @select="onSelect"
+      />
+      <p
+        v-else-if="!loading"
+        class="p-8 text-text-muted text-sm"
+      >
+        No data yet.
+      </p>
     </section>
   </div>
 </template>

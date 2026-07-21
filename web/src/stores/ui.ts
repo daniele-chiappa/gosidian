@@ -31,10 +31,15 @@ export type LocaleCode = 'it' | 'en' | 'es' | 'fr' | 'de'
 /** plancia layout: the niri-style strip or a tab bar. Persisted like the rest. */
 export type PlanciaViewMode = 'strip' | 'tabs'
 
+/** Graph window renderer: 2D canvas (default) or 3D WebGL. Global default;
+ *  each graph window starts from it and the toggle updates it. */
+export type GraphRenderMode = '2d' | '3d'
+
 interface UIState {
   preset: ThemePreset
   locale: LocaleCode | ''
   planciaViewMode: PlanciaViewMode
+  graphMode: GraphRenderMode
 }
 
 const VALID_PRESETS: ThemePreset[] = [
@@ -55,6 +60,7 @@ export const useUIStore = defineStore('ui', {
     preset: 'catppuccin-mocha',
     locale: '',
     planciaViewMode: 'strip',
+    graphMode: '2d',
   }),
   actions: {
     setPreset(preset: ThemePreset) {
@@ -65,6 +71,10 @@ export const useUIStore = defineStore('ui', {
     setPlanciaViewMode(mode: PlanciaViewMode) {
       if (mode !== 'strip' && mode !== 'tabs') return
       this.planciaViewMode = mode
+    },
+    setGraphMode(mode: GraphRenderMode) {
+      if (mode !== '2d' && mode !== '3d') return
+      this.graphMode = mode
     },
     setLocale(locale: LocaleCode) {
       if (!VALID_LOCALES.includes(locale)) return

@@ -8,6 +8,44 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.21.0] — 2026-07-21 — "graph 2D/3D"
+
+### Added
+- **Optional 3D graph mode**: every graph window now has a `2D | 3D`
+  toggle. The 3D renderer (three.js WebGL + d3-force-3d) mirrors the 2D
+  feature set — click-to-open, hover lights up the 1-hop neighbourhood,
+  node size by degree and colors by group — with an orbit camera and
+  tooltip titles. 2D stays the default; the choice persists per browser
+  profile. The three.js runtime ships as a separate lazy chunk loaded
+  only on the first switch to 3D.
+
+### Changed
+- **2D graph rebuilt on a live force simulation** (`force-graph`,
+  replacing Cytoscape + fcose static layouts): nodes are draggable and
+  collision-separated, labels fade in with zoom instead of stacking into
+  a wall of text, node colors group by project (or by top-level folder
+  inside a single project), and refetches reuse previous positions so
+  tweaking a filter no longer re-scrambles the layout.
+- Dependency maintenance: `axios` 1.16→1.18.1, `go-ldap` 3.4.13→3.4.14,
+  `modernc.org/sqlite` 1.53→1.54 (pulls `modernc.org/libc` 1.74.1).
+
+### Security
+- `axios` 1.18.1 resolves one high and four medium npm advisories
+  (Node HTTP adapter proxy inheritance, form serializer `maxDepth`
+  bypass, HTTP/2 `maxBodyLength` bypass, `NO_PROXY` 0.0.0.0 bypass,
+  prototype-pollution auth injection).
+- The api/v1 slow-handler log now also strips newlines from the escaped
+  request path — redundant at runtime on top of `EscapedPath()`, but it
+  is the sanitizer CodeQL's `go/log-injection` taint model recognizes,
+  closing the remaining code-scanning alert.
+
+### Removed
+- `cytoscape` and `cytoscape-fcose` (superseded by `force-graph`).
+
+### Notes
+- No migration. Open Dependabot PRs for axios/go-ldap/sqlite auto-close
+  on the next dependency rescan.
+
 ## [2.20.1] — 2026-07-15 — "hygiene"
 
 ### Security
