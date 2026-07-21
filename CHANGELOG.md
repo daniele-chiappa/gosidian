@@ -8,6 +8,18 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.21.1] — 2026-07-21 — "dev lockfile hygiene"
+
+### Security
+- Dev-toolchain lockfile bumps flagged by Dependabot right after the
+  2.21.0 scan: `js-yaml` 4.2.0→4.3.0 (GHSA-52cp-r559-cp3m, quadratic
+  CPU via YAML merge-key chains) and the remaining `brace-expansion`
+  instances. `npm audit` is back to zero vulnerabilities.
+
+### Notes
+- Lockfile-only: no runtime dependency or code changes, no migration.
+  The published image is identical in behavior to 2.21.0.
+
 ## [2.21.0] — 2026-07-21 — "graph 2D/3D"
 
 ### Added
