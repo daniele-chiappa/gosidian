@@ -20,6 +20,9 @@ type graphNode struct {
 	Label   string `json:"label"`
 	Project string `json:"project,omitempty"`
 	Degree  int    `json:"degree"`
+	// Mtime (unix seconds) powers the 3D "recency" z-mode client-side;
+	// 0 (omitted) on synthesized cross-project endpoints.
+	Mtime int64 `json:"mtime,omitempty"`
 }
 
 // graphEdge mirrors Cytoscape's edge shape — the source/target keys
@@ -152,6 +155,7 @@ func (r *Router) handleGraph(w http.ResponseWriter, req *http.Request) {
 			ID:      n.Path,
 			Label:   labelOrPath(n.Title, n.Path),
 			Project: n.Project,
+			Mtime:   n.Mtime,
 		})
 	}
 	edges := make([]graphEdge, 0, len(rawEdges))

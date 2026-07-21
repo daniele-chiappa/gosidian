@@ -54,9 +54,18 @@ let fitTimer = 0
 
 // Labels fade in between these zoom levels; below the range the
 // canvas shows shape only (hover always reveals the full title).
+// High-degree nodes get an earlier fade-in (up to HUB_LABEL_BOOST
+// sooner): at mid zoom the hubs are readable first, the long tail
+// arrives as you zoom in.
 const LABEL_FADE_START = 1.0
 const LABEL_FADE_RANGE = 0.5
 const LABEL_MAX_CHARS = 28
+const HUB_LABEL_BOOST = 0.6
+
+// Below this zoom, weight-1 links outside the hovered neighbourhood are
+// hidden: the unreadable background lattice disappears with distance.
+const WEAK_LINK_MIN_ZOOM = 0.5
+let currentZoom = 1
 
 // Hover state, read by the per-frame paint accessors. force-graph
 // redraws on pointer interaction, so mutating these in onNodeHover is
@@ -100,7 +109,8 @@ function drawNode(node: FGNode, ctx: CanvasRenderingContext2D, scale: number) {
 
   // Label LOD: fade in with zoom; hover shows the neighbourhood's
   // full titles regardless of zoom level.
-  const zoomAlpha = Math.min(Math.max((scale - LABEL_FADE_START) / LABEL_FADE_RANGE, 0), 1)
+  const fadeStart = LABEL_FADE_START - (Math.min(node.degree, 24) / 24) * HUB_LABEL_BOOST
+  const zoomAlpha = Math.min(Math.max((scale - fadeStart) / LABEL_FADE_RANGE, 0), 1)
   const labelAlpha = hovered || (lit && hoverNode !== null) ? 1 : zoomAlpha
   if (labelAlpha > 0 && !dimmed) {
     const fontSize = (hovered ? 13 : 11) / scale
@@ -169,6 +179,10 @@ async function mount() {
       return linkTouchesHover(l) ? w + 1 : w
     })
     .linkLineDash((l) => (l.cross ? [4, 3] : null))
+    .linkVisibility((l) => currentZoom >= WEAK_LINK_MIN_ZOOM || l.count > 1 || linkTouchesHover(l))
+    .onZoom(({ k }) => {
+      currentZoom = k
+    })
     .warmupTicks(60)
     .cooldownTime(6000)
     .d3AlphaMin(0.015)

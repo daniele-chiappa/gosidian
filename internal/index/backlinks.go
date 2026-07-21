@@ -77,6 +77,9 @@ type GraphNode struct {
 	Title   string
 	Project string
 	Degree  int
+	// Mtime is the note's last-modified unix time; 0 on synthesized
+	// cross-project foreign endpoints (unknown without a second query).
+	Mtime int64
 }
 type GraphEdge struct {
 	From         string
@@ -110,10 +113,10 @@ func (i *Index) GraphData(project string, includeCross bool) ([]GraphNode, []Gra
 		err error
 	)
 	if project == "" {
-		nodeRows, err = i.db.Query(`SELECT path, title FROM notes ORDER BY path`)
+		nodeRows, err = i.db.Query(`SELECT path, title, mtime FROM notes ORDER BY path`)
 	} else {
 		nodeRows, err = i.db.Query(
-			`SELECT path, title FROM notes WHERE path LIKE ? ORDER BY path`,
+			`SELECT path, title, mtime FROM notes WHERE path LIKE ? ORDER BY path`,
 			project+"/%",
 		)
 	}
@@ -125,7 +128,7 @@ func (i *Index) GraphData(project string, includeCross bool) ([]GraphNode, []Gra
 	var nodes []GraphNode
 	for nodeRows.Next() {
 		var n GraphNode
-		if err := nodeRows.Scan(&n.Path, &n.Title); err != nil {
+		if err := nodeRows.Scan(&n.Path, &n.Title, &n.Mtime); err != nil {
 			nodeRows.Close()
 			return nil, nil, err
 		}

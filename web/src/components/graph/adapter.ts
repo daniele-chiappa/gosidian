@@ -14,6 +14,8 @@ export interface FGNode {
   degree: number
   /** Color-grouping key — see `groupKey()`. */
   group: string
+  /** Last-modified unix seconds (0 = unknown) — powers the 3D recency z-mode. */
+  mtime: number
   // Simulation state, written by d3-force (z only in 3D mode).
   x?: number
   y?: number
@@ -37,6 +39,10 @@ export interface FGData {
   nodes: FGNode[]
   links: FGLink[]
 }
+
+/** Semantic z-axis of the 3D renderer: free simulation, one plane per
+ *  color group, or by note recency (mtime). */
+export type ZMode = 'free' | 'groups' | 'recency'
 
 /** Either endpoint of a link, before or after d3 resolves it to an object. */
 export function endpointId(end: string | FGNode): string {
@@ -86,6 +92,7 @@ export function toForceGraph(
         project: n.project ?? '',
         degree: n.degree,
         group: groupKey(n, multiProject),
+        mtime: n.mtime ?? 0,
         x: prev?.x,
         y: prev?.y,
         z: prev?.z,

@@ -8,6 +8,31 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.22.0] — 2026-07-21 — "graph filters in URL + semantic 3D z"
+
+### Added
+- **Graph filters survive reloads**: the graph window URL token grows a
+  compact param form (project/tag/focus/depth/min-degree/limit) next to
+  the legacy bare ego-focus path, and the view pushes filter changes
+  back into the window so the URL always reflects what you see. Window
+  titles follow the project filter (`Graph · <project>`). Existing ego
+  ("direct links") URLs are unchanged.
+- **3D z-axis modes**: in 3D, a `Z: free | groups | recency` selector
+  pins the third dimension to one plane per color group or to note
+  recency (newer floats up), or leaves it to the simulation (default).
+  Powered by a new additive `mtime` field on `/api/v1/graph` nodes.
+- **2D level-of-detail for dense graphs**: weight-1 links outside the
+  hovered neighbourhood hide below 0.5x zoom, and high-degree nodes get
+  an earlier label fade-in so hubs are readable at mid zoom.
+
+### Notes
+- `mtime` is additive (omitted on synthesized cross-project endpoints);
+  no API breaking changes and no migration.
+- A WebGPU renderer spike was evaluated and closed as no-go for now:
+  the `three.webgpu` build alone is ~1.8x the classic three size and
+  `3d-force-graph` pins the classic WebGLRenderer, for no measurable
+  gain at typical vault scale.
+
 ## [2.21.1] — 2026-07-21 — "dev lockfile hygiene"
 
 ### Security

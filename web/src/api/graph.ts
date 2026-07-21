@@ -5,6 +5,8 @@ export interface GraphNode {
   label: string
   project?: string
   degree: number
+  /** Last-modified unix seconds; absent on cross-project foreign endpoints. */
+  mtime?: number
 }
 
 export interface GraphEdge {

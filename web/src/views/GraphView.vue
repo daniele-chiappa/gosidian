@@ -19,6 +19,7 @@ import SearchSelect from '@/components/primitives/SearchSelect.vue'
 import { useWindowsStore, type OpenSpec } from 'plancia'
 import { planciaKey } from '@/composables/planciaKey'
 import { useUIStore, type GraphRenderMode } from '@/stores/ui'
+import type { ZMode } from '@/components/graph/adapter'
 
 const GraphCanvas = defineAsyncComponent(() => import('@/components/graph/GraphCanvas.vue'))
 const Graph3DCanvas = defineAsyncComponent(() => import('@/components/graph/Graph3DCanvas.vue'))
@@ -28,6 +29,11 @@ const props = defineProps<{
   tag?: string
   focus?: string
   depth?: number
+  minDegree?: number
+  limit?: number
+  /** True on a full (aside) view rehydrated from a param-form URL token —
+   *  distinguishes it from an ego window, which also carries `focus`. */
+  global?: boolean
 }>()
 
 const store = useWindowsStore()
@@ -43,6 +49,9 @@ function setMode(m: GraphRenderMode) {
   ui.setGraphMode(m)
 }
 
+// 3D-only semantic z-axis. Exploratory by nature → not persisted.
+const zMode = ref<ZMode>('free')
+
 const data = ref<GraphResponse | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -51,11 +60,50 @@ const project = ref<string>(props.project ?? '')
 const tag = ref<string>(props.tag ?? '')
 const focus = ref<string>(props.focus ?? '')
 const depth = ref<number>(props.depth ?? 2)
-const minDegree = ref<number>(0)
-const limit = ref<number>(0)
+const minDegree = ref<number>(props.minDegree ?? 0)
+const limit = ref<number>(props.limit ?? 0)
 
 /** Ego windows (opened from the "direct links" button) render compact. */
-const compact = computed(() => Boolean(props.focus))
+const compact = computed(() => Boolean(props.focus) && !props.global)
+
+// URL persistence for the full view: plancia has no "current window"
+// injection, but graph keys are deterministic (sidebar singleton `graph`,
+// ProjectsView `graph:project:<name>`), so the view can find its own
+// window once and push filter changes back via identify() — the codec
+// then re-encodes them into the `?w=` token. Ego windows never sync
+// (their props are static). Promote a proper CURRENT_WINDOW injection
+// to plancia if a second window type ever needs this (ADR-004 gate).
+const selfId = ref<string | null>(null)
+function resolveSelf() {
+  if (compact.value) return
+  const candidates = props.project
+    ? [`graph:project:${props.project}`, planciaKey('graph')]
+    : [planciaKey('graph')]
+  for (const k of candidates) {
+    const w = store.windows.find((w) => w.type === 'graph' && w.key === k)
+    if (w) {
+      selfId.value = w.id
+      return
+    }
+  }
+}
+function syncWindow() {
+  if (!selfId.value) return
+  const w = store.windows.find((w) => w.id === selfId.value)
+  if (!w) {
+    selfId.value = null
+    return
+  }
+  store.identify(w.id, w.key, {
+    ...(project.value ? { project: project.value } : {}),
+    ...(tag.value ? { tag: tag.value } : {}),
+    ...(focus.value ? { focus: focus.value, depth: depth.value } : {}),
+    ...(minDegree.value > 0 ? { minDegree: minDegree.value } : {}),
+    ...(limit.value > 0 ? { limit: limit.value } : {}),
+    global: true,
+  })
+  store.setTitle(w.id, project.value ? `Graph · ${project.value}` : 'Graph')
+}
 const hadInitialFilter = Boolean(project.value || tag.value || focus.value)
 const base = (p: string) => (p.split('/').pop() ?? p).replace(/\.md$/, '')
 
@@ -69,6 +117,7 @@ const params = computed(() => ({
 }))
 
 async function load() {
+  syncWindow()
   loading.value = true
   error.value = null
   try {
@@ -118,6 +167,7 @@ const sortedProjects = computed<Project[]>(() =>
 )
 
 onMounted(async () => {
+  resolveSelf()
   if (compact.value) {
     // Ego graph: no pickers needed, just load the neighbourhood.
     void load()
@@ -259,6 +309,22 @@ onMounted(async () => {
       >
         {{ error }}
       </p>
+      <select
+        v-if="mode === '3d'"
+        v-model="zMode"
+        class="absolute top-3 right-24 z-10 rounded border border-border bg-bg-elevated text-xs text-text-muted px-1.5 py-1"
+        aria-label="Z axis mode"
+      >
+        <option value="free">
+          Z: free
+        </option>
+        <option value="groups">
+          Z: groups
+        </option>
+        <option value="recency">
+          Z: recency
+        </option>
+      </select>
       <div
         class="absolute top-3 right-3 z-10 flex rounded border border-border overflow-hidden text-xs bg-bg-elevated"
         role="group"
@@ -291,6 +357,7 @@ onMounted(async () => {
         v-else-if="data && mode === '3d'"
         :nodes="data.nodes"
         :edges="data.edges"
+        :z-mode="zMode"
         @select="onSelect"
       />
       <p

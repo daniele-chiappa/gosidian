@@ -23,12 +23,14 @@ import {
   nodeVal,
   type FGLink,
   type FGNode,
+  type ZMode,
 } from './adapter'
 import { makeGroupColor, resolveTheme, withAlpha } from './theme'
 
 interface Props {
   nodes: GraphNode[]
   edges: GraphEdge[]
+  zMode?: ZMode
 }
 const props = defineProps<Props>()
 const emit = defineEmits<{
@@ -72,6 +74,42 @@ function linkTouchesHover(l: FGLink): boolean {
   return endpointId(l.source) === hoverNode.id || endpointId(l.target) === hoverNode.id
 }
 
+/**
+ * Semantic z-axis: pin (fz) or free the third coordinate per mode.
+ *  - groups: one plane per color group (spread symmetrically around 0) —
+ *    projects/folders become readable layers;
+ *  - recency: newer notes float up, older sink (mtime normalized to a
+ *    fixed band; unknown mtime sits mid-band);
+ *  - free: the simulation owns z (default).
+ */
+const Z_BAND = 160
+function applyZMode() {
+  if (!graph) return
+  const { nodes } = graph.graphData()
+  if (props.zMode === 'groups') {
+    const groups = [...new Set(nodes.map((n) => n.group))].sort()
+    const gap = groups.length > 1 ? (Z_BAND * 2) / (groups.length - 1) : 0
+    const layer = new Map(groups.map((g, i) => [g, -Z_BAND + i * gap]))
+    for (const n of nodes) n.fz = layer.get(n.group) ?? 0
+  } else if (props.zMode === 'recency') {
+    const known = nodes.filter((n) => n.mtime > 0).map((n) => n.mtime)
+    const min = Math.min(...known)
+    const max = Math.max(...known)
+    const span = max - min
+    for (const n of nodes) {
+      n.fz = n.mtime > 0 && span > 0 ? -Z_BAND + ((n.mtime - min) / span) * Z_BAND * 2 : 0
+    }
+  } else {
+    for (const n of nodes) n.fz = undefined
+  }
+  graph.d3ReheatSimulation()
+}
+
+watch(
+  () => props.zMode,
+  () => applyZMode(),
+)
+
 function applyData(nodes: GraphNode[], edges: GraphEdge[]) {
   if (!graph) return
   const prev = new Map<string, { x: number; y: number; z?: number }>()
@@ -84,6 +122,7 @@ function applyData(nodes: GraphNode[], edges: GraphEdge[]) {
   highlightIds = new Set()
   pendingFit = true
   graph.graphData(data)
+  if (props.zMode && props.zMode !== 'free') applyZMode()
 }
 
 let pendingFit = false

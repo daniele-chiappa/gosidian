@@ -37,6 +37,69 @@ const PATH_TYPE = (): ArgTypeSpec => ({
   title: (a) => (a ? base(a) : ''),
 })
 
+/**
+ * Graph window arg — two wire forms:
+ *  - legacy bare focus path (ego windows from "direct links"): stable URLs,
+ *    unchanged since v2.x;
+ *  - compact param-string (`p=…&t=…&f=…&d=…&m=…&l=…`) for the filtered global
+ *    view, so filters survive reloads. `global: true` in props marks the
+ *    full view (aside visible) and forces the param form even when only a
+ *    focus filter is set.
+ */
+const posNum = (v: unknown): number | null =>
+  typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null
+
+function graphArgFromProps(p: Record<string, unknown>): string | null {
+  const project = str(p.project)
+  const tag = str(p.tag)
+  const focus = str(p.focus)
+  const depth = posNum(p.depth)
+  const minDegree = posNum(p.minDegree)
+  const limit = posNum(p.limit)
+  if (p.global !== true && focus && !project && !tag && !minDegree && !limit && (depth ?? 1) <= 1)
+    return focus
+  const parts: string[] = []
+  if (project) parts.push('p=' + encodeURIComponent(project))
+  if (tag) parts.push('t=' + encodeURIComponent(tag))
+  if (focus) parts.push('f=' + encodeURIComponent(focus))
+  if (focus && depth !== null && depth !== 2) parts.push('d=' + depth)
+  if (minDegree !== null) parts.push('m=' + minDegree)
+  if (limit !== null) parts.push('l=' + limit)
+  return parts.length ? parts.join('&') : null
+}
+
+function graphPropsFromArg(a: string | null): Record<string, unknown> {
+  if (!a) return {}
+  if (!a.includes('=')) return { focus: a, depth: 1 }
+  const sp = new URLSearchParams(a)
+  const props: Record<string, unknown> = { global: true }
+  const p = sp.get('p')
+  if (p) props.project = p
+  const t = sp.get('t')
+  if (t) props.tag = t
+  const f = sp.get('f')
+  if (f) props.focus = f
+  const d = Number(sp.get('d'))
+  if (f) props.depth = d > 0 ? d : 2
+  const m = Number(sp.get('m'))
+  if (m > 0) props.minDegree = m
+  const l = Number(sp.get('l'))
+  if (l > 0) props.limit = l
+  return props
+}
+
+/**
+ * De-dup key for a decoded graph window, mirroring the opener conventions:
+ * project-anchored views reuse ProjectsView's `graph:project:<name>` key so
+ * they survive reloads as distinct windows; everything else is the sidebar
+ * singleton `graph`. Ego (bare-path) tokens never reach this — their key is
+ * the base codec's `graph:<path>`.
+ */
+function graphKeyForProps(props: Record<string, unknown>): string {
+  const project = str(props.project)
+  return project ? `graph:project:${project}` : planciaKey('graph')
+}
+
 /** gosidian's per-type URL scheme, expressed for `createArgCodec`. */
 const baseCodec: PlanciaCodec = createArgCodec({
   bareToken: 'type',
@@ -45,9 +108,14 @@ const baseCodec: PlanciaCodec = createArgCodec({
     edit: PATH_TYPE(),
     history: PATH_TYPE(),
     graph: {
-      arg: (p) => str(p.focus),
-      props: (a) => (a ? { focus: a, depth: 1 } : {}),
-      title: (a) => (a ? `↳ ${base(a)}` : 'Graph'),
+      arg: graphArgFromProps,
+      props: graphPropsFromArg,
+      title: (a) => {
+        if (!a) return 'Graph'
+        if (!a.includes('=')) return `↳ ${base(a)}`
+        const p = new URLSearchParams(a).get('p')
+        return p ? `Graph · ${p}` : 'Graph'
+      },
     },
     tags: {
       arg: (p) => str(p.tag),
@@ -77,7 +145,15 @@ const baseCodec: PlanciaCodec = createArgCodec({
  * `note:<path>` (the `edit:` token only ever appears as an inbound deep-link).
  */
 export const codec: PlanciaCodec = {
-  key: baseCodec.key,
+  key(spec) {
+    // Full graph views re-anchor to the opener-convention key (see
+    // graphKeyForProps); keep key() aligned with decode() so URL
+    // hydration de-dups against the same identity.
+    if (spec.type === 'graph' && spec.props?.global === true) {
+      return graphKeyForProps(spec.props)
+    }
+    return baseCodec.key(spec)
+  },
   encode: baseCodec.encode,
   decode(token) {
     const spec = baseCodec.decode(token)
@@ -89,6 +165,9 @@ export const codec: PlanciaCodec = {
         title: path ? base(path) : '',
         props: path ? { path, mode: 'edit' } : {},
       }
+    }
+    if (spec?.type === 'graph' && spec.props?.global === true) {
+      return { ...spec, key: graphKeyForProps(spec.props) }
     }
     return spec
   },
