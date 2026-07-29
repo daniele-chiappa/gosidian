@@ -302,3 +302,28 @@ func TestExtract_IgnoresCodeBlocks(t *testing.T) {
 		t.Errorf("expected only [[Real]], got %+v", links)
 	}
 }
+
+func TestFrontmatterList(t *testing.T) {
+	fm := "title: conventions\ntag_vocabulary: [\"cm:*\", anagrafica]\nother: x\n"
+	got := FrontmatterList(fm, "tag_vocabulary")
+	want := []string{"cm:*", "anagrafica"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("inline = %v, want %v", got, want)
+	}
+
+	fm = "title: c\ntag_vocabulary:\n  - \"cm:*\"\n  - anagrafica\n"
+	got = FrontmatterList(fm, "tag_vocabulary")
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("block = %v, want %v", got, want)
+	}
+
+	if got := FrontmatterList(fm, "absent_key"); got != nil {
+		t.Errorf("absent key = %v, want nil", got)
+	}
+	// Key match is exact and line-anchored: a similarly-prefixed key
+	// must not leak into the result.
+	fm = "tag_vocabulary_old: [a]\n"
+	if got := FrontmatterList(fm, "tag_vocabulary"); got != nil {
+		t.Errorf("prefixed key = %v, want nil", got)
+	}
+}

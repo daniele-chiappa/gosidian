@@ -82,6 +82,14 @@ type Linter struct {
 	// Populated via WithExtraAllowedTags from a vault's
 	// .gosidian/config.toml [lint.frontmatter_tag_vocabulary].
 	extraAllowedTags map[string]struct{}
+	// extraAllowedNamespaces holds the "ns:*" wildcard entries from the same
+	// sources: any well-formed value in one of these namespaces is accepted.
+	extraAllowedNamespaces map[string]struct{}
+	// projectVocabEnabled activates the per-project vocabulary declared in
+	// <project>/memory/conventions.md frontmatter (`tag_vocabulary:`).
+	// Wired from the project's use_tag_vocabulary flag (IMP-075) — when
+	// false the declaration is inert and the rule behaves as before.
+	projectVocabEnabled bool
 	// hotOversizeBytes is the hot-oversize threshold; <= 0 means
 	// DefaultHotOversizeBytes. Populated via WithHotOversizeLimit from
 	// [lint] hot_oversize_bytes.
@@ -102,9 +110,11 @@ func (l *Linter) WithHotOversizeLimit(bytes int64) *Linter {
 
 // WithExtraAllowedTags adds tags to the closed vocabulary the
 // frontmatter-tag-unknown rule accepts. Format of each entry is the same
-// as a frontmatter tag: "<namespace>:<value>" (e.g. "status:reference") or
-// a bare tag name. Malformed entries (empty namespace, empty value) are
-// skipped silently — a typo in the config should not crash the lint.
+// as a frontmatter tag: "<namespace>:<value>" (e.g. "status:reference"),
+// a bare tag name, or a namespace wildcard "<namespace>:*" (e.g. "cm:*")
+// accepting any well-formed value in that namespace. Malformed entries
+// (empty namespace, empty value) are skipped silently — a typo in the
+// config should not crash the lint.
 //
 // Returns the receiver for chaining (`lint.New(v, idx).WithExtraAllowedTags(extras)`).
 func (l *Linter) WithExtraAllowedTags(extra []string) *Linter {
@@ -114,13 +124,31 @@ func (l *Linter) WithExtraAllowedTags(extra []string) *Linter {
 	if l.extraAllowedTags == nil {
 		l.extraAllowedTags = make(map[string]struct{}, len(extra))
 	}
+	if l.extraAllowedNamespaces == nil {
+		l.extraAllowedNamespaces = make(map[string]struct{})
+	}
 	for _, t := range extra {
 		t = trimTag(t)
 		if !validExtraTag(t) {
 			continue
 		}
+		if ns, ok := wildcardNamespace(t); ok {
+			l.extraAllowedNamespaces[ns] = struct{}{}
+			continue
+		}
 		l.extraAllowedTags[t] = struct{}{}
 	}
+	return l
+}
+
+// WithProjectTagVocabulary toggles the per-project extra vocabulary
+// declared in <project>/memory/conventions.md frontmatter
+// (`tag_vocabulary:`, exact tags or "ns:*" wildcards, capped at
+// MaxProjectVocabEntries). Callers wire this from the project's
+// use_tag_vocabulary flag (IMP-075); default off keeps the declaration
+// inert. Returns the receiver for chaining.
+func (l *Linter) WithProjectTagVocabulary(enabled bool) *Linter {
+	l.projectVocabEnabled = enabled
 	return l
 }
 

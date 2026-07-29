@@ -26,6 +26,9 @@ type projectView struct {
 	// (settingsView.GlobalsEnabled / AnchorsEnabled).
 	UseGlobals bool `json:"use_globals"`
 	UseAnchors bool `json:"use_anchors"`
+	// UseTagVocabulary opts the project into the per-project lint tag
+	// vocabulary declared in memory/conventions.md (IMP-075).
+	UseTagVocabulary bool `json:"use_tag_vocabulary"`
 	// ModTime drives "most recent" sorting in the SPA's project
 	// pickers (graph filter, switcher). RFC 3339 UTC. Empty when
 	// the vault entry hasn't been stat-able.
@@ -41,12 +44,13 @@ type createProjectRequest struct {
 // set. NewName uses pointer-to-string so the JSON `null` means "no
 // change" while empty string `""` means "validation error".
 type updateProjectRequest struct {
-	NewName       *string `json:"new_name,omitempty"`
-	HiddenFromMCP *bool   `json:"hidden_from_mcp,omitempty"`
-	SkipGitSync   *bool   `json:"skip_git_sync,omitempty"`
-	Public        *bool   `json:"public,omitempty"`
-	UseGlobals    *bool   `json:"use_globals,omitempty"`
-	UseAnchors    *bool   `json:"use_anchors,omitempty"`
+	NewName          *string `json:"new_name,omitempty"`
+	HiddenFromMCP    *bool   `json:"hidden_from_mcp,omitempty"`
+	SkipGitSync      *bool   `json:"skip_git_sync,omitempty"`
+	Public           *bool   `json:"public,omitempty"`
+	UseGlobals       *bool   `json:"use_globals,omitempty"`
+	UseAnchors       *bool   `json:"use_anchors,omitempty"`
+	UseTagVocabulary *bool   `json:"use_tag_vocabulary,omitempty"`
 }
 
 // handleProjects dispatches GET (list) / POST (create) on /projects.
@@ -111,14 +115,15 @@ func (r *Router) listProjects(w http.ResponseWriter, req *http.Request) {
 		}
 		flags := r.projectFlag(p.Name)
 		out = append(out, projectView{
-			Name:          p.Name,
-			NoteCount:     p.NoteCount,
-			HiddenFromMCP: flags.HiddenFromMCP,
-			SkipGitSync:   flags.SkipGitSync,
-			Public:        flags.Public,
-			UseGlobals:    flags.UseGlobals,
-			UseAnchors:    flags.UseAnchors,
-			ModTime:       formatModTime(p.ModTime),
+			Name:             p.Name,
+			NoteCount:        p.NoteCount,
+			HiddenFromMCP:    flags.HiddenFromMCP,
+			SkipGitSync:      flags.SkipGitSync,
+			Public:           flags.Public,
+			UseGlobals:       flags.UseGlobals,
+			UseAnchors:       flags.UseAnchors,
+			UseTagVocabulary: flags.UseTagVocabulary,
+			ModTime:          formatModTime(p.ModTime),
 		})
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"items": out, "total": len(out)})
@@ -146,13 +151,14 @@ func (r *Router) getProject(w http.ResponseWriter, req *http.Request, name strin
 		if p.Name == name {
 			f := r.projectFlag(name)
 			WriteJSON(w, http.StatusOK, projectView{
-				Name:          p.Name,
-				NoteCount:     p.NoteCount,
-				HiddenFromMCP: f.HiddenFromMCP,
-				SkipGitSync:   f.SkipGitSync,
-				Public:        f.Public,
-				UseGlobals:    f.UseGlobals,
-				UseAnchors:    f.UseAnchors,
+				Name:             p.Name,
+				NoteCount:        p.NoteCount,
+				HiddenFromMCP:    f.HiddenFromMCP,
+				SkipGitSync:      f.SkipGitSync,
+				Public:           f.Public,
+				UseGlobals:       f.UseGlobals,
+				UseAnchors:       f.UseAnchors,
+				UseTagVocabulary: f.UseTagVocabulary,
 			})
 			return
 		}
@@ -225,7 +231,7 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 	// Apply flags first (cheap, no fs movement) so a failing rename
 	// still leaves the flags durable.
 	flagsChanged := false
-	if body.HiddenFromMCP != nil || body.SkipGitSync != nil || body.Public != nil || body.UseGlobals != nil || body.UseAnchors != nil {
+	if body.HiddenFromMCP != nil || body.SkipGitSync != nil || body.Public != nil || body.UseGlobals != nil || body.UseAnchors != nil || body.UseTagVocabulary != nil {
 		current := r.projectFlag(name)
 		if body.HiddenFromMCP != nil {
 			current.HiddenFromMCP = *body.HiddenFromMCP
@@ -241,6 +247,9 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 		}
 		if body.UseAnchors != nil {
 			current.UseAnchors = *body.UseAnchors
+		}
+		if body.UseTagVocabulary != nil {
+			current.UseTagVocabulary = *body.UseTagVocabulary
 		}
 		if r.deps.Projects != nil {
 			if err := r.deps.Projects.Set(name, current); err != nil {
@@ -285,13 +294,14 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 		}
 	}
 	WriteJSON(w, http.StatusOK, projectView{
-		Name:          finalName,
-		NoteCount:     count,
-		HiddenFromMCP: flags.HiddenFromMCP,
-		SkipGitSync:   flags.SkipGitSync,
-		Public:        flags.Public,
-		UseGlobals:    flags.UseGlobals,
-		UseAnchors:    flags.UseAnchors,
+		Name:             finalName,
+		NoteCount:        count,
+		HiddenFromMCP:    flags.HiddenFromMCP,
+		SkipGitSync:      flags.SkipGitSync,
+		Public:           flags.Public,
+		UseGlobals:       flags.UseGlobals,
+		UseAnchors:       flags.UseAnchors,
+		UseTagVocabulary: flags.UseTagVocabulary,
 	})
 }
 

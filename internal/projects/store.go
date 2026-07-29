@@ -39,6 +39,12 @@ type Flags struct {
 	// of agent anchors to write/reconcile in the agent's cwd for the active CLI
 	// profile. Default false. See plan 20260630-agent-anchors.
 	UseAnchors bool `json:"use_anchors,omitempty"`
+	// UseTagVocabulary opts the project into the per-project lint tag
+	// vocabulary declared in <project>/memory/conventions.md frontmatter
+	// (`tag_vocabulary:`, exact tags or "ns:*" wildcards). When unset the
+	// declaration is inert and memory_lint checks the built-in closed
+	// vocabulary only. Default false. See IMP-075.
+	UseTagVocabulary bool `json:"use_tag_vocabulary,omitempty"`
 }
 
 // Entry is a (name, flags) pair returned by All().
@@ -301,6 +307,13 @@ func (s *Store) UsesGlobals(name string) bool {
 // materialisation. Unknown projects default to false.
 func (s *Store) UsesAnchors(name string) bool {
 	return s.Get(name).UseAnchors
+}
+
+// UsesTagVocabulary reports whether the project opted into the per-project
+// lint tag vocabulary declared in memory/conventions.md (IMP-075). Unknown
+// projects default to false.
+func (s *Store) UsesTagVocabulary(name string) bool {
+	return s.Get(name).UseTagVocabulary
 }
 
 // PublicNames returns the set of project names flagged Public=true, sorted.

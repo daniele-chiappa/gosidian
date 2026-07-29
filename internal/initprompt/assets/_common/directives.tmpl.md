@@ -118,12 +118,19 @@ Status dei plan: `draft` → `in-progress` → `done` | `archived` (tag
 
 Saltarlo è la via più rapida perché la memoria diventi inutile.
 
-### Vocabolario tag (chiuso)
+### Vocabolario tag (chiuso, estendibile per-progetto)
 
 - `type:{memory,agent,plan,skill,doc,index,handoff}`
 - `status:{draft,in-progress,done,archived}` — solo plan
 - `status:{pending,claimed,done,rejected}` — solo handoff
-- `topic:<area>` (es. `topic:deploy`); `pinned`; `importance: 1..5`
+- `topic:<area>` a valore libero (es. `topic:deploy`); `pinned`; `importance: 1..5`
+- **Estensione per-progetto** (attiva solo col flag di progetto
+  `use_tag_vocabulary`): dichiara le tassonomie di dominio nel frontmatter
+  di `{{PROJECT}}/memory/conventions.md`, campo `tag_vocabulary:` — tag
+  esatti o wildcard `ns:*` (es. `cm:*`), max 64 voci; documenta nel body il
+  perché di ogni namespace. Il bootstrap riflette il vocabolario attivo nel
+  blocco `tag_vocabulary` e `memory_lint` lo accetta. Non usarla per
+  aggirare un typo: è per tassonomie vive del dominio.
 
 ### Handoff fra agenti
 

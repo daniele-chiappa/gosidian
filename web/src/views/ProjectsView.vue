@@ -95,6 +95,11 @@ async function toggleAnchors(p: Project) {
   await load()
 }
 
+async function toggleTagVocabulary(p: Project) {
+  await updateProject(p.name, { use_tag_vocabulary: !p.use_tag_vocabulary })
+  await load()
+}
+
 function globalsTitle(p: Project): string {
   if (!globalsMaster.value)
     return 'Global-projects master switch (GOSIDIAN_GLOBAL_ENABLED) is off — this flag has no effect until it is enabled on the server.'
@@ -161,7 +166,9 @@ onMounted(() => {
       <em>hidden</em> keeps the project invisible to MCP agents;
       <em>globals</em> merges the shared global skills/agents at bootstrap;
       <em>anchors</em> materialises vault agents as local subagent files at bootstrap
-      (both need their server master switch on — dimmed when off).
+      (both need their server master switch on — dimmed when off);
+      <em>tag-vocab</em> lets the project extend the lint tag vocabulary from
+      memory/conventions.md.
     </p>
 
     <form
@@ -240,6 +247,15 @@ onMounted(() => {
             :title="anchorsTitle(p)"
             @click="toggleAnchors(p)"
           >anchors</button>
+          <button
+            type="button"
+            class="text-xs px-2 py-1 rounded"
+            :class="p.use_tag_vocabulary ? 'bg-accent/20 text-accent' : 'border border-border'"
+            :title="p.use_tag_vocabulary
+              ? 'Tag vocabulary on: memory_lint accepts the extra tags declared in this project\'s memory/conventions.md frontmatter (tag_vocabulary). Click to disable.'
+              : 'Click to let this project extend the lint tag vocabulary via memory/conventions.md frontmatter (tag_vocabulary: exact tags or ns:* wildcards).'"
+            @click="toggleTagVocabulary(p)"
+          >tag-vocab</button>
 
           <button
             v-if="auth.isOwner"

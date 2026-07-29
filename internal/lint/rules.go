@@ -271,16 +271,6 @@ var knownTagValues = map[string]map[string]struct{}{
 		"image":   {},
 		"table":   {},
 	},
-	"topic": {
-		"mcp":     {},
-		"webui":   {},
-		"vault":   {},
-		"index":   {},
-		"gitsync": {},
-		"auth":    {},
-		"deploy":  {},
-		"meta":    {},
-	},
 	"status": {
 		"draft":       {},
 		"in-progress": {},
@@ -291,13 +281,116 @@ var knownTagValues = map[string]map[string]struct{}{
 	},
 }
 
+// knownOpenNamespaces are namespaces whose value set is open by contract —
+// the directives define `topic:<area>` as free-form, so any well-formed
+// value is accepted. type: and status: stay closed: they are lifecycle
+// vocabularies the tooling itself depends on.
+var knownOpenNamespaces = map[string]struct{}{
+	"topic": {},
+}
+
+// MaxProjectVocabEntries caps the per-project vocabulary declared in
+// memory/conventions.md — entries beyond the cap are ignored, so a runaway
+// declaration cannot void the closed vocabulary (IMP-075).
+const MaxProjectVocabEntries = 64
+
+// ProjectVocabularyNote returns the vault-relative path of the note whose
+// frontmatter `tag_vocabulary:` field declares a project's extra tag
+// vocabulary.
+func ProjectVocabularyNote(project string) string {
+	return project + "/memory/conventions.md"
+}
+
+// ValidVocabularyEntries filters raw tag_vocabulary entries down to the
+// well-formed ones — bare tag, "ns:value", or "ns:*" namespace wildcard —
+// trimmed and capped at MaxProjectVocabEntries. Shared by the lint rule
+// and the bootstrap surfacing so both report the same effective vocabulary.
+func ValidVocabularyEntries(entries []string) []string {
+	if len(entries) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		e = trimTag(e)
+		if !validExtraTag(e) {
+			continue
+		}
+		out = append(out, e)
+		if len(out) == MaxProjectVocabEntries {
+			break
+		}
+	}
+	return out
+}
+
+// tagVocab is an extra vocabulary resolved for a single rule run: exact
+// entries plus wildcard namespaces ("ns:*"). The zero value (nil maps) is
+// a valid empty vocabulary.
+type tagVocab struct {
+	exact      map[string]struct{}
+	namespaces map[string]struct{}
+}
+
+// newTagVocab indexes pre-validated entries into a tagVocab.
+func newTagVocab(entries []string) tagVocab {
+	v := tagVocab{
+		exact:      make(map[string]struct{}, len(entries)),
+		namespaces: make(map[string]struct{}),
+	}
+	for _, e := range entries {
+		if ns, ok := wildcardNamespace(e); ok {
+			v.namespaces[ns] = struct{}{}
+			continue
+		}
+		v.exact[e] = struct{}{}
+	}
+	return v
+}
+
+// wildcardNamespace reports whether entry is a namespace wildcard
+// ("ns:*") and returns the namespace.
+func wildcardNamespace(entry string) (string, bool) {
+	if strings.HasSuffix(entry, ":*") && len(entry) > 2 {
+		return entry[:len(entry)-2], true
+	}
+	return "", false
+}
+
+// validTagValue reports whether a namespaced tag's value part is
+// well-formed: non-empty, no whitespace, no further colon. Open and
+// wildcard namespaces accept any value passing this check.
+func validTagValue(v string) bool {
+	return v != "" && !strings.ContainsAny(v, ": \t\n")
+}
+
+// projectVocab resolves the per-project extra vocabulary declared in
+// memory/conventions.md frontmatter (`tag_vocabulary:`). Empty unless the
+// linter was armed via WithProjectTagVocabulary — the declaration is
+// inert otherwise. notes is the project note list the rule already
+// loaded, so this costs no extra I/O.
+func (l *Linter) projectVocab(project string, notes []projectNote) tagVocab {
+	if !l.projectVocabEnabled {
+		return tagVocab{}
+	}
+	target := ProjectVocabularyNote(project)
+	for _, n := range notes {
+		if n.Path != target {
+			continue
+		}
+		entries := parser.FrontmatterList(rawFrontmatter(n), "tag_vocabulary")
+		return newTagVocab(ValidVocabularyEntries(entries))
+	}
+	return tagVocab{}
+}
+
 // isKnownTag reports whether tag is part of the closed vocabulary. The
 // project name itself is always considered valid (each project tags its
 // own notes with its top-level folder name). When the linter has been
 // extended via WithExtraAllowedTags (e.g. from
-// .gosidian/config.toml [lint.frontmatter_tag_vocabulary]), those extra
-// entries are also accepted in addition to the built-in vocabulary.
-func (l *Linter) isKnownTag(tag, project string) bool {
+// .gosidian/config.toml [lint.frontmatter_tag_vocabulary]) or via a
+// per-project vocabulary (extra), those entries are also accepted in
+// addition to the built-in vocabulary.
+func (l *Linter) isKnownTag(tag, project string, extra tagVocab) bool {
 	if tag == project {
 		return true
 	}
@@ -307,13 +400,29 @@ func (l *Linter) isKnownTag(tag, project string) bool {
 	if _, ok := l.extraAllowedTags[tag]; ok {
 		return true
 	}
-	if i := strings.IndexByte(tag, ':'); i > 0 {
-		ns := tag[:i]
-		val := tag[i+1:]
-		if vals, ok := knownTagValues[ns]; ok {
-			if _, ok := vals[val]; ok {
-				return true
-			}
+	if _, ok := extra.exact[tag]; ok {
+		return true
+	}
+	i := strings.IndexByte(tag, ':')
+	if i <= 0 {
+		return false
+	}
+	ns, val := tag[:i], tag[i+1:]
+	if !validTagValue(val) {
+		return false
+	}
+	if _, ok := knownOpenNamespaces[ns]; ok {
+		return true
+	}
+	if _, ok := l.extraAllowedNamespaces[ns]; ok {
+		return true
+	}
+	if _, ok := extra.namespaces[ns]; ok {
+		return true
+	}
+	if vals, ok := knownTagValues[ns]; ok {
+		if _, ok := vals[val]; ok {
+			return true
 		}
 	}
 	return false
@@ -353,6 +462,10 @@ func checkFrontmatterTagUnknown(ctx context.Context, l *Linter, project string) 
 	if err != nil {
 		return nil, err
 	}
+	extra := l.projectVocab(project, notes)
+	fixHint := fmt.Sprintf(
+		"use type:/topic:/status: namespaces, or declare the tag in %s frontmatter tag_vocabulary (exact or ns:* — needs the project's use_tag_vocabulary flag)",
+		ProjectVocabularyNote(project))
 	var issues []Issue
 	for _, n := range notes {
 		raw := rawFrontmatter(n)
@@ -365,7 +478,7 @@ func checkFrontmatterTagUnknown(ctx context.Context, l *Linter, project string) 
 			continue
 		}
 		for _, tag := range tags {
-			if l.isKnownTag(tag, project) {
+			if l.isKnownTag(tag, project, extra) {
 				continue
 			}
 			issues = append(issues, Issue{
@@ -373,7 +486,7 @@ func checkFrontmatterTagUnknown(ctx context.Context, l *Linter, project string) 
 				File:     n.Path,
 				Rule:     "frontmatter-tag-unknown",
 				Message:  fmt.Sprintf("tag %q is outside the closed vocabulary", tag),
-				FixHint:  "use type:/topic:/status: namespaces or document the new tag in gosidian/memory/conventions.md",
+				FixHint:  fixHint,
 			})
 		}
 	}

@@ -2,6 +2,7 @@ package lint
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -150,22 +151,24 @@ func TestLint_FrontmatterTagUnknown_HTMLNote(t *testing.T) {
 
 	// The tag rule must read an HTML note's comment-wrapped frontmatter too —
 	// before the dispatch fix it silently saw no frontmatter and skipped it.
-	seed(t, v, idx, "proj/w.html", "<!--\n---\ntitle: w\ntags: [proj, type:doc, topic:bogus]\n---\n-->\n<html><body>x</body></html>\n")
+	seed(t, v, idx, "proj/w.html", "<!--\n---\ntitle: w\ntags: [proj, type:doc, status:bogus]\n---\n-->\n<html><body>x</body></html>\n")
 
 	issues, err := l.Run(context.Background(), "proj", []string{"frontmatter-tag-unknown"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(issues) != 1 || issues[0].File != "proj/w.html" {
-		t.Fatalf("expected 1 unknown-tag issue on proj/w.html (topic:bogus), got %+v", issues)
+		t.Fatalf("expected 1 unknown-tag issue on proj/w.html (status:bogus), got %+v", issues)
 	}
 }
 
 func TestLint_FrontmatterTagUnknown(t *testing.T) {
 	l, v, idx := newTestLinter(t)
 
-	// 3 unknown tags: "random", "topic:bogus", "status:invented".
-	seed(t, v, idx, "proj/n.md", "---\ntitle: n\ntags: [proj, type:memory, random, topic:bogus, status:invented]\n---\n\n# n\n")
+	// 3 unknown tags: "random", "type:bogus", "status:invented".
+	// (topic: is an open namespace since IMP-075, so it can't serve as an
+	// unknown example anymore.)
+	seed(t, v, idx, "proj/n.md", "---\ntitle: n\ntags: [proj, type:memory, random, type:bogus, status:invented]\n---\n\n# n\n")
 
 	issues, err := l.Run(context.Background(), "proj", []string{"frontmatter-tag-unknown"}, "")
 	if err != nil {
@@ -211,11 +214,11 @@ func TestLint_FrontmatterTagUnknown_ExtraAllowed(t *testing.T) {
 	// untouched, the extension is purely additive.
 	l, v, idx := newTestLinter(t)
 
-	seed(t, v, idx, "proj/n.md", "---\ntitle: n\ntags: [proj, type:memory, random, topic:bogus, status:invented]\n---\n\n# n\n")
+	seed(t, v, idx, "proj/n.md", "---\ntitle: n\ntags: [proj, type:memory, random, type:bogus, status:invented]\n---\n\n# n\n")
 
 	l = l.WithExtraAllowedTags([]string{
 		"random",
-		"topic:bogus",
+		"type:bogus",
 		"status:invented",
 	})
 
@@ -261,7 +264,7 @@ func TestLint_FrontmatterTagUnknown_ExtraAllowedNotMaskingOtherUnknown(t *testin
 	// suppress warnings for tags that are still unknown. Tag isolation.
 	l, v, idx := newTestLinter(t)
 
-	seed(t, v, idx, "proj/n.md", "---\ntitle: n\ntags: [proj, allowed-extra, still-unknown, topic:another-unknown]\n---\n\n# n\n")
+	seed(t, v, idx, "proj/n.md", "---\ntitle: n\ntags: [proj, allowed-extra, still-unknown, status:another-unknown]\n---\n\n# n\n")
 
 	l = l.WithExtraAllowedTags([]string{"allowed-extra"})
 
@@ -269,10 +272,113 @@ func TestLint_FrontmatterTagUnknown_ExtraAllowedNotMaskingOtherUnknown(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	// "allowed-extra" silenced. "still-unknown" + "topic:another-unknown"
+	// "allowed-extra" silenced. "still-unknown" + "status:another-unknown"
 	// still flagged.
 	if len(issues) != 2 {
-		t.Fatalf("expected 2 issues (still-unknown + topic:another-unknown), got %d: %+v", len(issues), issues)
+		t.Fatalf("expected 2 issues (still-unknown + status:another-unknown), got %d: %+v", len(issues), issues)
+	}
+}
+
+func TestLint_FrontmatterTagUnknown_TopicOpen(t *testing.T) {
+	// topic: is an open namespace (the directives define `topic:<area>` as
+	// free-form, IMP-075): any well-formed value passes, malformed values
+	// (empty, whitespace, extra colon) still flag.
+	l, v, idx := newTestLinter(t)
+
+	seed(t, v, idx, "proj/ok.md", "---\ntitle: ok\ntags: [proj, topic:cm-clienti, topic:whatever-new-area]\n---\n\n# ok\n")
+	seed(t, v, idx, "proj/bad.md", "---\ntitle: bad\ntags: [proj, \"topic:\", \"topic:has space\", \"topic:a:b\"]\n---\n\n# bad\n")
+
+	issues, err := l.Run(context.Background(), "proj", []string{"frontmatter-tag-unknown"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 3 {
+		t.Fatalf("expected 3 issues (all on proj/bad.md), got %d: %+v", len(issues), issues)
+	}
+	for _, is := range issues {
+		if is.File != "proj/bad.md" {
+			t.Fatalf("unexpected issue outside proj/bad.md: %+v", is)
+		}
+	}
+}
+
+func TestLint_FrontmatterTagUnknown_ExtraAllowedWildcard(t *testing.T) {
+	// "cm:*" accepts any well-formed value in the cm namespace — the
+	// panthera-app case (IMP-075). Other unknowns still flag, and a
+	// malformed value in the wildcarded namespace still flags.
+	l, v, idx := newTestLinter(t)
+
+	seed(t, v, idx, "proj/n.md", "---\ntitle: n\ntags: [proj, cm:clienti, cm:listini-vendita, \"cm:\", other-unknown]\n---\n\n# n\n")
+
+	l = l.WithExtraAllowedTags([]string{"cm:*"})
+
+	issues, err := l.Run(context.Background(), "proj", []string{"frontmatter-tag-unknown"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// "cm:" (empty value) + "other-unknown" flagged; cm:clienti and
+	// cm:listini-vendita silenced by the wildcard.
+	if len(issues) != 2 {
+		t.Fatalf("expected 2 issues (cm: + other-unknown), got %d: %+v", len(issues), issues)
+	}
+}
+
+func TestLint_FrontmatterTagUnknown_ProjectVocabulary(t *testing.T) {
+	// The vocabulary declared in <project>/memory/conventions.md frontmatter
+	// (`tag_vocabulary:`) takes effect only when the linter is armed via
+	// WithProjectTagVocabulary (wired from the project's use_tag_vocabulary
+	// flag). Same vault, flag off → declaration inert.
+	l, v, idx := newTestLinter(t)
+
+	seed(t, v, idx, "proj/memory/conventions.md",
+		"---\ntitle: conventions\ntags: [proj, type:memory]\ntag_vocabulary: [\"cm:*\", anagrafica, \"bad entry\"]\n---\n\n# conventions\n")
+	seed(t, v, idx, "proj/n.md", "---\ntitle: n\ntags: [proj, cm:clienti, anagrafica, still-unknown]\n---\n\n# n\n")
+
+	// Flag off: cm:clienti + anagrafica + still-unknown all flagged.
+	issues, err := l.Run(context.Background(), "proj", []string{"frontmatter-tag-unknown"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 3 {
+		t.Fatalf("flag off: expected 3 issues, got %d: %+v", len(issues), issues)
+	}
+
+	// Flag on: wildcard + exact entry honoured, malformed entry skipped,
+	// unrelated unknown still flagged.
+	l = l.WithProjectTagVocabulary(true)
+	issues, err = l.Run(context.Background(), "proj", []string{"frontmatter-tag-unknown"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 1 || issues[0].File != "proj/n.md" {
+		t.Fatalf("flag on: expected 1 issue (still-unknown), got %d: %+v", len(issues), issues)
+	}
+}
+
+func TestLint_FrontmatterTagUnknown_ProjectVocabularyCap(t *testing.T) {
+	// Entries beyond MaxProjectVocabEntries are ignored — a runaway
+	// declaration cannot void the closed vocabulary.
+	l, v, idx := newTestLinter(t)
+
+	var sb strings.Builder
+	sb.WriteString("---\ntitle: conventions\ntags: [proj, type:memory]\ntag_vocabulary:\n")
+	for i := 0; i <= MaxProjectVocabEntries; i++ { // one entry past the cap
+		fmt.Fprintf(&sb, "  - extra-%d\n", i)
+	}
+	sb.WriteString("---\n\n# conventions\n")
+	seed(t, v, idx, "proj/memory/conventions.md", sb.String())
+	seed(t, v, idx, "proj/n.md", fmt.Sprintf(
+		"---\ntitle: n\ntags: [proj, extra-0, extra-%d, extra-%d]\n---\n\n# n\n",
+		MaxProjectVocabEntries-1, MaxProjectVocabEntries))
+
+	l = l.WithProjectTagVocabulary(true)
+	issues, err := l.Run(context.Background(), "proj", []string{"frontmatter-tag-unknown"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// extra-0 and extra-63 inside the cap → silenced; extra-64 past it → flagged.
+	if len(issues) != 1 || !strings.Contains(issues[0].Message, fmt.Sprintf("extra-%d", MaxProjectVocabEntries)) {
+		t.Fatalf("expected 1 issue on the past-cap entry, got %d: %+v", len(issues), issues)
 	}
 }
 

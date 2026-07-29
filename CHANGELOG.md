@@ -8,6 +8,47 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.23.0] — 2026-07-29 — "per-project tag vocabulary"
+
+### Added
+- **Per-project lint tag vocabulary.** A project can extend the closed tag
+  vocabulary checked by `memory_lint` by declaring `tag_vocabulary:` in the
+  frontmatter of its `memory/conventions.md` — exact tags (`anagrafica`) or
+  namespace wildcards (`cm:*`), capped at 64 entries. The declaration is
+  gated by the new per-project `use_tag_vocabulary` flag (toggle in the
+  Projects view, `use_tag_vocabulary` on `PUT /api/v1/projects/{name}`,
+  persisted in `.gosidian/projects.json`); off by default, the declaration
+  is inert. Agents maintain the vocabulary with regular note edits — no new
+  tool, auditable through the vault's git history.
+- `memory_bootstrap` surfaces the effective declaration in a
+  `tag_vocabulary` block (`{enabled, note, extra}`), so a project's
+  extended vocabulary stays visible at session start instead of acting
+  silently. Operational directives bumped to **v10** documenting the
+  mechanism ("for living domain taxonomies, not for dodging a typo").
+
+### Changed
+- The `topic:` namespace is now **open**: any well-formed `topic:<area>`
+  value (non-empty, no whitespace, no extra colon) passes the
+  `frontmatter-tag-unknown` rule, aligning the linter with the directives
+  contract. `type:` and `status:` stay closed — they are lifecycle
+  vocabularies the tooling depends on.
+- The instance-wide `[lint.frontmatter_tag_vocabulary] extra_allowed`
+  config now accepts `ns:*` namespace wildcards too, and the rule's fix
+  hint teaches the per-project mechanism.
+- Dependency maintenance: `mark3labs/mcp-go` 0.56.0→0.57.0,
+  `prometheus/client_golang` 1.23.2→1.24.1.
+
+### Security
+- `dompurify` 3.4.11→3.4.12 (clears the open npm advisory, low severity).
+- npm override `brace-expansion ^5.0.8` clears GHSA-mh99-v99m-4gvg across
+  the dev-only eslint chain without the breaking `eslint@10` upgrade —
+  `npm audit` now reports 0 vulnerabilities including devDependencies.
+
+### Notes
+- No migration needed: the feature is opt-in per project; without the
+  `use_tag_vocabulary` flag lint behaviour is unchanged (except the now
+  open `topic:` namespace, which only removes warnings).
+
 ## [2.22.0] — 2026-07-21 — "graph filters in URL + semantic 3D z"
 
 ### Added

@@ -17,6 +17,10 @@ export interface Project {
    *  Only effective when the server master switch (settings.anchors_enabled)
    *  is on. */
   use_anchors: boolean
+  /** Opt the project into the per-project lint tag vocabulary declared in
+   *  <project>/memory/conventions.md frontmatter (tag_vocabulary). No server
+   *  master switch — purely per-project. */
+  use_tag_vocabulary: boolean
   /** RFC 3339 UTC string of the directory's mtime — proxy for
    *  "last activity" (fs birth time isn't preserved by rsync /
    *  git checkout / container layer copy). Empty when stat failed. */
@@ -35,6 +39,7 @@ export interface UpdateProjectRequest {
   public?: boolean
   use_globals?: boolean
   use_anchors?: boolean
+  use_tag_vocabulary?: boolean
 }
 
 export async function listProjects(): Promise<Project[]> {

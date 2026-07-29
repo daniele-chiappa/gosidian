@@ -15,20 +15,37 @@ var wikiLinkRe = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
 // frontmatter block and returns the values. Accepts both inline list and
 // indented list syntax:
 //
-//   tags: [foo, bar]
-//   tags: foo, bar
-//   tags:
-//     - foo
-//     - bar
+//	tags: [foo, bar]
+//	tags: foo, bar
+//	tags:
+//	  - foo
+//	  - bar
 //
 // Each value is trimmed and any leading '#' is stripped. Quotes (single or
 // double) around values are removed. We avoid a real YAML dependency since
 // only this one field matters and the spec is forgiving.
 func extractFrontmatterTags(fm string) []string {
+	return extractFrontmatterListByRe(fm, frontTagsKeyRe)
+}
+
+// FrontmatterList extracts an arbitrary list-valued frontmatter field by
+// key, with the same forgiving inline/block parsing as the tags field
+// (see extractFrontmatterTags). Returns nil when the key is absent or has
+// no values. Used e.g. for `tag_vocabulary:` in memory/conventions.md
+// (per-project lint vocabulary, IMP-075).
+func FrontmatterList(fm, key string) []string {
+	re := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(key) + `:\s*(.*)$`)
+	return extractFrontmatterListByRe(fm, re)
+}
+
+// extractFrontmatterListByRe is the shared inline/block list parser behind
+// extractFrontmatterTags and FrontmatterList. re must capture the inline
+// remainder of the `key:` line as group 1.
+func extractFrontmatterListByRe(fm string, re *regexp.Regexp) []string {
 	var out []string
 	lines := strings.Split(fm, "\n")
 	for i := 0; i < len(lines); i++ {
-		m := frontTagsKeyRe.FindStringSubmatch(lines[i])
+		m := re.FindStringSubmatch(lines[i])
 		if m == nil {
 			continue
 		}

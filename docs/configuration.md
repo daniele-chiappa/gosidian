@@ -104,16 +104,57 @@ Behaviour:
 
 - **Additive only**. Built-in tags are always allowed; the entries
   here are merged on top.
-- **Format**: each entry is either a bare token (e.g. `mytag`) or a
-  `<namespace>:<value>` pair where both halves are non-empty.
-  Malformed entries (empty, leading/trailing colon, internal
-  whitespace) are skipped silently — a typo in the config doesn't
-  crash the lint.
+- **Format**: each entry is either a bare token (e.g. `mytag`), a
+  `<namespace>:<value>` pair where both halves are non-empty, or a
+  namespace wildcard `<namespace>:*` accepting any well-formed value
+  in that namespace (e.g. `cm:*`). Malformed entries (empty,
+  leading/trailing colon, internal whitespace) are skipped silently —
+  a typo in the config doesn't crash the lint.
 - **Per-vault scope**: the file is loaded at server startup; the
   lint runner passes the list to the rule. Restart gosidian after
   editing.
 - **No file = no change**: vaults without `[lint]` keep the
   baseline behaviour identically.
+
+Note: the `topic:` namespace is **open** — any well-formed value
+(`topic:<area>`, no whitespace or extra colons) is accepted without
+configuration. `type:` and `status:` stay closed: they are lifecycle
+vocabularies the tooling itself depends on.
+
+### Per-project vocabulary (declared in the vault)
+
+The config entries above are instance-wide. A single project can
+instead declare its own domain taxonomy **inside the vault**, where
+agents can maintain it with regular note edits:
+
+1. Enable the project's `use_tag_vocabulary` flag (Projects view in
+   the web UI, or `use_tag_vocabulary` via `PUT /api/v1/projects/{name}` —
+   persisted in `<vault>/.gosidian/projects.json`). Default off: the
+   declaration below is inert without it.
+2. Declare the extra vocabulary in the frontmatter of
+   `<project>/memory/conventions.md`, field `tag_vocabulary:`:
+
+   ```yaml
+   ---
+   title: Conventions
+   tags: [myproject, type:memory]
+   tag_vocabulary:
+     - "cm:*"        # domain taxonomy namespace (wildcard)
+     - anagrafica    # exact extra tag
+   ---
+   ```
+
+Behaviour:
+
+- Same entry format as `extra_allowed` (bare, `ns:value`, `ns:*`),
+  capped at 64 entries — entries past the cap are ignored.
+- Scope is the declaring project only; the instance-wide
+  `extra_allowed` still applies everywhere, additively.
+- No restart needed: the declaration is read at each `memory_lint` run.
+- `memory_bootstrap` surfaces the effective declaration in a
+  `tag_vocabulary` block, so the extension stays visible at session
+  start instead of acting silently. Document *why* each namespace
+  exists in the body of `conventions.md`.
 
 > **Opt-in rule**: `unlinked-mentions` flags prose that names another
 > note's title/basename without linking to it. It is **advisory**

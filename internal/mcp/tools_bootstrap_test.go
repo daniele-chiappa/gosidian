@@ -3,12 +3,14 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/initprompt"
+	"github.com/gosidian/gosidian/internal/projects"
 )
 
 // seedBootstrapVault populates the test server with a small but realistic set
@@ -303,5 +305,68 @@ func TestMCP_Bootstrap_MaintenanceDigest(t *testing.T) {
 	m = boot()
 	if m.BrokenLinks != 0 {
 		t.Errorf("attachment embed inflated broken_links: %+v", m)
+	}
+}
+
+// TestMCP_Bootstrap_TagVocabulary asserts the IMP-075 surfacing: the
+// tag_vocabulary block appears only when the project opted in
+// (use_tag_vocabulary) and reports the sanitized entries declared in
+// memory/conventions.md frontmatter.
+func TestMCP_Bootstrap_TagVocabulary(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	proj := seedBootstrapVault(t, s)
+	ctx := context.Background()
+
+	if _, err := s.handleCreate(ctx, call(map[string]any{
+		"path":    proj + "/memory/conventions.md",
+		"content": "---\ntitle: conventions\ntags: [type:memory]\ntag_vocabulary: [\"cm:*\", anagrafica, \"bad entry\"]\n---\n\n# conventions\n",
+	})); err != nil {
+		t.Fatal(err)
+	}
+
+	type vocabResp struct {
+		TagVocabulary *struct {
+			Enabled bool     `json:"enabled"`
+			Note    string   `json:"note"`
+			Extra   []string `json:"extra"`
+		} `json:"tag_vocabulary"`
+	}
+	bootstrap := func(t *testing.T) vocabResp {
+		t.Helper()
+		res, err := s.handleBootstrap(ctx, call(map[string]any{"project": proj}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got vocabResp
+		if err := json.Unmarshal([]byte(resultText(t, res)), &got); err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		return got
+	}
+
+	// No opt-in (no projects store flag) → block absent.
+	if got := bootstrap(t); got.TagVocabulary != nil {
+		t.Fatalf("tag_vocabulary should be absent without opt-in: %+v", got.TagVocabulary)
+	}
+
+	pstore, err := projects.Open(filepath.Join(t.TempDir(), "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.SetProjects(pstore)
+	if err := pstore.Set(proj, projects.Flags{UseTagVocabulary: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := bootstrap(t)
+	if got.TagVocabulary == nil || !got.TagVocabulary.Enabled {
+		t.Fatal("tag_vocabulary block missing with flag on")
+	}
+	if got.TagVocabulary.Note != proj+"/memory/conventions.md" {
+		t.Errorf("note = %q", got.TagVocabulary.Note)
+	}
+	// "bad entry" (whitespace) is filtered by ValidVocabularyEntries.
+	if len(got.TagVocabulary.Extra) != 2 || got.TagVocabulary.Extra[0] != "cm:*" || got.TagVocabulary.Extra[1] != "anagrafica" {
+		t.Errorf("extra = %v, want [cm:* anagrafica]", got.TagVocabulary.Extra)
 	}
 }

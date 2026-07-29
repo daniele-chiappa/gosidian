@@ -44,6 +44,39 @@ func TestProjectFlags_UseAnchorsGlobalsPersist(t *testing.T) {
 	}
 }
 
+// TestProjectFlags_UseTagVocabularyPersist covers the IMP-075 toggle: PUT
+// /projects/{slug} sets use_tag_vocabulary, the view echoes it, the store
+// persists it, and a partial update of another flag leaves it intact.
+func TestProjectFlags_UseTagVocabularyPersist(t *testing.T) {
+	f := newAdminFixture(t)
+	f.seedNote(t, "Alpha/a.md", "x")
+
+	w := f.doAuthRecorder(http.MethodPut, "/api/v1/projects/Alpha",
+		`{"use_tag_vocabulary":true}`, nil)
+	if w.code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.code, w.body)
+	}
+	if !strings.Contains(w.body, `"use_tag_vocabulary":true`) {
+		t.Errorf("response missing use_tag_vocabulary: %s", w.body)
+	}
+	if !f.projects.Get("Alpha").UseTagVocabulary {
+		t.Fatalf("store not persisted: %+v", f.projects.Get("Alpha"))
+	}
+	if !f.projects.UsesTagVocabulary("Alpha") {
+		t.Error("UsesTagVocabulary helper out of sync")
+	}
+
+	// Partial update of an unrelated flag must not clear it.
+	w = f.doAuthRecorder(http.MethodPut, "/api/v1/projects/Alpha",
+		`{"public":true}`, nil)
+	if w.code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.code, w.body)
+	}
+	if !f.projects.Get("Alpha").UseTagVocabulary {
+		t.Errorf("partial update cleared use_tag_vocabulary: %+v", f.projects.Get("Alpha"))
+	}
+}
+
 // TestSettings_ExposesMasterSwitches asserts the read-only master switches
 // (GOSIDIAN_ANCHORS_ENABLED / GOSIDIAN_GLOBAL_ENABLED) reach the SPA so it can
 // tell whether a project's use_anchors/use_globals flag has any effect.

@@ -119,7 +119,14 @@ const StubVersion = 2
 // step 0 — when the bootstrap serves maintenance.attention (hot.md oversize
 // and/or broken wikilinks), propose the relevant grooming before closing;
 // stale_count is context, not an obligation.
-const DirectivesVersion = 9
+//
+// v10 (2026-07-29, IMP-075 per-project tag vocabulary): the tag vocabulary
+// section documents the open topic:<area> namespace and the per-project
+// extension — domain taxonomies declared in memory/conventions.md
+// frontmatter (tag_vocabulary: exact tags or ns:* wildcards, capped),
+// active only under the project's use_tag_vocabulary flag, surfaced by the
+// bootstrap tag_vocabulary block and honoured by memory_lint.
+const DirectivesVersion = 10
 
 // AnchorVersion is the version of the agent-anchor template/format. It is
 // substituted into the `<!-- gosidian:anchor v=N ... -->` marker so the

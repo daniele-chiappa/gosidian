@@ -101,13 +101,17 @@ type LintConfig struct {
 }
 
 // FrontmatterTagVocabulary lets a vault add tags to the closed vocabulary
-// the frontmatter-tag-unknown rule checks against. Built-in namespaces
-// (type/topic/status, plus the bare "pinned" tag and the project name) are
-// always allowed; ExtraAllowed is purely additive — a vault never weakens
-// its own discipline by setting this.
+// the frontmatter-tag-unknown rule checks against, instance-wide (every
+// project). Built-in namespaces (type/topic/status, plus the bare "pinned"
+// tag and the project name) are always allowed; ExtraAllowed is purely
+// additive — a vault never weakens its own discipline by setting this.
+// For a single project's domain taxonomy prefer the per-project vocabulary
+// instead: use_tag_vocabulary flag + `tag_vocabulary:` in that project's
+// memory/conventions.md frontmatter (IMP-075).
 //
-// Format of each entry: "<namespace>:<value>" (e.g. "status:reference") or
-// the bare tag name. Malformed entries are skipped silently at load time.
+// Format of each entry: "<namespace>:<value>" (e.g. "status:reference"),
+// the bare tag name, or a namespace wildcard "<namespace>:*". Malformed
+// entries are skipped silently at load time.
 type FrontmatterTagVocabulary struct {
 	ExtraAllowed []string `toml:"extra_allowed"`
 }
