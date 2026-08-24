@@ -38,7 +38,7 @@ RUN npm run build -- --outDir /out/dist --emptyOutDir
 # -----------------------------------------------------------------
 # 2. Go compile
 # -----------------------------------------------------------------
-FROM golang:1.25-alpine AS go-builder
+FROM golang:1.27-alpine AS go-builder
 RUN apk add --no-cache git ca-certificates
 WORKDIR /src
 
