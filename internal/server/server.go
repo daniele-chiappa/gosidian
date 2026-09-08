@@ -135,9 +135,15 @@ func (s *Server) handleVaultFile(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
+		uri := attach.DataURI(data, filepath.Ext(clean))
+		if uri == "" {
+			// Extension outside the attachment allowlist: DataURI fails closed.
+			http.NotFound(w, r)
+			return
+		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-		_, _ = w.Write([]byte(attach.DataURI(data, filepath.Ext(clean))))
+		_, _ = w.Write([]byte(uri))
 		return
 	}
 	ext := strings.ToLower(filepath.Ext(clean))

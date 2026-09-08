@@ -15,15 +15,20 @@ import (
 )
 
 // DataURI builds an RFC 2397 data: URI for the given bytes, using the MIME of
-// ext from AllowedExt (octet-stream fallback). Used to inline vault images for
-// the HTML-note render and for self-contained downloads, so the stored note can
-// keep a lightweight reference while the presentation layer embeds the bytes.
+// ext from AllowedExt. Used to inline vault attachments for the HTML-note
+// render and for self-contained downloads, so the stored note can keep a
+// lightweight reference while the presentation layer embeds the bytes.
+//
+// Fails closed: an extension outside AllowedExt returns "" rather than falling
+// back to application/octet-stream, so a file that was never meant to be an
+// attachment (a .jsonl, .db, .toml under the vault) cannot be embedded by a
+// caller that forgot to filter. Callers must treat "" as "do not inline".
 func DataURI(data []byte, ext string) string {
-	mime := "application/octet-stream"
-	if info, ok := AllowedExt[strings.ToLower(ext)]; ok {
-		mime = info.MIME
+	info, ok := AllowedExt[strings.ToLower(ext)]
+	if !ok {
+		return ""
 	}
-	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)
+	return "data:" + info.MIME + ";base64," + base64.StdEncoding.EncodeToString(data)
 }
 
 // MaxBytes is the largest raw attachment the system accepts (10 MiB).

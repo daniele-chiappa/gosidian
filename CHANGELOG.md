@@ -8,6 +8,39 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.23.1] — 2026-09-08 — "inline authz fix"
+
+### Security
+- **Vault credential store is no longer readable through `?inline`
+  (GHSA-45w4-74p9-cj5j, high, CVSS 7.1).** `GET /api/v1/notes/{path}?inline`
+  — and the note **Download** button, which uses it — rewrites a note's image
+  references into `data:` URIs so the download is self-contained. The helper
+  doing the read took no principal and applied no extension filter, so a
+  **member** (the lowest write-capable role) could put
+  `![](/vault-files/.gosidian/auth.json)` in a note they own and read the
+  response back with the whole credential store base64-inlined: the owner
+  bcrypt hash, the **plaintext TOTP secret**, invite tokens, and — where
+  git-sync is enabled — the plaintext git push token. The sibling
+  `![[wikilink]]` resolver already ran the caller's authorization check; the
+  `/vault-files/…` branch did not. Fixed on three axes: the inline helper now
+  confines to `attachments/` subpaths (like the file handler that serves the
+  same URLs), inlines only real images, and applies the same per-note
+  authorization gate every other read funnels through. `attach.DataURI` now
+  fails closed (returns nothing for an extension outside the allowlist) so the
+  same mistake cannot recur at another call site. Legitimate image inlining is
+  unchanged. Affected v2.9.0–v2.23.0. Reported by dipakpanchal05.
+- `dompurify` 3.4.12 → 3.4.15 (clears GHSA-55q2-fjhq-7xh7 / Dependabot alert
+  #33, moderate).
+- npm `overrides` pin `nanoid ^3.3.18` (clears GHSA-2v37-7h3g-55p8 / alert #36,
+  high — a transitive dependency via vue → postcss). `npm audit --omit=dev`
+  reports 0 vulnerabilities.
+
+### Notes
+- No configuration change or migration needed — upgrade in place. If you run
+  with git-sync enabled and a member account has existed on the instance,
+  rotating the git push token and any outstanding invite tokens after
+  upgrading is prudent.
+
 ## [2.23.0] — 2026-07-29 — "per-project tag vocabulary"
 
 ### Added
