@@ -314,6 +314,11 @@ func (r *Router) updateNote(w http.ResponseWriter, req *http.Request, rel string
 	if r.denyWriteProject(w, user.principal(), projectOf(rel)) {
 		return
 	}
+	// ADR-021: the notes endpoints only touch note files (POST already did).
+	if !r.deps.Vault.IsNoteFile(rel) {
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "path must be a note file (.md, or .html when html notes are enabled)")
+		return
+	}
 	unlock := r.deps.Vault.LockPath(rel)
 	defer unlock()
 	existing, err := r.deps.Vault.Load(rel)
@@ -371,6 +376,11 @@ func (r *Router) deleteNote(w http.ResponseWriter, req *http.Request, rel string
 		return
 	}
 	if r.denyWriteProject(w, user.principal(), projectOf(rel)) {
+		return
+	}
+	// ADR-021: the notes endpoints only touch note files (POST already did).
+	if !r.deps.Vault.IsNoteFile(rel) {
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "path must be a note file (.md, or .html when html notes are enabled)")
 		return
 	}
 	unlock := r.deps.Vault.LockPath(rel)

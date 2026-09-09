@@ -22,6 +22,7 @@ func newTestLinter(t *testing.T) (*Linter, *vault.Vault, *index.Index) {
 	}
 	t.Cleanup(func() { idx.Close() })
 	v := vault.New(dir)
+	v.SetHTMLNotes(true) // HTML notes are first-class in these fixtures (ADR-011)
 	return New(v, idx), v, idx
 }
 
@@ -521,7 +522,7 @@ func TestLint_AttachmentEmbedNotBroken(t *testing.T) {
 	// A real webp under the vault-root attachments/ dir, embedded by bare
 	// name (the Obsidian image-embed shape the UI guides use) and by
 	// qualified path — neither may be flagged (they render fine, ADR-013).
-	if err := v.Save("attachments/aabbccdd.webp", []byte("RIFFxxxxWEBPVP8 ")); err != nil {
+	if err := v.SaveAttachment("attachments/aabbccdd.webp", []byte("RIFFxxxxWEBPVP8 "), map[string]bool{".webp": true}); err != nil {
 		t.Fatal(err)
 	}
 	seed(t, v, idx, "proj/guide.md", "---\ntitle: guide\ntags: [proj, type:doc]\n---\n\n# g\n\n![[aabbccdd.webp]]\n\n![[attachments/aabbccdd.webp]]\n\n[[proj/guide]]\n")

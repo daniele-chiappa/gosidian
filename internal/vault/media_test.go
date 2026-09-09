@@ -30,9 +30,7 @@ func TestMediaRefForNote_FlagGating(t *testing.T) {
 	v := New(dir)
 	// The bytes are irrelevant: MediaRefForNote validates the extension and
 	// stats the file, it does not sniff content.
-	if err := v.Save("proj/attachments/abc.png", []byte("\x89PNG\r\n\x1a\nfake")); err != nil {
-		t.Fatal(err)
-	}
+	write(t, v.Root, "proj/attachments/abc.png", "\x89PNG\r\n\x1a\nfake")
 	if err := v.Save("proj/diagram.md", []byte(sampleMediaNote)); err != nil {
 		t.Fatal(err)
 	}
@@ -98,9 +96,7 @@ func TestMediaRefForNote_BrokenPointers(t *testing.T) {
 	v := New(dir)
 	v.SetMediaNotes(true)
 	// A real non-image file so the "non-image ext" case finds a file but a bad kind.
-	if err := v.Save("proj/attachments/note.txt", []byte("hello")); err != nil {
-		t.Fatal(err)
-	}
+	write(t, v.Root, "proj/attachments/note.txt", "hello")
 
 	cases := []struct{ name, file, body string }{
 		{"missing media key", "proj/m1.md", "---\ntitle: x\ntype: image\ntags: [proj, type:image]\n---\n\ncap"},
@@ -128,9 +124,7 @@ func TestMediaRefForNote_BrokenPointers(t *testing.T) {
 func TestMediaRefForNote_TableNotes(t *testing.T) {
 	dir := t.TempDir()
 	v := New(dir)
-	if err := v.Save("proj/attachments/audit.csv", []byte("user,action,ts\nalice,login,1\nbob,logout,2\n")); err != nil {
-		t.Fatal(err)
-	}
+	write(t, v.Root, "proj/attachments/audit.csv", "user,action,ts\nalice,login,1\nbob,logout,2\n")
 	if err := v.Save("proj/audit.md", []byte(sampleTableNote)); err != nil {
 		t.Fatal(err)
 	}
@@ -163,9 +157,7 @@ func TestMediaRefForNote_TableNotes(t *testing.T) {
 
 	// A type:table note whose pointer is not a .csv is recognised but broken —
 	// e.g. pointing at an image.
-	if err := v.Save("proj/attachments/abc.png", []byte("\x89PNG\r\n\x1a\nfake")); err != nil {
-		t.Fatal(err)
-	}
+	write(t, v.Root, "proj/attachments/abc.png", "\x89PNG\r\n\x1a\nfake")
 	bad := "---\ntitle: x\ntype: table\nmedia: proj/attachments/abc.png\n---\n\ncap"
 	if err := v.Save("proj/t2.md", []byte(bad)); err != nil {
 		t.Fatal(err)

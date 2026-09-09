@@ -108,6 +108,15 @@ func stripNoteExt(p string) string {
 	return p
 }
 
+// ErrNotNote is returned by Save, Delete and RenameNote when the path is not a
+// note file (ADR-021): the vault layer mutates only notes; attachment bytes go
+// through SaveAttachment/DeleteAttachment.
+var ErrNotNote = errors.New("not a note file")
+
+// ErrNotAttachment is returned by SaveAttachment/DeleteAttachment when the
+// path is outside an attachments/ directory or its extension is not allowed.
+var ErrNotAttachment = errors.New("not an attachment path")
+
 // Rel returns a cleaned vault-relative path. Rejects any path that contains
 // a ".." segment (attempted escape) and any hidden segment — one starting
 // with "." — so the machine-owned .gosidian/ credential store, the .git/
@@ -173,10 +182,15 @@ func (v *Vault) Load(rel string) (*Note, error) {
 	return note, nil
 }
 
+// Delete removes a note. Like Save it refuses non-note paths (ADR-021);
+// attachments are removed with DeleteAttachment.
 func (v *Vault) Delete(rel string) error {
 	abs, err := v.Abs(rel)
 	if err != nil {
 		return err
+	}
+	if !v.IsNoteFile(abs) {
+		return fmt.Errorf("%w: %q", ErrNotNote, rel)
 	}
 	if v.cache != nil {
 		// We need the cleaned relative path for the cache key; reuse Rel.
@@ -187,10 +201,15 @@ func (v *Vault) Delete(rel string) error {
 	return os.Remove(abs)
 }
 
+// Save writes a note. Only note files (IsNoteFile) can be written through the
+// vault layer (ADR-021); attachment bytes go through SaveAttachment.
 func (v *Vault) Save(rel string, content []byte) error {
 	abs, err := v.Abs(rel)
 	if err != nil {
 		return err
+	}
+	if !v.IsNoteFile(abs) {
+		return fmt.Errorf("%w: %q", ErrNotNote, rel)
 	}
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		return err
@@ -202,6 +221,49 @@ func (v *Vault) Save(rel string, content []byte) error {
 		if r, rErr := v.Rel(rel); rErr == nil {
 			v.cache.Invalidate(r)
 		}
+	}
+	return nil
+}
+
+// SaveAttachment writes attachment bytes. The path must sit inside an
+// attachments/ directory and carry an extension present in allowedExt (the
+// caller passes attach.ExtSet(); vault must not import attach). Together with
+// Save's note-only rule this is the only way non-note bytes enter the vault
+// (ADR-021).
+func (v *Vault) SaveAttachment(rel string, content []byte, allowedExt map[string]bool) error {
+	r, err := v.Rel(rel)
+	if err != nil {
+		return err
+	}
+	if err := checkAttachmentPath(r, allowedExt); err != nil {
+		return err
+	}
+	abs := filepath.Join(v.Root, filepath.FromSlash(r))
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(abs, content, 0o644)
+}
+
+// DeleteAttachment removes an attachment file under the same confinement as
+// SaveAttachment.
+func (v *Vault) DeleteAttachment(rel string, allowedExt map[string]bool) error {
+	r, err := v.Rel(rel)
+	if err != nil {
+		return err
+	}
+	if err := checkAttachmentPath(r, allowedExt); err != nil {
+		return err
+	}
+	return os.Remove(filepath.Join(v.Root, filepath.FromSlash(r)))
+}
+
+func checkAttachmentPath(r string, allowedExt map[string]bool) error {
+	if !strings.Contains("/"+r, "/attachments/") {
+		return fmt.Errorf("%w: %q is not inside an attachments/ directory", ErrNotAttachment, r)
+	}
+	if ext := strings.ToLower(filepath.Ext(r)); !allowedExt[ext] {
+		return fmt.Errorf("%w: extension %q is not allowed", ErrNotAttachment, ext)
 	}
 	return nil
 }
@@ -515,6 +577,10 @@ func (v *Vault) RenameNote(idx *index.Index, from, to string) ([]string, error) 
 	// extension on the target (e.g. switching .md→.html) is honoured as-is.
 	if filepath.Ext(toRel) == "" {
 		toRel += filepath.Ext(fromRel)
+	}
+	// ADR-021: a rename never turns a note into a non-note (or vice versa).
+	if !v.IsNoteFile(fromRel) || !v.IsNoteFile(toRel) {
+		return nil, fmt.Errorf("%w: %q -> %q", ErrNotNote, fromRel, toRel)
 	}
 	if fromRel == toRel {
 		return nil, nil

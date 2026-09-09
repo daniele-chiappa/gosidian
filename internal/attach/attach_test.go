@@ -87,7 +87,7 @@ type fakeSaver struct {
 }
 
 func (f *fakeSaver) Rel(p string) (string, error) { return p, nil }
-func (f *fakeSaver) Save(rel string, content []byte) error {
+func (f *fakeSaver) SaveAttachment(rel string, content []byte, _ map[string]bool) error {
 	f.saved[rel] = content
 	return nil
 }

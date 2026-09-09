@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"strings"
 	"time"
 
@@ -887,6 +888,9 @@ func (s *Server) handleDelete(ctx context.Context, req mcp.CallToolRequest) (*mc
 	if _, errRes := s.authorizeWrite(ctx, rel); errRes != nil {
 		return errRes, nil
 	}
+	if !s.vault.IsNoteFile(rel) {
+		return mcp.NewToolResultErrorf("%q is not a note: attachments are removed with memory_delete_attachment", rel), nil
+	}
 	unlock := s.vault.LockPath(rel)
 	defer unlock()
 	if err := s.vault.Delete(rel); err != nil {
@@ -942,6 +946,14 @@ func (s *Server) handleRenameNote(ctx context.Context, req mcp.CallToolRequest) 
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("invalid to", err), nil
 	}
+	// Keep the source's note extension when the target carries none, then
+	// refuse any target that is not a note (ADR-021) before touching disk.
+	if path.Ext(toRel) == "" {
+		toRel += path.Ext(fromRel)
+	}
+	if !s.vault.IsNoteFile(toRel) {
+		return mcp.NewToolResultErrorf("to %q is not a note path: keep the .md (or .html) extension", toRel), nil
+	}
 	// Both endpoints must be inside the token's scope (write).
 	if _, errRes := s.authorizeWrite(ctx, fromRel); errRes != nil {
 		return errRes, nil
@@ -959,11 +971,9 @@ func (s *Server) handleRenameNote(ctx context.Context, req mcp.CallToolRequest) 
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("rename failed", err), nil
 	}
-	// RenameNote may have appended .md to to; recompute the canonical path.
+	// The extension was resolved above, so toRel already is the canonical path
+	// (this used to force .md, which mislabelled .html notes).
 	canonical := toRel
-	if !strings.HasSuffix(strings.ToLower(canonical), ".md") {
-		canonical += ".md"
-	}
 	s.auditWrite(ctx, audit.ActionRename, fromRel, canonical, 0)
 	return mcp.NewToolResultJSON(map[string]any{
 		"from":      fromRel,
@@ -1334,6 +1344,11 @@ func (s *Server) handleGetOutline(ctx context.Context, req mcp.CallToolRequest) 
 // writeAndIndex persists the note and upserts it into the index synchronously
 // so that a search immediately after the write reflects the change.
 func (s *Server) writeAndIndex(rel string, content []byte) error {
+	// ADR-021: write tools only touch notes. The vault layer enforces the same
+	// rule; checking here first yields a didactic error before any I/O.
+	if !s.vault.IsNoteFile(rel) {
+		return fmt.Errorf("%w: %q is not a note (.md, or .html when html notes are enabled) — files go through memory_ingest (bridge_filename, source_path, transfer:\"http\") or memory_upload_attachment", vault.ErrNotNote, rel)
+	}
 	if err := s.vault.Save(rel, content); err != nil {
 		return err
 	}

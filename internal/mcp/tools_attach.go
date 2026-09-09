@@ -247,11 +247,7 @@ func (s *Server) handleUploadResource(ctx context.Context, req mcp.CallToolReque
 
 // allowedExtSet builds a set of allowed extensions for vault.ListAttachments.
 func allowedExtSet() map[string]bool {
-	m := make(map[string]bool, len(attach.AllowedExt))
-	for ext := range attach.AllowedExt {
-		m[ext] = true
-	}
-	return m
+	return attach.ExtSet()
 }
 
 func (s *Server) handleListAttachments(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -319,7 +315,7 @@ func (s *Server) handleDeleteAttachment(ctx context.Context, req mcp.CallToolReq
 	if !s.vault.Exists(rel) {
 		return mcp.NewToolResultErrorf("attachment %q not found", rel), nil
 	}
-	if err := s.vault.Delete(rel); err != nil {
+	if err := s.vault.DeleteAttachment(rel, allowedExtSet()); err != nil {
 		return mcp.NewToolResultErrorFromErr("delete failed", err), nil
 	}
 	s.auditWrite(ctx, audit.ActionDeleteAttachment, rel, "", 0)

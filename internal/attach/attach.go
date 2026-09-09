@@ -60,6 +60,16 @@ var AllowedExt = map[string]ExtInfo{
 	".xlsx": {MIME: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", IsImage: false},
 }
 
+// ExtSet returns the allowed extensions as a set — the shape the vault's
+// attachment API and ListAttachments take (vault must not import attach).
+func ExtSet() map[string]bool {
+	set := make(map[string]bool, len(AllowedExt))
+	for ext := range AllowedExt {
+		set[ext] = true
+	}
+	return set
+}
+
 // ValidateExt checks that ext (lowercase, with leading dot) is in the
 // allowlist. Returns the MIME type, whether it is an image, or an error.
 func ValidateExt(ext string) (mime string, isImage bool, err error) {
@@ -189,7 +199,7 @@ func MarkdownRef(vaultRelPath, origFilename string, isImage bool) string {
 // Saver is the subset of vault.Vault that Store needs.
 type Saver interface {
 	Rel(p string) (string, error)
-	Save(rel string, content []byte) error
+	SaveAttachment(rel string, content []byte, allowedExt map[string]bool) error
 }
 
 // Result holds what Store returns on success.
@@ -296,7 +306,7 @@ func Store(v Saver, data []byte, origFilename, project string) (*Result, error) 
 	if _, err := v.Rel(rel); err != nil {
 		return nil, fmt.Errorf("invalid attachment path: %w", err)
 	}
-	if err := v.Save(rel, data); err != nil {
+	if err := v.SaveAttachment(rel, data, ExtSet()); err != nil {
 		return nil, fmt.Errorf("save attachment: %w", err)
 	}
 

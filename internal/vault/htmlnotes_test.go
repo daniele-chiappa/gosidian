@@ -17,9 +17,7 @@ func TestVault_HTMLNotesGating(t *testing.T) {
 	if err := v.Save("proj/a.md", []byte("# a")); err != nil {
 		t.Fatal(err)
 	}
-	if err := v.Save("proj/page.html", []byte("<html><body>x</body></html>")); err != nil {
-		t.Fatal(err)
-	}
+	write(t, dir, "proj/page.html", "<html><body>x</body></html>")
 
 	// Flag off (default): .html is invisible, .md is a note.
 	if v.IsNoteFile("x.html") {
@@ -63,9 +61,7 @@ func TestVault_RenamePreservesHTMLExtension(t *testing.T) {
 	v := New(dir)
 	v.SetHTMLNotes(true)
 	idx := openIndex(t)
-	if err := v.Save("proj/dash.html", []byte("<html><body>hi</body></html>")); err != nil {
-		t.Fatal(err)
-	}
+	write(t, dir, "proj/dash.html", "<html><body>hi</body></html>")
 	if n, lerr := v.Load("proj/dash.html"); lerr == nil {
 		_ = idx.Upsert(toIndexNote(n))
 	}

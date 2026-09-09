@@ -8,6 +8,46 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.24.2] — 2026-09-09 — "inert attachments, note-only writes"
+
+### Security
+- **SVG attachments could run script in the app origin
+  (GHSA-xx3w-73fv-6qmh, high, CVSS 8.0).** `/vault-files/` served
+  attachments with their real MIME type and no security headers, and the
+  upload check accepts any text payload for `.svg`, so an SVG carrying
+  `<script>` opened directly — a link in a note, a shared URL — executed in
+  the application origin, where the SPA keeps its bearer token in
+  `localStorage`. Anyone who can upload (a member, a write-scoped MCP token)
+  could plant one; the victim is whoever opens the link. Every
+  `/vault-files/` response now carries `Content-Security-Policy:
+  default-src 'none'; script-src 'none'; style-src 'none'; sandbox`,
+  `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`;
+  non-image attachments (PDF, CSV, JSON, TXT, ZIP, DOCX, XLSX) are served
+  with `Content-Disposition: attachment`. `<img>` embedding, media notes and
+  table notes are unaffected.
+- **The vault layer now mutates only note files.** `PUT` and `DELETE
+  /api/v1/notes/{path}` (only `POST` checked the extension) and every MCP
+  write tool could create, overwrite, delete or rename arbitrary non-note
+  files inside projects, existing attachments included. `Save`, `Delete` and
+  `RenameNote` now refuse anything that is not a `.md` (or `.html` when HTML
+  notes are enabled); attachment bytes go through a dedicated API confined
+  to `attachments/` and the extension allowlist, used by the upload paths
+  and by `memory_delete_attachment`. An MCP caller writing to a non-note
+  path gets an error pointing at `memory_ingest` /
+  `memory_upload_attachment`.
+
+### Fixed
+- `memory_rename_note` reported a `.md` canonical path even for `.html`
+  notes; the target extension is now resolved (defaulting to the source's)
+  before the rename, and a non-note target is refused.
+
+### Notes
+- No configuration change or migration needed — upgrade in place. Clicking
+  a PDF/CSV attachment now downloads it instead of opening it inline.
+  Existing attachments are not modified by the upgrade: if untrusted
+  members or write-scoped MCP tokens have existed on the instance, review
+  the stored `.svg` attachments for script content.
+
 ## [2.24.1] — 2026-09-09 — "hidden vault paths unreachable"
 
 ### Security
