@@ -8,6 +8,32 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.24.3] — 2026-09-09 — "attachments behind authentication"
+
+### Security
+- **`/vault-files/` now requires authentication (GHSA-6fwv-7wrp-f3wm,
+  medium, CVSS 5.9).** The endpoint the web UI uses to display and download
+  attachments accepted anonymous requests: anyone holding an attachment URL
+  could fetch the file from any project, regardless of roles,
+  `member_scope`, project visibility or open-mode. Filenames are content
+  hashes (not enumerable), but URLs sit in note bodies, browser history,
+  referrers and reverse-proxy logs. Attachments now share the notes API's
+  authentication: the SPA login sets an `HttpOnly`, `SameSite=Lax` cookie
+  scoped to `/vault-files/` (re-issued by any authenticated API call,
+  cleared at logout), so images, downloads and the note renderers keep
+  working with no front-end change; any other client sends
+  `Authorization: Bearer` with a session token or an MCP token whose `read`
+  scope covers the path. Open-mode guests reach public projects only.
+  Requests without a credential get 401, a principal that cannot see the
+  project gets 404, and responses are `Cache-Control: private`. The server
+  fails closed: without the authorizer wired, `/vault-files/` answers 401.
+
+### Notes
+- No configuration change needed. Sessions established before the upgrade
+  obtain the cookie on their first API call — if an image does not load,
+  reload the page. Attachment URLs pasted into external tools now need a
+  Bearer token (see `docs/mcp/upload.md`).
+
 ## [2.24.2] — 2026-09-09 — "inert attachments, note-only writes"
 
 ### Security

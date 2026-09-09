@@ -165,9 +165,15 @@ Success (`200 OK`, `Content-Type: application/json`):
 
 - `path` — vault-relative location (`<project>/attachments/<hash>.<ext>`).
 - `url` — relative URL served by gosidian under `/vault-files/...` with
-  one-year immutable cache. Intentionally relative so it resolves
+  one-year immutable (private) cache. Intentionally relative so it resolves
   correctly against whatever host:port the caller used (`localhost`
   via tunnel, `127.0.0.1` direct, public hostname behind reverse proxy).
+  Since v2.24.3 the URL requires the same authentication as the notes API:
+  the browser sends the session cookie the SPA login sets, and any other
+  client passes `Authorization: Bearer <token>` — a SPA session token or an
+  MCP token with the `read` scope whose project scope covers the path.
+  Anonymous requests get 401; a principal that cannot see the project
+  gets 404.
 - `mime` — canonical MIME from the allowlist (not the
   client-declared `Content-Type`, which is ignored).
 - `kind` — `image` if the extension is in the image group, `document`

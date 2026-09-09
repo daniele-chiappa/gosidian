@@ -14,6 +14,7 @@ import (
 // and non-image attachments are downloads, not documents.
 func TestVaultFiles_SecurityHeaders(t *testing.T) {
 	s := newTestServer(t)
+	s.SetVaultFileAuthorizer(func(*http.Request, string) int { return 0 })
 	root := s.vault.Root
 	write := func(rel, content string) {
 		t.Helper()

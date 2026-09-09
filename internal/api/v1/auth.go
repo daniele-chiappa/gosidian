@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"github.com/gosidian/gosidian/internal/webauth"
 	"net/http"
 
 	"github.com/gosidian/gosidian/internal/audit"
@@ -123,6 +124,7 @@ func (r *Router) handleLogin(w http.ResponseWriter, req *http.Request) {
 		})
 	}
 
+	r.setFilesCookie(w, req, plain, tok.HardExpiry)
 	WriteJSON(w, http.StatusOK, loginResponse{
 		Token:      plain,
 		ExpiresAt:  tok.ExpiresAt.UTC().Format(rfc3339Z),
@@ -158,6 +160,7 @@ func (r *Router) handleLogout(w http.ResponseWriter, req *http.Request) {
 			Action: audit.ActionSpaTokenRevoke,
 		})
 	}
+	http.SetCookie(w, clearFilesCookie(webauth.IsSecureRequest(req)))
 	w.WriteHeader(http.StatusNoContent)
 }
 

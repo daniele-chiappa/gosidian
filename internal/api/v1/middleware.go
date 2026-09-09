@@ -127,6 +127,13 @@ func (d *AuthDeps) requireAuth(next http.Handler) http.Handler {
 			Username: user.Username,
 			Role:     user.Role,
 		}
+		// Self-healing attachment cookie (ADR-022): any authenticated API call
+		// (re)issues gosidian_files when the browser lacks it or holds another
+		// token, so sessions persisted before the cookie existed recover on
+		// their first request instead of at the next login.
+		if c, err := r.Cookie(filesCookieName); err != nil || c.Value != token {
+			http.SetCookie(w, filesCookie(token, webauth.IsSecureRequest(r), spaTok.HardExpiry))
+		}
 		ctx := context.WithValue(r.Context(), ctxKeyUser, ru)
 		ctx = context.WithValue(ctx, ctxKeyToken, token)
 		next.ServeHTTP(w, r.WithContext(ctx))

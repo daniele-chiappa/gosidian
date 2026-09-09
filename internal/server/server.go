@@ -28,6 +28,17 @@ type Server struct {
 	// Build + runtime info, populated by SetBuildInfo for /healthz.
 	version   string
 	gitSyncOn bool
+
+	// vaultFileAuthz gates /vault-files/ (ADR-022, BUG-031). It returns 0 to
+	// allow, or the HTTP status to answer with (401 unauthenticated, 404 when
+	// the principal must not learn the file exists). Injected by main from the
+	// api/v1 router — this package cannot import it. nil fails closed.
+	vaultFileAuthz func(r *http.Request, rel string) int
+}
+
+// SetVaultFileAuthorizer installs the /vault-files/ gate. See vaultFileAuthz.
+func (s *Server) SetVaultFileAuthorizer(fn func(r *http.Request, rel string) int) {
+	s.vaultFileAuthz = fn
 }
 
 // New wires the minimal HTTP surface for v2.0. Only the SPA shell,
@@ -120,6 +131,22 @@ func (s *Server) handleVaultFile(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	// Attachments require the same authentication as the notes API
+	// (ADR-022). Decided before any disk access; no authorizer = fail closed.
+	status := http.StatusUnauthorized
+	if s.vaultFileAuthz != nil {
+		status = s.vaultFileAuthz(r, clean)
+	}
+	switch status {
+	case 0:
+	case http.StatusUnauthorized:
+		w.Header().Set("WWW-Authenticate", "Bearer")
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	default:
+		http.NotFound(w, r)
+		return
+	}
 	abs, err := s.vault.Abs(clean)
 	if err != nil {
 		http.NotFound(w, r)
@@ -143,7 +170,7 @@ func (s *Server) handleVaultFile(w http.ResponseWriter, r *http.Request) {
 		}
 		setAttachmentSecurityHeaders(w)
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
 		_, _ = w.Write([]byte(uri))
 		return
 	}
@@ -161,7 +188,7 @@ func (s *Server) handleVaultFile(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Disposition", `attachment; filename="`+filepath.Base(clean)+`"`)
 	}
 	w.Header().Set("Content-Type", ct)
-	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
 	http.ServeFile(w, r, abs)
 }
 

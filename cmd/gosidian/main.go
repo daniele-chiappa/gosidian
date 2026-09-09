@@ -455,6 +455,7 @@ func main() {
 		ConfigPath: cfgPath,
 	})
 	srv.MountAPIv1(apiRouter)
+	srv.SetVaultFileAuthorizer(apiRouter.VaultFileAuthorizer()) // ADR-022: attachments share the API auth
 	srv.MountMCP(mcpServer.Handler("/mcp"))
 	// v2.0 cutover: the SPA is the only frontend. The legacy
 	// GOSIDIAN_SPA_MODE flag was retired alongside the HTMX
