@@ -8,7 +8,7 @@ anyone's network.
 
 ## What happens
 
-1. `devcontainer.json` builds a container with Go 1.25 + Node 24.
+1. `devcontainer.json` builds a container with Go 1.27 + Node 24.
 2. `setup.sh` (run once) builds the SPA + binary from the source you
    opened, seeds the disposable vault in `demo-vault/`, and provisions a
    `demo` / `gosidian-demo` owner.

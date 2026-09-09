@@ -2,7 +2,7 @@
 #
 # Multi-stage build for gosidian v2.0:
 #   1. node:24-alpine builds the Vue 3 SPA (`npm run build`).
-#   2. golang:1.25-alpine compiles the binary, embedding the dist/.
+#   2. golang:1.27-alpine compiles the binary, embedding the dist/.
 #   3. alpine:3.20 runtime with git on PATH for gitsync.
 #
 # Final image is ~35 MB and runs as nonroot UID 65532. The
@@ -38,7 +38,7 @@ RUN npm run build -- --outDir /out/dist --emptyOutDir
 # -----------------------------------------------------------------
 # 2. Go compile
 # -----------------------------------------------------------------
-FROM golang:1.25-alpine AS go-builder
+FROM golang:1.27-alpine AS go-builder
 RUN apk add --no-cache git ca-certificates
 WORKDIR /src
 

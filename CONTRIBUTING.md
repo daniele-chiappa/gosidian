@@ -25,7 +25,7 @@ go build -o gosidian ./cmd/gosidian
 ./gosidian --vault ./testdata/vault --mcp-addr 127.0.0.1:8765
 ```
 
-Requirements: Go 1.25 or newer. No CGO required for the default build
+Requirements: Go 1.27 or newer. No CGO required for the default build
 (the SQLite driver is pure Go). Docker is optional but convenient for
 end-to-end tests.
 

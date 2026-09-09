@@ -102,16 +102,30 @@ func TestSync_DebounceCoalesces(t *testing.T) {
 		s.TriggerCommit()
 		time.Sleep(30 * time.Millisecond)
 	}
-	time.Sleep(300 * time.Millisecond)
 
+	// Wait for the debounced commit to land instead of sleeping a fixed
+	// amount: on a loaded CI runner `git add` + `git commit` can outlast the
+	// debounce window, and returning early lets the TempDir cleanup race the
+	// in-flight git process (BUG-028, same family as BUG-006).
+	deadline := time.Now().Add(5 * time.Second)
+	for countAutoCommits(t, dir) == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	// Grace period: a second, non-coalesced commit would show up here.
+	time.Sleep(2 * cfg.Debounce)
+	if got := countAutoCommits(t, dir); got != 1 {
+		t.Errorf("expected exactly 1 auto commit after debounce, got %d", got)
+	}
+}
+
+// countAutoCommits returns how many "auto:" commits the repo at dir holds.
+func countAutoCommits(t *testing.T, dir string) int {
+	t.Helper()
 	out, err := exec.Command("git", "-C", dir, "log", "--oneline").Output()
 	if err != nil {
 		t.Fatalf("git log: %v", err)
 	}
-	autoCount := strings.Count(string(out), "auto:")
-	if autoCount != 1 {
-		t.Errorf("expected exactly 1 auto commit after debounce, got %d: %s", autoCount, out)
-	}
+	return strings.Count(string(out), "auto:")
 }
 
 func TestSync_Flush(t *testing.T) {
@@ -345,4 +359,3 @@ func TestIsRepoCorruption(t *testing.T) {
 		}
 	}
 }
-

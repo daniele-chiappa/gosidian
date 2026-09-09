@@ -8,6 +8,44 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.24.0] — 2026-09-09 — "Go 1.27 + dependency roundup"
+
+### Security
+- **Toolchain moved to Go 1.27.** Go 1.25 has left upstream support (only the
+  1.27 and 1.26 lines receive fixes), so the Docker build stage, CI, the
+  precompiled release binaries, the devcontainer and the contributor docs now
+  use Go 1.27. **Building from source now requires Go 1.27 or newer.** The
+  container image is unaffected beyond being rebuilt on the new toolchain.
+- `golang.org/x/crypto` 0.54.0 → 0.56.0 (bcrypt), unblocked by the Go bump.
+- npm devDependencies (never shipped in the binary or the SPA bundle):
+  `js-yaml` 4.3.2 (GHSA-5p4m-2wfm-xmqj), `browserslist` 4.28.9
+  (GHSA-73wf-gq98-2v4g), `baseline-browser-mapping` 2.11.21
+  (GHSA-w5vr-8v7q-w6rv), `vitest` + `@vitest/mocker` 4.1.11
+  (GHSA-82fw-gwwq-j7x9), `postcss-selector-parser` 6.1.4
+  (GHSA-w9m9-85wc-3x92), and the `brace-expansion` override raised to
+  `^5.0.9` (GHSA-rgw5-rvv9-x895). `npm audit` reports 0 vulnerabilities with
+  devDependencies included.
+
+### Changed
+- **MCP server library `mark3labs/mcp-go` 0.57.0 → 1.0.0.** The server can
+  now speak the MCP **2026-07-28** specification (stateless request/response,
+  `server/discover`), negotiated per request — clients that use the
+  `initialize` handshake over SSE, i.e. every client that works today, get the
+  exact same wire behaviour as before. The bump also brings SSE transport
+  fixes (no panic on a duplicate `endpoint` event, no spurious connection-lost
+  callback on an intentional close).
+- `modernc.org/sqlite` 1.54.0 → 1.58.0, `yuin/goldmark` 1.8.4 → 1.8.6.
+
+### Fixed
+- Flaky `TestSync_DebounceCoalesces` (`internal/gitsync`) on slow CI runners:
+  the test now waits for the debounced commit with a deadline instead of a
+  fixed sleep, and no longer races the temp-dir cleanup against an in-flight
+  `git commit`.
+
+### Notes
+- No configuration change or migration needed — upgrade in place. Source
+  builds: install Go 1.27 (the devcontainer definition is already bumped).
+
 ## [2.23.1] — 2026-09-08 — "inline authz fix"
 
 ### Security

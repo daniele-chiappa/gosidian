@@ -18,7 +18,7 @@ The Go source lives under `src/` (the module root, `cmd/gosidian` +
 build` (run from `src/web`) emits the bundle that `go build` from
 `src/` embeds via `//go:embed`.
 
-**Requirements**: Go 1.25 (and Node 24 for the SPA build). No CGO
+**Requirements**: Go 1.27 (and Node 24 for the SPA build). No CGO
 required for the default build (`CGO_ENABLED=0`; the SQLite driver is
 pure Go). Docker is optional but convenient for end-to-end tests.
 
@@ -48,7 +48,7 @@ docker build -f src/Dockerfile -t gosidian:dev ./src
 
 1. **`node:24-alpine`** — `npm ci && npm run build` of the `src/web`
    SPA, producing the embeddable Vite bundle.
-2. **`golang:1.25-alpine`** — `CGO_ENABLED=0 go build` of the Go
+2. **`golang:1.27-alpine`** — `CGO_ENABLED=0 go build` of the Go
    binary with the SPA bundle embedded via `//go:embed`.
 3. **`alpine:3.20`** runtime with `git` + `ca-certificates` — the
    final stage keeps `git` on PATH because `gitsync` shells out to it
