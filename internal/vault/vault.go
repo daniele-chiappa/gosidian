@@ -109,11 +109,18 @@ func stripNoteExt(p string) string {
 }
 
 // Rel returns a cleaned vault-relative path. Rejects any path that contains
-// a ".." segment (attempted escape).
+// a ".." segment (attempted escape) and any hidden segment — one starting
+// with "." — so the machine-owned .gosidian/ credential store, the .git/
+// metadata and dotfiles are never addressable through the vault layer, by
+// any consumer (HTTP notes API, /vault-files/, MCP tools and resources,
+// attachments). Invariant (ADR-020, BUG-029): the vault layer addresses only
+// what the scanner indexes; List/ScanInto/ListAttachments/watcher skip the
+// same hidden entries. The error is deliberately the same generic one as for
+// "..": callers turn it into 400/404 without revealing what exists.
 func (v *Vault) Rel(p string) (string, error) {
 	raw := filepath.ToSlash(p)
 	for _, seg := range strings.Split(raw, "/") {
-		if seg == ".." {
+		if seg == ".." || isHidden(seg) {
 			return "", errors.New("invalid path")
 		}
 	}
@@ -123,6 +130,12 @@ func (v *Vault) Rel(p string) (string, error) {
 		return "", errors.New("empty path")
 	}
 	return clean, nil
+}
+
+// isHidden reports whether a single path segment is a hidden entry: it starts
+// with "." and is not the "." no-op segment. ".." is handled separately.
+func isHidden(seg string) bool {
+	return len(seg) > 1 && seg[0] == '.' && seg != ".."
 }
 
 func (v *Vault) Abs(rel string) (string, error) {
@@ -207,7 +220,9 @@ func (v *Vault) List() ([]string, error) {
 			}
 			return nil
 		}
-		if !v.IsNoteFile(d.Name()) {
+		// Hidden files are not notes even with a note extension: keep the
+		// index aligned with what Rel can address (ADR-020).
+		if isHidden(d.Name()) || !v.IsNoteFile(d.Name()) {
 			return nil
 		}
 		rel, err := filepath.Rel(v.Root, path)
@@ -433,6 +448,9 @@ func (v *Vault) ListAttachments(project string, allowedExt map[string]bool) ([]A
 			}
 			if len(out) >= maxResults {
 				return fs.SkipAll
+			}
+			if isHidden(d.Name()) { // e.g. macOS ._resource forks: unaddressable via Rel
+				return nil
 			}
 			ext := strings.ToLower(filepath.Ext(d.Name()))
 			if !allowedExt[ext] {

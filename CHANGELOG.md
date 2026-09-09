@@ -8,6 +8,40 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.24.1] — 2026-09-09 — "hidden vault paths unreachable"
+
+### Security
+- **Hidden directories under the vault root are no longer addressable
+  through the vault layer (GHSA-q96r-f95c-459v, high, CVSS 8.8).** The path
+  helper `Vault.Rel` only rejected `..`, so every consumer built on it — the
+  notes HTTP API, `/vault-files/`, the MCP tools and resources — could reach
+  files inside `<vault>/.gosidian/` (the credential store: account bcrypt
+  hashes, **plaintext TOTP secrets**, invite tokens, the git push token, MCP
+  token hashes) and `<vault>/.git/`. Verified on v2.24.0: a **member** under
+  the default `member_scope = all` could `GET` and `DELETE`
+  `/api/v1/notes/.gosidian/auth.json` and `GET` `.git/config`; an **MCP token
+  without a project scope** could `memory_get` the same files and, with the
+  write scope, rewrite `auth.json` (hot-reloaded, so an immediate web
+  takeover), create `.git/config` (a `core.hooksPath` / `credential.helper`
+  entry runs on the next git-sync operation) or delete the store. Same class
+  as GHSA-45w4-74p9-cj5j — v2.23.1 had closed only the `?inline` vector.
+  Fixed structurally: `Rel` now rejects any path segment starting with `.`,
+  at any depth, with the same generic error as `..`; the scanner and the
+  attachment listing skip hidden files too, so "addressable" now coincides
+  with "indexed". Project-scoped MCP tokens were never affected. Regression
+  tests cover the HTTP API (member and owner), the MCP tools (unscoped read
+  and write tokens) and the path helper.
+
+### Notes
+- No configuration change or migration needed — upgrade in place. Hidden
+  files and folders inside projects (names starting with `.`) were already
+  invisible to the index and are now also unreachable by path, for every
+  role.
+- If a member account or an unscoped MCP token has ever existed on the
+  instance, rotate account passwords and TOTP enrolments, outstanding invite
+  tokens, the git push token and MCP tokens. The audit log records
+  mutations, not reads, so a read-only disclosure leaves no trace.
+
 ## [2.24.0] — 2026-09-09 — "Go 1.27 + dependency roundup"
 
 ### Security
