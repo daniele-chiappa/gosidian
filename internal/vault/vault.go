@@ -155,10 +155,16 @@ func (v *Vault) Abs(rel string) (string, error) {
 	return filepath.Join(v.Root, filepath.FromSlash(r)), nil
 }
 
+// Load reads a note. Only note files are readable through the vault layer
+// (ADR-021, IMP-080): attachment bytes are served by /vault-files/ and
+// described by the attachment tools, never returned as Note.Content.
 func (v *Vault) Load(rel string) (*Note, error) {
 	r, err := v.Rel(rel)
 	if err != nil {
 		return nil, err
+	}
+	if !v.IsNoteFile(r) {
+		return nil, fmt.Errorf("%w: %q", ErrNotNote, r)
 	}
 	// Stat first so we can validate any cache entry against the current
 	// filesystem state. A cache hit saves the full file read.

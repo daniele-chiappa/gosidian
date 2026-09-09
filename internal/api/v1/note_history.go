@@ -1,9 +1,7 @@
 package v1
 
 import (
-	"errors"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -36,11 +34,7 @@ func (r *Router) readHistory(w http.ResponseWriter, req *http.Request, notePath 
 	// caller probe arbitrary git paths. Vault.Load already maps to
 	// the same fs space the gitsync.History expects.
 	if _, err := r.deps.Vault.Load(notePath); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			WriteError(w, http.StatusNotFound, CodeNotFound, "note not found")
-			return
-		}
-		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
+		writeLoadError(w, err)
 		return
 	}
 	limit, _ := strconv.Atoi(strings.TrimSpace(req.URL.Query().Get("limit")))

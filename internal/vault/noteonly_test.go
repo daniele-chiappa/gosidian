@@ -63,3 +63,26 @@ func TestVault_SaveAttachmentConfined(t *testing.T) {
 		t.Errorf("DeleteAttachment(note) err=%v, want ErrNotAttachment", err)
 	}
 }
+
+func TestVault_LoadRejectsNonNote(t *testing.T) {
+	v := newTestVault(t)
+	write(t, v.Root, "proj/attachments/a.png", "\x89PNG\r\n\x1a\nfake")
+	write(t, v.Root, "proj/x.sh", "#!/bin/sh\n")
+	write(t, v.Root, "proj/n.md", "# n\n")
+	write(t, v.Root, "proj/p.html", "<html><body>x</body></html>")
+	for _, rel := range []string{"proj/attachments/a.png", "proj/x.sh", "proj/p.html"} {
+		if _, err := v.Load(rel); !errors.Is(err, ErrNotNote) {
+			t.Errorf("Load(%q) err=%v, want ErrNotNote", rel, err)
+		}
+	}
+	if _, err := v.Load("proj/n.md"); err != nil {
+		t.Errorf("Load(note): %v", err)
+	}
+	v.SetHTMLNotes(true)
+	if _, err := v.Load("proj/p.html"); err != nil {
+		t.Errorf("Load(html, flag on): %v", err)
+	}
+	if _, err := v.Load("proj/missing.md"); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("Load(missing) err=%v, want ErrNotExist", err)
+	}
+}

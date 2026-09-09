@@ -545,7 +545,7 @@ func (s *Server) handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	}
 	note, err := s.vault.Load(path)
 	if err != nil {
-		return mcp.NewToolResultErrorf("cannot read %q: %v", path, err), nil
+		return readNoteError(path, err), nil
 	}
 	nc := noteContent{
 		Path:    note.Path,
@@ -636,7 +636,7 @@ func (s *Server) handleGetSection(ctx context.Context, req mcp.CallToolRequest) 
 	}
 	note, err := s.vault.Load(path)
 	if err != nil {
-		return mcp.NewToolResultErrorf("cannot read %q: %v", path, err), nil
+		return readNoteError(path, err), nil
 	}
 	section := parser.ExtractSection(note.Content, heading)
 	if section == "" {
@@ -714,7 +714,7 @@ func (s *Server) handleUpdate(ctx context.Context, req mcp.CallToolRequest) (*mc
 	defer unlock()
 	existing, err := s.vault.Load(rel)
 	if err != nil {
-		return mcp.NewToolResultErrorf("note %q does not exist", rel), nil
+		return writeNoteError(rel, err), nil
 	}
 	if errRes := checkIfMatch(existing, req.GetString("if_match", "")); errRes != nil {
 		return errRes, nil
@@ -836,7 +836,7 @@ func (s *Server) handleEdit(ctx context.Context, req mcp.CallToolRequest) (*mcp.
 	defer unlock()
 	note, err := s.vault.Load(rel)
 	if err != nil {
-		return mcp.NewToolResultErrorf("note %q does not exist", rel), nil
+		return writeNoteError(rel, err), nil
 	}
 	if errRes := checkIfMatch(note, req.GetString("if_match", "")); errRes != nil {
 		return errRes, nil
@@ -1202,6 +1202,9 @@ func (s *Server) handleBatchGet(ctx context.Context, req mcp.CallToolRequest) (*
 		note, err := s.vault.Load(p)
 		if err != nil {
 			entry.Error = "not found"
+			if errors.Is(err, vault.ErrNotNote) {
+				entry.Error = "not a note"
+			}
 			out = append(out, entry)
 			continue
 		}
@@ -1295,7 +1298,7 @@ func (s *Server) handleGetFrontmatter(ctx context.Context, req mcp.CallToolReque
 	}
 	note, err := s.vault.Load(path)
 	if err != nil {
-		return mcp.NewToolResultErrorf("cannot read %q: %v", path, err), nil
+		return readNoteError(path, err), nil
 	}
 	raw := parser.FrontmatterRawForPath(path, note.Content)
 	parsed := parser.ParseFrontmatterFields(raw)
@@ -1327,7 +1330,7 @@ func (s *Server) handleGetOutline(ctx context.Context, req mcp.CallToolRequest) 
 	}
 	note, err := s.vault.Load(path)
 	if err != nil {
-		return mcp.NewToolResultErrorf("cannot read %q: %v", path, err), nil
+		return readNoteError(path, err), nil
 	}
 	heads := parser.ExtractHeadings(note.Content)
 	out := make([]outlineHeading, 0, len(heads))
@@ -1437,4 +1440,23 @@ func buildProjectsFilter(requested []string, scope []string) projectsFilter {
 		}
 	}
 	return projectsFilter{active: true, allowed: allowed}
+}
+
+// readNoteError maps a Vault.Load failure into a tool error. A path that is
+// not a note gets a didactic hint (IMP-080): attachment bytes never travel
+// through the note tools.
+func readNoteError(path string, err error) *mcp.CallToolResult {
+	if errors.Is(err, vault.ErrNotNote) {
+		return mcp.NewToolResultErrorf("%q is not a note: attachments are described by memory_attachment_info and served at /vault-files/%s (session cookie or Authorization: Bearer); table and media notes are the .md next to the file", path, path)
+	}
+	return mcp.NewToolResultErrorf("cannot read %q: %v", path, err)
+}
+
+// writeNoteError is readNoteError's counterpart for the load-before-write of
+// memory_update / memory_edit: a non-note path points at the file tools.
+func writeNoteError(rel string, err error) *mcp.CallToolResult {
+	if errors.Is(err, vault.ErrNotNote) {
+		return mcp.NewToolResultErrorf("%q is not a note (.md, or .html when html notes are enabled) — files go through memory_ingest (bridge_filename, source_path, transfer:\"http\") or memory_upload_attachment", rel)
+	}
+	return mcp.NewToolResultErrorf("note %q does not exist", rel)
 }

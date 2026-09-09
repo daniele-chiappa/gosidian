@@ -8,6 +8,35 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.24.4] — 2026-09-09 — "hygiene: note-only reads"
+
+### Changed
+- **Reads through the vault layer are note-only.** `Vault.Load` — behind
+  `GET /api/v1/notes/{path}` (and its `excerpt`/`backlinks`/`history`
+  sub-routes) and the MCP read tools (`memory_get`, `memory_get_section`,
+  `memory_get_outline`, `memory_get_frontmatter`, `memory_batch_get`) —
+  used to return any file inside a project as note content, so an
+  attachment path handed to `memory_get` dumped binary into the agent's
+  context and a CSV came back as a "note". It now refuses paths that are
+  not note files (`.md`, or `.html` when HTML notes are enabled): the HTTP
+  API answers 400 with the same message the write guards use, and the MCP
+  tools answer with a hint pointing at `memory_attachment_info` and
+  `/vault-files/` (`memory_batch_get` marks the entry `not a note`;
+  `memory_update`/`memory_edit` on such a path point at `memory_ingest` /
+  `memory_upload_attachment`). Attachments, table notes and media notes are
+  unaffected — they never read bytes through the note path. Completes the
+  read side of v2.24.2's note-only rule.
+
+### Fixed
+- `npm run lint` reported 7 `no-undef` errors in `web/scripts/record-demo.mjs`
+  (`process` in a Node script): the ESLint flat config now declares the
+  Node globals for `scripts/**/*.mjs`. Style warnings are unchanged.
+
+### Notes
+- No configuration change or migration needed — upgrade in place. Agents
+  that used `memory_get` to fetch attachment bytes should use
+  `memory_attachment_info` and the served URL instead.
+
 ## [2.24.3] — 2026-09-09 — "attachments behind authentication"
 
 ### Security

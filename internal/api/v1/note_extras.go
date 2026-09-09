@@ -1,9 +1,7 @@
 package v1
 
 import (
-	"errors"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 )
@@ -33,11 +31,7 @@ func (r *Router) readBacklinks(w http.ResponseWriter, req *http.Request, notePat
 	// Reject if the note doesn't exist — backlinks for ghost paths
 	// would be confusing UX.
 	if _, err := r.deps.Vault.Load(notePath); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			WriteError(w, http.StatusNotFound, CodeNotFound, "note not found")
-			return
-		}
-		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
+		writeLoadError(w, err)
 		return
 	}
 	rows, err := r.deps.Index.Backlinks(notePath)
@@ -73,11 +67,7 @@ func (r *Router) readExcerpt(w http.ResponseWriter, req *http.Request, notePath 
 	}
 	note, err := r.deps.Vault.Load(notePath)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			WriteError(w, http.StatusNotFound, CodeNotFound, "note not found")
-			return
-		}
-		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
+		writeLoadError(w, err)
 		return
 	}
 	lines := 5

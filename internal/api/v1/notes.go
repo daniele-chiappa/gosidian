@@ -270,11 +270,7 @@ func (r *Router) readNote(w http.ResponseWriter, req *http.Request, rel string) 
 	}
 	note, err := r.deps.Vault.Load(rel)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			WriteError(w, http.StatusNotFound, CodeNotFound, "note not found")
-			return
-		}
-		WriteError(w, http.StatusInternalServerError, CodeServerInternal, "load: "+err.Error())
+		writeLoadError(w, err)
 		return
 	}
 	// ?inline returns the content with image references inlined as data: URIs,
@@ -323,11 +319,7 @@ func (r *Router) updateNote(w http.ResponseWriter, req *http.Request, rel string
 	defer unlock()
 	existing, err := r.deps.Vault.Load(rel)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			WriteError(w, http.StatusNotFound, CodeNotFound, "note not found")
-			return
-		}
-		WriteError(w, http.StatusInternalServerError, CodeServerInternal, "load: "+err.Error())
+		writeLoadError(w, err)
 		return
 	}
 	if ifMatch := strings.TrimSpace(req.Header.Get("If-Match")); ifMatch != "" {
@@ -386,11 +378,7 @@ func (r *Router) deleteNote(w http.ResponseWriter, req *http.Request, rel string
 	unlock := r.deps.Vault.LockPath(rel)
 	defer unlock()
 	if _, err := r.deps.Vault.Load(rel); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			WriteError(w, http.StatusNotFound, CodeNotFound, "note not found")
-			return
-		}
-		WriteError(w, http.StatusInternalServerError, CodeServerInternal, "load: "+err.Error())
+		writeLoadError(w, err)
 		return
 	}
 	if r.deps.Trash != nil {

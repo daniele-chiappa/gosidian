@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/gosidian/gosidian/internal/auth"
+	mcplib "github.com/mark3labs/mcp-go/mcp"
 )
 
 // ADR-021 on the MCP surface: write tools only touch note files; attachment
@@ -83,5 +84,40 @@ func TestMCP_NoteOnly_RenameKeepsNoteExtension(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "proj", "a.md")); err != nil {
 		t.Errorf("source note lost: %v", err)
+	}
+}
+
+// IMP-080: the read tools never return attachment bytes as note content.
+func TestMCP_NoteOnly_ReadsRejectAttachments(t *testing.T) {
+	s, _, root := newTestServer(t)
+	ctx := ctxWithToken(&auth.Token{ID: "noteonly", Name: "unscoped", Scopes: []string{auth.ScopeRead, auth.ScopeWrite}})
+	seedFile(t, root, "proj/attachments/data.csv", "secret,cell\n")
+	if res, _ := s.handleCreate(ctx, call(map[string]any{"path": "proj/n.md", "content": "# n\n"})); res == nil || res.IsError {
+		t.Fatalf("create note: %v", res)
+	}
+	res, _ := s.handleGet(ctx, call(map[string]any{"path": "proj/attachments/data.csv"}))
+	msg := expectError(t, res)
+	if !strings.Contains(msg, "memory_attachment_info") || strings.Contains(msg, "secret,cell") {
+		t.Errorf("memory_get on attachment: %q", msg)
+	}
+	if res, _ := s.handleGetOutline(ctx, call(map[string]any{"path": "proj/attachments/data.csv"})); res == nil || !res.IsError {
+		t.Errorf("memory_get_outline on attachment succeeded")
+	}
+	res, _ = s.handleUpdate(ctx, call(map[string]any{"path": "proj/attachments/data.csv", "content": "x"}))
+	if msg := expectError(t, res); !strings.Contains(msg, "memory_ingest") {
+		t.Errorf("memory_update on attachment should point at memory_ingest: %q", msg)
+	}
+	res, _ = s.handleBatchGet(ctx, call(map[string]any{"paths": []any{"proj/attachments/data.csv", "proj/n.md"}}))
+	if res == nil || res.IsError {
+		t.Fatalf("batch_get: %v", res)
+	}
+	text := ""
+	for _, c := range res.Content {
+		if tc, ok := c.(mcplib.TextContent); ok {
+			text += tc.Text
+		}
+	}
+	if !strings.Contains(text, "not a note") || strings.Contains(text, "secret,cell") || !strings.Contains(text, "# n") {
+		t.Errorf("batch_get mixed: %s", text)
 	}
 }
