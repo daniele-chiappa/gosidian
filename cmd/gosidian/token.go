@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gosidian/gosidian/internal/auth"
+	"github.com/gosidian/gosidian/internal/statedir"
 )
 
 // runTokenCmd implements the `gosidian token <action>` subcommand. It opens
@@ -71,7 +72,7 @@ Opt-in options:
   --off                   Withdraw the opt-in instead of granting it`)
 }
 
-func openStore(vaultDir string) *auth.Store {
+func openStore(vaultDir, stateDirFlag string) *auth.Store {
 	if vaultDir == "" {
 		log.Fatal("--vault is required")
 	}
@@ -79,7 +80,12 @@ func openStore(vaultDir string) *auth.Store {
 	if err != nil {
 		log.Fatalf("vault: %v", err)
 	}
-	path := filepath.Join(abs, ".gosidian", "tokens.json")
+	// Same resolution as `serve` (ADR-023): --state-dir > GOSIDIAN_STATE_DIR > <vault>/.gosidian.
+	sdir, _, err := statedir.Resolve(abs, stateDirFlag, os.Getenv(statedir.EnvVar))
+	if err != nil {
+		log.Fatalf("state dir: %v", err)
+	}
+	path := filepath.Join(sdir, "tokens.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		log.Fatalf("mkdir: %v", err)
 	}
@@ -93,6 +99,7 @@ func openStore(vaultDir string) *auth.Store {
 func tokenCreate(args []string) {
 	fs := flag.NewFlagSet("token create", flag.ExitOnError)
 	vaultDir := fs.String("vault", "", "vault directory")
+	stateDirFlag := fs.String("state-dir", "", "state dir (default <vault>/.gosidian; env GOSIDIAN_STATE_DIR)")
 	name := fs.String("name", "", "token name")
 	project := fs.String("project", "", "comma-separated project list (empty = admin)")
 	scopesCSV := fs.String("scopes", "read,write", "comma-separated scopes")
@@ -105,7 +112,7 @@ func tokenCreate(args []string) {
 		log.Fatalf("invalid --tool-profile %q (expected core or full)", *toolProfile)
 	}
 
-	store := openStore(*vaultDir)
+	store := openStore(*vaultDir, *stateDirFlag)
 	scopes := splitCSV(*scopesCSV)
 
 	plaintext, tok, err := store.Create(*name, splitCSV(*project), scopes, *ttl, "")
@@ -146,9 +153,10 @@ func tokenCreate(args []string) {
 func tokenList(args []string) {
 	fs := flag.NewFlagSet("token list", flag.ExitOnError)
 	vaultDir := fs.String("vault", "", "vault directory")
+	stateDirFlag := fs.String("state-dir", "", "state dir (default <vault>/.gosidian; env GOSIDIAN_STATE_DIR)")
 	_ = fs.Parse(args)
 
-	store := openStore(*vaultDir)
+	store := openStore(*vaultDir, *stateDirFlag)
 	tokens := store.List()
 	if len(tokens) == 0 {
 		fmt.Println("(no tokens — auth disabled)")
@@ -181,10 +189,11 @@ func tokenList(args []string) {
 func tokenRevoke(args []string) {
 	fs := flag.NewFlagSet("token revoke", flag.ExitOnError)
 	vaultDir := fs.String("vault", "", "vault directory")
+	stateDirFlag := fs.String("state-dir", "", "state dir (default <vault>/.gosidian; env GOSIDIAN_STATE_DIR)")
 	id := fs.String("id", "", "token id (from `token list`)")
 	_ = fs.Parse(args)
 
-	store := openStore(*vaultDir)
+	store := openStore(*vaultDir, *stateDirFlag)
 	if err := store.Revoke(*id); err != nil {
 		log.Fatalf("revoke: %v", err)
 	}
@@ -198,6 +207,7 @@ func tokenRevoke(args []string) {
 func tokenOptIn(args []string) {
 	fs := flag.NewFlagSet("token opt-in", flag.ExitOnError)
 	vaultDir := fs.String("vault", "", "vault directory")
+	stateDirFlag := fs.String("state-dir", "", "state dir (default <vault>/.gosidian; env GOSIDIAN_STATE_DIR)")
 	id := fs.String("id", "", "token id (from `token list`)")
 	all := fs.Bool("all", false, "apply to every token")
 	off := fs.Bool("off", false, "withdraw the opt-in instead of granting it")
@@ -207,7 +217,7 @@ func tokenOptIn(args []string) {
 		log.Fatal("exactly one of --id or --all is required")
 	}
 
-	store := openStore(*vaultDir)
+	store := openStore(*vaultDir, *stateDirFlag)
 	optIn := !*off
 
 	if *all {

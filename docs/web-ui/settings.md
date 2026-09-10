@@ -1,6 +1,6 @@
 # Settings
 
-The `/settings` page edits `<vault>/.gosidian/config.toml`. Changes to
+The `/settings` page edits `<state-dir>/config.toml`. Changes to
 the theme take effect on the next page refresh; git sync changes take
 effect on the next server restart.
 

@@ -66,12 +66,16 @@ FROM alpine:3.24
 RUN apk add --no-cache git ca-certificates \
     && addgroup -g 65532 -S nonroot \
     && adduser -u 65532 -S nonroot -G nonroot \
-    && mkdir -p /vault \
-    && chown 65532:65532 /vault
+    && mkdir -p /vault /data \
+    && chown 65532:65532 /vault /data
 
 COPY --from=go-builder /out/gosidian /gosidian
 
 USER 65532:65532
+# /data is the recommended mount for GOSIDIAN_STATE_DIR (ADR-023): mount a
+# volume there and set the env to keep credentials, config, audit log and
+# index out of the vault. Deliberately not a VOLUME — an anonymous volume
+# would hide the choice; the default state dir stays <vault>/.gosidian.
 WORKDIR /data
 VOLUME ["/vault"]
 

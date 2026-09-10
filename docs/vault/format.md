@@ -7,7 +7,7 @@ from the file contents + a small frontmatter convention.
 ## Source of truth
 
 The markdown files on disk are authoritative. The SQLite index at
-`<vault>/.gosidian/index.db` is a **cache**: wipe it and the next
+`<state-dir>/index.db` (default `<vault>/.gosidian/index.db`) is a **cache**: wipe it and the next
 startup rebuilds it from the files. This has three consequences:
 
 - **External edits are supported**. Edit from Obsidian, VS Code,
@@ -25,7 +25,7 @@ startup rebuilds it from the files. This has three consequences:
 
 ```
 vault/
-├── .gosidian/          # machine-owned (not versioned)
+├── .gosidian/          # machine-owned (not versioned); state files move out with --state-dir
 │   ├── index.db        # SQLite FTS5 index (rebuildable)
 │   ├── tokens.json     # MCP bearer tokens (hashed)
 │   ├── auth.json       # webauth accounts + invites
@@ -173,6 +173,11 @@ Rows: 12480
 See **ADR-016** for the rationale.
 
 ## Bootstrap templates
+
+With `--state-dir` (recommended, see [Configuration → State
+directory](../configuration.md#state-directory)) the credential store,
+config, audit log and index move out of the vault root and `.gosidian/`
+holds vault content only: `templates/` and `trash/`.
 
 Three templates ship with the binary and are seeded into
 `.gosidian/templates/` on first start:

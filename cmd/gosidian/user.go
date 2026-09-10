@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/gosidian/gosidian/internal/qrsvg"
+	"github.com/gosidian/gosidian/internal/statedir"
 	"github.com/gosidian/gosidian/internal/webauth"
 	"golang.org/x/term"
 )
@@ -55,7 +56,7 @@ Setup options:
   --password-stdin   Read password from stdin instead of prompt`)
 }
 
-func openWebauth(vaultDir string) *webauth.Store {
+func openWebauth(vaultDir, stateDirFlag string) *webauth.Store {
 	if vaultDir == "" {
 		log.Fatal("--vault is required")
 	}
@@ -63,7 +64,12 @@ func openWebauth(vaultDir string) *webauth.Store {
 	if err != nil {
 		log.Fatalf("vault: %v", err)
 	}
-	path := filepath.Join(abs, ".gosidian", "auth.json")
+	// Same resolution as `serve` (ADR-023): --state-dir > GOSIDIAN_STATE_DIR > <vault>/.gosidian.
+	sdir, _, err := statedir.Resolve(abs, stateDirFlag, os.Getenv(statedir.EnvVar))
+	if err != nil {
+		log.Fatalf("state dir: %v", err)
+	}
+	path := filepath.Join(sdir, "auth.json")
 	store, err := webauth.Open(path)
 	if err != nil {
 		log.Fatalf("open web auth: %v", err)
@@ -74,12 +80,13 @@ func openWebauth(vaultDir string) *webauth.Store {
 func userSetup(args []string) {
 	fs := flag.NewFlagSet("user setup", flag.ExitOnError)
 	vaultDir := fs.String("vault", "", "vault directory")
+	stateDirFlag := fs.String("state-dir", "", "state dir (default <vault>/.gosidian; env GOSIDIAN_STATE_DIR)")
 	username := fs.String("username", "admin", "account username")
 	enableTOTP := fs.Bool("totp", false, "enable TOTP")
 	pwStdin := fs.Bool("password-stdin", false, "read password from stdin instead of prompt")
 	_ = fs.Parse(args)
 
-	store := openWebauth(*vaultDir)
+	store := openWebauth(*vaultDir, *stateDirFlag)
 
 	password, err := readPassword(*pwStdin)
 	if err != nil {
@@ -113,9 +120,10 @@ func userSetup(args []string) {
 func userDisable(args []string) {
 	fs := flag.NewFlagSet("user disable", flag.ExitOnError)
 	vaultDir := fs.String("vault", "", "vault directory")
+	stateDirFlag := fs.String("state-dir", "", "state dir (default <vault>/.gosidian; env GOSIDIAN_STATE_DIR)")
 	_ = fs.Parse(args)
 
-	store := openWebauth(*vaultDir)
+	store := openWebauth(*vaultDir, *stateDirFlag)
 	if !store.Enabled() {
 		fmt.Println("Auth already disabled.")
 		return
@@ -133,9 +141,10 @@ func userDisable(args []string) {
 func userStatus(args []string) {
 	fs := flag.NewFlagSet("user status", flag.ExitOnError)
 	vaultDir := fs.String("vault", "", "vault directory")
+	stateDirFlag := fs.String("state-dir", "", "state dir (default <vault>/.gosidian; env GOSIDIAN_STATE_DIR)")
 	_ = fs.Parse(args)
 
-	store := openWebauth(*vaultDir)
+	store := openWebauth(*vaultDir, *stateDirFlag)
 	if !store.Enabled() {
 		fmt.Println("disabled")
 		return

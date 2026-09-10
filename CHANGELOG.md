@@ -8,6 +8,42 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.25.0] — 2026-09-10 — "state directory"
+
+### Added
+- **`--state-dir` / `GOSIDIAN_STATE_DIR`: keep credentials, config and the
+  index out of the vault root.** The machine-owned files — `auth.json`
+  (accounts, TOTP secrets, invites), `tokens.json` and `spa_tokens.json`
+  (hashed tokens), `gitsync.json`, `config.toml`, `projects.json`,
+  `audit.jsonl` and the SQLite index — lived in `<vault>/.gosidian/`:
+  reachable by any path that resolves inside the vault (the class closed in
+  v2.23.1 and v2.24.1) and kept out of the vault's git repository only by
+  the managed `.gitignore` block. With a state dir configured they live
+  elsewhere by construction. **Default unchanged** (`<vault>/.gosidian/`).
+  The first start with a custom directory migrates the known files once
+  (rename, or copy+remove across filesystems, permissions preserved),
+  leaves files already present in the destination untouched (logged), and
+  writes a `STATE-MOVED-TO` marker in the old location. `templates/` and
+  `trash/` are vault content and stay under `<vault>/.gosidian/`. The
+  `user` and `token` subcommands honour the same setting. Docker: mount a
+  volume on `/data` and set `GOSIDIAN_STATE_DIR=/data` — the image creates
+  `/data` but deliberately declares no volume and no default, so the choice
+  stays explicit. See `docs/configuration.md` (*State directory*) and the
+  compose examples.
+
+### Changed
+- `--db` / `GOSIDIAN_DB` now relocates the index alone. Previously every
+  state file silently followed the index's directory; if you relied on
+  that, point `--state-dir` at the same directory.
+- Docs: the backup section is written around the state dir; the
+  authentication and settings pages refer to `<state-dir>/…`.
+
+### Notes
+- Nothing to do to upgrade in place. To adopt the recommended layout: stop,
+  add the volume and `GOSIDIAN_STATE_DIR`, start — the migration is
+  automatic and idempotent. To revert: stop and move the files from the
+  state dir back into `<vault>/.gosidian/`.
+
 ## [2.24.4] — 2026-09-09 — "hygiene: note-only reads"
 
 ### Changed

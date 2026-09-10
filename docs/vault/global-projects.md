@@ -24,7 +24,7 @@ the defaults are `global` and `global-private`.
 
 ## Enabling it
 
-Operator master switch (off by default), in `<vault>/.gosidian/config.toml`:
+Operator master switch (off by default), in `<state-dir>/config.toml`:
 
 ```toml
 [global]
@@ -41,7 +41,7 @@ the two projects are seeded on the next boot.
 
 Sharing is **per project** and opt-in — a project only sees global
 material once it sets the `use_globals` flag in the projects store
-(`<vault>/.gosidian/projects.json`):
+(`<state-dir>/projects.json`):
 
 ```json
 { "my-project": { "use_globals": true } }

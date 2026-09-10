@@ -6,7 +6,7 @@ enabled — by logging in against your directory. This page covers the
 role model, project visibility, two-factor (TOTP), and LDAP / Active
 Directory login.
 
-> If `<vault>/.gosidian/auth.json` does not exist, authentication is
+> If `<state-dir>/auth.json` does not exist, authentication is
 > **disabled** and the UI is open (local bootstrap mode). The first
 > `gosidian user setup` or the on-screen "create admin" step turns it on.
 

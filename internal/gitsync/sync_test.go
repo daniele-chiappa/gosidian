@@ -51,9 +51,9 @@ func TestSync_InitAndCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.TriggerCommit()
-
-	// Wait past debounce
-	time.Sleep(200 * time.Millisecond)
+	// Flush is synchronous: it stops the debounce timer and runs the commit
+	// inline (BUG-006/BUG-032 — never sleep-then-assert on git timing).
+	s.Flush()
 
 	out, err := exec.Command("git", "-C", dir, "log", "--oneline").Output()
 	if err != nil {

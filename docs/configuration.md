@@ -4,7 +4,7 @@ Settings come from four sources, in decreasing precedence:
 
 1. **CLI flags** (`--vault`, `--addr`, `--db`, `--mcp-addr`)
 2. **Environment variables** (`GOSIDIAN_*`)
-3. **`<vault>/.gosidian/config.toml`** (edited from `/settings` UI)
+3. **`<state-dir>/config.toml`** (edited from `/settings` UI)
 4. **Built-in defaults**
 
 ## Environment variables
@@ -13,7 +13,8 @@ Settings come from four sources, in decreasing precedence:
 |---|---|---|
 | `GOSIDIAN_VAULT` | — (CLI only `--vault`) | *required* |
 | `GOSIDIAN_ADDR` | — (CLI `--addr`) | `:8080` |
-| `GOSIDIAN_DB` | — (CLI `--db`) | `<vault>/.gosidian/index.db` |
+| `GOSIDIAN_STATE_DIR` | `--state-dir` | `<vault>/.gosidian` (see [State directory](#state-directory)) |
+| `GOSIDIAN_DB` | — (CLI `--db`) | `<state-dir>/index.db` |
 | `GOSIDIAN_MCP_ADDR` | — (CLI `--mcp-addr`) | empty (legacy listener disabled; MCP is always at `/mcp/sse` on the web port) |
 | `GOSIDIAN_LOG_LEVEL` | — | `info` (`debug`, `warn`, `error`) |
 | `GOSIDIAN_LOG_FORMAT` | — | `text` (`json`) |
@@ -67,7 +68,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_ANCHORS_ENABLED` | `agent_anchors.enabled` | `false` (master switch for [agent anchors](mcp/agent-anchors.md); per-project opt-in via the `use_anchors` flag) |
 | — | `lint.hot_oversize_bytes` | `16384` (threshold for the `hot-oversize` lint rule) |
 
-The `config.toml` at `<vault>/.gosidian/config.toml` holds the
+The `config.toml` at `<state-dir>/config.toml` holds the
 persistent form of the same settings and is edited from the web UI at
 `/settings`. Env vars override the file on every start.
 
@@ -89,7 +90,7 @@ and a vault gradually accumulates a coherent metadata language.
 Some vaults legitimately use additional tags that are part of their
 own structural conventions. To keep those tags warning-free without
 weakening the rule for everyone, add them under
-`[lint.frontmatter_tag_vocabulary]` in `<vault>/.gosidian/config.toml`:
+`[lint.frontmatter_tag_vocabulary]` in `<state-dir>/config.toml`:
 
 ```toml
 [lint.frontmatter_tag_vocabulary]
@@ -129,7 +130,7 @@ agents can maintain it with regular note edits:
 
 1. Enable the project's `use_tag_vocabulary` flag (Projects view in
    the web UI, or `use_tag_vocabulary` via `PUT /api/v1/projects/{name}` —
-   persisted in `<vault>/.gosidian/projects.json`). Default off: the
+   persisted in `<state-dir>/projects.json`). Default off: the
    declaration below is inert without it.
 2. Declare the extra vocabulary in the frontmatter of
    `<project>/memory/conventions.md`, field `tag_vocabulary:`:
@@ -175,3 +176,23 @@ gosidian import-vault --vault <path> [flags]
 ```
 
 Run `gosidian token -h` etc. for per-subcommand options.
+
+## State directory
+
+`<state-dir>` is where gosidian keeps its machine-owned files: `auth.json`
+(web accounts), `tokens.json` and `spa_tokens.json` (hashed tokens),
+`gitsync.json`, `config.toml`, `projects.json`, `audit.jsonl` and the
+SQLite index. By default it is `<vault>/.gosidian/`, unchanged from earlier
+releases. Set `--state-dir` (or `GOSIDIAN_STATE_DIR`) to move it **out of
+the vault root** — the recommended layout: nothing that resolves inside the
+vault can reach the credential store, and the vault's git repository never
+contains it, by construction rather than by `.gitignore`.
+
+On the first start with a custom state dir, the known files are moved from
+`<vault>/.gosidian/` into it (rename, or copy+remove across filesystems);
+files already present in the destination are left untouched and logged;
+a `STATE-MOVED-TO` marker is written in the old location. `templates/` and
+`trash/` are vault content and stay under `<vault>/.gosidian/`. `--db`
+relocates the index alone. The `user` and `token` subcommands honour the
+same flag and variable. In Docker, mount a volume on `/data` and set
+`GOSIDIAN_STATE_DIR=/data`.

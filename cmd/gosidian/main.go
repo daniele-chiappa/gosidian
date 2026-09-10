@@ -29,6 +29,7 @@ import (
 	"github.com/gosidian/gosidian/internal/scaffold"
 	"github.com/gosidian/gosidian/internal/server"
 	"github.com/gosidian/gosidian/internal/server/events"
+	"github.com/gosidian/gosidian/internal/statedir"
 	"github.com/gosidian/gosidian/internal/trash"
 	"github.com/gosidian/gosidian/internal/vault"
 	"github.com/gosidian/gosidian/internal/webauth"
@@ -90,7 +91,8 @@ func main() {
 
 	vaultDir := flag.String("vault", "", "path to vault directory (required)")
 	addr := flag.String("addr", ":8080", "HTTP listen address")
-	dbPath := flag.String("db", "", "path to SQLite index file (default: <vault>/.gosidian/index.db)")
+	dbPath := flag.String("db", "", "path to SQLite index file (default: <state-dir>/index.db)")
+	stateDir := flag.String("state-dir", "", "directory for machine-owned state — credentials, config, project flags, audit log, index (default: <vault>/.gosidian; env GOSIDIAN_STATE_DIR). Setting it moves those files out of the vault root, migrating them once at boot.")
 	mcpAddr := flag.String("mcp-addr", "", "Optional standalone MCP (HTTP+SSE) listen address (e.g. 127.0.0.1:8765). Deprecated: MCP is always served on the web port at /mcp/sse. Set this only when a separate listener is required for backward compatibility.")
 	flag.Parse()
 
@@ -99,6 +101,7 @@ func main() {
 	envOverride(vaultDir, "GOSIDIAN_VAULT", "")
 	envOverride(addr, "GOSIDIAN_ADDR", ":8080")
 	envOverride(dbPath, "GOSIDIAN_DB", "")
+	envOverride(stateDir, statedir.EnvVar, "")
 	envOverride(mcpAddr, "GOSIDIAN_MCP_ADDR", "")
 
 	if *vaultDir == "" {
@@ -112,12 +115,36 @@ func main() {
 		log.Fatalf("vault dir not accessible: %v", err)
 	}
 
-	if *dbPath == "" {
-		hidden := filepath.Join(absVault, ".gosidian")
-		if err := os.MkdirAll(hidden, 0o755); err != nil {
-			log.Fatalf("mkdir .gosidian: %v", err)
+	// State dir (ADR-023): credentials, config, project flags, audit log and
+	// the index live here. Default <vault>/.gosidian (unchanged); an explicit
+	// --state-dir / GOSIDIAN_STATE_DIR moves them out of the vault root with a
+	// one-time migration of the known files. templates/ and trash/ are vault
+	// content and always stay under <vault>/.gosidian.
+	sdir, sdirDefault, err := statedir.Resolve(absVault, *stateDir, "")
+	if err != nil {
+		log.Fatalf("state dir: %v", err)
+	}
+	legacyDir := filepath.Join(absVault, statedir.DefaultSubdir)
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		log.Fatalf("mkdir .gosidian: %v", err)
+	}
+	if sdirDefault {
+		log.Printf("state dir: %s (default, inside the vault)", sdir)
+	} else {
+		if err := os.MkdirAll(sdir, 0o700); err != nil {
+			log.Fatalf("mkdir state dir: %v", err)
 		}
-		*dbPath = filepath.Join(hidden, "index.db")
+		moved, err := statedir.Migrate(legacyDir, sdir, log.Printf)
+		if err != nil {
+			log.Fatalf("state dir migration: %v", err)
+		}
+		if len(moved) > 0 {
+			log.Printf("state dir: moved %v from %s to %s", moved, legacyDir, sdir)
+		}
+		log.Printf("state dir: %s (custom)", sdir)
+	}
+	if *dbPath == "" {
+		*dbPath = filepath.Join(sdir, "index.db")
 	}
 
 	metrics.Register()
@@ -128,7 +155,9 @@ func main() {
 	}
 	defer idx.Close()
 
-	hiddenDir := filepath.Dir(*dbPath)
+	// Every machine-owned file follows the state dir, not the index path:
+	// --db relocates the index alone.
+	hiddenDir := sdir
 	tokensPath := filepath.Join(hiddenDir, "tokens.json")
 	tokenStore, err := auth.Open(tokensPath)
 	if err != nil {

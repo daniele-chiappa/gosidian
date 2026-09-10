@@ -5,7 +5,7 @@ on the server.
 
 ## MCP bearer tokens
 
-When `<vault>/.gosidian/tokens.json` is empty, the MCP endpoint is
+When `<state-dir>/tokens.json` is empty, the MCP endpoint is
 **open** (useful for localhost development). The first token you create
 switches auth on globally.
 

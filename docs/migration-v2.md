@@ -54,7 +54,7 @@ shell catch-all returns the SPA for any unmatched path.
 - Cookie-session auth (`gosidian_session`) is gone. The SPA uses
   Bearer tokens (`gsp_<base64url>`) returned by `POST /api/v1/login`
   and persisted in `localStorage` under `gosidian.auth`.
-- MCP token store remains separate (`/.gosidian/tokens.json`) and
+- MCP token store remains separate (`<state-dir>/tokens.json`, default `<vault>/.gosidian/`) and
   unchanged for agents.
 - The `GOSIDIAN_SPA_MODE` env flag — used during the v2-spa
   development branch as a feature gate — has been removed; the

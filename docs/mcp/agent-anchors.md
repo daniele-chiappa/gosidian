@@ -37,7 +37,7 @@ exactly as before and no anchor is ever surfaced:
 1. **Master switch**: `GOSIDIAN_ANCHORS_ENABLED=true`
    (`agent_anchors.enabled` in `config.toml`).
 2. **Per-project opt-in**: the `use_anchors` flag on the project
-   (project flags live in `<vault>/.gosidian/projects.json`,
+   (project flags live in `<state-dir>/projects.json`,
    alongside `use_globals` / `public` / `hidden_from_mcp`).
 3. **A profile that supports native subagents**: pass
    `profile="claude"` (the default) to `memory_bootstrap`; profiles

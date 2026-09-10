@@ -128,6 +128,10 @@ func TestMCP_WaitChangesOneWaiterPerSession(t *testing.T) {
 		_, _ = s.handleWaitChanges(ctx, call(map[string]any{"timeout_s": 2}))
 	}()
 	<-started
+	// Readiness sleep (BUG-032 survey): the first waiter has no observable
+	// "in flight" state other than the error the second call gets; the
+	// window only makes the negative assertion more likely, never a false
+	// failure of a positive one.
 	time.Sleep(100 * time.Millisecond)
 
 	res, _ := s.handleWaitChanges(ctx, call(map[string]any{"timeout_s": 1}))

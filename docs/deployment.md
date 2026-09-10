@@ -100,21 +100,25 @@ mcp-legacy.example.com {
 
 ## Backup & disaster recovery
 
-Back up the **vault directory** and `<vault>/.gosidian/`:
+Back up the **vault directory** and the **state dir** (`--state-dir` / `GOSIDIAN_STATE_DIR`, default `<vault>/.gosidian/`; see [Configuration → State directory](configuration.md#state-directory)):
 
-- The SQLite index (`.gosidian/index.db`) is **safe to drop** — it
+- The SQLite index (`<state-dir>/index.db`) is **safe to drop** — it
   rebuilds from the markdown files at the next start.
-- `.gosidian/tokens.json`, `.gosidian/auth.json`,
-  `.gosidian/audit.jsonl`, `.gosidian/config.toml` are the only
-  stateful files outside the vault proper. Include them in backups.
+- `<state-dir>/tokens.json`, `spa_tokens.json`, `auth.json`,
+  `gitsync.json`, `projects.json`, `audit.jsonl` and `config.toml` are
+  the only stateful files outside the vault proper. Include them in
+  backups — `auth.json` and `gitsync.json` hold secrets, keep the
+  archive private.
 
 Git sync (when enabled) adds a second copy of the vault on a remote
-git host. It does **not** back up `.gosidian/` (by design — tokens
-and auth live only on the server).
+git host. It does **not** back up the state dir (by design — tokens
+and auth live only on the server; with `--state-dir` they are outside
+the repository altogether).
 
-Recommended cadence: nightly tarball of `./vault` (including
-`.gosidian/`) with 14-day retention. If git sync is enabled, the
-remote already holds a second copy of the notes themselves.
+Recommended cadence: nightly tarball of `./vault` and of the state dir
+(one archive when the default `<vault>/.gosidian/` is in use) with
+14-day retention. If git sync is enabled, the remote already holds a
+second copy of the notes themselves.
 
 ## Health probe
 

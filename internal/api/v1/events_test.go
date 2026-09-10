@@ -80,12 +80,11 @@ func TestEvents_StreamsPublishedEvent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Publish from another goroutine. Give the subscription a moment
-	// to register before publishing — Subscribe is synchronous but
-	// the HTTP roundtrip + handler entry + Hub.Subscribe call are
-	// not. 50ms is plenty in practice and fast enough that the test
-	// stays under a second.
-	time.Sleep(50 * time.Millisecond)
+	// Publish from another goroutine once the subscription is registered:
+	// the HTTP roundtrip + handler entry + Hub.Subscribe are asynchronous
+	// from here, so wait for the hub to see the subscriber instead of
+	// sleeping a fixed amount (BUG-032).
+	waitSubscribers(t, f.router.deps.Events, 1)
 	go func() {
 		f.router.deps.Events.Publish(events.TopicTree, map[string]string{"action": "test", "path": "x.md"})
 	}()
@@ -133,7 +132,7 @@ func TestEvents_TopicFilter(t *testing.T) {
 	// Drain initial comment.
 	_, _, _ = reader.ReadLine()
 	_, _, _ = reader.ReadLine()
-	time.Sleep(50 * time.Millisecond)
+	waitSubscribers(t, f.router.deps.Events, 1)
 
 	// Publish a tree event the subscriber should NOT receive.
 	f.router.deps.Events.Publish(events.TopicTree, map[string]string{"action": "tree-only"})
@@ -181,5 +180,19 @@ func TestEvents_RejectsNonGet(t *testing.T) {
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusMethodNotAllowed {
 		t.Errorf("status=%d, want 405", res.StatusCode)
+	}
+}
+
+// waitSubscribers blocks until the hub reports at least n subscriptions or
+// the deadline passes. Readiness must be observed, never assumed from a
+// sleep (BUG-032).
+func waitSubscribers(t *testing.T, hub *events.Hub, n int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for hub.SubCount() < n {
+		if time.Now().After(deadline) {
+			t.Fatalf("subscriber did not register: have %d, want %d", hub.SubCount(), n)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }

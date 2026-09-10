@@ -24,7 +24,10 @@ func TestWatcher_NewSubdirRace(t *testing.T) {
 		done <- v.Watch(ctx, idx, nil)
 	}()
 
-	// Give the watcher a moment to install its initial watches.
+	// Give the watcher a moment to install its initial watches. This is a
+	// readiness sleep, not a sleep-then-assert: the assertion below polls
+	// with a 2s deadline. Watch exposes no "ready" signal to wait on
+	// (BUG-032 survey); adding one for a test alone was judged not worth it.
 	time.Sleep(150 * time.Millisecond)
 
 	// Create dir + file in tight sequence — this is the race.

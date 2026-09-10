@@ -71,14 +71,18 @@ func TestSpaTokenStore_ValidateRejectsHardExpired(t *testing.T) {
 func TestSpaTokenStore_Refresh(t *testing.T) {
 	dir := t.TempDir()
 	s, _ := OpenSpaTokens(filepath.Join(dir, "spa.json"))
-	s.SetTTL(50*time.Millisecond, 1*time.Hour)
+	// Wide windows on purpose (BUG-032): the assertion is bidirectional
+	// ("still has time left"), so the margin must dwarf any scheduling
+	// hiccup on a shared CI runner. Expiry-only checks below keep tiny
+	// TTLs because waiting longer can only make them pass.
+	s.SetTTL(2*time.Second, 1*time.Hour)
 	plain, _, _ := s.Create("user-1", "")
 	time.Sleep(20 * time.Millisecond)
 	got, err := s.Refresh(plain)
 	if err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
-	if got.ExpiresAt.Sub(time.Now().UTC()) < 30*time.Millisecond {
+	if got.ExpiresAt.Sub(time.Now().UTC()) < 1*time.Second {
 		t.Errorf("refresh did not extend ExpiresAt")
 	}
 	// Refresh after hard expiry should fail
