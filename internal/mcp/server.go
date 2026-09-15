@@ -400,6 +400,10 @@ func (s *Server) Handler(basePath string) http.Handler {
 	// <basePath>/sse and /message under the catch-all.
 	mux := http.NewServeMux()
 	mux.HandleFunc(basePath+"/upload", s.handleHTTPUpload)
+	// Read-side twin: GET the raw bytes of a note with the same bearer, so a
+	// large note reaches the agent's disk without crossing the model context
+	// (IMP-081).
+	mux.HandleFunc(basePath+"/download", s.handleHTTPDownload)
 	// Single-use ticket redemption for memory_ingest transfer:http (ADR-018).
 	// No bearer here: the unguessable ticket id, bound to the minting token,
 	// is the credential.

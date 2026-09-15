@@ -31,6 +31,17 @@ func DataURI(data []byte, ext string) string {
 	return "data:" + info.MIME + ";base64," + base64.StdEncoding.EncodeToString(data)
 }
 
+// SetInertHeaders makes a response carrying vault bytes inert (ADR-021,
+// BUG-030): whatever the content is — an SVG with a <script>, an HTML note —
+// nothing executes in the app origin when the URL is opened directly. Shared
+// by /vault-files/ and the MCP /download endpoint. The sandbox CSP does not
+// affect <img> embedding.
+func SetInertHeaders(h http.Header) {
+	h.Set("Content-Security-Policy", "default-src 'none'; script-src 'none'; style-src 'none'; sandbox")
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Referrer-Policy", "no-referrer")
+}
+
 // MaxBytes is the largest raw attachment the system accepts (10 MiB).
 const MaxBytes = 10 << 20
 

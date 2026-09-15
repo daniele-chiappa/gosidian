@@ -168,7 +168,7 @@ func (s *Server) handleVaultFile(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		setAttachmentSecurityHeaders(w)
+		attach.SetInertHeaders(w.Header())
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
 		_, _ = w.Write([]byte(uri))
@@ -181,7 +181,7 @@ func (s *Server) handleVaultFile(w http.ResponseWriter, r *http.Request) {
 		ct = info.MIME
 		isImage = info.IsImage
 	}
-	setAttachmentSecurityHeaders(w)
+	attach.SetInertHeaders(w.Header())
 	if !isImage {
 		// Non-image attachments are downloads, never documents rendered in the
 		// app origin. Images stay inline so <img> embedding keeps working.
@@ -190,17 +190,6 @@ func (s *Server) handleVaultFile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
 	http.ServeFile(w, r, abs)
-}
-
-// setAttachmentSecurityHeaders makes an attachment response inert (ADR-021,
-// BUG-030): whatever the bytes are — an SVG carrying a <script>, an HTML-
-// looking text file — nothing executes in the app origin when the URL is
-// opened directly. The sandbox CSP does not affect <img> embedding.
-func setAttachmentSecurityHeaders(w http.ResponseWriter) {
-	h := w.Header()
-	h.Set("Content-Security-Policy", "default-src 'none'; script-src 'none'; style-src 'none'; sandbox")
-	h.Set("X-Content-Type-Options", "nosniff")
-	h.Set("Referrer-Policy", "no-referrer")
 }
 
 // statusRecorder lets the metrics middleware observe the final status

@@ -126,7 +126,10 @@ for precise schemas; the groupings below are the conceptual map.
 
 The single-step / pre-uploader split, the equivalent REST endpoint
 `POST /api/upload`, and the full error catalogue live in
-[Upload flow](upload.md).
+[Upload flow](upload.md). The read-side twin — `GET /mcp/download?path=`
+serving a note's raw bytes with the same bearer token, so a large note
+reaches the agent's disk without crossing the model context — is
+documented there too.
 
 ## Orchestration (agent-to-agent handoffs + change feed)
 

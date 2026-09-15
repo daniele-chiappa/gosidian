@@ -8,6 +8,40 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.26.0] — 2026-09-15 — "MCP note download"
+
+### Added
+- **`GET /mcp/download?path=<note>` — a note's raw bytes for the MCP bearer
+  token.** The read-side twin of `POST /mcp/upload` and of the
+  `memory_ingest` upload ticket: your MCP `/sse` URL with `/sse` replaced by
+  `/download` returns the note as-is (`text/markdown` or `text/html`),
+  authenticated by the MCP token with the `read` scope and confined to its
+  project scope (404 outside it, the same fail-closed shape as
+  `/vault-files/`). The response carries an RFC 7232 quoted `ETag` with the
+  same stamp `memory_get` returns, and every `if_match` (`memory_update`,
+  `memory_edit`, `memory_append`, `memory_ingest overwrite`) now accepts
+  that quoted form verbatim — so a large self-contained `.html` report can
+  be fetched to disk, edited locally and re-ingested with CAS, without a
+  byte crossing the model context. Notes only: attachments keep
+  `/vault-files/` (same bearer), and the `400` on an attachment path says
+  so. Served inert like `/vault-files/` (sandbox CSP, `nosniff`,
+  `Content-Disposition: attachment`). Reads are not audited, consistently
+  with the MCP read tools.
+- `memory_bootstrap` advertises the endpoint in
+  `capabilities.attachments.download_endpoint_hint`, and a truncated
+  `memory_get` points to it in its `hint`. Documented in
+  `docs/mcp/upload.md` (section "HTTP download endpoint").
+
+### Changed
+- The inert-response headers `/vault-files/` sets moved to the shared
+  `internal/attach.SetInertHeaders` helper, now used by both endpoints. No
+  behaviour change.
+
+### Notes
+- Upgrade in place; nothing to do. Existing MCP tokens with the `read` scope
+  can use the endpoint immediately. Agents see the new bootstrap hint on
+  their next fresh session.
+
 ## [2.25.2] — 2026-09-15 — "deps"
 
 ### Changed

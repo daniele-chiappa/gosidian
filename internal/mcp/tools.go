@@ -99,7 +99,7 @@ func (s *Server) registerTools() {
 	), s.handleNotesByTag)
 
 	s.impl.AddTool(mcp.NewTool("memory_get",
-		mcp.WithDescription("Read a note by its vault-relative path (e.g. 'project/note.md'). Oversize guard: when the body exceeds 24 KiB (and raw is not set) the response is truncated — frontmatter + heading outline + the first chunk, with truncated:true, the full size, and the note's real etag (if_match still works). Fetch just the section you need via memory_get_section, or pass raw:true only when you really need the whole body."),
+		mcp.WithDescription("Read a note by its vault-relative path (e.g. 'project/note.md'). Oversize guard: when the body exceeds 24 KiB (and raw is not set) the response is truncated — frontmatter + heading outline + the first chunk, with truncated:true, the full size, and the note's real etag (if_match still works). Fetch just the section you need via memory_get_section, or pass raw:true only when you really need the whole body. To get a large note onto your own disk without spending context tokens, GET the HTTP /download endpoint instead (your MCP /sse URL with /sse replaced by /download?path=<path>, bearer token) — see bootstrap capabilities."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative path to the .md file.")),
 		mcp.WithBoolean("raw", mcp.Description("Bypass the oversize guard and return the full body regardless of size.")),
 		mcp.WithNumber("max_bytes", mcp.Description("Explicit body cap in bytes — truncates even below the default threshold. Ignored when raw:true.")),
@@ -589,7 +589,7 @@ func (s *Server) handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 		for _, h := range hs {
 			nc.Headings = append(nc.Headings, outlineHeading{Level: h.Level, Text: h.Text, ID: h.ID})
 		}
-		nc.Hint = fmt.Sprintf("body truncated (%d of %d bytes): fetch one section with memory_get_section, or pass raw:true for the full body", len(nc.Content), note.Size)
+		nc.Hint = fmt.Sprintf("body truncated (%d of %d bytes): fetch one section with memory_get_section, pass raw:true for the full body, or GET it onto your disk without context tokens via the HTTP /download endpoint (your MCP /sse URL with /sse replaced by /download?path=<path>, bearer token; the ETag header works as if_match)", len(nc.Content), note.Size)
 		if nc.OutlineTotal > len(nc.Headings) {
 			nc.Hint += fmt.Sprintf("; outline capped to %d of %d headings (first %d + most recent)", len(nc.Headings), nc.OutlineTotal, getTruncHeadHeadings)
 		}
@@ -604,6 +604,9 @@ func checkIfMatch(note *vault.Note, ifMatch string) *mcp.CallToolResult {
 	if ifMatch == "" {
 		return nil
 	}
+	// The HTTP /download endpoint returns the stamp as an RFC 7232 quoted
+	// ETag header; accept it verbatim so the caller need not unquote it.
+	ifMatch = strings.Trim(strings.TrimSpace(ifMatch), "\"")
 	current := note.ETag()
 	if current != ifMatch {
 		return mcp.NewToolResultErrorf(

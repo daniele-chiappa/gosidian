@@ -69,6 +69,7 @@ The dedicated tools remain for explicit workflows (and for the web UI):
 | **MCP `memory_upload_attachment`** | Single-step: upload + return a ready-to-splice markdown embed. |
 | **MCP `memory_upload_resource`** | Two-step stage-then-attach: upload first, decide note placement later. |
 | REST `/api/v1/upload` | Web-UI editor path (drag-and-drop). Authenticated by a **SPA** token (from login), not the MCP token. |
+| **HTTP download (`/download`)** | The read-side twin: `GET` the raw bytes of a **note** with the same MCP bearer token, onto your disk, without crossing the model context. See [below](#http-download-endpoint-notes). |
 
 ## HTTP upload endpoint
 
@@ -110,6 +111,48 @@ curl -X POST "$UPLOAD?project=Work" \
   `path` → `memory_create_media_note({attachment: path, caption: …})`
   (or `memory_create_table_note` for a CSV).
   The image lives once; agents read only the caption (ADR-013).
+
+## HTTP download endpoint (notes)
+
+The round trip "fetch a large note, edit it locally, write it back" is
+token-free on the write side (the `memory_ingest` ticket above). This
+endpoint makes the read side token-free too: `memory_get` streams a body
+through the model context at ~1 token per character, while `GET
+/download` hands the bytes to `curl`.
+
+**The path mirrors your `/sse` endpoint** — replace `/sse` with
+`/download`, and pass the vault-relative note path as `?path=`:
+
+```bash
+# $DOWNLOAD = your /sse URL with /sse -> /download
+curl -sf -D headers.txt "$DOWNLOAD?path=Work/docs/report.html" \
+  -H "Authorization: Bearer $MCP_TOKEN" -o report.html
+# … edit report.html locally …
+# write it back with the ticket flow, CAS-protected by the ETag you got:
+#   memory_ingest({project:"Work", transfer:"http", as:"note",
+#                  note_path:"Work/docs/report.html", overwrite:true,
+#                  if_match:'<ETag header value, quotes included are fine>'})
+curl -sf -F "file=@report.html" "https://host/mcp/ingest/<ticket>"
+```
+
+- **Auth**: the MCP bearer token with the **read** scope; a scoped token
+  gets `404` outside its projects (it must not learn what exists there).
+  No token → `401`, no read scope → `403`.
+- **Notes only** (`.md`, or `.html` when html notes are enabled):
+  attachments are already served at `/vault-files/<path>` with the same
+  bearer, and the `400` on an attachment path says so. Hidden entries and
+  traversal are rejected like everywhere else (`400`).
+- **Response**: the note bytes as-is, `Content-Type` `text/markdown` or
+  `text/html`, and an `ETag` carrying the same stamp `memory_get`
+  returns — pass it back verbatim as `if_match` (`memory_update`,
+  `memory_edit`, `memory_ingest overwrite`) for a safe replace.
+- **Inert by construction**: the same headers as `/vault-files/` (sandbox
+  CSP, `nosniff`, `Content-Disposition: attachment`), so an `.html` note
+  opened in a browser never renders in the app origin.
+- Reads are not audited, consistently with the MCP read tools.
+- `memory_bootstrap` advertises it in
+  `capabilities.attachments.download_endpoint_hint`, and a truncated
+  `memory_get` points here in its `hint`.
 
 ## REST `/api/upload`
 

@@ -26,7 +26,7 @@ import (
 // registerTools() alongside the other v1.2 tools.
 func (s *Server) registerBootstrapTool() {
 	s.impl.AddTool(mcp.NewTool("memory_bootstrap",
-		mcp.WithDescription("Aggregate session-start payload for a project: hot.md + README + instruction file (when present), active plans, skills, agents, 5 recent notes, stats. Call this FIRST each session instead of separate gets. `directives_block` carries the full operational directives rendered for this project — read and FOLLOW it (served fresh every session; regenerate your stub via memory_init_agent only when stub_version is ahead of your stub marker). `capabilities` reports the enabled content formats (html/media/table notes) plus attachment limits/extensions and the HTTP /upload endpoint hint. `maintenance` carries cheap grooming signals (hot.md size/age, broken wikilinks, stale-note count): when its `attention` flag is true, propose the relevant grooming at end of task. `tag_vocabulary` (only on projects with the use_tag_vocabulary flag) reports the extra lint tag vocabulary declared in memory/conventions.md frontmatter. `missing` lists absent vault scaffold; `agent_md.expected_external` means the instruction file lives in the agent's working dir, not the vault. Repeat calls: pass known_directives_version + known_etags (+ known_anchor_metas on anchor-enabled projects) and use mode lite — see the parameter docs."),
+		mcp.WithDescription("Aggregate session-start payload for a project: hot.md + README + instruction file (when present), active plans, skills, agents, 5 recent notes, stats. Call this FIRST each session instead of separate gets. `directives_block` carries the full operational directives rendered for this project — read and FOLLOW it (served fresh every session; regenerate your stub via memory_init_agent only when stub_version is ahead of your stub marker). `capabilities` reports the enabled content formats (html/media/table notes) plus attachment limits/extensions and the HTTP /upload and /download endpoint hints. `maintenance` carries cheap grooming signals (hot.md size/age, broken wikilinks, stale-note count): when its `attention` flag is true, propose the relevant grooming at end of task. `tag_vocabulary` (only on projects with the use_tag_vocabulary flag) reports the extra lint tag vocabulary declared in memory/conventions.md frontmatter. `missing` lists absent vault scaffold; `agent_md.expected_external` means the instruction file lives in the agent's working dir, not the vault. Repeat calls: pass known_directives_version + known_etags (+ known_anchor_metas on anchor-enabled projects) and use mode lite — see the parameter docs."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder) to bootstrap. Scoped tokens are forced to their project.")),
 		mcp.WithString("profile", mcp.Description("CLI/agent profile for agent-anchor materialisation (default \"claude\"). When the master switch + the project's use_anchors flag are on and the profile supports native subagents, the response carries an `anchors` block: thin agent-anchor files to reconcile in the agent's cwd.")),
 		mcp.WithNumber("known_directives_version", mcp.Description("The directives_version you already hold from a previous bootstrap: on match, directives_block is omitted (directives_version is always present to detect it).")),
@@ -119,7 +119,10 @@ type bootstrapAttachCapability struct {
 	MaxMiB             int      `json:"max_mib"`
 	Extensions         []string `json:"extensions"`
 	UploadEndpointHint string   `json:"upload_endpoint_hint"`
-	Tools              []string `json:"tools"`
+	// DownloadEndpointHint is the read-side twin (IMP-081): how to get a
+	// note's raw bytes onto the agent's disk without crossing the context.
+	DownloadEndpointHint string   `json:"download_endpoint_hint"`
+	Tools                []string `json:"tools"`
 	// BridgeDir is the server-side staging directory for bridge_filename
 	// sources, when configured. Surfacing it here closes the ADR-018
 	// chicken-and-egg: a co-located agent learns the cheap path up front
@@ -146,13 +149,14 @@ func (s *Server) buildCapabilities() bootstrapCapabilities {
 		MediaNotes: s.vault.MediaNotesEnabled(),
 		TableNotes: s.vault.TableNotesEnabled(),
 		Attachments: bootstrapAttachCapability{
-			MaxMiB:             attach.MaxBytes >> 20,
-			Extensions:         exts,
-			UploadEndpointHint: "to save a file use memory_ingest (routes by extension; sources: bridge_filename, source_path, url, or transfer:\"http\" for a single-use upload ticket). Raw bytes can also be POSTed multipart (field 'file', bearer token) to your MCP /sse URL with /sse replaced by /upload — bytes travel over HTTP, not the model context",
-			Tools:              []string{"memory_ingest", "memory_upload_attachment", "memory_upload_resource"},
-			BridgeDir:          s.bridgeDir,
-			AllowedUploadRoots: s.allowedUploadRoots,
-			IngestURLEnabled:   len(s.ingestURLAllow) > 0,
+			MaxMiB:               attach.MaxBytes >> 20,
+			Extensions:           exts,
+			UploadEndpointHint:   "to save a file use memory_ingest (routes by extension; sources: bridge_filename, source_path, url, or transfer:\"http\" for a single-use upload ticket). Raw bytes can also be POSTed multipart (field 'file', bearer token) to your MCP /sse URL with /sse replaced by /upload — bytes travel over HTTP, not the model context",
+			DownloadEndpointHint: "to get a note's full bytes on your disk without context tokens (edit a large .html report locally, then re-ingest it), GET your MCP /sse URL with /sse replaced by /download?path=<vault path> (bearer token, read scope): raw .md/.html body, ETag reusable as if_match on the next write. Attachments are served at /vault-files/<path> with the same bearer",
+			Tools:                []string{"memory_ingest", "memory_upload_attachment", "memory_upload_resource"},
+			BridgeDir:            s.bridgeDir,
+			AllowedUploadRoots:   s.allowedUploadRoots,
+			IngestURLEnabled:     len(s.ingestURLAllow) > 0,
 		},
 	}
 }

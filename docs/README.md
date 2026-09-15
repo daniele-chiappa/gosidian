@@ -27,7 +27,8 @@ trial, read the [root README](../README.md) first.
 - [Agent anchors](mcp/agent-anchors.md) — surface vault-defined agent
   roles as thin referenced files in the harness working dir (opt-in)
 - [Upload flow](mcp/upload.md) — REST `/api/upload` + the two MCP
-  upload tools, contract and decision tree
+  upload tools, contract and decision tree; the HTTP `/download` twin
+  for fetching a note's raw bytes with the MCP token
 
 ## Web UI
 
