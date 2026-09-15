@@ -8,6 +8,16 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.25.2] — 2026-09-15 — "deps"
+
+### Changed
+- `golang.org/x/crypto` 0.56.0 → 0.57.0, `golang.org/x/term` 0.45.0 →
+  0.46.0 (with `x/sys` 0.48.0 and `x/text` 0.42.0 indirect). Routine
+  Dependabot bumps, no advisories attached.
+
+### Notes
+- Upgrade in place; nothing to do.
+
 ## [2.25.1] — 2026-09-15 — "hygiene: CodeQL"
 
 ### Fixed
