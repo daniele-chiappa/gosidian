@@ -8,6 +8,18 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.25.1] — 2026-09-15 — "hygiene: CodeQL"
+
+### Fixed
+- CodeQL `go/unhandled-writable-file-close` in the state-dir migration
+  (`internal/statedir`): the two error branches of the cross-filesystem
+  copy closed the partially written target without looking at `Close`'s
+  result. The partial file is removed right after, so the result is
+  irrelevant there — the discard is now explicit. No behaviour change.
+
+### Notes
+- Upgrade in place; nothing to do.
+
 ## [2.25.0] — 2026-09-10 — "state directory"
 
 ### Added

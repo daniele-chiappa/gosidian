@@ -133,12 +133,12 @@ func moveFile(src, dst string) error {
 		return err
 	}
 	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
+		_ = out.Close() // already failing; the partial file is removed below
 		_ = os.Remove(dst)
 		return err
 	}
 	if err := out.Sync(); err != nil {
-		out.Close()
+		_ = out.Close() // idem
 		_ = os.Remove(dst)
 		return err
 	}
