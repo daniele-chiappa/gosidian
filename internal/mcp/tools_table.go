@@ -99,6 +99,11 @@ func (s *Server) handleCreateTableNote(ctx context.Context, req mcp.CallToolRequ
 	if errRes != nil {
 		return errRes, nil
 	}
+	// The exists-probe and the write below share the per-path lock, like
+	// every other create path: without it two concurrent creates both pass
+	// the probe and the second silently overwrites the first.
+	unlock := s.vault.LockPath(rel)
+	defer unlock()
 	if _, err := s.vault.Load(rel); err == nil {
 		return mcp.NewToolResultErrorf("note %q already exists", rel), nil
 	}
@@ -234,7 +239,7 @@ func csvSummary(raw []byte) (cols []string, rows int, err error) {
 func buildTableNote(title, mediaPath, project, caption string, cols []string, rows int) string {
 	var b strings.Builder
 	b.WriteString("---\n")
-	fmt.Fprintf(&b, "title: %s\n", title)
+	fmt.Fprintf(&b, "title: %s\n", yamlQuote(title))
 	b.WriteString("type: table\n")
 	fmt.Fprintf(&b, "media: %s\n", mediaPath)
 	fmt.Fprintf(&b, "tags: [%s, type:table]\n", project)

@@ -7,6 +7,8 @@ func TestAnchorSlug(t *testing.T) {
 		"plancia/agents/frontend-engineer.md": "frontend-engineer",
 		"x.md":                                "x",
 		"a/b/c.md":                            "c",
+		"p/agents/foo.html":                   "foo",
+		"p/agents/Bar.MD":                     "Bar",
 	}
 	for in, want := range cases {
 		if got := anchorSlug(in); got != want {

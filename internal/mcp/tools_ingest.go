@@ -411,7 +411,11 @@ func (s *Server) ingestRaw(ctx context.Context, in ingestIntent, data []byte) (*
 
 	// Every other kind starts with the bytes stored as an attachment
 	// (extension allowlist, magic-bytes MIME check, 10 MiB cap).
-	if _, errRes := s.authorizeWrite(ctx, attach.RelPath(in.Project, "probe"+ext)); errRes != nil {
+	tok, errRes := s.authorizeWrite(ctx, attach.RelPath(in.Project, "probe"+ext))
+	if errRes != nil {
+		return errRes, nil
+	}
+	if errRes := s.checkWriteLimits(tok, len(data)); errRes != nil {
 		return errRes, nil
 	}
 	res, err := attach.Store(s.vault, data, in.Filename, in.Project)
@@ -454,13 +458,70 @@ func (s *Server) ingestRaw(ctx context.Context, in ingestIntent, data []byte) (*
 // ingestFetchTimeout bounds a server-side url fetch end to end.
 const ingestFetchTimeout = 20 * time.Second
 
-// ingestURLAllowed reports whether u matches one of the configured allowlist
-// prefixes. Plain prefix match: entries should be as specific as possible
-// (scheme + host + base path).
+// ingestPrefix is one parsed allowlist entry. Scheme, host and effective
+// port are compared exactly; the path is compared on a segment boundary.
+type ingestPrefix struct {
+	scheme string
+	host   string // lowercase hostname
+	port   string // "" when it is the scheme default
+	path   string // cleaned; "/" covers the whole host
+}
+
+// parseIngestPrefix validates one allowlist entry. Entries must be absolute
+// http(s) URLs with a host and without userinfo, query or fragment.
+func parseIngestPrefix(raw string) (ingestPrefix, error) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return ingestPrefix{}, err
+	}
+	scheme := strings.ToLower(u.Scheme)
+	switch {
+	case scheme != "http" && scheme != "https":
+		return ingestPrefix{}, fmt.Errorf("%q: scheme must be http or https", raw)
+	case u.Hostname() == "":
+		return ingestPrefix{}, fmt.Errorf("%q: missing host", raw)
+	case u.User != nil:
+		return ingestPrefix{}, fmt.Errorf("%q: userinfo is not allowed", raw)
+	case u.RawQuery != "" || u.Fragment != "":
+		return ingestPrefix{}, fmt.Errorf("%q: query and fragment are not allowed", raw)
+	}
+	return ingestPrefix{scheme: scheme, host: strings.ToLower(u.Hostname()), port: effectivePort(scheme, u.Port()), path: cleanURLPath(u.Path)}, nil
+}
+
+func effectivePort(scheme, port string) string {
+	if (scheme == "http" && port == "80") || (scheme == "https" && port == "443") {
+		return ""
+	}
+	return port
+}
+
+func cleanURLPath(p string) string {
+	if p == "" {
+		return "/"
+	}
+	return path.Clean("/" + p)
+}
+
+// ingestURLAllowed reports whether u is covered by the allowlist. The match
+// is structural — parsed scheme, host, port and path — never a string
+// prefix: "https://api.example.com@evil/x" and "https://api.example.com.evil/x"
+// both start with the literal text "https://api.example.com" and both must
+// be rejected. The request path is cleaned first so "/pub/../secret" cannot
+// ride on a "/pub" entry.
 func (s *Server) ingestURLAllowed(u string) bool {
+	pu, err := url.Parse(u)
+	if err != nil || pu.User != nil {
+		return false
+	}
+	scheme := strings.ToLower(pu.Scheme)
+	host := strings.ToLower(pu.Hostname())
+	port := effectivePort(scheme, pu.Port())
+	reqPath := cleanURLPath(pu.Path)
 	for _, p := range s.ingestURLAllow {
-		p = strings.TrimSpace(p)
-		if p != "" && strings.HasPrefix(u, p) {
+		if p.scheme != scheme || p.host != host || p.port != port {
+			continue
+		}
+		if p.path == "/" || reqPath == p.path || strings.HasPrefix(reqPath, p.path+"/") {
 			return true
 		}
 	}

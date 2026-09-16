@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -49,8 +50,12 @@ func (s *Server) handleHTTPUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := r.ParseMultipartForm(attach.MaxBytes + (1 << 20)); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "bad multipart body: "+err.Error())
+	// The cap must sit on the body itself: ParseMultipartForm's argument only
+	// bounds in-memory buffering, everything beyond it is spooled to disk
+	// before any size check downstream could run.
+	r.Body = http.MaxBytesReader(w, r.Body, multipartBodyCap)
+	if err := r.ParseMultipartForm(multipartBodyCap); err != nil {
+		writeMultipartError(w, err)
 		return
 	}
 	file, hdr, err := r.FormFile("file")
@@ -67,6 +72,10 @@ func (s *Server) handleHTTPUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(data) > attach.MaxBytes {
 		writeJSONError(w, http.StatusRequestEntityTooLarge, "file too large (max 10 MiB)")
+		return
+	}
+	if msg := s.writeLimitViolation(tok, len(data)); msg != "" {
+		writeJSONError(w, http.StatusTooManyRequests, msg)
 		return
 	}
 
@@ -107,4 +116,19 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 
 func writeJSONError(w http.ResponseWriter, code int, msg string) {
 	writeJSON(w, code, map[string]any{"error": msg})
+}
+
+// multipartBodyCap bounds a multipart upload body: the attachment cap plus
+// room for the multipart framing and a small metadata field or two.
+const multipartBodyCap = attach.MaxBytes + (1 << 20)
+
+// writeMultipartError maps a ParseMultipartForm failure to a status: a body
+// that tripped MaxBytesReader is 413, anything else is a malformed request.
+func writeMultipartError(w http.ResponseWriter, err error) {
+	var tooBig *http.MaxBytesError
+	if errors.As(err, &tooBig) {
+		writeJSONError(w, http.StatusRequestEntityTooLarge, "request body too large (max 10 MiB file)")
+		return
+	}
+	writeJSONError(w, http.StatusBadRequest, "bad multipart body: "+err.Error())
 }

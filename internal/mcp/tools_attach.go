@@ -92,7 +92,11 @@ func (s *Server) storeAttachmentFromRequest(ctx context.Context, project, filena
 		}
 		ext := strings.ToLower(filepath.Ext(filename))
 		testRel := attach.RelPath(project, "test"+ext)
-		if _, errRes := s.authorizeWrite(ctx, testRel); errRes != nil {
+		tok, errRes := s.authorizeWrite(ctx, testRel)
+		if errRes != nil {
+			return nil, 0, errRes
+		}
+		if errRes := s.checkWriteLimits(tok, 0); errRes != nil {
 			return nil, 0, errRes
 		}
 		res, err := attach.StoreFromPath(s.vault, staged, filename, project, s.effectiveUploadRoots())
@@ -121,7 +125,11 @@ func (s *Server) storeAttachmentFromRequest(ctx context.Context, project, filena
 		// Auth check: verify write scope on the target attachment path.
 		ext := strings.ToLower(filepath.Ext(filename))
 		testRel := attach.RelPath(project, "test"+ext)
-		if _, errRes := s.authorizeWrite(ctx, testRel); errRes != nil {
+		tok, errRes := s.authorizeWrite(ctx, testRel)
+		if errRes != nil {
+			return nil, 0, errRes
+		}
+		if errRes := s.checkWriteLimits(tok, 0); errRes != nil {
 			return nil, 0, errRes
 		}
 		res, err := attach.StoreFromPath(s.vault, sourcePath, filename, project, s.effectiveUploadRoots())
@@ -211,7 +219,18 @@ func (s *Server) handleUploadResource(ctx context.Context, req mcp.CallToolReque
 		return mcp.NewToolResultError("kind must be one of: image, document, auto"), nil
 	}
 
-	res, dataSize, errRes := s.storeAttachmentFromRequest(ctx, project, filename, dataB64, sourcePath, req.GetString("bridge_filename", ""))
+	bridgeFilename := req.GetString("bridge_filename", "")
+	// Derive the original filename here so the response can report it: the
+	// store helper derives it too, but only in its own scope.
+	if filename == "" {
+		switch {
+		case sourcePath != "":
+			filename = filepath.Base(sourcePath)
+		case bridgeFilename != "":
+			filename = filepath.Base(bridgeFilename)
+		}
+	}
+	res, dataSize, errRes := s.storeAttachmentFromRequest(ctx, project, filename, dataB64, sourcePath, bridgeFilename)
 	if errRes != nil {
 		return errRes, nil
 	}
@@ -309,7 +328,11 @@ func (s *Server) handleDeleteAttachment(ctx context.Context, req mcp.CallToolReq
 	if !strings.Contains("/"+rel, "/attachments/") {
 		return mcp.NewToolResultError("path is not inside an attachments/ directory"), nil
 	}
-	if _, errRes := s.authorizeWrite(ctx, rel); errRes != nil {
+	tok, errRes := s.authorizeWrite(ctx, rel)
+	if errRes != nil {
+		return errRes, nil
+	}
+	if errRes := s.checkWriteLimits(tok, 0); errRes != nil {
 		return errRes, nil
 	}
 	if !s.vault.Exists(rel) {

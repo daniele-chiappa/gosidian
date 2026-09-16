@@ -198,10 +198,13 @@ func (s *Store) load() error {
 }
 
 // reloadIfStale re-reads the file when its mtime (or existence) diverges from
-// the last-loaded snapshot. Cheap: 1 os.Stat on the hot path, no I/O beyond
-// that unless something actually changed. Caller must hold s.mu.Lock() or
-// enter through RLock()+upgrade; the lockless call below handles the upgrade
-// itself.
+// the last-loaded snapshot. Every mutator calls it before touching s.tokens:
+// save() rewrites the whole file, so mutating a stale snapshot would silently
+// undo whatever the CLI (or another process) wrote in the meantime — a
+// revoked token coming back to life is the worst case. Cheap: 1 os.Stat on
+// the hot path, no I/O beyond that unless something actually changed. Caller
+// must hold s.mu.Lock() or enter through RLock()+upgrade; the lockless call
+// below handles the upgrade itself.
 func (s *Store) reloadIfStale() {
 	st, err := os.Stat(s.path)
 	if err != nil {
@@ -317,6 +320,7 @@ func (s *Store) Create(name string, projects []string, scopes []string, ttl time
 	}
 
 	s.mu.Lock()
+	s.reloadIfStale()
 	s.tokens = append(s.tokens, tok)
 	if err := s.save(); err != nil {
 		s.tokens = s.tokens[:len(s.tokens)-1]
@@ -331,6 +335,7 @@ func (s *Store) Create(name string, projects []string, scopes []string, ttl time
 func (s *Store) Revoke(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.reloadIfStale()
 	for i, t := range s.tokens {
 		if t.ID == id {
 			s.tokens = append(s.tokens[:i], s.tokens[i+1:]...)
@@ -349,6 +354,7 @@ func (s *Store) RevokeByOwner(userID string) int {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.reloadIfStale()
 	kept := s.tokens[:0]
 	removed := 0
 	for _, t := range s.tokens {
@@ -376,6 +382,7 @@ func (s *Store) AssignOwnerToOrphans(userID string) int {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.reloadIfStale()
 	updated := 0
 	for i := range s.tokens {
 		if s.tokens[i].OwnerUserID == "" {
@@ -399,6 +406,7 @@ func (s *Store) AssignOwnerToOrphans(userID string) int {
 func (s *Store) SetSelfImproveOptIn(id string, optIn bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.reloadIfStale()
 	for i := range s.tokens {
 		if s.tokens[i].ID == id {
 			s.tokens[i].SelfImproveOptIn = optIn
@@ -416,6 +424,7 @@ func (s *Store) SetToolProfile(id, profile string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.reloadIfStale()
 	for i := range s.tokens {
 		if s.tokens[i].ID == id {
 			s.tokens[i].ToolProfile = profile

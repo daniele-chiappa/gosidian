@@ -546,12 +546,15 @@ func (s *Store) Authenticate(username, password, totpCode string, ldap LDAPAuthe
 		}
 		u, err := s.AddLDAPUser(username)
 		if err != nil {
-			// Race: a concurrent login provisioned it. Re-fetch.
-			if e, ok := s.UserByUsername(username); ok {
-				u = e
-			} else {
-				return nil, err
+			// Race: a concurrent login provisioned it. Re-fetch — but only
+			// accept an LDAP-backed record. If a local account with this
+			// username landed in the meantime, a successful LDAP bind says
+			// nothing about it and must not open its session.
+			e, ok := s.UserByUsername(username)
+			if !ok || e.AuthSource != "ldap" {
+				return nil, errors.New("invalid credentials")
 			}
+			u = e
 		}
 		if err := s.checkTOTP(u, totpCode); err != nil {
 			return nil, err

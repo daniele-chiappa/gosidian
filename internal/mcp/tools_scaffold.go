@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
+	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/gosidian/gosidian/internal/scaffold"
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -65,16 +66,21 @@ type scaffoldResult struct {
 }
 
 func (s *Server) handleProjectScaffold(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	tok, errRes := s.authorizeWrite(ctx, "")
-	if errRes != nil {
-		return errRes, nil
+	// Scope is checked on the resolved project below: authorizeWrite on ""
+	// would reject every project-scoped token (AllowsPath("") is false).
+	tok := s.tokenFromContext(ctx)
+	if tok == nil {
+		return mcp.NewToolResultError("unauthorized"), nil
+	}
+	if !tok.HasScope(auth.ScopeWrite) {
+		return mcp.NewToolResultError("token lacks write scope"), nil
 	}
 	project, err := s.resolveProject(tok, req)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	if !tok.AllowsPath(project) {
-		return mcp.NewToolResultErrorf("project %q is outside the token's scope", project), nil
+	if _, errRes := s.authorizeWrite(ctx, project); errRes != nil {
+		return errRes, nil
 	}
 	tmplName := strings.TrimSpace(req.GetString("template", defaultTemplate))
 	if tmplName == "" {

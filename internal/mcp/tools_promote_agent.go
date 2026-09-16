@@ -74,6 +74,10 @@ func (s *Server) handlePromoteAgent(ctx context.Context, req mcp.CallToolRequest
 	if !tok.AllowsProject(project) {
 		return mcp.NewToolResultErrorf("project %q is outside the token's scope %q", project, tok.ScopeLabel()), nil
 	}
+	// Probe and write under the per-path lock: two concurrent promotes of the
+	// same slug must not both take the fresh-create branch.
+	unlock := s.vault.LockPath(rel)
+	defer unlock()
 	if existing, err := s.vault.Load(rel); err == nil {
 		if !req.GetBool("adopt_into_existing", false) {
 			return mcp.NewToolResultErrorf("canonical agent %q already exists; pass adopt_into_existing:true to adopt the foreign file into it (existing body preserved, foreign body returned for manual fold-check)", rel), nil
@@ -131,8 +135,11 @@ func parseForeignAgentFile(slug string, foreign []byte) foreignAgentFile {
 		f.Desc = strings.TrimSpace(v)
 	}
 	if v, ok := fields["tools"].(string); ok && strings.TrimSpace(v) != "" {
+		// Both "a, b" and the YAML inline list "[a, b]" (Claude Code's own
+		// subagent format) are accepted; the brackets would otherwise nest.
+		v = strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(v), "["), "]")
 		for _, t := range strings.Split(v, ",") {
-			if t = strings.TrimSpace(t); t != "" {
+			if t = strings.Trim(strings.TrimSpace(t), `"'`); t != "" {
 				f.Tools = append(f.Tools, t)
 			}
 		}
@@ -195,8 +202,11 @@ func buildCanonicalAgentNote(project, slug string, foreign []byte) string {
 func (s *Server) adoptIntoExisting(ctx context.Context, req mcp.CallToolRequest, tok *auth.Token, rel, slug string, canonical, foreign []byte) (*mcp.CallToolResult, error) {
 	f := parseForeignAgentFile(slug, foreign)
 
+	// Any existing harness key — block or inline scalar — must be left alone:
+	// ExtractFrontmatterBlock returns nil for both "absent" and "inline", so
+	// it cannot be the guard against inserting a duplicate.
 	raw := parser.FrontmatterRawForPath(rel, canonical)
-	if parser.ExtractFrontmatterBlock(raw, "harness") == nil {
+	if !parser.HasFrontmatterKey(raw, "harness") {
 		if updated, ok := insertHarnessBlock(canonical, slug, f); ok {
 			if errRes := s.checkWriteLimits(tok, len(updated)); errRes != nil {
 				return errRes, nil

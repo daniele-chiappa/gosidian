@@ -30,7 +30,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_MCP_MAX_NOTE_BYTES` | `mcp.max_note_bytes` | `1048576` (1 MiB) |
 | `GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS` | `mcp.allowed_upload_roots` | empty (vault only) |
 | `GOSIDIAN_MCP_BRIDGE_DIR` | `mcp.bridge_dir` | empty (off; staging dir for cheap `bridge_filename` uploads, IMP-059) |
-| `GOSIDIAN_INGEST_URL_ALLOWLIST` | `mcp.ingest_url_allowlist` | empty (off; comma-separated URL prefixes the `memory_ingest` `url` source may fetch from — the allowlist is the SSRF boundary and also gates every redirect hop) |
+| `GOSIDIAN_INGEST_URL_ALLOWLIST` | `mcp.ingest_url_allowlist` | empty (off; comma-separated absolute `http(s)` URLs the `memory_ingest` `url` source may fetch from — each entry is matched structurally on scheme, host, port and path segment (never as a text prefix, so `https://api.example.com` does not admit `https://api.example.com.evil/`); the allowlist is the SSRF boundary and also gates every redirect hop) |
 | `GOSIDIAN_TRASH_ENABLED` | `trash.enabled` | `false` |
 | `GOSIDIAN_TRASH_RETENTION` | `trash.retention` | `720h` |
 | `GOSIDIAN_THEME_PRESET` | `theme.preset` | `midnight-luxury` |
@@ -42,6 +42,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_LOGIN_SESSION_TTL` | `webauth.session_ttl` | `24h` |
 | `GOSIDIAN_LOGIN_WINDOW` | `webauth.login_window` | `15m` |
 | `GOSIDIAN_LOGIN_MAX_FAILURES` | `webauth.login_max_failures` | `5` |
+| `GOSIDIAN_TRUSTED_PROXIES` | `webauth.trusted_proxies` | empty (comma-separated IPs/CIDRs of the reverse proxies whose `X-Forwarded-For` the login rate limiter may trust; empty = the header is ignored and the peer address is used) |
 | `GOSIDIAN_TOTP_MODE` | `webauth.totp_mode` | `off` (`optional`, `required`) |
 | `GOSIDIAN_LDAP_ENABLED` | `ldap.enabled` | `false` |
 | `GOSIDIAN_LDAP_URL` | `ldap.url` | empty (`ldap://host:389`, `ldaps://host:636`) |

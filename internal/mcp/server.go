@@ -5,7 +5,9 @@ package mcp
 import (
 	"context"
 	"crypto/rand"
+	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -124,7 +126,7 @@ type Server struct {
 	// ingestURLAllow is the URL-prefix allowlist for the memory_ingest `url`
 	// source (ADR-018). Empty (default) keeps the channel disabled — the
 	// allowlist is the SSRF boundary, so there is no implicit default.
-	ingestURLAllow []string
+	ingestURLAllow []ingestPrefix
 	// ingestTickets holds the pending single-use upload tickets minted by
 	// memory_ingest transfer:http. In-memory only: a restart voids pending
 	// tickets, which is fine at their TTL. Guarded by ingestTicketsMu.
@@ -217,6 +219,38 @@ func (s *Server) publishNoteChange(action, path string, etag string, treeAffecte
 	}
 }
 
+// publishTreeChange broadcasts a project-level mutation (rename/delete of a
+// whole project) on the tree topic only: there is no single note to point
+// at, but the sidebar and memory_wait_changes still need to learn that the
+// tree changed shape.
+func (s *Server) publishTreeChange(action, path string, extra map[string]any) {
+	if s.events == nil {
+		return
+	}
+	payload := map[string]any{"action": action, "path": path, "source": "mcp"}
+	for k, v := range extra {
+		payload[k] = v
+	}
+	s.events.Publish(events.TopicTree, payload)
+}
+
+// publishRename broadcasts a note move as a delete of the old path plus a
+// create of the new one — the two actions every subscriber already handles —
+// followed by an update for each note whose links were rewritten.
+func (s *Server) publishRename(from, to string, rewritten []string) {
+	s.publishNoteChange("delete", from, "", true)
+	etag := ""
+	if fresh, err := s.vault.Load(to); err == nil {
+		etag = fresh.ETag()
+	}
+	s.publishNoteChange("create", to, etag, true)
+	for _, p := range rewritten {
+		if p != to && p != from {
+			s.publishNoteChange("update", p, "", false)
+		}
+	}
+}
+
 // SetProjects wires the per-project flag store. When non-nil, projects with
 // HiddenFromMCP=true are filtered out of list-style tools and rejected with
 // an explicit "hidden by config" error when a tool receives the project name
@@ -253,8 +287,22 @@ func (s *Server) SetBridgeDir(dir string) { s.bridgeDir = dir }
 // source may fetch from (ADR-018). Empty keeps the channel disabled: the
 // allowlist is the SSRF boundary, so every prefix — including private-network
 // ones like an internal screenshot service — must be an explicit choice.
-func (s *Server) SetIngestURLAllowlist(prefixes []string) {
-	s.ingestURLAllow = prefixes
+// Entries are parsed up front; a malformed one is an error rather than a
+// silently-ignored (or silently-permissive) prefix.
+func (s *Server) SetIngestURLAllowlist(prefixes []string) error {
+	parsed := make([]ingestPrefix, 0, len(prefixes))
+	for _, raw := range prefixes {
+		if strings.TrimSpace(raw) == "" {
+			continue
+		}
+		p, err := parseIngestPrefix(raw)
+		if err != nil {
+			return fmt.Errorf("ingest url allowlist: %w", err)
+		}
+		parsed = append(parsed, p)
+	}
+	s.ingestURLAllow = parsed
+	return nil
 }
 
 // BridgeDir returns the configured staging directory (empty when unset).

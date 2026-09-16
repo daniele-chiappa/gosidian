@@ -261,3 +261,42 @@ func TestStore_SetToolProfile(t *testing.T) {
 		t.Error("unknown token id must error")
 	}
 }
+
+// Mutations must re-read tokens.json before touching the in-memory slice:
+// a token revoked by the CLI while the server runs must not be resurrected
+// by the server's next Create/Revoke (BUG-049).
+func TestStore_MutationsReloadExternalWrites(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tokens.json")
+	server, _ := Open(path)
+	if _, _, err := server.Create("stale", nil, []string{ScopeRead}, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	staleID := server.List()[0].ID
+
+	// The CLI (a second process) revokes it and creates another one.
+	cli, _ := Open(path)
+	if err := cli.Revoke(staleID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := cli.Create("via-cli", nil, []string{ScopeRead}, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	future := time.Now().Add(time.Second)
+	_ = os.Chtimes(path, future, future)
+
+	// The server, unaware, mints a token of its own.
+	if _, _, err := server.Create("via-spa", nil, []string{ScopeRead}, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	fresh, _ := Open(path)
+	names := map[string]bool{}
+	for _, tok := range fresh.List() {
+		names[tok.Name] = true
+	}
+	if names["stale"] {
+		t.Errorf("revoked token resurrected by a stale Create: %v", names)
+	}
+	if !names["via-cli"] || !names["via-spa"] {
+		t.Errorf("expected both via-cli and via-spa on disk, got %v", names)
+	}
+}

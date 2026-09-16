@@ -150,8 +150,8 @@ func renderInsight(project string, now time.Time, category, title, friction, con
 	date := now.Format("2006-01-02")
 	var b strings.Builder
 	b.WriteString("---\n")
-	b.WriteString("title: " + siYAMLQuote(title) + "\n")
-	b.WriteString("description: " + siYAMLQuote(siFirstLine(friction, 120)) + "\n")
+	b.WriteString("title: " + yamlQuote(title) + "\n")
+	b.WriteString("description: " + yamlQuote(siFirstLine(friction, 120)) + "\n")
 	b.WriteString("tags: [" + project + ", type:insight, status:pending]\n")
 	b.WriteString("type: insight\n")
 	b.WriteString("category: " + category + "\n")
@@ -160,7 +160,7 @@ func renderInsight(project string, now time.Time, category, title, friction, con
 	b.WriteString("created: " + date + "\n")
 	b.WriteString("source_token: " + tokenID + "\n")
 	if agentLabel != "" {
-		b.WriteString("agent_label: " + siYAMLQuote(agentLabel) + "\n")
+		b.WriteString("agent_label: " + yamlQuote(agentLabel) + "\n")
 	}
 	if session != "" {
 		b.WriteString("session: " + session + "\n")
@@ -207,12 +207,4 @@ func siFirstLine(s string, max int) string {
 		cut = cut[:sp]
 	}
 	return cut + "…"
-}
-
-// siYAMLQuote renders s as a safe single-line double-quoted YAML scalar.
-func siYAMLQuote(s string) string {
-	s = strings.ReplaceAll(s, "\\", "\\\\")
-	s = strings.ReplaceAll(s, "\"", "\\\"")
-	s = strings.ReplaceAll(s, "\n", " ")
-	return "\"" + s + "\""
 }

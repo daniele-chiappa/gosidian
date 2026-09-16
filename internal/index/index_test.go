@@ -276,3 +276,30 @@ func TestIndex_FragmentLinkResolution(t *testing.T) {
 		}
 	}
 }
+
+// "_" and "%" in a wikilink target are literal characters, not LIKE
+// wildcards: [[api_reference]] must not resolve to apixreference.md
+// (BUG-042).
+func TestIndex_BasenameResolutionEscapesWildcards(t *testing.T) {
+	idx := openTest(t)
+	upsert(t, idx, "docs/apixreference.md", "X", "decoy")
+	upsert(t, idx, "docs/api_reference.md", "Y", "real")
+	upsert(t, idx, "a.md", "A", "[[api_reference]] [[apixreference]] [[%]]")
+	outs, err := idx.Outlinks("a.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, o := range outs {
+		got[o.Target] = o.TargetPath
+	}
+	if got["api_reference"] != "docs/api_reference.md" {
+		t.Errorf("[[api_reference]] resolved to %q", got["api_reference"])
+	}
+	if got["apixreference"] != "docs/apixreference.md" {
+		t.Errorf("[[apixreference]] resolved to %q", got["apixreference"])
+	}
+	if got["%"] != "" {
+		t.Errorf("[[%%]] must stay unresolved, got %q", got["%"])
+	}
+}

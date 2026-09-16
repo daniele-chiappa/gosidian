@@ -2,6 +2,7 @@ package v1
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/webauth"
@@ -90,18 +91,5 @@ func (r *Router) handleSignup(w http.ResponseWriter, req *http.Request) {
 // AddUser returns "username %q already exists" so the substring is
 // stable enough for routing without reaching for typed errors.
 func isDuplicateUsername(msg string) bool {
-	return contains(msg, "already exists")
-}
-
-// contains is a tiny strings.Contains wrapper kept to avoid the
-// strings import collision with router.go's import block.
-func contains(haystack, needle string) bool {
-	return len(haystack) >= len(needle) && (func() bool {
-		for i := 0; i+len(needle) <= len(haystack); i++ {
-			if haystack[i:i+len(needle)] == needle {
-				return true
-			}
-		}
-		return false
-	}())
+	return strings.Contains(msg, "already exists")
 }

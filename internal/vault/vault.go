@@ -1,6 +1,7 @@
 package vault
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -629,7 +630,7 @@ func (v *Vault) RenameNote(idx *index.Index, from, to string) ([]string, error) 
 			continue
 		}
 		newBody := rewriteWikiLinks(note.Content, oldBase, newBase, fromRel, toRel)
-		if !bytesEqual(newBody, note.Content) {
+		if !bytes.Equal(newBody, note.Content) {
 			if err := v.Save(b.Path, newBody); err != nil {
 				return rewritten, fmt.Errorf("rewrite %s: %w", b.Path, err)
 			}
@@ -684,18 +685,6 @@ func rewriteWikiLinks(body []byte, oldBase, newBase, oldRel, newRel string) []by
 		return []byte("[[" + replacement + "]]")
 	})
 	return replaced
-}
-
-func bytesEqual(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 // MoveNote moves a note from its current location to the given target

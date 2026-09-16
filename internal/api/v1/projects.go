@@ -197,7 +197,12 @@ func (r *Router) createProject(w http.ResponseWriter, req *http.Request) {
 	// Under member_scope=members the creator must keep access to what they just
 	// made; owners see everything, so only non-owner creators need a membership.
 	if r.deps.Projects != nil && !user.principal().CanAdmin() {
-		_ = r.deps.Projects.SetMember(clean, user.ID, projects.LevelWrite)
+		if err := r.deps.Projects.SetMember(clean, user.ID, projects.LevelWrite); err != nil {
+			// The directory exists but the creator has no access to it: say
+			// so, rather than answering 201 to someone who is now locked out.
+			WriteError(w, http.StatusInternalServerError, CodeServerInternal, "project created, but the membership grant could not be saved (an owner can grant access): "+err.Error())
+			return
+		}
 	}
 	r.auditNote(req, audit.ActionCreateProject, user, clean, "", 0)
 	r.publishSidebarEvent("create", clean)
@@ -273,7 +278,14 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 				return
 			}
 			if r.deps.Projects != nil {
-				_ = r.deps.Projects.Rename(name, newName)
+				if err := r.deps.Projects.Rename(name, newName); err != nil {
+					// The vault directory is already renamed; flags and
+					// members are still keyed by the old name. Surface it
+					// instead of returning 200 with a project that looks
+					// unflagged and member-less.
+					WriteError(w, http.StatusInternalServerError, CodeServerInternal, "project renamed on disk, but its flags and members could not follow: "+err.Error())
+					return
+				}
 			}
 			r.auditNote(req, audit.ActionRenameProject, user, name, newName, 0)
 			finalName = newName

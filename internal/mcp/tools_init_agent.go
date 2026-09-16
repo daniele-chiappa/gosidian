@@ -243,5 +243,11 @@ func anchorSlug(path string) string {
 	if i := strings.LastIndex(base, "/"); i >= 0 {
 		base = base[i+1:]
 	}
-	return strings.TrimSuffix(base, ".md")
+	low := strings.ToLower(base)
+	for _, ext := range []string{".md", ".html"} {
+		if strings.HasSuffix(low, ext) {
+			return base[:len(base)-len(ext)]
+		}
+	}
+	return base
 }

@@ -422,7 +422,9 @@ func main() {
 	if cfg.MCP.BridgeDir != "" {
 		log.Printf("mcp bridge dir: %s (stage files here, reference by bridge_filename — IMP-059)", cfg.MCP.BridgeDir)
 	}
-	mcpServer.SetIngestURLAllowlist(cfg.MCP.IngestURLAllowlist)
+	if err := mcpServer.SetIngestURLAllowlist(cfg.MCP.IngestURLAllowlist); err != nil {
+		log.Fatalf("mcp: %v", err)
+	}
 	if len(cfg.MCP.IngestURLAllowlist) > 0 {
 		log.Printf("mcp ingest url allowlist: %s (memory_ingest url source enabled)", strings.Join(cfg.MCP.IngestURLAllowlist, ", "))
 	}
@@ -464,6 +466,12 @@ func main() {
 		log.Printf("self-improve: digest scheduler enabled (interval=%s)", cfg.SelfImprove.DigestInterval)
 	}
 
+	if err := apiv1.SetTrustedProxies(cfg.Webauth.TrustedProxies); err != nil {
+		log.Fatalf("webauth.trusted_proxies: %v", err)
+	}
+	if len(cfg.Webauth.TrustedProxies) > 0 {
+		log.Printf("webauth: trusting X-Forwarded-For from %s", strings.Join(cfg.Webauth.TrustedProxies, ", "))
+	}
 	apiRouter := apiv1.NewRouter(&apiv1.Deps{
 		Auth: &apiv1.AuthDeps{
 			WebAuth:   webauthStore,

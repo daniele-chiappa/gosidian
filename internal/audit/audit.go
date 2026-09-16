@@ -7,7 +7,7 @@
 //   - token:     token id (8 hex), empty for HTTP requests without auth
 //   - actor:     e.g. http remote IP or token name (best-effort)
 //   - action:    create / update / append / delete / rename / create_project /
-//                delete_project / rename_project
+//     delete_project / rename_project
 //   - path:      vault-relative path (or project name for project ops)
 //   - to:        target path/name for rename (omitted otherwise)
 //   - size:      content size in bytes after the operation (omitted for delete)
@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -37,12 +38,12 @@ const (
 type Action string
 
 const (
-	ActionCreate        Action = "create"
-	ActionUpdate        Action = "update"
-	ActionAppend        Action = "append"
-	ActionDelete        Action = "delete"
-	ActionRename        Action = "rename"
-	ActionCreateProject Action = "create_project"
+	ActionCreate           Action = "create"
+	ActionUpdate           Action = "update"
+	ActionAppend           Action = "append"
+	ActionDelete           Action = "delete"
+	ActionRename           Action = "rename"
+	ActionCreateProject    Action = "create_project"
 	ActionDeleteProject    Action = "delete_project"
 	ActionRenameProject    Action = "rename_project"
 	ActionUploadAttachment Action = "upload_attachment"
@@ -67,6 +68,11 @@ const (
 	ActionSpaTokenRefresh Action = "spa_token_refresh"
 	ActionSpaTokenRevoke  Action = "spa_token_revoke"
 	ActionSpaLoginFailed  Action = "spa_login_failed"
+
+	// Web-UI account administration (admin_users handlers).
+	ActionUserCreate  Action = "user_create"
+	ActionUserDisable Action = "user_disable"
+	ActionUserUpdate  Action = "user_update"
 )
 
 // Entry is the on-disk shape. Keep field names short; this file may grow.
@@ -137,7 +143,7 @@ type TailOpts struct {
 	Actor      string    // exact match on entry.Actor (token name, possibly suffixed with @<cid>).
 	UserID     string    // exact match on entry.UserID (webauth user id).
 	Action     Action    // exact match on entry.Action.
-	PathPrefix string    // entry.Path must start with this string (vault-relative).
+	PathPrefix string    // entry.Path must start with this string (vault-relative); "<p>/" also matches the bare project row "<p>".
 	Source     Source    // exact match on entry.Source ("http" or "mcp").
 	Limit      int       // max entries to return. <=0 or >500 is clamped to 50.
 }
@@ -208,7 +214,13 @@ func matchesOpts(e Entry, opts TailOpts) bool {
 		return false
 	}
 	if opts.PathPrefix != "" {
-		if e.Path == "" || (len(e.Path) < len(opts.PathPrefix) || e.Path[:len(opts.PathPrefix)] != opts.PathPrefix) {
+		// A "<project>/" prefix also covers the project-level rows (create,
+		// rename, delete project, flags, git token) whose Path is the bare
+		// project name.
+		if e.Path == "" {
+			return false
+		}
+		if !strings.HasPrefix(e.Path, opts.PathPrefix) && e.Path != strings.TrimSuffix(opts.PathPrefix, "/") {
 			return false
 		}
 	}

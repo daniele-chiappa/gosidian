@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
+	"github.com/gosidian/gosidian/internal/auth"
 )
 
 // seedAuditLog wires a fresh audit log into the server and populates it with
@@ -153,5 +154,40 @@ func TestMCP_AuditTail_NoAuditLogReturnsEmpty(t *testing.T) {
 	}
 	if len(payload.Entries) != 0 {
 		t.Errorf("expected 0 entries without audit log, got %d", len(payload.Entries))
+	}
+}
+
+// A single-project token must also see the project-level rows (create/
+// rename/delete project, flags), whose Path is the bare project name and not
+// "<project>/…" (BUG-037).
+func TestMCP_AuditTail_ScopedTokenSeesProjectLevelRows(t *testing.T) {
+	s, ctx := newScopedServer(t, "projA", []string{auth.ScopeRead, auth.ScopeWrite})
+	l := seedAuditLog(t, s)
+	if err := l.Write(audit.Entry{TS: time.Now(), Source: audit.SourceHTTP, Actor: "owner", Action: audit.ActionCreateProject, Path: "projA"}); err != nil {
+		t.Fatal(err)
+	}
+	res, _ := s.handleAuditTail(ctx, call(map[string]any{}))
+	var payload struct {
+		Entries []auditEntryOut `json:"entries"`
+	}
+	_ = json.Unmarshal([]byte(resultText(t, res)), &payload)
+	var paths []string
+	for _, e := range payload.Entries {
+		paths = append(paths, e.Path)
+	}
+	seenProject, seenOther := false, false
+	for _, p := range paths {
+		if p == "projA" {
+			seenProject = true
+		}
+		if p == "projB/z.md" {
+			seenOther = true
+		}
+	}
+	if !seenProject {
+		t.Errorf("project-level row hidden from scoped token: %v", paths)
+	}
+	if seenOther {
+		t.Errorf("row outside the scope leaked: %v", paths)
 	}
 }

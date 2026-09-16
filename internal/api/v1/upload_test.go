@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/gosidian/gosidian/internal/attach"
 )
 
 // uploadFixture is the smallest setup needed for the upload/attach
@@ -179,5 +181,17 @@ func TestHistory_RequiresGitSync(t *testing.T) {
 	}
 	if !strings.Contains(w.body, "git sync") {
 		t.Errorf("missing git sync hint: %s", w.body)
+	}
+}
+
+// A body far beyond the attachment cap must be refused by the parser (413)
+// instead of being spooled to a temp file first (BUG-034).
+func TestUpload_OversizedBodyIs413(t *testing.T) {
+	f := newUploadFixture(t)
+	huge := bytes.Repeat([]byte("x"), int(attach.MaxBytes)+3<<20)
+	ct, raw := uploadFile(t, "huge.png", huge)
+	rec := f.doMultipart(t, http.MethodPost, "/api/v1/upload?project=proj", ct, raw)
+	if rec.code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status=%d body=%s", rec.code, rec.body)
 	}
 }

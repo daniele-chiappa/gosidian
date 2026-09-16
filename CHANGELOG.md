@@ -8,6 +8,79 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.26.1] — 2026-09-16 — "ultrareview roundup: security & bounds"
+
+Twenty fixes from a three-slice external code review of v2.26.0 (MCP core,
+MCP workflow tools, authentication/vault surface). No new features, no
+migration. One configuration surface is new and matters to deployments
+behind a reverse proxy — see the upgrade note under *Security*.
+
+### Security
+- **Login rate limiter keyed on the peer address** (GHSA pending, CWE-307).
+  `X-Forwarded-For` is honoured only when the connecting peer is listed in
+  `webauth.trusted_proxies` (`GOSIDIAN_TRUSTED_PROXIES`, IPs or CIDRs), and
+  the chain is walked from the right to the first untrusted hop. Rotating
+  the header no longer buys a fresh failed-login bucket per attempt, and
+  the limiter stops creating map entries for requests that never reach
+  authentication. **Upgrade note**: if gosidian sits behind a reverse
+  proxy (nginx, NPM, Caddy, Cloudflare Tunnel…), list that proxy in
+  `webauth.trusted_proxies` — otherwise every client behind it shares one
+  failed-login bucket. Direct deployments need nothing.
+- **`memory_ingest` URL allowlist matched structurally.** Scheme, host,
+  effective port and path segment are compared after parsing; URLs and
+  redirect hops that merely *start with* an allowlist string
+  (`https://api.example.com@evil/…`, `https://api.example.com.evil/…`)
+  are rejected, and a malformed entry fails startup instead of being
+  ignored. Default (empty allowlist, channel off) was never exposed.
+- **Multipart uploads capped before parsing.** `POST /mcp/upload`, ingest
+  ticket redemption and `POST /api/v1/upload` wrap the body in
+  `http.MaxBytesReader`, so an oversized upload is refused with 413
+  instead of being spooled to disk first.
+- **Write rate limiter covers every mutation.** Delete, rename, move,
+  delete-attachment, bridge/source_path uploads, the HTTP upload and
+  ticket endpoints and ticket minting now consult the per-token budget; a
+  token may hold at most 16 unredeemed ingest tickets.
+- **Token store reloads before mutating.** A token revoked by the CLI while
+  the server runs is no longer resurrected by the next write from the web
+  UI.
+- **Bounded metrics labels.** `/api/v1/*` paths collapse to a fixed set of
+  route families; unknown paths no longer mint Prometheus series.
+- **LDAP provisioning collision.** After a same-username local account
+  appears mid-login, the LDAP bind no longer opens that local session.
+
+### Fixed
+- `memory_compact` with `keep_last_n: 0` archives everything instead of
+  panicking.
+- `memory_refresh_hot` and `memory_project_scaffold` accept project-scoped
+  tokens again (the scope check ran on an empty path).
+- MCP mutations publish on the event hub: `memory_edit`, rename, move,
+  rename/delete project, `memory_ask`, `memory_compact` and
+  `memory_refresh_hot` now wake the SPA and `memory_wait_changes`;
+  `memory_append` announces `create` when it creates the note.
+- `memory_audit_tail` with a single-project token also lists the
+  project-level rows (create/rename/delete project, flags).
+- Media, table and promoted-agent note creation hold the per-path lock, so
+  concurrent creates of the same note cannot silently overwrite each other.
+- Media/table note titles are YAML-quoted; the frontmatter parser decodes
+  double-quoted scalars.
+- Wikilink resolution by basename escapes `_` and `%` and orders ties.
+- `ExtractSection` (`memory_get_section`, skill triggers, handoff
+  summaries) ignores headings inside code fences.
+- `memory_ask` only bootstraps `open-questions.md` when the file is
+  missing; other read errors abort instead of overwriting it.
+- `memory_promote_agent` accepts YAML inline `tools: [a, b]` lists and
+  never inserts a second `harness:` key.
+- Agent anchors derive the slug from `.html` notes too.
+- Project create/rename report projects-store failures instead of returning
+  success with orphaned flags or a locked-out creator.
+- `memory_upload_resource` reports `original_filename` when it was derived
+  from `source_path` / `bridge_filename`.
+
+### Changed
+- Typed constants replace string literals for the owner-role check and the
+  user-admin audit actions; hand-rolled `contains`/`bytesEqual` helpers
+  replaced by the standard library.
+
 ## [2.26.0] — 2026-09-15 — "MCP note download"
 
 ### Added

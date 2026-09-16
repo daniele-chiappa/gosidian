@@ -357,3 +357,31 @@ func TestStore_LegacyMigration(t *testing.T) {
 func writeFile(path string, data []byte) error {
 	return os.WriteFile(path, data, 0o600)
 }
+
+// ldapProvisionsLocal simulates the race behind BUG-052: while the LDAP bind
+// is in flight, a local account with the same username appears (a signup or
+// an admin create). The bind succeeds, AddLDAPUser then collides, and the
+// re-fetch must refuse the local record instead of logging the LDAP caller
+// into it.
+type ldapProvisionsLocal struct{ store *Store }
+
+func (l ldapProvisionsLocal) Authenticate(username, _ string) error {
+	if _, err := l.store.AddUser(username, "local-password", RoleOwner); err != nil {
+		return err
+	}
+	return nil
+}
+
+func TestAuthenticate_LDAPCollisionRefusesLocalAccount(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "auth.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := s.Authenticate("bob", "ldap-password", "", ldapProvisionsLocal{store: s})
+	if err == nil {
+		t.Fatalf("LDAP bind must not unlock a same-name local account; got user %+v", u)
+	}
+	if local, ok := s.UserByUsername("bob"); !ok || local.AuthSource == "ldap" {
+		t.Fatalf("local account must be left untouched: %+v ok=%v", local, ok)
+	}
+}

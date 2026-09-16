@@ -290,11 +290,15 @@ func (i *Index) resolveTargetLocked(target string) string {
 	if err := i.db.QueryRow(`SELECT path FROM notes WHERE lower(title) = lower(?) LIMIT 1`, t).Scan(&got); err == nil {
 		return got
 	}
-	// 3. basename match across note extensions (.md before .html).
+	// 3. basename match across note extensions (.md before .html). "_" and
+	// "%" are literal characters in a link target, so they are escaped for
+	// LIKE; ORDER BY keeps a multi-match deterministic.
+	lowerT := strings.ToLower(t)
+	likeT := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(lowerT)
 	for _, e := range noteExts {
 		if err := i.db.QueryRow(
-			`SELECT path FROM notes WHERE lower(path) LIKE ? OR lower(path) = ? LIMIT 1`,
-			"%/"+strings.ToLower(t)+e, strings.ToLower(t)+e,
+			`SELECT path FROM notes WHERE lower(path) LIKE ? ESCAPE '\' OR lower(path) = ? ORDER BY path LIMIT 1`,
+			"%/"+likeT+e, lowerT+e,
 		).Scan(&got); err == nil {
 			return got
 		}

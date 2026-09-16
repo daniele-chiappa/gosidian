@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
+	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -47,9 +48,14 @@ type refreshHotResult struct {
 }
 
 func (s *Server) handleRefreshHot(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	tok, errRes := s.authorizeWrite(ctx, "")
-	if errRes != nil {
-		return errRes, nil
+	// Scope is checked on the concrete hot.md path below: authorizeWrite on
+	// "" would reject every project-scoped token (AllowsPath("") is false).
+	tok := s.tokenFromContext(ctx)
+	if tok == nil {
+		return mcp.NewToolResultError("unauthorized"), nil
+	}
+	if !tok.HasScope(auth.ScopeWrite) {
+		return mcp.NewToolResultError("token lacks write scope"), nil
 	}
 	project, err := s.resolveProject(tok, req)
 	if err != nil {
@@ -61,8 +67,8 @@ func (s *Server) handleRefreshHot(ctx context.Context, req mcp.CallToolRequest) 
 	}
 
 	hotPath := project + "/hot.md"
-	if !tok.AllowsPath(hotPath) {
-		return mcp.NewToolResultErrorf("hot path %q is outside the token's scope", hotPath), nil
+	if _, errRes := s.authorizeWrite(ctx, hotPath); errRes != nil {
+		return errRes, nil
 	}
 	unlock := s.vault.LockPath(hotPath)
 	defer unlock()
@@ -107,6 +113,7 @@ func (s *Server) handleRefreshHot(ctx context.Context, req mcp.CallToolRequest) 
 	if newNote != nil {
 		newTag = newNote.ETag()
 	}
+	s.publishNoteChange("update", hotPath, newTag, false)
 	return mcp.NewToolResultJSON(refreshHotResult{
 		Project: project,
 		Updated: true,

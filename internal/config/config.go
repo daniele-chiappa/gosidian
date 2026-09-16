@@ -122,6 +122,12 @@ type WebauthConfig struct {
 	SessionTTL       time.Duration `toml:"session_ttl"`        // default 24h
 	LoginWindow      time.Duration `toml:"login_window"`       // default 15m
 	LoginMaxFailures int           `toml:"login_max_failures"` // default 5
+	// TrustedProxies lists the reverse proxies (IPs or CIDRs) whose
+	// X-Forwarded-For header the login rate limiter may believe. Empty
+	// (default) means the header is ignored and the peer address is used:
+	// honouring XFF from an untrusted peer lets a brute-forcer choose its
+	// own rate-limit bucket on every attempt.
+	TrustedProxies []string `toml:"trusted_proxies"`
 	// TOTPMode is the global two-factor policy: "off" (default; no TOTP, the
 	// login field is hidden), "optional" (users may enrol; enforced for those
 	// who have a secret), or "required" (every non-exempt user must enrol).
@@ -369,6 +375,15 @@ func (c *Config) ApplyEnv() error {
 	}
 	if v := os.Getenv("GOSIDIAN_TOTP_MODE"); v != "" {
 		c.Webauth.TOTPMode = v
+	}
+	if v := os.Getenv("GOSIDIAN_TRUSTED_PROXIES"); v != "" {
+		var proxies []string
+		for _, p := range strings.Split(v, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				proxies = append(proxies, p)
+			}
+		}
+		c.Webauth.TrustedProxies = proxies
 	}
 	if v := os.Getenv("GOSIDIAN_OPEN_MODE"); v != "" {
 		switch v {

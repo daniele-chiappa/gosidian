@@ -221,14 +221,48 @@ func (s *statusRecorder) Unwrap() http.ResponseWriter {
 	return s.ResponseWriter
 }
 
+// apiRouteFamilies are the first path segments under /api/v1/ that get
+// their own metrics label. Anything else collapses to "other": the label set
+// must stay fixed no matter what paths clients — authenticated or not —
+// choose to request.
+var apiRouteFamilies = map[string]bool{
+	"admin": true, "attach": true, "auth-config": true, "command-palette": true,
+	"events": true, "graph": true, "health": true, "i18n": true, "insights": true,
+	"login": true, "logout": true, "me": true, "note-titles": true, "notes": true,
+	"preview": true, "projects": true, "refresh": true, "search": true,
+	"settings": true, "signup": true, "tags": true, "totp": true, "trash": true,
+	"tree": true, "upload": true, "version": true,
+}
+
+var apiAdminFamilies = map[string]bool{
+	"audit": true, "invites": true, "spa-tokens": true, "tokens": true, "users": true,
+}
+
 // routeLabel collapses URL paths into bounded label values so metrics
-// cardinality stays manageable.
+// cardinality stays manageable: per-note, per-project and per-user paths
+// share one label per route family, and unknown paths never mint a series.
 func routeLabel(p string) string {
 	switch {
 	case p == "/" || p == "/healthz" || p == "/metrics":
 		return p
 	case strings.HasPrefix(p, "/api/v1/"):
-		return p
+		first, rest, more := strings.Cut(strings.TrimPrefix(p, "/api/v1/"), "/")
+		if !apiRouteFamilies[first] {
+			return "/api/v1/other"
+		}
+		label := "/api/v1/" + first
+		if first == "admin" {
+			second, _, deeper := strings.Cut(rest, "/")
+			if !apiAdminFamilies[second] {
+				return "/api/v1/admin/other"
+			}
+			label += "/" + second
+			more = deeper
+		}
+		if more {
+			label += "/*"
+		}
+		return label
 	case strings.HasPrefix(p, "/mcp/"):
 		return "/mcp/*"
 	case strings.HasPrefix(p, "/static/"):
@@ -236,5 +270,6 @@ func routeLabel(p string) string {
 	case strings.HasPrefix(p, "/vault-files/"):
 		return "/vault-files/*"
 	}
-	return p
+	// Everything else is served by the SPA fallback.
+	return "/*"
 }

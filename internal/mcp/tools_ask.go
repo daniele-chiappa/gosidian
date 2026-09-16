@@ -13,7 +13,9 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -84,10 +86,16 @@ func (s *Server) handleAsk(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	// Locked so two concurrent asks can't mint the same OQ id.
 	unlock := s.vault.LockPath(rel)
 	defer unlock()
+	// Only "not found" may bootstrap the file from the template: any other
+	// read error (permissions, a directory in the way, I/O) would otherwise
+	// be mistaken for a first use and the existing questions overwritten.
 	var existing []byte
 	if note, loadErr := s.vault.Load(rel); loadErr == nil {
 		existing = note.Content
+	} else if !errors.Is(loadErr, os.ErrNotExist) && !strings.Contains(loadErr.Error(), "no such file") {
+		return mcp.NewToolResultErrorFromErr("load failed", loadErr), nil
 	}
+	created := len(existing) == 0
 	nextID := nextOQIndex(existing)
 	body := appendOQBlock(existing, project, nextID, question, urgency, qContext)
 
@@ -107,6 +115,11 @@ func (s *Server) handleAsk(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	if fresh, err := s.vault.Load(rel); err == nil {
 		result.ETag = fresh.ETag()
 	}
+	action := "update"
+	if created {
+		action = "create"
+	}
+	s.publishNoteChange(action, rel, result.ETag, created)
 	return mcp.NewToolResultJSON(result)
 }
 

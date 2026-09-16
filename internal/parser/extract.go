@@ -2,6 +2,7 @@ package parser
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -188,9 +189,7 @@ func ParseFrontmatterFields(raw string) map[string]any {
 		if val == "" {
 			continue
 		}
-		// Strip optional surrounding quotes.
-		val = strings.Trim(val, `"'`)
-		out[key] = val
+		out[key] = unquoteScalar(val)
 	}
 	return out
 }
@@ -332,9 +331,13 @@ func ExtractSection(body []byte, heading string) string {
 	headingLower := strings.ToLower(heading)
 
 	lines := strings.Split(src, "\n")
+	fenced := fencedLines(lines)
 	startIdx := -1
 	startLevel := 0
 	for i, line := range lines {
+		if fenced[i] {
+			continue
+		}
 		level, text := parseHeadingLine(line)
 		if level == 0 {
 			continue
@@ -350,6 +353,9 @@ func ExtractSection(body []byte, heading string) string {
 	}
 	endIdx := len(lines)
 	for j := startIdx + 1; j < len(lines); j++ {
+		if fenced[j] {
+			continue
+		}
 		level, _ := parseHeadingLine(lines[j])
 		if level > 0 && level <= startLevel {
 			endIdx = j
@@ -357,6 +363,24 @@ func ExtractSection(body []byte, heading string) string {
 		}
 	}
 	return strings.Join(lines[startIdx:endIdx], "\n")
+}
+
+// fencedLines marks the lines that sit inside a ``` or ~~~ code fence
+// (delimiters included): a "## …" line in there is content, not a heading.
+// The lines themselves are kept, so section offsets stay intact.
+func fencedLines(lines []string) []bool {
+	out := make([]bool, len(lines))
+	in := false
+	for i, line := range lines {
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "```") || strings.HasPrefix(trim, "~~~") {
+			in = !in
+			out[i] = true
+			continue
+		}
+		out[i] = in
+	}
+	return out
 }
 
 // parseHeadingLine returns the heading level (1-6) and trimmed text for an
@@ -491,4 +515,28 @@ func replaceInlineCode(line string) string {
 		}
 	}
 	return b.String()
+}
+
+// HasFrontmatterKey reports whether raw frontmatter carries key as a
+// top-level entry, whatever its shape (block, inline scalar, or empty).
+func HasFrontmatterKey(raw, key string) bool {
+	for _, line := range strings.Split(raw, "\n") {
+		if strings.HasPrefix(line, key+":") {
+			return true
+		}
+	}
+	return false
+}
+
+// unquoteScalar strips the quotes around a frontmatter scalar. A
+// double-quoted value is decoded so escaped quotes and backslashes written by
+// a YAML emitter round-trip; single-quoted (and bare) values keep the historic
+// trim behaviour.
+func unquoteScalar(val string) string {
+	if len(val) >= 2 && val[0] == '"' && val[len(val)-1] == '"' {
+		if u, err := strconv.Unquote(val); err == nil {
+			return u
+		}
+	}
+	return strings.Trim(val, `"'`)
 }

@@ -19,6 +19,12 @@ import (
 // of validity is its whole security budget.
 const defaultIngestTicketTTL = 5 * time.Minute
 
+// maxIngestTicketsPerToken caps the unredeemed tickets one token may hold.
+// Tickets live in memory until redeemed or expired, so without a cap a
+// write-scoped token minting in a loop grows the map at whatever rate the
+// transport allows.
+const maxIngestTicketsPerToken = 16
+
 // ingestTicket is a pending memory_ingest transfer:http intent, waiting for
 // its bytes to arrive on the redemption endpoint. In-memory and single-use:
 // the first redemption attempt consumes it, success or not.
@@ -40,6 +46,9 @@ func (s *Server) mintIngestTicket(ctx context.Context, project, as string, req m
 	}
 	tok, errRes := s.authorizeWrite(ctx, project+"/ingest-probe.md")
 	if errRes != nil {
+		return errRes, nil
+	}
+	if errRes := s.checkWriteLimits(tok, 0); errRes != nil {
 		return errRes, nil
 	}
 
@@ -72,10 +81,19 @@ func (s *Server) mintIngestTicket(ctx context.Context, project, as string, req m
 		s.ingestTickets = make(map[string]*ingestTicket)
 	}
 	now := time.Now()
+	pending := 0
 	for k, v := range s.ingestTickets {
 		if now.After(v.Expires) {
 			delete(s.ingestTickets, k)
+			continue
 		}
+		if v.TokenID == tok.ID {
+			pending++
+		}
+	}
+	if pending >= maxIngestTicketsPerToken {
+		s.ingestTicketsMu.Unlock()
+		return mcp.NewToolResultErrorf("too many pending ingest tickets for this token (max %d): redeem them or let them expire", maxIngestTicketsPerToken), nil
 	}
 	s.ingestTickets[id] = tk
 	s.ingestTicketsMu.Unlock()
@@ -159,8 +177,9 @@ func (s *Server) handleIngestTicketRedeem(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	if err := r.ParseMultipartForm(attach.MaxBytes + (1 << 20)); err != nil {
-		writeJSONError(w, http.StatusBadRequest, "bad multipart body: "+err.Error())
+	r.Body = http.MaxBytesReader(w, r.Body, multipartBodyCap)
+	if err := r.ParseMultipartForm(multipartBodyCap); err != nil {
+		writeMultipartError(w, err)
 		return
 	}
 	file, hdr, err := r.FormFile("file")
@@ -176,6 +195,10 @@ func (s *Server) handleIngestTicketRedeem(w http.ResponseWriter, r *http.Request
 	}
 	if len(data) > attach.MaxBytes {
 		writeJSONError(w, http.StatusRequestEntityTooLarge, "file too large (max 10 MiB)")
+		return
+	}
+	if msg := s.writeLimitViolation(tok, len(data)); msg != "" {
+		writeJSONError(w, http.StatusTooManyRequests, msg)
 		return
 	}
 

@@ -5,6 +5,7 @@ import (
 
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/projects"
+	"github.com/gosidian/gosidian/internal/webauth"
 )
 
 // projectMemberView is the JSON shape for a per-project membership. Username is
@@ -35,7 +36,7 @@ func (r *Router) handleProjectMembers(w http.ResponseWriter, req *http.Request, 
 		WriteError(w, http.StatusUnauthorized, CodeAuthTokenInvalid, "no user in context")
 		return
 	}
-	if user.Role != "owner" {
+	if user.Role != webauth.RoleOwner {
 		WriteError(w, http.StatusForbidden, CodeAuthOwnerOnly, "owner role required to manage project members")
 		return
 	}

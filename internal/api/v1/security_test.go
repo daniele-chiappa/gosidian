@@ -2,6 +2,7 @@ package v1
 
 import (
 	"encoding/base64"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -163,8 +164,11 @@ func TestLoginRateLimit_ResetsOnSuccess(t *testing.T) {
 
 func TestLoginRateLimit_DoesNotBlockOtherIPs(t *testing.T) {
 	// Simulate two distinct clients via X-Forwarded-For. One IP
-	// burns through its quota; the other should remain allowed.
+	// burns through its quota; the other should remain allowed. The
+	// header is honoured only because the httptest peer (192.0.2.1) is
+	// declared a trusted proxy.
 	f := newAuthFixture(t)
+	withTrustedProxies(t, "192.0.2.1")
 	prevMax := LoginMaxFailures
 	prevWin := LoginWindow
 	LoginMaxFailures = 2
@@ -196,5 +200,35 @@ func TestLoginRateLimit_DoesNotBlockOtherIPs(t *testing.T) {
 	})
 	if wOther.Code == http.StatusTooManyRequests {
 		t.Errorf("unrelated IP wrongly blocked: status=%d", wOther.Code)
+	}
+}
+
+// Without a trusted proxy in front, rotating X-Forwarded-For must not buy a
+// fresh rate-limit bucket per attempt (BUG-047).
+func TestLoginRateLimit_SpoofedXFFDoesNotBypass(t *testing.T) {
+	f := newAuthFixture(t)
+	prevMax := LoginMaxFailures
+	prevWin := LoginWindow
+	LoginMaxFailures = 2
+	LoginWindow = 1 * time.Minute
+	defer func() {
+		LoginMaxFailures = prevMax
+		LoginWindow = prevWin
+	}()
+
+	wrong := `{"username":"owner","password":"wrong"}`
+	for i := 0; i < LoginMaxFailures; i++ {
+		w := f.request(http.MethodPost, "/api/v1/login", wrong, map[string]string{
+			"X-Forwarded-For": fmt.Sprintf("10.0.0.%d", i+1),
+		})
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: status=%d", i+1, w.Code)
+		}
+	}
+	w := f.request(http.MethodPost, "/api/v1/login", wrong, map[string]string{
+		"X-Forwarded-For": "10.0.0.99",
+	})
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("spoofed XFF bypassed the limiter: status=%d", w.Code)
 	}
 }

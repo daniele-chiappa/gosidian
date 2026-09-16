@@ -135,7 +135,7 @@ func (r *Router) createUser(w http.ResponseWriter, req *http.Request) {
 			Source: audit.SourceHTTP,
 			Actor:  actor.Username,
 			UserID: actor.ID,
-			Action: "user_create",
+			Action: audit.ActionUserCreate,
 			Path:   user.ID,
 		})
 	}
@@ -200,7 +200,7 @@ func (r *Router) handleAdminUserItem(w http.ResponseWriter, req *http.Request) {
 			Source: audit.SourceHTTP,
 			Actor:  user.Username,
 			UserID: user.ID,
-			Action: "user_disable",
+			Action: audit.ActionUserDisable,
 			Path:   id,
 		})
 	}
@@ -263,7 +263,7 @@ func (r *Router) updateUserRole(w http.ResponseWriter, req *http.Request, id str
 			Source: audit.SourceHTTP,
 			Actor:  actor.Username,
 			UserID: actor.ID,
-			Action: "user_update",
+			Action: audit.ActionUserUpdate,
 			Path:   id,
 		})
 	}

@@ -99,7 +99,10 @@ func (s *Server) handleCompact(ctx context.Context, req mcp.CallToolRequest) (*m
 	// (frontmatter, intro, top title). The "kept" section is everything from
 	// the first entry to archive plus `keep` onwards.
 	headerEnd := starts[0][0]
-	keepStart := starts[original-keep][0]
+	keepStart := len(body) // keep == 0: archive every entry
+	if keep > 0 {
+		keepStart = starts[original-keep][0]
+	}
 	header := body[:headerEnd]
 	keepSuffix := body[keepStart:]
 
@@ -133,6 +136,7 @@ func (s *Server) handleCompact(ctx context.Context, req mcp.CallToolRequest) (*m
 	if newNote != nil {
 		etag = newNote.ETag()
 	}
+	s.publishNoteChange("update", rel, etag, false)
 	return mcp.NewToolResultJSON(compactResult{
 		Path:            rel,
 		OriginalEntries: original,

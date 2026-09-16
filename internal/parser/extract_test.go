@@ -327,3 +327,20 @@ func TestFrontmatterList(t *testing.T) {
 		t.Errorf("prefixed key = %v, want nil", got)
 	}
 }
+
+// A "## Heading" line inside a fenced code block is content, not a section
+// boundary (BUG-043): it must neither start nor end a section.
+func TestExtractSection_IgnoresFencedHeadings(t *testing.T) {
+	body := []byte("# Skill\n\nExample note:\n\n```markdown\n## Trigger phrase\nfenced decoy\n```\n\n## Trigger phrase\n\nreal trigger\n\n```\n## Steps\nstill inside\n```\n\nafter fence\n\n## Steps\n\nreal steps\n")
+	got := ExtractSection(body, "Trigger phrase")
+	for _, want := range []string{"real trigger", "still inside", "after fence"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("section missing %q:\n%s", want, got)
+		}
+	}
+	for _, miss := range []string{"fenced decoy", "real steps"} {
+		if strings.Contains(got, miss) {
+			t.Errorf("section wrongly contains %q:\n%s", miss, got)
+		}
+	}
+}

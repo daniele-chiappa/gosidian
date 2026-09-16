@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"path/filepath"
@@ -46,7 +47,7 @@ func (r *Router) handleAttach(w http.ResponseWriter, req *http.Request) {
 	if r.denyWriteProject(w, principalFromContext(req), project) {
 		return
 	}
-	data, header, errCode, errMsg := r.readAttachUpload(req)
+	data, header, errCode, errMsg := r.readAttachUpload(w, req)
 	if errCode != 0 {
 		WriteError(w, errCode, CodeValidationFormat, errMsg)
 		return
@@ -88,17 +89,13 @@ func (r *Router) handleUpload(w http.ResponseWriter, req *http.Request) {
 	if r.denyWriteProject(w, principalFromContext(req), project) {
 		return
 	}
-	data, header, errCode, errMsg := r.readAttachUpload(req)
+	data, header, errCode, errMsg := r.readAttachUpload(w, req)
 	if errCode != 0 {
 		WriteError(w, errCode, CodeValidationFormat, errMsg)
 		return
 	}
 	ext := strings.ToLower(filepath.Ext(header.Filename))
-	mime, isImage, err := attach.ValidateExt(ext)
-	if err != nil {
-		WriteError(w, http.StatusUnsupportedMediaType, CodeValidationFormat, err.Error())
-		return
-	}
+	mime, isImage := header.MIME, header.IsImage
 	res, err := attach.Store(r.deps.Vault, data, header.Filename, project)
 	if err != nil {
 		if strings.Contains(err.Error(), "MIME mismatch") {
@@ -127,8 +124,16 @@ func (r *Router) handleUpload(w http.ResponseWriter, req *http.Request) {
 // field, and enforces the size cap from internal/attach. Returns
 // (errCode, errMsg) when the request should fail before the call
 // reaches storage; both are zero on success.
-func (r *Router) readAttachUpload(req *http.Request) (data []byte, header *attachHeader, errCode int, errMsg string) {
-	if err := req.ParseMultipartForm(20 << 20); err != nil {
+func (r *Router) readAttachUpload(w http.ResponseWriter, req *http.Request) (data []byte, header *attachHeader, errCode int, errMsg string) {
+	// Cap the body itself before parsing: ParseMultipartForm's argument only
+	// bounds in-memory buffering and spools the rest to disk, so without
+	// MaxBytesReader the size check below runs after the whole upload landed.
+	req.Body = http.MaxBytesReader(w, req.Body, attach.MaxBytes+(1<<20))
+	if err := req.ParseMultipartForm(attach.MaxBytes + (1 << 20)); err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			return nil, nil, http.StatusRequestEntityTooLarge, "request body too large (max 10 MiB file)"
+		}
 		return nil, nil, http.StatusBadRequest, "bad multipart: " + err.Error()
 	}
 	file, h, err := req.FormFile("file")
@@ -146,10 +151,11 @@ func (r *Router) readAttachUpload(req *http.Request) (data []byte, header *attac
 		return nil, nil, http.StatusRequestEntityTooLarge, "file too large (max 10 MiB)"
 	}
 	ext := strings.ToLower(filepath.Ext(h.Filename))
-	if _, _, err := attach.ValidateExt(ext); err != nil {
+	mime, isImage, err := attach.ValidateExt(ext)
+	if err != nil {
 		return nil, nil, http.StatusUnsupportedMediaType, err.Error()
 	}
-	return read, &attachHeader{Filename: h.Filename, Size: h.Size}, 0, ""
+	return read, &attachHeader{Filename: h.Filename, Size: h.Size, MIME: mime, IsImage: isImage}, 0, ""
 }
 
 // attachHeader is a minimal projection of multipart.FileHeader so the
@@ -158,4 +164,6 @@ func (r *Router) readAttachUpload(req *http.Request) (data []byte, header *attac
 type attachHeader struct {
 	Filename string
 	Size     int64
+	MIME     string // from the validated extension
+	IsImage  bool
 }

@@ -189,3 +189,40 @@ func TestPromoteAgent_AdoptIntoExisting(t *testing.T) {
 		t.Errorf("fresh canonical not created: %v", err)
 	}
 }
+
+// Claude Code's native subagent format writes tools as a YAML inline list;
+// promoting it must not nest the brackets (BUG-045a).
+func TestPromoteAgent_InlineToolsList(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	foreign := "---\nname: lister\ndescription: d\ntools: [Read, Edit, \"Bash\"]\n---\nbody\n"
+	res, _ := s.handlePromoteAgent(context.Background(), call(map[string]any{
+		"project": "rc", "slug": "lister", "content": foreign, "profile": "claude",
+	}))
+	_ = resultText(t, res)
+	note, err := s.vault.Load("rc/agents/lister.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(note.Content)
+	if !strings.Contains(body, "tools: [Read, Edit, Bash]") || strings.Contains(body, "[[") {
+		t.Fatalf("tools list mangled:\n%s", body)
+	}
+}
+
+// adopt_into_existing must not add a second harness: key when the canonical
+// note already carries one as an inline value (BUG-045b).
+func TestPromoteAgent_AdoptDoesNotDuplicateInlineHarness(t *testing.T) {
+	s, _, dir := newTestServer(t)
+	writeVaultFile(t, dir, "rc/agents/inl.md", "---\ntitle: inl\ntype: agent\nharness: legacy\ntags: [rc, type:agent]\n---\n\ncanonical body\n")
+	foreign := "---\nname: inl-foreign\ntools: Read\n---\nforeign body\n"
+	for i := 0; i < 2; i++ {
+		res, _ := s.handlePromoteAgent(context.Background(), call(map[string]any{
+			"project": "rc", "slug": "inl", "content": foreign, "adopt_into_existing": true,
+		}))
+		_ = resultText(t, res)
+	}
+	note, _ := s.vault.Load("rc/agents/inl.md")
+	if n := strings.Count(string(note.Content), "harness:"); n != 1 {
+		t.Fatalf("harness key count = %d, want 1:\n%s", n, note.Content)
+	}
+}

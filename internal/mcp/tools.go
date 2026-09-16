@@ -13,7 +13,6 @@ import (
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/gosidian/gosidian/internal/index"
-	idx "github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/metrics"
 	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/gosidian/gosidian/internal/vault"
@@ -52,10 +51,23 @@ func (s *Server) authorizeWrite(ctx context.Context, path string) (*auth.Token, 
 // checkWriteLimits enforces the rate limit and per-note size cap. Returns a
 // CallToolResult error to be returned to the caller, or nil when the request
 // may proceed. Should be called AFTER authorizeWrite (so we know the token).
+// Every mutation goes through it — deletes, renames and uploads included,
+// with contentSize 0 when there is no body to cap — so the per-token budget
+// the operator configured really bounds what a runaway agent can do.
 func (s *Server) checkWriteLimits(tok *auth.Token, contentSize int) *mcp.CallToolResult {
+	if msg := s.writeLimitViolation(tok, contentSize); msg != "" {
+		return mcp.NewToolResultError(msg)
+	}
+	return nil
+}
+
+// writeLimitViolation is checkWriteLimits for non-MCP callers (the HTTP
+// upload endpoints): it returns the rejection message, or "" when the write
+// may proceed.
+func (s *Server) writeLimitViolation(tok *auth.Token, contentSize int) string {
 	if s.maxNoteBytes > 0 && int64(contentSize) > s.maxNoteBytes {
 		metrics.MCPRateLimitHits.Inc()
-		return mcp.NewToolResultErrorf("note size %d exceeds limit of %d bytes. A body this large usually belongs elsewhere: long tabular data → a table note, an image → a media note, a big generated file already on disk → memory_ingest (bridge_filename/source_path, or transfer:\"http\" for a single-use upload URL)", contentSize, s.maxNoteBytes)
+		return fmt.Sprintf("note size %d exceeds limit of %d bytes. A body this large usually belongs elsewhere: long tabular data → a table note, an image → a media note, a big generated file already on disk → memory_ingest (bridge_filename/source_path, or transfer:\"http\" for a single-use upload URL)", contentSize, s.maxNoteBytes)
 	}
 	id := ""
 	if tok != nil {
@@ -63,9 +75,9 @@ func (s *Server) checkWriteLimits(tok *auth.Token, contentSize int) *mcp.CallToo
 	}
 	if !s.limiter.Allow(id) {
 		metrics.MCPRateLimitHits.Inc()
-		return mcp.NewToolResultErrorf("write rate limit exceeded for token (max %d/min)", s.limiter.maxPerMinute)
+		return fmt.Sprintf("write rate limit exceeded for token (max %d/min)", s.limiter.maxPerMinute)
 	}
-	return nil
+	return ""
 }
 
 func (s *Server) registerTools() {
@@ -801,8 +813,13 @@ func (s *Server) handleAppend(ctx context.Context, req mcp.CallToolRequest) (*mc
 		freshETag = fresh.ETag()
 		out["etag"] = freshETag
 	}
-	// Tree affected only when the append created the note.
-	s.publishNoteChange("update", rel, freshETag, len(existing) == 0)
+	// An append onto a missing note is a create for subscribers too: the
+	// tree changes and per-note listeners have no record to update.
+	action := "update"
+	if len(existing) == 0 {
+		action = "create"
+	}
+	s.publishNoteChange(action, rel, freshETag, len(existing) == 0)
 	return mcp.NewToolResultJSON(out)
 }
 
@@ -873,9 +890,12 @@ func (s *Server) handleEdit(ctx context.Context, req mcp.CallToolRequest) (*mcp.
 		"replacements": count,
 		"new_size":     len(updated),
 	}
+	freshETag := ""
 	if fresh, err := s.vault.Load(rel); err == nil {
-		out["etag"] = fresh.ETag()
+		freshETag = fresh.ETag()
+		out["etag"] = freshETag
 	}
+	s.publishNoteChange("update", rel, freshETag, false)
 	return mcp.NewToolResultJSON(out)
 }
 
@@ -888,7 +908,11 @@ func (s *Server) handleDelete(ctx context.Context, req mcp.CallToolRequest) (*mc
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("invalid path", err), nil
 	}
-	if _, errRes := s.authorizeWrite(ctx, rel); errRes != nil {
+	tok, errRes := s.authorizeWrite(ctx, rel)
+	if errRes != nil {
+		return errRes, nil
+	}
+	if errRes := s.checkWriteLimits(tok, 0); errRes != nil {
 		return errRes, nil
 	}
 	if !s.vault.IsNoteFile(rel) {
@@ -958,10 +982,14 @@ func (s *Server) handleRenameNote(ctx context.Context, req mcp.CallToolRequest) 
 		return mcp.NewToolResultErrorf("to %q is not a note path: keep the .md (or .html) extension", toRel), nil
 	}
 	// Both endpoints must be inside the token's scope (write).
-	if _, errRes := s.authorizeWrite(ctx, fromRel); errRes != nil {
+	tok, errRes := s.authorizeWrite(ctx, fromRel)
+	if errRes != nil {
 		return errRes, nil
 	}
 	if _, errRes := s.authorizeWrite(ctx, toRel); errRes != nil {
+		return errRes, nil
+	}
+	if errRes := s.checkWriteLimits(tok, 0); errRes != nil {
 		return errRes, nil
 	}
 	// Lock the source path only: it serializes rename-vs-update on the note
@@ -978,6 +1006,7 @@ func (s *Server) handleRenameNote(ctx context.Context, req mcp.CallToolRequest) 
 	// (this used to force .md, which mislabelled .html notes).
 	canonical := toRel
 	s.auditWrite(ctx, audit.ActionRename, fromRel, canonical, 0)
+	s.publishRename(fromRel, canonical, rewritten)
 	return mcp.NewToolResultJSON(map[string]any{
 		"from":      fromRel,
 		"to":        canonical,
@@ -1008,7 +1037,11 @@ func (s *Server) handleMoveNote(ctx context.Context, req mcp.CallToolRequest) (*
 	if project != "" {
 		dest = project + "/" + base
 	}
-	if _, errRes := s.authorizeWrite(ctx, dest); errRes != nil {
+	tok, errRes := s.authorizeWrite(ctx, dest)
+	if errRes != nil {
+		return errRes, nil
+	}
+	if errRes := s.checkWriteLimits(tok, 0); errRes != nil {
 		return errRes, nil
 	}
 	unlock := s.vault.LockPath(fromRel)
@@ -1018,6 +1051,7 @@ func (s *Server) handleMoveNote(ctx context.Context, req mcp.CallToolRequest) (*
 		return mcp.NewToolResultErrorFromErr("move failed", err), nil
 	}
 	s.auditWrite(ctx, audit.ActionRename, fromRel, dest, 0)
+	s.publishRename(fromRel, dest, rewritten)
 	return mcp.NewToolResultJSON(map[string]any{
 		"from":      fromRel,
 		"to":        dest,
@@ -1048,6 +1082,7 @@ func (s *Server) handleRenameProject(ctx context.Context, req mcp.CallToolReques
 		return mcp.NewToolResultErrorFromErr("rename project failed", err), nil
 	}
 	s.auditWrite(ctx, audit.ActionRenameProject, from, to, 0)
+	s.publishTreeChange("rename_project", from, map[string]any{"to": to})
 	return mcp.NewToolResultJSON(map[string]any{"from": from, "to": to})
 }
 
@@ -1074,6 +1109,7 @@ func (s *Server) handleDeleteProject(ctx context.Context, req mcp.CallToolReques
 		_ = s.index.Delete(p)
 	}
 	s.auditWrite(ctx, audit.ActionDeleteProject, name, "", int64(len(removed)))
+	s.publishTreeChange("delete_project", name, map[string]any{"removed_notes": len(removed)})
 	return mcp.NewToolResultJSON(map[string]any{
 		"deleted":       true,
 		"name":          name,
@@ -1362,7 +1398,7 @@ func (s *Server) writeAndIndex(rel string, content []byte) error {
 	if err != nil {
 		return fmt.Errorf("reload: %w", err)
 	}
-	return s.index.Upsert(idx.NoteDoc{
+	return s.index.Upsert(index.NoteDoc{
 		Path:    note.Path,
 		Title:   note.Title,
 		Body:    string(note.Content),
