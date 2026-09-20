@@ -8,10 +8,10 @@ import (
 	"strings"
 
 	"github.com/yuin/goldmark"
+	highlighting "github.com/yuin/goldmark-highlighting/v2"
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/parser"
 	gmhtml "github.com/yuin/goldmark/renderer/html"
-	highlighting "github.com/yuin/goldmark-highlighting/v2"
 )
 
 // Resolver maps a wiki-link target to a vault-relative path. Returns empty

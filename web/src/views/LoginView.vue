@@ -86,13 +86,18 @@ async function handleSubmit() {
         </label>
 
         <label v-if="showTotp" class="block text-sm">
-          <span class="text-text-muted">TOTP <span class="opacity-60">(if enabled for your account)</span></span>
+          <span class="text-text-muted">
+            Two-factor code
+            <span class="opacity-60">(if enabled for your account — a recovery code works too)</span>
+          </span>
+          <!-- inputmode "text", not "numeric": recovery codes carry letters. -->
           <input
             v-model.trim="totp"
             type="text"
-            inputmode="numeric"
+            inputmode="text"
             autocomplete="one-time-code"
-            placeholder="123 456"
+            autocapitalize="characters"
+            placeholder="123 456 or xxxxx-xxxxx"
             class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
           />
         </label>

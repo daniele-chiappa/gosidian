@@ -73,8 +73,17 @@ type totpConfirmRequest struct {
 	Code   string `json:"code"`
 }
 
+// totpRecoveryCodesResponse carries a freshly minted set of recovery codes.
+// They are shown exactly once: the store keeps only their hashes.
+type totpRecoveryCodesResponse struct {
+	RecoveryCodes []string `json:"recovery_codes"`
+}
+
 // handleTOTPConfirm validates a code against the candidate secret from
-// /totp/enroll and, on success, activates it for the user.
+// /totp/enroll and, on success, activates it for the user together with the
+// account's first set of recovery codes. No rate limit here: the code is
+// checked against a secret the client itself supplied, so there is nothing
+// to guess.
 func (r *Router) handleTOTPConfirm(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
 		WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
@@ -102,18 +111,82 @@ func (r *Router) handleTOTPConfirm(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "invalid code")
 		return
 	}
-	if err := r.deps.Auth.WebAuth.SetTOTPSecret(user.ID, body.Secret); err != nil {
+	codes, err := r.deps.Auth.WebAuth.EnrollTOTP(user.ID, body.Secret)
+	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
 		return
 	}
 	if r.deps.Audit != nil {
-		_ = r.deps.Audit.Write(audit.Entry{Source: audit.SourceHTTP, Actor: user.Username, UserID: user.ID, Action: "totp_enroll", Path: user.ID})
+		_ = r.deps.Audit.Write(audit.Entry{Source: audit.SourceHTTP, Actor: user.Username, UserID: user.ID, Action: audit.ActionTOTPEnroll, Path: user.ID})
 	}
-	w.WriteHeader(http.StatusNoContent)
+	WriteJSON(w, http.StatusOK, totpRecoveryCodesResponse{RecoveryCodes: codes})
 }
 
-// handleTOTPDisenroll removes the user's TOTP secret, unless their effective
-// policy requires it (403). DELETE /api/v1/totp.
+type totpRecoveryRequest struct {
+	Code string `json:"code"`
+}
+
+// handleTOTPRecoveryCodes replaces the caller's recovery codes with a fresh
+// set. POST /api/v1/totp/recovery-codes with a current TOTP code: the session
+// alone must not be enough, or a hijacked browser tab could mint itself a
+// lasting second factor. A wrong code counts against the account's
+// second-factor limiter exactly like a failed login.
+func (r *Router) handleTOTPRecoveryCodes(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodPost {
+		WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
+		return
+	}
+	user := UserFromContext(req.Context())
+	if user == nil || r.deps.Auth == nil || r.deps.Auth.WebAuth == nil {
+		WriteError(w, http.StatusUnauthorized, CodeAuthTokenInvalid, "no user in context")
+		return
+	}
+	if user.isAnonymous() {
+		WriteError(w, http.StatusForbidden, CodeAuthForbidden, "anonymous session has no account to manage")
+		return
+	}
+	var body totpRecoveryRequest
+	if err := DecodeJSON(req, &body); err != nil {
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
+		return
+	}
+	if body.Code == "" {
+		WriteError(w, http.StatusBadRequest, CodeValidationRequired, "code is required")
+		return
+	}
+	full, ok := r.deps.Auth.WebAuth.UserByID(user.ID)
+	if !ok || full.TOTPSec == "" {
+		WriteError(w, http.StatusForbidden, CodeAuthForbidden, "two-factor is not enrolled")
+		return
+	}
+	acct := accountLimiterKey(user.Username)
+	if r.loginLimiter != nil && !r.loginLimiter.allowed(acct) {
+		WriteError(w, http.StatusTooManyRequests, CodeRateLimit, "too many failed two-factor attempts; try again later")
+		return
+	}
+	if !webauth.ValidateTOTPCode(full.TOTPSec, body.Code) {
+		if r.loginLimiter != nil {
+			r.loginLimiter.registerFail(acct)
+		}
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "invalid code")
+		return
+	}
+	if r.loginLimiter != nil {
+		r.loginLimiter.reset(acct)
+	}
+	codes, err := r.deps.Auth.WebAuth.GenerateRecoveryCodes(user.ID)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
+		return
+	}
+	if r.deps.Audit != nil {
+		_ = r.deps.Audit.Write(audit.Entry{Source: audit.SourceHTTP, Actor: user.Username, UserID: user.ID, Action: audit.ActionTOTPRecoveryRegen, Path: user.ID})
+	}
+	WriteJSON(w, http.StatusOK, totpRecoveryCodesResponse{RecoveryCodes: codes})
+}
+
+// handleTOTPDisenroll removes the user's TOTP secret and recovery codes,
+// unless their effective policy requires it (403). DELETE /api/v1/totp.
 func (r *Router) handleTOTPDisenroll(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodDelete {
 		WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
@@ -134,12 +207,12 @@ func (r *Router) handleTOTPDisenroll(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusForbidden, CodeAuthForbidden, "TOTP is required for your account and cannot be removed")
 		return
 	}
-	if err := r.deps.Auth.WebAuth.SetTOTPSecret(user.ID, ""); err != nil {
+	if err := r.deps.Auth.WebAuth.ResetTOTP(user.ID); err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
 		return
 	}
 	if r.deps.Audit != nil {
-		_ = r.deps.Audit.Write(audit.Entry{Source: audit.SourceHTTP, Actor: user.Username, UserID: user.ID, Action: "totp_disenroll", Path: user.ID})
+		_ = r.deps.Audit.Write(audit.Entry{Source: audit.SourceHTTP, Actor: user.Username, UserID: user.ID, Action: audit.ActionTOTPDisenroll, Path: user.ID})
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

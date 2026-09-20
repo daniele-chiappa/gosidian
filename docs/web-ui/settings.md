@@ -76,8 +76,13 @@ immediately — a boot-time invariant.
 ## Two-factor (TOTP)
 
 The **Two-factor** panel lets any user enroll a TOTP authenticator
-(scan the QR code, then confirm a code to activate). Owners additionally
-get a **global TOTP mode** (`off` / `optional` / `required`) here, while
-per-user overrides live in **Admin → Users**. Full policy semantics —
-including how `off` acts as a lockout-proof master switch — are in
+(scan the QR code, then confirm a code to activate). The confirmation
+hands out **8 single-use recovery codes**, shown once; the panel then
+tracks how many are left and can **regenerate** the set on request
+(a current TOTP code is asked for). Owners additionally get a **global
+TOTP mode** (`off` / `optional` / `required`) here, while per-user
+overrides — and the **Reset** that clears a locked-out user's second
+factor — live in **Admin → Users**. Full policy semantics, including how
+`off` acts as a lockout-proof master switch and how to recover a lost
+authenticator, are in
 [Authentication & roles](authentication.md#two-factor-authentication-totp).

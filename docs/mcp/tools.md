@@ -24,8 +24,11 @@ for precise schemas; the groupings below are the conceptual map.
   relevant grooming at end of task
 - `memory_recent(project)` — notes recently modified
 - `memory_pinned(project)` — notes tagged `pinned`
-- `memory_stale(project, older_than)` — unmodified long enough to
-  review/archive
+- `memory_stale(project, older_than, exclude_closed?)` — unmodified long
+  enough to review/archive; each note carries `closed` (tagged
+  `status:done` / `status:archived`) and `exclude_closed: true` drops
+  them, which is exactly what the bootstrap `maintenance.stale_count`
+  counts
 - `memory_plans(project, status)` — typed plan retrieval by status
 - `memory_skills(project, trigger_phrase?)` — reusable procedures
 - `memory_notes_by_importance(project, min_level)` — filter by the

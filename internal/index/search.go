@@ -215,39 +215,53 @@ func (i *Index) RecentNotes(project string, since int64, limit int) ([]RecentNot
 	return out, rows.Err()
 }
 
+// closedNoteExpr is the single SQL definition of a "closed" note — one tagged
+// status:done or status:archived — shared by StaleNotes and MaintenanceCounts,
+// so the memory_stale tool and the bootstrap maintenance digest cannot drift
+// on what they exclude. It expects the notes table to be aliased as n.
+const closedNoteExpr = `EXISTS (SELECT 1 FROM tags t WHERE t.note_id = n.id AND t.tag IN ('status:done', 'status:archived'))`
+
+// StaleNote is a RecentNote annotated with whether the note is closed (see
+// closedNoteExpr): closed notes age by design, and the flag lets callers tell
+// archive candidates from plans that are simply finished.
+type StaleNote struct {
+	RecentNote
+	Closed bool
+}
+
 // StaleNotes is the inverse of RecentNotes: it returns notes whose mtime is
 // strictly less than `before`, in ascending mtime order (oldest first),
 // optionally scoped to a project prefix. Used by the memory_stale MCP tool to
-// surface archive candidates.
-func (i *Index) StaleNotes(project string, before int64, limit int) ([]RecentNote, error) {
+// surface archive candidates. With excludeClosed the result is exactly the set
+// MaintenanceCounts counts as stale; without it every old note is returned,
+// flagged Closed where applicable.
+func (i *Index) StaleNotes(project string, before int64, limit int, excludeClosed bool) ([]StaleNote, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 50
 	}
-	var (
-		rows *sql.Rows
-		err  error
-	)
-	if project == "" {
-		rows, err = i.db.Query(
-			`SELECT path, title, mtime FROM notes WHERE mtime < ? ORDER BY mtime ASC LIMIT ?`,
-			before, limit,
-		)
-	} else {
+	q := `SELECT n.path, n.title, n.mtime, ` + closedNoteExpr + ` FROM notes n WHERE n.mtime < ?`
+	args := []any{before}
+	if project != "" {
 		like := strings.ReplaceAll(project, "%", `\%`)
 		like = strings.ReplaceAll(like, "_", `\_`) + "/%"
-		rows, err = i.db.Query(
-			`SELECT path, title, mtime FROM notes WHERE path LIKE ? ESCAPE '\' AND mtime < ? ORDER BY mtime ASC LIMIT ?`,
-			like, before, limit,
-		)
+		q += ` AND n.path LIKE ? ESCAPE '\'`
+		args = append(args, like)
 	}
+	if excludeClosed {
+		q += ` AND NOT ` + closedNoteExpr
+	}
+	q += ` ORDER BY n.mtime ASC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := i.db.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []RecentNote
+	var out []StaleNote
 	for rows.Next() {
-		var n RecentNote
-		if err := rows.Scan(&n.Path, &n.Title, &n.Mtime); err != nil {
+		var n StaleNote
+		if err := rows.Scan(&n.Path, &n.Title, &n.Mtime, &n.Closed); err != nil {
 			return nil, err
 		}
 		out = append(out, n)
@@ -309,9 +323,11 @@ func (i *Index) NotesByTagInProject(tag, project string) ([]NoteRow, error) {
 // MaintenanceCounts returns the cheap per-project grooming signals served by
 // the bootstrap maintenance digest (ADR-019): the number of unresolved
 // wikilinks leaving the project's notes, and the number of notes older than
-// staleBefore that are not tagged status:done / status:archived (closed plans
-// and archived notes age by design and would drown the signal). Both are
-// single indexed queries — the digest's cost budget forbids content scans.
+// staleBefore that are not closed (closedNoteExpr: tagged status:done or
+// status:archived — closed plans and archived notes age by design and would
+// drown the signal; memory_stale with exclude_closed lists exactly them).
+// Both are single indexed queries — the digest's cost budget forbids content
+// scans.
 //
 // excludeSuffixes drops targets by extension: the index resolves note targets
 // only, so attachment embeds (![[<hash>.webp]]) are always "unresolved" here
@@ -334,9 +350,8 @@ func (i *Index) MaintenanceCounts(project string, staleBefore int64, excludeSuff
 	}
 
 	if err = i.db.QueryRow(
-		`SELECT COUNT(*) FROM notes
-		 WHERE path LIKE ? ESCAPE '\' AND mtime < ?
-		   AND id NOT IN (SELECT note_id FROM tags WHERE tag IN ('status:done', 'status:archived'))`,
+		`SELECT COUNT(*) FROM notes n
+		 WHERE n.path LIKE ? ESCAPE '\' AND n.mtime < ? AND NOT `+closedNoteExpr,
 		like, staleBefore,
 	).Scan(&staleCount); err != nil {
 		return 0, 0, err

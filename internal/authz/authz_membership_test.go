@@ -9,9 +9,9 @@ import (
 // cfg builds an AccessConfig from simple maps. members keys are "user|project".
 func cfg(enforced bool, public map[string]bool, members map[string]string) AccessConfig {
 	return AccessConfig{
-		Enforced: enforced,
-		IsPublic: func(p string) bool { return public[p] },
-		IsMember: func(u, p string) bool { _, ok := members[u+"|"+p]; return ok },
+		Enforced:       enforced,
+		IsPublic:       func(p string) bool { return public[p] },
+		IsMember:       func(u, p string) bool { _, ok := members[u+"|"+p]; return ok },
 		MemberCanWrite: func(u, p string) bool { return members[u+"|"+p] == "write" },
 	}
 }

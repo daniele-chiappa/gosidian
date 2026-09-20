@@ -7,9 +7,9 @@
 // a time without navigating the whole catalogue.
 //
 // Fallback chain for T(lang, scope, key):
-//   1. exact lang catalogue for scope
-//   2. default-lang catalogue for scope
-//   3. key literal (surfaces missing-translation bugs immediately in dev)
+//  1. exact lang catalogue for scope
+//  2. default-lang catalogue for scope
+//  3. key literal (surfaces missing-translation bugs immediately in dev)
 package i18n
 
 import (

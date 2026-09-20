@@ -10,7 +10,15 @@
     "invalid_code": "Invalid code",
     "start_failed": "Failed to start enrolment",
     "interstitial_title": "Two-factor required",
-    "interstitial_desc": "Your account requires two-factor authentication. Set it up to continue."
+    "interstitial_desc": "Your account requires two-factor authentication. Set it up to continue.",
+    "recovery_title": "Recovery codes",
+    "recovery_intro": "Save these single-use codes somewhere safe: each one signs you in once if you lose your authenticator. They will not be shown again.",
+    "recovery_copy": "Copy codes",
+    "recovery_copied": "Copied",
+    "recovery_saved_button": "I've saved my codes",
+    "recovery_used_banner": "You signed in with a recovery code. {n} left — regenerate them from Settings if you're running low.",
+    "recovery_used_open_settings": "Open settings",
+    "recovery_used_dismiss": "Dismiss"
   },
   "plancia": {
     "unsavedClose": "There are unsaved changes. Close anyway?",

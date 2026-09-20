@@ -2,14 +2,18 @@
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { enrollTOTP, confirmTOTP } from '@/api/totp'
+import RecoveryCodes from './RecoveryCodes.vue'
 
 const { t } = useI18n()
-const emit = defineEmits<{ done: [] }>()
+// `done` fires only after the user acknowledges the recovery codes; it carries
+// how many were minted so the parent can seed the remaining-count display.
+const emit = defineEmits<{ done: [count: number] }>()
 
 const secret = ref('')
 const uri = ref('')
 const qrSvg = ref('')
 const code = ref('')
+const codes = ref<string[]>([])
 const error = ref<string | null>(null)
 const busy = ref(false)
 
@@ -33,8 +37,7 @@ async function confirm() {
   busy.value = true
   error.value = null
   try {
-    await confirmTOTP(secret.value, code.value.trim())
-    emit('done')
+    codes.value = await confirmTOTP(secret.value, code.value.trim())
   } catch (e) {
     error.value = e instanceof Error ? e.message : t('totp.invalid_code')
   } finally {
@@ -54,6 +57,9 @@ async function confirm() {
     >
       {{ t('totp.setup_button') }}
     </button>
+
+    <!-- Secret is active at this point; the codes are shown once, then done. -->
+    <RecoveryCodes v-else-if="codes.length" :codes="codes" @done="emit('done', codes.length)" />
 
     <div v-else class="space-y-3">
       <p class="text-sm text-text-muted">{{ t('totp.scan_instructions') }}</p>

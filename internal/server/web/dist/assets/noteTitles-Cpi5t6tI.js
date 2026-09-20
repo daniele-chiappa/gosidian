@@ -1,0 +1,2 @@
+import{i as e}from"./index-D9TflbM7.js";async function t(t,n=10){let{data:r}=await e.get(`/note-titles`,{params:{q:t,limit:n}});return r.items}export{t};
+//# sourceMappingURL=noteTitles-Cpi5t6tI.js.map

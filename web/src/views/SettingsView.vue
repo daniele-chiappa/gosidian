@@ -4,14 +4,16 @@ import { getSettings, updateSettings, type Settings } from '@/api/settings'
 import { useAuthStore } from '@/stores/auth'
 import { useUIStore, type LocaleCode, type ThemePreset } from '@/stores/ui'
 import TotpEnroll from '@/components/domain/TotpEnroll.vue'
-import { disenrollTOTP } from '@/api/totp'
+import RecoveryCodes from '@/components/domain/RecoveryCodes.vue'
+import { disenrollTOTP, regenerateRecoveryCodes } from '@/api/totp'
 
 const auth = useAuthStore()
 const ui = useUIStore()
 
 const totpError = ref<string | null>(null)
-function onTotpEnrolled() {
+function onTotpEnrolled(codeCount: number) {
   auth.setEnrolled(true)
+  auth.setRecoveryCodesRemaining(codeCount)
 }
 async function disableTotp() {
   totpError.value = null
@@ -21,6 +23,34 @@ async function disableTotp() {
   } catch (e) {
     totpError.value = e instanceof Error ? e.message : 'Failed to disable two-factor'
   }
+}
+
+// Recovery-code regeneration: gated on a current TOTP (the session alone must
+// not be able to mint itself a lasting second factor); the fresh set is shown
+// once through RecoveryCodes, then the counter is refreshed.
+const regenOpen = ref(false)
+const regenCode = ref('')
+const regenBusy = ref(false)
+const regenCodes = ref<string[]>([])
+async function regenerate() {
+  if (!regenCode.value.trim() || regenBusy.value) return
+  regenBusy.value = true
+  totpError.value = null
+  try {
+    const codes = await regenerateRecoveryCodes(regenCode.value.trim())
+    regenCodes.value = codes
+    auth.setRecoveryCodesRemaining(codes.length)
+    regenOpen.value = false
+    regenCode.value = ''
+  } catch (e) {
+    totpError.value = e instanceof Error ? e.message : 'Failed to regenerate recovery codes'
+  } finally {
+    regenBusy.value = false
+  }
+}
+function cancelRegen() {
+  regenOpen.value = false
+  regenCode.value = ''
 }
 
 interface PresetOption { value: ThemePreset; label: string; tone: 'dark' | 'light' }
@@ -154,6 +184,48 @@ onMounted(load)
       <hr v-if="auth.isOwner" class="border-border" />
       <template v-if="auth.user?.totp_enrolled">
         <p class="text-sm text-success">Two-factor authentication is enabled for your account.</p>
+        <p class="text-sm text-text-muted">
+          Recovery codes remaining:
+          <span class="font-medium text-text">{{ auth.user?.recovery_codes_remaining ?? 0 }}</span>
+          <span v-if="(auth.user?.recovery_codes_remaining ?? 0) <= 2" class="text-warning">
+            — running low, regenerate them soon
+          </span>
+        </p>
+        <RecoveryCodes v-if="regenCodes.length" :codes="regenCodes" @done="regenCodes = []" />
+        <template v-else>
+          <button
+            v-if="!regenOpen"
+            type="button"
+            class="rounded border border-border px-3 py-2 text-sm hover:bg-surface-hover"
+            @click="regenOpen = true"
+          >Regenerate recovery codes…</button>
+          <div v-else class="space-y-2">
+            <p class="text-xs text-text-muted">
+              Enter a current code from your authenticator. Every existing recovery code stops working.
+            </p>
+            <div class="flex gap-2">
+              <input
+                v-model.trim="regenCode"
+                inputmode="numeric"
+                autocomplete="one-time-code"
+                placeholder="123 456"
+                class="w-40 rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+                @keyup.enter="regenerate"
+              />
+              <button
+                type="button"
+                :disabled="regenBusy || !regenCode"
+                class="rounded bg-accent text-accent-fg px-3 py-2 text-sm hover:bg-accent-hover disabled:opacity-60"
+                @click="regenerate"
+              >Regenerate</button>
+              <button
+                type="button"
+                class="rounded border border-border px-3 py-2 text-sm hover:bg-surface-hover"
+                @click="cancelRegen"
+              >Cancel</button>
+            </div>
+          </div>
+        </template>
         <button
           type="button"
           class="rounded border border-border px-3 py-2 text-sm hover:bg-surface-hover"

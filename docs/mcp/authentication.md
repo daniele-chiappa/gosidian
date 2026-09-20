@@ -121,6 +121,11 @@ With web login enabled, unauthenticated browser requests are
 redirected to `/login`. Failed attempts trigger a rate limiter
 (default 5 failures per 15 minutes, see [Configuration](../configuration.md)).
 
+Lost the authenticator of an account with TOTP? `gosidian user totp-reset
+--vault ./vault --username admin` clears its secret and recovery codes,
+server running or not — see
+[Authentication & roles](../web-ui/authentication.md#lost-authenticator-resetting-two-factor).
+
 ### Multi-user (owner + members)
 
 An `owner` account can invite `member` accounts from `/admin/users`:

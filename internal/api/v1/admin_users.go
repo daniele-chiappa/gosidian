@@ -155,9 +155,17 @@ func (r *Router) handleAdminUserItem(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusServiceUnavailable, CodeServerUnavailable, "web auth not configured")
 		return
 	}
-	id := strings.TrimSuffix(strings.TrimPrefix(req.URL.Path, "/api/v1/admin/users/"), "/")
-	if id == "" || strings.Contains(id, "/") {
-		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "expected /api/v1/admin/users/{id}")
+	id, sub, _ := strings.Cut(strings.TrimSuffix(strings.TrimPrefix(req.URL.Path, "/api/v1/admin/users/"), "/"), "/")
+	if id == "" || (sub != "" && sub != "totp") {
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "expected /api/v1/admin/users/{id} or /api/v1/admin/users/{id}/totp")
+		return
+	}
+	if sub == "totp" {
+		if req.Method != http.MethodDelete {
+			WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
+			return
+		}
+		r.resetUserTOTP(w, req, id)
 		return
 	}
 	switch req.Method {
@@ -270,6 +278,33 @@ func (r *Router) updateUserRole(w http.ResponseWriter, req *http.Request, id str
 	if u, ok := r.deps.Auth.WebAuth.UserByID(id); ok {
 		WriteJSON(w, http.StatusOK, toAdminUserView(*u))
 		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// resetUserTOTP clears a user's TOTP secret and recovery codes (owner-only,
+// DELETE /admin/users/{id}/totp): the escape hatch for a lost authenticator.
+// The per-user policy stays, so an account that must have two-factor meets
+// the enrolment interstitial at its next login; sessions stay too — a lost
+// device is not a compromised account (disable + token revoke covers that).
+// Allowed on the owner's own account: the caller already proved ownership.
+func (r *Router) resetUserTOTP(w http.ResponseWriter, req *http.Request, id string) {
+	if err := r.deps.Auth.WebAuth.ResetTOTP(id); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			WriteError(w, http.StatusNotFound, CodeNotFound, err.Error())
+			return
+		}
+		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
+		return
+	}
+	if actor := UserFromContext(req.Context()); actor != nil && r.deps.Audit != nil {
+		_ = r.deps.Audit.Write(audit.Entry{
+			Source: audit.SourceHTTP,
+			Actor:  actor.Username,
+			UserID: actor.ID,
+			Action: audit.ActionTOTPReset,
+			Path:   id,
+		})
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

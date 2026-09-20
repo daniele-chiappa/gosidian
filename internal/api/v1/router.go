@@ -108,6 +108,7 @@ func (r *Router) registerAuthed() {
 	r.mux.Handle("/api/v1/totp", authed(r.handleTOTPDisenroll))
 	r.mux.Handle("/api/v1/totp/enroll", authed(r.handleTOTPEnroll))
 	r.mux.Handle("/api/v1/totp/confirm", authed(r.handleTOTPConfirm))
+	r.mux.Handle("/api/v1/totp/recovery-codes", authed(r.handleTOTPRecoveryCodes))
 
 	r.mux.Handle("/api/v1/notes", authed(r.handleNotes))
 	r.mux.Handle("/api/v1/notes/", authed(r.handleNoteByPath))

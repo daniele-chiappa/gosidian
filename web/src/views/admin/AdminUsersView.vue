@@ -5,6 +5,7 @@ import {
   disableUser,
   updateUserRole,
   updateUserTOTPPolicy,
+  resetUserTOTP,
   createUser,
   type AdminUser,
   type CreateUserRequest,
@@ -127,6 +128,24 @@ async function changeTotpPolicy(u: AdminUser, policy: string) {
     await load()
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'TOTP policy change failed'
+  }
+}
+
+// Lost-authenticator escape hatch: clears the secret and the recovery codes,
+// leaves policy and sessions alone (a required policy re-enrols the user at
+// the next login).
+async function resetTotp(u: AdminUser) {
+  if (
+    !confirm(
+      `Reset two-factor for "${u.username}"? Their authenticator and recovery codes stop working; under a required policy they will enrol again at the next login.`,
+    )
+  )
+    return
+  try {
+    await resetUserTOTP(u.id)
+    await load()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'TOTP reset failed'
   }
 }
 
@@ -282,6 +301,13 @@ onMounted(load)
               </select>
               <span v-else class="text-xs text-text-muted">{{ u.totp_policy || 'inherit' }}</span>
               <span v-if="u.totp_enrolled" class="text-xs text-success" title="TOTP enrolled">●</span>
+              <button
+                v-if="u.totp_enrolled && !u.disabled_at"
+                type="button"
+                class="text-xs px-2 py-0.5 rounded text-warning hover:bg-surface-hover"
+                title="Clear the secret and recovery codes (lost authenticator)"
+                @click="resetTotp(u)"
+              >Reset</button>
             </div>
           </td>
           <td class="py-2 px-3 font-mono text-xs">{{ u.created_at }}</td>

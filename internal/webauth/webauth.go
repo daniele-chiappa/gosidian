@@ -96,6 +96,10 @@ type User struct {
 	// TOTPPolicy is the per-user two-factor override: "" (inherit the global
 	// mode), "enabled" (force TOTP on), or "disabled" (exempt this user).
 	TOTPPolicy string `json:"totp_policy,omitempty"`
+	// RecoveryCodes are the single-use fallbacks for a lost authenticator,
+	// minted with the secret (see recovery.go). Hashed; empty when not
+	// enrolled.
+	RecoveryCodes []RecoveryCode `json:"recovery_codes,omitempty"`
 	// AuthSource is "" / "local" for password accounts, or "ldap" for accounts
 	// auto-provisioned on first LDAP login (no local password hash).
 	AuthSource string     `json:"auth_source,omitempty"`
@@ -410,10 +414,35 @@ func (s *Store) Disable() error {
 	return nil
 }
 
-// Verify checks credentials. When TOTP is enabled on the account, totpCode
-// must be valid for the current time window. Returns the matched user on
-// success, an error otherwise.
+// Login failure sentinels. Callers that need to tell a wrong password from a
+// wrong second factor (the per-account limiter only counts the latter, so an
+// attacker without the password cannot lock a victim out) compare with
+// errors.Is; the messages are what the audit log has always recorded.
+var (
+	ErrInvalidCredentials  = errors.New("invalid credentials")
+	ErrAccountDisabled     = errors.New("account disabled")
+	ErrInvalidSecondFactor = errors.New("invalid TOTP code")
+)
+
+// Verify checks a local account's credentials. When TOTP is enabled on the
+// account, totpCode must be a valid TOTP for the current window or an unused
+// recovery code (consumed). Returns the matched user on success, an error
+// otherwise. Authenticate is the entry point that also covers LDAP.
 func (s *Store) Verify(username, password, totpCode string) (*User, error) {
+	u, err := s.verifyPassword(username, password)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.secondFactor(u, totpCode); err != nil {
+		return nil, err
+	}
+	return u, nil
+}
+
+// verifyPassword is the first-factor stage for local accounts: finds the
+// enabled account and checks the bcrypt hash under the read lock. Returns a
+// copy of the user.
+func (s *Store) verifyPassword(username, password string) (*User, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if len(s.file.Users) == 0 {
@@ -425,20 +454,45 @@ func (s *Store) Verify(username, password, totpCode string) (*User, error) {
 			continue
 		}
 		if !u.Enabled() {
-			return nil, errors.New("account disabled")
+			return nil, ErrAccountDisabled
 		}
 		if err := bcrypt.CompareHashAndPassword([]byte(u.Hash), []byte(password)); err != nil {
-			return nil, errors.New("invalid credentials")
-		}
-		if totpActive(s.totpMode, u) && u.TOTPSec != "" {
-			if !totp.Validate(totpCode, u.TOTPSec) {
-				return nil, errors.New("invalid TOTP code")
-			}
+			return nil, ErrInvalidCredentials
 		}
 		cp := *u
 		return &cp, nil
 	}
-	return nil, errors.New("invalid credentials")
+	return nil, ErrInvalidCredentials
+}
+
+// secondFactor is the stage shared by local and LDAP logins. It is a no-op
+// when the effective policy is inactive or no secret is enrolled
+// (required-but-not-enrolled is surfaced via TOTPEnrollmentRequired and the
+// enrolment gate, not here). Otherwise code must be a valid TOTP or an unused
+// recovery code, which is consumed; the bool reports the latter so the login
+// handler can tell the user how many codes are left.
+func (s *Store) secondFactor(u *User, code string) (usedRecovery bool, err error) {
+	s.mu.RLock()
+	mode := s.totpMode
+	s.mu.RUnlock()
+	if !totpActive(mode, u) || u.TOTPSec == "" {
+		return false, nil
+	}
+	if totp.Validate(code, u.TOTPSec) {
+		return false, nil
+	}
+	norm := normalizeRecoveryCode(code)
+	if !looksLikeRecoveryCode(norm) {
+		return false, ErrInvalidSecondFactor
+	}
+	ok, err := s.consumeRecoveryCode(u.ID, norm)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, ErrInvalidSecondFactor
+	}
+	return true, nil
 }
 
 // LDAPAuthenticator verifies a username/password against an external directory.
@@ -491,60 +545,55 @@ func (s *Store) AddLDAPUser(username string) (*User, error) {
 	return &cp, nil
 }
 
-// checkTOTP validates totpCode when the effective policy is active and a secret
-// is enrolled. Required-but-not-enrolled is reported separately via
-// TOTPEnrollmentRequired (the login handler forces enrolment), so it is not an
-// error here.
-func (s *Store) checkTOTP(u *User, totpCode string) error {
-	s.mu.RLock()
-	mode := s.totpMode
-	s.mu.RUnlock()
-	if totpActive(mode, u) && u.TOTPSec != "" {
-		if !totp.Validate(totpCode, u.TOTPSec) {
-			return errors.New("invalid TOTP code")
-		}
-	}
-	return nil
+// AuthResult is what Authenticate returns on success: the user, plus whether
+// the second factor was satisfied by a recovery code (the SPA then nudges the
+// user to regenerate). User is re-read after a consumption so its
+// RecoveryCodesRemaining is current.
+type AuthResult struct {
+	User             *User
+	RecoveryCodeUsed bool
 }
 
 // Authenticate is the unified web-login entry point. A local username always
 // shadows LDAP (an existing local account is never checked against the
 // directory). ldap may be nil (LDAP disabled).
-//   - local account → bcrypt password + TOTP (delegates to Verify);
-//   - ldap account   → password verified against LDAP, TOTP from local record;
+//   - local account → bcrypt password, then the shared second-factor stage;
+//   - ldap account   → password verified against LDAP, second factor from the local record;
 //   - unknown + LDAP → LDAP bind, then auto-provision a guest account.
-func (s *Store) Authenticate(username, password, totpCode string, ldap LDAPAuthenticator) (*User, error) {
+func (s *Store) Authenticate(username, password, totpCode string, ldap LDAPAuthenticator) (AuthResult, error) {
 	if username == "" || password == "" {
-		return nil, errors.New("missing credentials")
+		return AuthResult{}, errors.New("missing credentials")
 	}
+	var u *User
 	existing, found := s.UserByUsername(username)
 	switch {
 	case found && existing.AuthSource == "ldap":
 		if ldap == nil {
-			return nil, errors.New("invalid credentials")
+			return AuthResult{}, ErrInvalidCredentials
 		}
 		if !existing.Enabled() {
-			return nil, errors.New("account disabled")
+			return AuthResult{}, ErrAccountDisabled
 		}
 		if err := ldap.Authenticate(username, password); err != nil {
-			return nil, errors.New("invalid credentials")
+			return AuthResult{}, ErrInvalidCredentials
 		}
-		if err := s.checkTOTP(existing, totpCode); err != nil {
-			return nil, err
-		}
-		return existing, nil
+		u = existing
 
 	case found:
-		return s.Verify(username, password, totpCode)
+		local, err := s.verifyPassword(username, password)
+		if err != nil {
+			return AuthResult{}, err
+		}
+		u = local
 
 	default:
 		if ldap == nil {
-			return nil, errors.New("invalid credentials")
+			return AuthResult{}, ErrInvalidCredentials
 		}
 		if err := ldap.Authenticate(username, password); err != nil {
-			return nil, errors.New("invalid credentials")
+			return AuthResult{}, ErrInvalidCredentials
 		}
-		u, err := s.AddLDAPUser(username)
+		added, err := s.AddLDAPUser(username)
 		if err != nil {
 			// Race: a concurrent login provisioned it. Re-fetch — but only
 			// accept an LDAP-backed record. If a local account with this
@@ -552,15 +601,23 @@ func (s *Store) Authenticate(username, password, totpCode string, ldap LDAPAuthe
 			// nothing about it and must not open its session.
 			e, ok := s.UserByUsername(username)
 			if !ok || e.AuthSource != "ldap" {
-				return nil, errors.New("invalid credentials")
+				return AuthResult{}, ErrInvalidCredentials
 			}
-			u = e
+			added = e
 		}
-		if err := s.checkTOTP(u, totpCode); err != nil {
-			return nil, err
-		}
-		return u, nil
+		u = added
 	}
+
+	used, err := s.secondFactor(u, totpCode)
+	if err != nil {
+		return AuthResult{}, err
+	}
+	if used {
+		if fresh, ok := s.UserByID(u.ID); ok {
+			u = fresh
+		}
+	}
+	return AuthResult{User: u, RecoveryCodeUsed: used}, nil
 }
 
 // CreateSession returns a fresh session cookie value for the given user,
@@ -818,7 +875,7 @@ func (s *Store) TOTPEnrollmentRequired(u *User) bool {
 
 // GenerateTOTPSecret produces a fresh secret + otpauth:// URI for username. The
 // secret is NOT persisted: the caller confirms a code against it
-// (ValidateTOTPCode) then activates it via SetTOTPSecret.
+// (ValidateTOTPCode) then activates it via EnrollTOTP.
 func (s *Store) GenerateTOTPSecret(username, issuer string) (secret, uri string, err error) {
 	if issuer == "" {
 		issuer = "gosidian"
@@ -834,20 +891,6 @@ func (s *Store) GenerateTOTPSecret(username, issuer string) (secret, uri string,
 // the enrolment confirm step before the secret is persisted.
 func ValidateTOTPCode(secret, code string) bool {
 	return totp.Validate(code, secret)
-}
-
-// SetTOTPSecret activates (secret != "") or clears (secret == "") a user's TOTP
-// secret.
-func (s *Store) SetTOTPSecret(userID, secret string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i := range s.file.Users {
-		if s.file.Users[i].ID == userID {
-			s.file.Users[i].TOTPSec = secret
-			return s.saveLocked()
-		}
-	}
-	return fmt.Errorf("user %q not found", userID)
 }
 
 // SetTOTPPolicy sets a user's per-user TOTP override: "" (inherit), "enabled"

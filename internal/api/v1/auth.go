@@ -1,10 +1,11 @@
 package v1
 
 import (
-	"github.com/gosidian/gosidian/internal/webauth"
+	"errors"
 	"net/http"
 
 	"github.com/gosidian/gosidian/internal/audit"
+	"github.com/gosidian/gosidian/internal/webauth"
 )
 
 // loginRequest matches the OpenAPI LoginRequest schema. JSON only — the
@@ -12,7 +13,9 @@ import (
 type loginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
-	TOTP     string `json:"totp,omitempty"`
+	// TOTP is the second factor: a 6-digit TOTP code, or one of the
+	// account's single-use recovery codes.
+	TOTP string `json:"totp,omitempty"`
 }
 
 // loginResponse mirrors the OpenAPI LoginResponse. The plaintext token
@@ -27,6 +30,9 @@ type loginResponse struct {
 	// TOTP but no secret is enrolled yet — the SPA forces the enrolment
 	// interstitial before granting access.
 	TOTPEnrollmentRequired bool `json:"totp_enrollment_required,omitempty"`
+	// RecoveryCodeUsed is true when this login consumed a recovery code
+	// instead of a TOTP; the SPA nudges the user to regenerate the set.
+	RecoveryCodeUsed bool `json:"recovery_code_used,omitempty"`
 }
 
 type refreshResponse struct {
@@ -43,13 +49,25 @@ type userView struct {
 	Username     string `json:"username"`
 	Role         string `json:"role"`
 	TOTPEnrolled bool   `json:"totp_enrolled"`
+	// RecoveryCodesRemaining counts the unused recovery codes; omitted when
+	// not enrolled, so the SPA can tell "none left" from "not applicable".
+	RecoveryCodesRemaining *int `json:"recovery_codes_remaining,omitempty"`
+}
+
+// recoveryRemaining projects the recovery-code counter for userView.
+func recoveryRemaining(u *webauth.User) *int {
+	if u == nil || u.TOTPSec == "" {
+		return nil
+	}
+	n := u.RecoveryCodesRemaining()
+	return &n
 }
 
 // handleLogin implements POST /api/v1/login. Body is JSON; on success
 // we mint a SPA token, audit the create, and return the plaintext +
-// expiry envelope. Rate limiting is intentionally out of scope for
-// Phase 1.0 — it ships with the auth-hardening pass before v2.0
-// stable.
+// expiry envelope. Two rate limits guard it: per client IP (any
+// failure) and per account (wrong second factor only — see
+// accountLimiterKey).
 func (r *Router) handleLogin(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
 		WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
@@ -82,10 +100,21 @@ func (r *Router) handleLogin(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	user, verr := r.deps.Auth.WebAuth.Authenticate(body.Username, body.Password, body.TOTP, r.deps.Auth.LDAP)
+	// Per-account second-factor limit: an account whose TOTP has been
+	// guessed at too often is closed for the window even from a fresh IP.
+	acct := accountLimiterKey(body.Username)
+	if r.loginLimiter != nil && !r.loginLimiter.allowed(acct) {
+		WriteError(w, http.StatusTooManyRequests, CodeRateLimit, "too many failed login attempts; try again later")
+		return
+	}
+
+	res, verr := r.deps.Auth.WebAuth.Authenticate(body.Username, body.Password, body.TOTP, r.deps.Auth.LDAP)
 	if verr != nil {
 		if r.loginLimiter != nil {
 			r.loginLimiter.registerFail(ip)
+			if errors.Is(verr, webauth.ErrInvalidSecondFactor) {
+				r.loginLimiter.registerFail(acct)
+			}
 		}
 		// Audit the failure with the actor we tried to authenticate as
 		// — this is what SOC dashboards grep for when triaging brute
@@ -101,11 +130,12 @@ func (r *Router) handleLogin(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusUnauthorized, CodeAuthInvalidCredentials, "invalid credentials")
 		return
 	}
-	// Successful auth resets the IP's failure history so a typo
-	// right before a correct password doesn't punish the next legit
-	// failure burst.
+	user := res.User
+	// Successful auth resets both failure histories so a typo right
+	// before a correct login doesn't punish the next legit failure burst.
 	if r.loginLimiter != nil {
 		r.loginLimiter.reset(ip)
+		r.loginLimiter.reset(acct)
 	}
 
 	plain, tok, terr := r.deps.Auth.SpaAuth.Create(user.ID, req.UserAgent())
@@ -122,6 +152,15 @@ func (r *Router) handleLogin(w http.ResponseWriter, req *http.Request) {
 			Action: audit.ActionSpaTokenCreate,
 			Path:   tok.ID,
 		})
+		if res.RecoveryCodeUsed {
+			_ = r.deps.Audit.Write(audit.Entry{
+				Source: audit.SourceHTTP,
+				Actor:  user.Username,
+				UserID: user.ID,
+				Action: audit.ActionTOTPRecoveryUsed,
+				Path:   user.ID,
+			})
+		}
 	}
 
 	r.setFilesCookie(w, req, plain, tok.HardExpiry)
@@ -130,12 +169,14 @@ func (r *Router) handleLogin(w http.ResponseWriter, req *http.Request) {
 		ExpiresAt:  tok.ExpiresAt.UTC().Format(rfc3339Z),
 		HardExpiry: tok.HardExpiry.UTC().Format(rfc3339Z),
 		User: userView{
-			ID:           user.ID,
-			Username:     user.Username,
-			Role:         string(user.Role),
-			TOTPEnrolled: user.TOTPSec != "",
+			ID:                     user.ID,
+			Username:               user.Username,
+			Role:                   string(user.Role),
+			TOTPEnrolled:           user.TOTPSec != "",
+			RecoveryCodesRemaining: recoveryRemaining(user),
 		},
 		TOTPEnrollmentRequired: r.deps.Auth.WebAuth.TOTPEnrollmentRequired(user),
+		RecoveryCodeUsed:       res.RecoveryCodeUsed,
 	})
 }
 
@@ -177,14 +218,17 @@ func (r *Router) handleMe(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	enrolled := false
+	var remaining *int
 	if full, ok := r.deps.Auth.WebAuth.UserByID(u.ID); ok {
 		enrolled = full.TOTPSec != ""
+		remaining = recoveryRemaining(full)
 	}
 	WriteJSON(w, http.StatusOK, userView{
-		ID:           u.ID,
-		Username:     u.Username,
-		Role:         string(u.Role),
-		TOTPEnrolled: enrolled,
+		ID:                     u.ID,
+		Username:               u.Username,
+		Role:                   string(u.Role),
+		TOTPEnrolled:           enrolled,
+		RecoveryCodesRemaining: remaining,
 	})
 }
 

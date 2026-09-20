@@ -18,6 +18,8 @@ export interface User {
   username: string
   role: Role
   totp_enrolled?: boolean
+  /** Unused recovery codes; absent when two-factor is not enrolled. */
+  recovery_codes_remaining?: number
 }
 
 interface AuthState {
@@ -28,6 +30,10 @@ interface AuthState {
   /** Set when login reports the effective policy mandates TOTP but no secret
    *  is enrolled yet — the AppShell forces the enrolment interstitial. */
   enrollmentRequired: boolean
+  /** Set when the login consumed a recovery code instead of a TOTP: the
+   *  AppShell shows a one-time notice until dismissed (persisted, so a reload
+   *  does not swallow it). */
+  recoveryCodeUsed: boolean
   /** True when the server runs read-only anonymous access (open mode) and we
    *  have no token: the shell renders read-only as a guest. Derived from
    *  /version at boot; deliberately NOT persisted. See BUG-018. */
@@ -40,6 +46,7 @@ interface LoginResponse {
   hard_expiry: string
   user: User
   totp_enrollment_required?: boolean
+  recovery_code_used?: boolean
 }
 
 interface RefreshResponse {
@@ -74,6 +81,7 @@ export const useAuthStore = defineStore('auth', {
     hardExpiry: '',
     user: null,
     enrollmentRequired: false,
+    recoveryCodeUsed: false,
     openMode: false,
   }),
 
@@ -98,11 +106,21 @@ export const useAuthStore = defineStore('auth', {
       this.hardExpiry = data.hard_expiry
       this.user = data.user
       this.enrollmentRequired = Boolean(data.totp_enrollment_required)
+      this.recoveryCodeUsed = Boolean(data.recovery_code_used)
       this.openMode = false // a real session supersedes any anonymous open-mode state
     },
 
     clearEnrollment() {
       this.enrollmentRequired = false
+    },
+
+    dismissRecoveryNotice() {
+      this.recoveryCodeUsed = false
+    },
+
+    /** Track the recovery-code counter after an enrolment or a regeneration. */
+    setRecoveryCodesRemaining(n: number) {
+      if (this.user) this.user.recovery_codes_remaining = n
     },
 
     /** Raise the enrolment interstitial. Called by the API client when any
@@ -113,7 +131,9 @@ export const useAuthStore = defineStore('auth', {
     },
 
     setEnrolled(v: boolean) {
-      if (this.user) this.user.totp_enrolled = v
+      if (!this.user) return
+      this.user.totp_enrolled = v
+      if (!v) this.user.recovery_codes_remaining = undefined
     },
 
     async refresh() {
@@ -139,6 +159,7 @@ export const useAuthStore = defineStore('auth', {
       this.hardExpiry = ''
       this.user = null
       this.enrollmentRequired = false
+      this.recoveryCodeUsed = false
       this.openMode = false
     },
 
@@ -152,6 +173,7 @@ export const useAuthStore = defineStore('auth', {
       this.hardExpiry = ''
       this.user = { id: 'anonymous', username: 'guest', role: 'guest' }
       this.enrollmentRequired = false
+      this.recoveryCodeUsed = false
       this.openMode = true
     },
   },
@@ -159,6 +181,6 @@ export const useAuthStore = defineStore('auth', {
   persist: {
     key: 'gosidian.auth',
     storage: localStorage,
-    paths: ['token', 'expiresAt', 'hardExpiry', 'user', 'enrollmentRequired'],
+    paths: ['token', 'expiresAt', 'hardExpiry', 'user', 'enrollmentRequired', 'recoveryCodeUsed'],
   },
 })

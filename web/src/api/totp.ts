@@ -26,12 +26,27 @@ export async function enrollTOTP(): Promise<TotpEnrollData> {
   return data
 }
 
-/** Confirm a code against the candidate secret to activate it. */
-export async function confirmTOTP(secret: string, code: string): Promise<void> {
-  await client.post('/totp/confirm', { secret, code })
+interface RecoveryCodesData {
+  recovery_codes: string[]
 }
 
-/** Remove the current user's TOTP secret (403 if the policy requires it). */
+/** Confirm a code against the candidate secret to activate it. Returns the
+ *  account's first set of single-use recovery codes — shown once, the server
+ *  keeps only their hashes. */
+export async function confirmTOTP(secret: string, code: string): Promise<string[]> {
+  const { data } = await client.post<RecoveryCodesData>('/totp/confirm', { secret, code })
+  return data.recovery_codes
+}
+
+/** Replace every recovery code with a fresh set. Needs a current TOTP code:
+ *  the session alone must not be able to mint itself a lasting second factor. */
+export async function regenerateRecoveryCodes(code: string): Promise<string[]> {
+  const { data } = await client.post<RecoveryCodesData>('/totp/recovery-codes', { code })
+  return data.recovery_codes
+}
+
+/** Remove the current user's TOTP secret and recovery codes (403 if the
+ *  policy requires it). */
 export async function disenrollTOTP(): Promise<void> {
   await client.delete('/totp')
 }

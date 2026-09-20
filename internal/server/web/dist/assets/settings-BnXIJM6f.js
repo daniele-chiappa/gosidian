@@ -1,0 +1,2 @@
+import{i as e}from"./index-D9TflbM7.js";async function t(){let{data:t}=await e.get(`/settings`);return t}async function n(t){let{data:n}=await e.put(`/settings`,t);return n}export{n,t};
+//# sourceMappingURL=settings-BnXIJM6f.js.map

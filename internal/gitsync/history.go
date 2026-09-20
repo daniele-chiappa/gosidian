@@ -10,11 +10,11 @@ import (
 
 // Commit summarizes one entry from `git log` for a single file.
 type Commit struct {
-	SHA     string
+	SHA      string
 	ShortSHA string
-	Author  string
-	Date    time.Time
-	Subject string
+	Author   string
+	Date     time.Time
+	Subject  string
 }
 
 // History runs `git log --follow` on the given vault-relative path and

@@ -1,2 +1,0 @@
-import{i as e}from"./index-BkdtTTEH.js";async function t(t,n){let{data:r}=await e.get(`/notes/${encodeURIComponent(t)}`,{params:n?.inline?{inline:1}:void 0});return r}async function n(t,n){let{data:r}=await e.post(`/notes`,{path:t,content:n});return r}async function r(t,n){let r={};n.ifMatch&&(r[`If-Match`]=n.ifMatch);let{data:i}=await e.put(`/notes/${encodeURIComponent(t)}`,{content:n.content},{headers:r});return i}async function i(t){await e.delete(`/notes/${encodeURIComponent(t)}`)}export{r as i,i as n,t as r,n as t};
-//# sourceMappingURL=notes-DN61cQR9.js.map

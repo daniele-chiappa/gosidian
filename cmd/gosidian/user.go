@@ -30,6 +30,8 @@ func runUserCmd(args []string) {
 		userDisable(rest)
 	case "status":
 		userStatus(rest)
+	case "totp-reset":
+		userTOTPReset(rest)
 	case "-h", "--help", "help":
 		userUsage()
 	default:
@@ -43,17 +45,23 @@ func userUsage() {
 	fmt.Fprintln(os.Stderr, `Usage: gosidian user <action> [options]
 
 Actions:
-  setup    Create or replace the web UI account
-  disable  Remove the account (web UI becomes open again)
-  status   Show current account state
+  setup       Create or replace the web UI account
+  disable     Remove the account (web UI becomes open again)
+  status      Show current account state
+  totp-reset  Clear a user's two-factor secret and recovery codes
+              (lost authenticator; works while the server is running)
 
 Common options:
-  --vault <dir>  Vault directory (required)
+  --vault <dir>      Vault directory (required)
+  --state-dir <dir>  State dir (default <vault>/.gosidian; env GOSIDIAN_STATE_DIR)
 
 Setup options:
   --username <s>     Account username (default: admin)
-  --totp             Enable TOTP (prompts for code after setup)
-  --password-stdin   Read password from stdin instead of prompt`)
+  --totp             Enable TOTP (prints the QR and the recovery codes)
+  --password-stdin   Read password from stdin instead of prompt
+
+totp-reset options:
+  --username <s>     Account to reset (required)`)
 }
 
 func openWebauth(vaultDir, stateDirFlag string) *webauth.Store {
@@ -112,9 +120,64 @@ func userSetup(args []string) {
 		fmt.Println("  " + uri)
 		fmt.Println()
 		fmt.Println("After adding it, test the first code on the web UI login page.")
+		// The owner is the one account nobody else can rescue, so it gets
+		// its recovery codes at provisioning time, not only from Settings.
+		if owner := store.FirstOwner(); owner != nil {
+			codes, cerr := store.GenerateRecoveryCodes(owner.ID)
+			if cerr != nil {
+				log.Fatalf("recovery codes: %v", cerr)
+			}
+			printRecoveryCodes(codes)
+		}
 	}
 
 	fmt.Printf("\nAccount %q provisioned. Web UI now requires login at /login.\n", *username)
+}
+
+// printRecoveryCodes shows a freshly minted set once; only hashes are stored.
+func printRecoveryCodes(codes []string) {
+	fmt.Println()
+	fmt.Println("Recovery codes (single-use, shown once — store them somewhere safe;")
+	fmt.Println("each one signs you in once if the authenticator is lost):")
+	fmt.Println()
+	for _, c := range codes {
+		fmt.Println("  " + c)
+	}
+}
+
+// userTOTPReset implements `gosidian user totp-reset --username <u>`: clears
+// the account's TOTP secret and recovery codes. Offline escape hatch for a
+// lost authenticator — the web UI has the same for the owner, but nobody can
+// reset the owner from there. Safe with the server running: it re-reads the
+// accounts file on its next request (mtime check).
+func userTOTPReset(args []string) {
+	fs := flag.NewFlagSet("user totp-reset", flag.ExitOnError)
+	vaultDir := fs.String("vault", "", "vault directory")
+	stateDirFlag := fs.String("state-dir", "", "state dir (default <vault>/.gosidian; env GOSIDIAN_STATE_DIR)")
+	username := fs.String("username", "", "account to reset (required)")
+	_ = fs.Parse(args)
+	if *username == "" {
+		log.Fatal("--username is required")
+	}
+
+	store := openWebauth(*vaultDir, *stateDirFlag)
+	if !store.Enabled() {
+		log.Fatal("auth disabled: no accounts provisioned")
+	}
+	u, ok := store.UserByUsername(*username)
+	if !ok {
+		log.Fatalf("user %q not found", *username)
+	}
+	if u.TOTPSec == "" {
+		fmt.Printf("User %q has no two-factor secret enrolled; nothing to reset.\n", *username)
+		return
+	}
+	if err := store.ResetTOTP(u.ID); err != nil {
+		log.Fatalf("totp-reset: %v", err)
+	}
+	fmt.Printf("Two-factor reset for %q: secret and recovery codes removed.\n", *username)
+	fmt.Println("If the account's policy still requires two-factor, the next login")
+	fmt.Println("goes through enrolment again (new QR, new recovery codes).")
 }
 
 func userDisable(args []string) {

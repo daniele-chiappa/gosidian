@@ -102,6 +102,11 @@ components:
           type: string
         role:
           $ref: "#/components/schemas/Role"
+        totp_enrolled:
+          type: boolean
+        recovery_codes_remaining:
+          type: integer
+          description: Unused recovery codes. Present only when two-factor is enrolled.
 
     LoginRequest:
       type: object
@@ -115,7 +120,10 @@ components:
           minLength: 1
         totp:
           type: string
-          description: Six-digit TOTP code; required when the account has it enabled.
+          description: >-
+            Second factor, required when the account has two-factor enabled:
+            a six-digit TOTP code, or one of the account's single-use recovery
+            codes (xxxxx-xxxxx; case and dashes are ignored).
 
     LoginResponse:
       type: object
@@ -132,6 +140,55 @@ components:
           format: date-time
         user:
           $ref: "#/components/schemas/User"
+        totp_enrollment_required:
+          type: boolean
+          description: >-
+            The effective policy mandates two-factor but no secret is enrolled:
+            every route outside the enrolment flow answers 403
+            auth.enrollment_required until /totp/confirm succeeds.
+        recovery_code_used:
+          type: boolean
+          description: This login consumed a recovery code instead of a TOTP.
+
+    TotpEnrollResponse:
+      type: object
+      required: [secret, otpauth_uri, qr_svg]
+      properties:
+        secret:
+          type: string
+          description: Candidate base32 secret; not active until confirmed.
+        otpauth_uri:
+          type: string
+        qr_svg:
+          type: string
+          description: Inline SVG of the otpauth URI; empty if rendering failed.
+
+    TotpConfirmRequest:
+      type: object
+      required: [secret, code]
+      properties:
+        secret:
+          type: string
+        code:
+          type: string
+
+    TotpCodeRequest:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          description: A current six-digit TOTP code.
+
+    RecoveryCodesResponse:
+      type: object
+      required: [recovery_codes]
+      properties:
+        recovery_codes:
+          type: array
+          items:
+            type: string
+          description: Single-use codes, shown once; the server keeps only hashes.
 
     RefreshResponse:
       type: object
@@ -403,6 +460,96 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
 
+  /api/v1/totp/enroll:
+    post:
+      tags: [auth]
+      summary: Start two-factor enrolment — a candidate secret plus its otpauth URI and QR.
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TotpEnrollResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/totp/confirm:
+    post:
+      tags: [auth]
+      summary: Activate the candidate secret by proving a current code; issues the recovery codes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TotpConfirmRequest"
+      responses:
+        "200":
+          description: Secret active; the account's single-use recovery codes, shown once.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecoveryCodesResponse"
+        "400":
+          description: Invalid code.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/totp/recovery-codes:
+    post:
+      tags: [auth]
+      summary: Replace every recovery code with a fresh set (requires a current TOTP code).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TotpCodeRequest"
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecoveryCodesResponse"
+        "400":
+          description: Invalid code (counts against the account's second-factor limiter).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: Two-factor is not enrolled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Too many failed second-factor attempts for this account.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/totp:
+    delete:
+      tags: [auth]
+      summary: Remove the caller's TOTP secret and recovery codes.
+      responses:
+        "204":
+          description: Removed.
+        "403":
+          description: The effective policy requires two-factor for this account.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /api/v1/refresh:
     post:
       tags: [auth]
@@ -553,6 +700,27 @@ paths:
       responses:
         "501":
           $ref: "#/components/responses/NotImplemented"
+
+  /api/v1/admin/users/{id}/totp:
+    delete:
+      tags: [admin]
+      summary: Clear a user's TOTP secret and recovery codes (owner-only; lost authenticator).
+      description: >-
+        Policy and sessions are untouched: under a required policy the user
+        re-enrols at the next login. Audited as totp_reset.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Reset.
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /api/v1/admin/audit:
     get:

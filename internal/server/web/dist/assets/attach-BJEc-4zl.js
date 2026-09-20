@@ -1,2 +1,0 @@
-import{i as e}from"./index-BkdtTTEH.js";async function t(t,n){let r=new FormData;r.append(`file`,t);let i={};n&&(i.project=n);let{data:a}=await e.post(`/attach`,r,{params:i,headers:{"Content-Type":`multipart/form-data`}});return a}export{t};
-//# sourceMappingURL=attach-BJEc-4zl.js.map

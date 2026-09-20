@@ -43,10 +43,11 @@ func (s *Server) registerDiscoveryTools() {
 	), s.handlePinned)
 
 	s.impl.AddTool(mcp.NewTool("memory_stale",
-		mcp.WithDescription("List notes in a project that have NOT been modified recently — archive candidates. Returns path, title, mtime (unix seconds) in ascending mtime order (oldest first)."),
+		mcp.WithDescription("List notes in a project that have NOT been modified recently — review/archive candidates. Returns path, title, mtime (unix seconds) and closed (true when tagged status:done or status:archived), in ascending mtime order (oldest first). By default every old note is listed; pass exclude_closed:true to drop closed plans and archived notes — that is exactly what memory_bootstrap's maintenance.stale_count counts (with its fixed 90d cutoff), so the two agree only with the flag on."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder). Scoped tokens are forced to their project.")),
 		mcp.WithString("older_than", mcp.Description("Cutoff age. Relative duration ('30d', '180d', '1h') or RFC3339 timestamp. Default '30d'.")),
 		mcp.WithNumber("limit", mcp.Description("Max notes to return (default 20, max 500).")),
+		mcp.WithBoolean("exclude_closed", mcp.Description("Drop notes tagged status:done or status:archived (closed plans age by design). Default false. With true the list matches the bootstrap maintenance digest's stale_count.")),
 	), s.handleStale)
 }
 
@@ -199,6 +200,13 @@ func (s *Server) handlePinned(ctx context.Context, req mcp.CallToolRequest) (*mc
 
 // ---- memory_stale ----
 
+// staleNoteResponse adds the closed flag to the recent-note shape so agents
+// can tell finished plans from real archive candidates without a second call.
+type staleNoteResponse struct {
+	recentNoteResponse
+	Closed bool `json:"closed"`
+}
+
 func (s *Server) handleStale(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	tok, errRes := s.authorizeRead(ctx)
 	if errRes != nil {
@@ -218,16 +226,19 @@ func (s *Server) handleStale(ctx context.Context, req mcp.CallToolRequest) (*mcp
 		limit = 20
 	}
 
-	notes, err := s.index.StaleNotes(project, cutoff, limit)
+	notes, err := s.index.StaleNotes(project, cutoff, limit, req.GetBool("exclude_closed", false))
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("stale lookup failed", err), nil
 	}
-	out := make([]recentNoteResponse, 0, len(notes))
+	out := make([]staleNoteResponse, 0, len(notes))
 	for _, n := range notes {
 		if !tok.AllowsPath(n.Path) {
 			continue
 		}
-		out = append(out, recentNoteResponse{Path: n.Path, Title: n.Title, Mtime: n.Mtime})
+		out = append(out, staleNoteResponse{
+			recentNoteResponse: recentNoteResponse{Path: n.Path, Title: n.Title, Mtime: n.Mtime},
+			Closed:             n.Closed,
+		})
 	}
 	return mcp.NewToolResultJSON(map[string]any{"notes": out})
 }

@@ -73,6 +73,15 @@ const (
 	ActionUserCreate  Action = "user_create"
 	ActionUserDisable Action = "user_disable"
 	ActionUserUpdate  Action = "user_update"
+
+	// Two-factor lifecycle (totp handlers, admin reset, IMP-062). Path = id of
+	// the account whose second factor changed; Actor = who did it, which for
+	// totp_reset is the owner rather than the account itself.
+	ActionTOTPEnroll        Action = "totp_enroll"
+	ActionTOTPDisenroll     Action = "totp_disenroll"
+	ActionTOTPRecoveryUsed  Action = "totp_recovery_used"
+	ActionTOTPRecoveryRegen Action = "totp_recovery_regen"
+	ActionTOTPReset         Action = "totp_reset"
 )
 
 // Entry is the on-disk shape. Keep field names short; this file may grow.

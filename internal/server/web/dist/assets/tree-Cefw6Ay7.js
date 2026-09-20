@@ -1,0 +1,2 @@
+import{c as e,i as t}from"./index-D9TflbM7.js";async function n(e){let{data:n}=await t.get(`/tree`,{params:e?{project:e}:void 0});return n.root}var r=e(`tree`,{state:()=>({byProject:{},loading:{},error:{}}),actions:{async load(e=``){let t=e;this.loading[t]=!0,this.error[t]=``;try{this.byProject[t]=await n(e||void 0)}catch(e){this.error[t]=e instanceof Error?e.message:String(e)}finally{this.loading[t]=!1}},invalidate(e=``){delete this.byProject[e]},invalidateAll(){this.byProject={}}}});export{r as t};
+//# sourceMappingURL=tree-Cefw6Ay7.js.map

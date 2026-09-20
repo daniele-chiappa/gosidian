@@ -1,0 +1,2 @@
+import{i as e}from"./index-D9TflbM7.js";async function t(t,n){let r=new FormData;r.append(`file`,t);let i={};n&&(i.project=n);let{data:a}=await e.post(`/attach`,r,{params:i,headers:{"Content-Type":`multipart/form-data`}});return a}export{t};
+//# sourceMappingURL=attach-DjnZptwQ.js.map

@@ -10,7 +10,15 @@
     "invalid_code": "Codice non valido",
     "start_failed": "Avvio della registrazione non riuscito",
     "interstitial_title": "Verifica in due passaggi obbligatoria",
-    "interstitial_desc": "Il tuo account richiede la verifica in due passaggi. Configurala per continuare."
+    "interstitial_desc": "Il tuo account richiede la verifica in due passaggi. Configurala per continuare.",
+    "recovery_title": "Codici di recupero",
+    "recovery_intro": "Salva questi codici monouso in un posto sicuro: ognuno ti fa accedere una volta se perdi l'app di autenticazione. Non verranno mostrati di nuovo.",
+    "recovery_copy": "Copia i codici",
+    "recovery_copied": "Copiati",
+    "recovery_saved_button": "Ho salvato i codici",
+    "recovery_used_banner": "Hai effettuato l'accesso con un codice di recupero. Te ne restano {n}: rigenerali dalle Impostazioni se stanno finendo.",
+    "recovery_used_open_settings": "Apri le impostazioni",
+    "recovery_used_dismiss": "Chiudi"
   },
   "plancia": {
     "unsavedClose": "Ci sono modifiche non salvate. Chiudere comunque?",

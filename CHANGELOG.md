@@ -8,6 +8,65 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.27.0] — 2026-09-20 — "two-factor recovery"
+
+A lost authenticator is no longer a dead end: TOTP enrolment now hands out
+single-use recovery codes, the owner can reset any user's second factor
+from the admin page, and a CLI command does the same for every account —
+the owner included — while the server keeps running. Also in this
+release: the `memory_stale` MCP tool finally agrees with the bootstrap
+maintenance digest. No migration; the accounts file gains a per-user
+`recovery_codes` list the first time a code set is minted.
+
+### Added
+- **Two-factor recovery codes** — confirming a TOTP enrolment
+  (`POST /api/v1/totp/confirm`, now `200` with the codes instead of `204`)
+  issues **8 single-use codes** (`xxxxx-xxxxx`, bcrypt-hashed at rest),
+  accepted in the login's second-factor field in place of a TOTP and
+  consumed on use. The login response flags `recovery_code_used` and
+  `user.recovery_codes_remaining` (also on `/api/v1/me`); the web UI shows
+  a banner after such a login and lets the user regenerate the set from
+  Settings by entering a current TOTP (`POST /api/v1/totp/recovery-codes`).
+- **Two-factor reset for a lost authenticator** — the owner clears a
+  user's secret and recovery codes from Admin → Users
+  (`DELETE /api/v1/admin/users/{id}/totp`, audited as `totp_reset`); the
+  per-user policy and the sessions are untouched, so under a `required`
+  policy the user simply re-enrols at the next login. The new
+  `gosidian user totp-reset --username <u>` command does the same for any
+  account, the owner included, with the server running (in Docker:
+  `docker exec <container> /gosidian user totp-reset --vault /vault --username <u>`).
+  `gosidian user setup --totp` prints the owner's recovery codes after
+  the QR.
+- **Audit actions** `totp_enroll`, `totp_disenroll`, `totp_recovery_used`,
+  `totp_recovery_regen`, `totp_reset`.
+- **`memory_stale` agrees with the maintenance digest** — the tool
+  returns a `closed` flag per note (tagged `status:done` /
+  `status:archived`) and accepts `exclude_closed: true`, which lists
+  exactly the notes that `memory_bootstrap`'s `maintenance.stale_count`
+  counts (closed plans age by design and were never counted there, but
+  the tool listed them). Default output is unchanged apart from the new
+  field; both queries now share one SQL definition of "closed".
+
+### Security
+- **Per-account second-factor limiter** — besides the per-IP login
+  limiter, wrong TOTP/recovery codes for an account (right password,
+  wrong code) now close that account for the window under the same
+  `login_max_failures` / `login_window` knobs, regardless of the client
+  IP, capping distributed guesses at the 6-digit code. Wrong passwords
+  never feed this bucket, so a stranger cannot lock a victim out; a wrong
+  TOTP on the recovery-code regeneration counts too.
+
+### Notes
+- Accounts enrolled before this release have no recovery codes yet:
+  Settings → Two-factor shows *0 remaining* until the user regenerates a
+  set (a current TOTP code is required). Nothing else changes for them.
+- The TOTP secret stays in clear in the accounts file by decision: the
+  server needs it to validate, the file lives in the state dir with mode
+  `0600` and is unreachable through the product; the recovery codes next
+  to it are bcrypt hashes.
+- The OpenAPI spec now documents the `/api/v1/totp/*` endpoints and the
+  new login fields.
+
 ## [2.26.1] — 2026-09-16 — "ultrareview roundup: security & bounds"
 
 Twenty fixes from a three-slice external code review of v2.26.0 (MCP core,

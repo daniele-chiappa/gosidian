@@ -72,7 +72,11 @@ type bootstrapStats struct {
 // scan (memory_lint stays on-demand; this block tells the agent WHEN to run
 // it). Attention fires on the two failure modes observed in the wild (hot.md
 // growing unbounded, broken wikilinks accumulating silently); stale_count is
-// informational context, deliberately not a trigger.
+// informational context, deliberately not a trigger. stale_count excludes
+// notes tagged status:done / status:archived: the matching list is
+// memory_stale with exclude_closed:true and older_than = stale_cutoff_days;
+// without the flag the tool also lists closed plans, so the two numbers are
+// not comparable.
 type bootstrapMaintenance struct {
 	HotSize         int64 `json:"hot_size"`
 	HotOversize     bool  `json:"hot_oversize"`

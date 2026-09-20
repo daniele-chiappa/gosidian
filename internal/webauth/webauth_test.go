@@ -148,11 +148,11 @@ func TestAuthenticate(t *testing.T) {
 	ld := &fakeLDAP{ok: map[string]string{"alice": "ldappass"}}
 
 	// Unknown user + valid LDAP → auto-provisioned guest.
-	u, err := s.Authenticate("alice", "ldappass", "", ld)
+	res, err := s.Authenticate("alice", "ldappass", "", ld)
 	if err != nil {
 		t.Fatalf("ldap login: %v", err)
 	}
-	if u.Role != RoleGuest || u.AuthSource != "ldap" {
+	if u := res.User; u.Role != RoleGuest || u.AuthSource != "ldap" {
 		t.Errorf("expected ldap guest, got role=%s src=%q", u.Role, u.AuthSource)
 	}
 	// Second login: existing ldap account, re-checked against LDAP.

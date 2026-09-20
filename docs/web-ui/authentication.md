@@ -93,6 +93,47 @@ the secret), then **confirm a current code** — the secret only activates
 after a successful confirmation, so a mistyped setup can't lock the
 account. Enrollment is self-service; owners don't handle secrets.
 
+### Recovery codes
+
+Confirming the enrollment also issues **8 single-use recovery codes**
+(`xxxxx-xxxxx`), shown once. Each one signs the user in **once** in place
+of a TOTP: type it in the same field of the login form. A session opened
+with a recovery code shows a banner with the remaining count. The set
+can be regenerated at any time from **Settings → Two-factor** by
+entering a current TOTP code; every previous code stops working. The
+server stores only bcrypt hashes of the codes.
+
+### Lost authenticator: resetting two-factor
+
+When a user has neither the authenticator nor a recovery code left:
+
+- **Owner, from the UI**: **Admin → Users → Reset** next to the TOTP
+  marker clears that user's secret and recovery codes
+  (`DELETE /api/v1/admin/users/{id}/totp`, audited as `totp_reset`).
+  The per-user policy and the user's sessions are untouched — under a
+  `required` policy the user simply enrolls again at the next login.
+- **Any account, the owner included, from the CLI**:
+
+  ```bash
+  gosidian user totp-reset --vault ./vault --username alice
+  # in Docker (the binary is /gosidian, not on PATH; the state dir comes from the env):
+  docker exec gosidian /gosidian user totp-reset --vault /vault --username alice
+  ```
+
+  Safe with the server running: the accounts file is re-read at the
+  next request. `gosidian user setup --totp` prints the owner's recovery
+  codes right after the QR.
+
+### Brute-force protection
+
+Two limiters guard the login, sharing the `login_max_failures` /
+`login_window` knobs: one per client IP on any failure, one per
+**account** on wrong second factors only. The account limiter is fed
+exclusively by "right password, wrong code" attempts, so a stranger
+spraying wrong passwords cannot lock anyone out, while a distributed
+guess at the 6-digit code is capped per account. A wrong TOTP on the
+recovery-code regeneration counts too.
+
 ## LDAP / Active Directory login
 
 With LDAP enabled, users authenticate against your directory and a local

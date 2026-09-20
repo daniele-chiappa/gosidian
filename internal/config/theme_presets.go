@@ -20,7 +20,7 @@ const CustomThemePreset = "custom"
 //   - Midnight Luxury: the historical default — dark blue/teal with gold.
 //   - Light clean:     inverted for bright environments, readable in daylight.
 //   - High contrast:   WCAG AAA-style pure black/white with saturated accents,
-//                      for accessibility or very bright monitors.
+//     for accessibility or very bright monitors.
 var ThemePresets = map[string]ThemeConfig{
 	"midnight-luxury": {
 		Preset:       "midnight-luxury",

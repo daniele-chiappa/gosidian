@@ -161,6 +161,13 @@ export async function updateUserTOTPPolicy(id: string, totpPolicy: string): Prom
   return data
 }
 
+/** Clear a user's TOTP secret and recovery codes (owner-only): the escape
+ *  hatch for a lost authenticator. Policy and sessions are untouched — under a
+ *  required policy the user re-enrols at the next login. */
+export async function resetUserTOTP(id: string): Promise<void> {
+  await client.delete(`/admin/users/${encodeURIComponent(id)}/totp`)
+}
+
 // Invites
 
 export async function listInvites(): Promise<Invite[]> {

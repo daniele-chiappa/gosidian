@@ -1,2 +1,0 @@
-import{i as e}from"./index-BkdtTTEH.js";async function t(t){let{data:n}=await e.get(`/tags`,{params:t?{project:t}:void 0});return n.items}async function n(t,n){let{data:r}=await e.get(`/tags/${encodeURIComponent(t)}`,{params:n?{project:n}:void 0});return r.items}export{n,t};
-//# sourceMappingURL=tags-DPEeSKjd.js.map

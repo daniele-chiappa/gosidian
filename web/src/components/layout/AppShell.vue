@@ -16,7 +16,7 @@ import CommandPalette from './CommandPalette.vue'
 import TotpEnroll from '@/components/domain/TotpEnroll.vue'
 import { windowRegistry } from '@/components/plancia/windowRegistry'
 import { windowTone } from '@/components/plancia/windowModules'
-import { codec } from '@/composables/planciaKey'
+import { codec, planciaKey } from '@/composables/planciaKey'
 import { useSidebarResize } from '@/composables/useSidebarResize'
 import { useAuthStore } from '@/stores/auth'
 import { useUIStore } from '@/stores/ui'
@@ -80,15 +80,47 @@ function openLinks(win: WindowInstance): void {
 
 onMounted(() => plancia.hydrate())
 
-function onEnrolled() {
+function onEnrolled(codeCount: number) {
   auth.setEnrolled(true)
+  auth.setRecoveryCodesRemaining(codeCount)
   auth.clearEnrollment()
+}
+
+/** Settings window, same spec the sidebar entry uses. */
+function openSettings(): void {
+  openWindow({ type: 'settings', key: planciaKey('settings') })
 }
 </script>
 
 <template>
   <div class="h-screen flex flex-col bg-bg text-text">
     <TopBar />
+    <!-- One-time notice after a login that consumed a recovery code: the
+         user should know how many are left and where to regenerate them. -->
+    <div
+      v-if="auth.recoveryCodeUsed"
+      role="status"
+      class="flex items-center gap-3 border-b border-border bg-bg-elevated px-4 py-2 text-sm"
+    >
+      <span class="text-warning" aria-hidden="true">●</span>
+      <span class="flex-1">
+        {{ t('totp.recovery_used_banner', { n: auth.user?.recovery_codes_remaining ?? 0 }) }}
+      </span>
+      <button
+        type="button"
+        class="rounded border border-border px-2 py-1 text-xs hover:bg-surface-hover"
+        @click="openSettings"
+      >
+        {{ t('totp.recovery_used_open_settings') }}
+      </button>
+      <button
+        type="button"
+        class="rounded px-2 py-1 text-xs text-text-muted hover:bg-surface-hover"
+        @click="auth.dismissRecoveryNotice()"
+      >
+        {{ t('totp.recovery_used_dismiss') }}
+      </button>
+    </div>
     <div class="flex-1 flex overflow-hidden min-h-0">
       <!-- Left sidebar chrome via the library's <PlanciaSidebar> (inline shell).
            gosidian has no collapse/rail/peek, so it stays permanently expanded

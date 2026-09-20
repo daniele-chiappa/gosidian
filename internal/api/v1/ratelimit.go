@@ -26,6 +26,16 @@ var (
 // in-line on the failing request itself.
 const loginCleanupEvery = 100
 
+// accountLimiterKey is the bucket a username's second-factor failures land
+// in. The same loginLimiter holds both per-IP and per-account buckets; the
+// prefix keeps the two namespaces apart (an IP never starts with "user:").
+// The account bucket is fed only by "right password, wrong code" failures,
+// so a distributed guess at a 6-digit code is capped per account while a
+// stranger spamming bad passwords cannot lock anyone out (IMP-062).
+func accountLimiterKey(username string) string {
+	return "user:" + username
+}
+
 // loginLimiter is a per-IP failed-login counter. Same shape as the
 // v1.x server.loginLimiter but lives here so the api/v1 package
 // stays self-contained (importing internal/server back into

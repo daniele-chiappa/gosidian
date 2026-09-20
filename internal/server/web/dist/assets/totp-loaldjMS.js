@@ -1,2 +1,0 @@
-import{i as e}from"./index-BkdtTTEH.js";async function t(){let{data:t}=await e.get(`/auth-config`);return t}async function n(){let{data:t}=await e.post(`/totp/enroll`,{});return t}async function r(t,n){await e.post(`/totp/confirm`,{secret:t,code:n})}async function i(){await e.delete(`/totp`)}export{t as i,i as n,n as r,r as t};
-//# sourceMappingURL=totp-loaldjMS.js.map

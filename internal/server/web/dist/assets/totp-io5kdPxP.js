@@ -1,0 +1,2 @@
+import{i as e}from"./index-D9TflbM7.js";async function t(){let{data:t}=await e.get(`/auth-config`);return t}async function n(){let{data:t}=await e.post(`/totp/enroll`,{});return t}async function r(t,n){let{data:r}=await e.post(`/totp/confirm`,{secret:t,code:n});return r.recovery_codes}async function i(t){let{data:n}=await e.post(`/totp/recovery-codes`,{code:t});return n.recovery_codes}async function a(){await e.delete(`/totp`)}export{i as a,t as i,a as n,n as r,r as t};
+//# sourceMappingURL=totp-io5kdPxP.js.map

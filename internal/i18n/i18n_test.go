@@ -33,11 +33,11 @@ func TestCatalog_LoadAndT(t *testing.T) {
 
 func TestCatalog_PrimaryTag(t *testing.T) {
 	for in, want := range map[string]string{
-		"it":               "it",
-		"it-IT":            "it",
-		"en-US,en;q=0.5":   "en",
-		"IT,en;q=0.5":      "it",
-		"":                 "",
+		"it":             "it",
+		"it-IT":          "it",
+		"en-US,en;q=0.5": "en",
+		"IT,en;q=0.5":    "it",
+		"":               "",
 	} {
 		if got := primaryTag(in); got != want {
 			t.Errorf("primaryTag(%q)=%q, want %q", in, got, want)

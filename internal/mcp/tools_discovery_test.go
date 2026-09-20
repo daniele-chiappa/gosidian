@@ -145,14 +145,47 @@ func TestMCP_Stale(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, _ := s.handleStale(context.Background(), call(map[string]any{"project": proj, "older_than": "30d"}))
-	body := resultText(t, res)
-	var p struct {
-		Notes []recentNoteResponse `json:"notes"`
+	// A finished plan backdated the same way is stale too, but closed.
+	donePath := filepath.Join(v.Root, "proj/plans/b.md")
+	if err := os.Chtimes(donePath, past, past); err != nil {
+		t.Fatal(err)
 	}
-	_ = json.Unmarshal([]byte(body), &p)
-	if len(p.Notes) != 1 || p.Notes[0].Path != "proj/memory/old.md" {
-		t.Errorf("expected only stale old.md, got %+v", p.Notes)
+	if err := v.ScanInto(s.index); err != nil {
+		t.Fatal(err)
+	}
+
+	list := func(args map[string]any) []staleNoteResponse {
+		t.Helper()
+		args["project"] = proj
+		args["older_than"] = "30d"
+		res, _ := s.handleStale(context.Background(), call(args))
+		var p struct {
+			Notes []staleNoteResponse `json:"notes"`
+		}
+		if err := json.Unmarshal([]byte(resultText(t, res)), &p); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		return p.Notes
+	}
+
+	got := list(map[string]any{})
+	if len(got) != 2 {
+		t.Fatalf("expected old.md and b.md, got %+v", got)
+	}
+	byPath := map[string]bool{}
+	for _, n := range got {
+		byPath[n.Path] = n.Closed
+	}
+	if closed, ok := byPath["proj/plans/b.md"]; !ok || !closed {
+		t.Errorf("status:done plan should be listed as closed: %+v", got)
+	}
+	if closed, ok := byPath["proj/memory/old.md"]; !ok || closed {
+		t.Errorf("old.md should be listed as open: %+v", got)
+	}
+
+	got = list(map[string]any{"exclude_closed": true})
+	if len(got) != 1 || got[0].Path != "proj/memory/old.md" || got[0].Closed {
+		t.Errorf("exclude_closed should leave only old.md, got %+v", got)
 	}
 }
 

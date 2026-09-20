@@ -53,19 +53,24 @@ func TestTOTPEnrollConfirmDisenroll(t *testing.T) {
 	}
 
 	code, _ := totp.GenerateCode(enr.Secret, time.Now())
-	if rec := f.doAuthRecorder(http.MethodPost, "/api/v1/totp/confirm", `{"secret":"`+enr.Secret+`","code":"`+code+`"}`, nil); rec.code != http.StatusNoContent {
+	rec = f.doAuthRecorder(http.MethodPost, "/api/v1/totp/confirm", `{"secret":"`+enr.Secret+`","code":"`+code+`"}`, nil)
+	if rec.code != http.StatusOK {
 		t.Fatalf("confirm status %d: %s", rec.code, rec.body)
 	}
-	if u, ok := f.webauth.UserByID(f.owner.ID); !ok || u.TOTPSec == "" {
-		t.Error("secret not persisted after confirm")
+	// Confirmation mints the recovery codes alongside the secret.
+	if !strings.Contains(rec.body, `"recovery_codes":[`) {
+		t.Errorf("confirm response missing recovery codes: %s", rec.body)
+	}
+	if u, ok := f.webauth.UserByID(f.owner.ID); !ok || u.TOTPSec == "" || u.RecoveryCodesRemaining() != webauth.RecoveryCodeCount {
+		t.Error("secret or recovery codes not persisted after confirm")
 	}
 
-	// Disenroll (optional + not required) → 204, secret cleared.
+	// Disenroll (optional + not required) → 204, secret and codes cleared.
 	if rec := f.doAuthRecorder(http.MethodDelete, "/api/v1/totp", "", nil); rec.code != http.StatusNoContent {
 		t.Fatalf("disenroll status %d: %s", rec.code, rec.body)
 	}
-	if u, ok := f.webauth.UserByID(f.owner.ID); ok && u.TOTPSec != "" {
-		t.Error("secret not cleared after disenroll")
+	if u, ok := f.webauth.UserByID(f.owner.ID); ok && (u.TOTPSec != "" || len(u.RecoveryCodes) != 0) {
+		t.Error("secret or codes not cleared after disenroll")
 	}
 }
 
@@ -170,7 +175,7 @@ func TestTOTPEnrollmentGate(t *testing.T) {
 
 	// Confirm a valid code → secret persisted → the gate lifts.
 	code, _ := totp.GenerateCode(enr.Secret, time.Now())
-	if cr := f.doAuthRecorder(http.MethodPost, "/api/v1/totp/confirm", `{"secret":"`+enr.Secret+`","code":"`+code+`"}`, nil); cr.code != http.StatusNoContent {
+	if cr := f.doAuthRecorder(http.MethodPost, "/api/v1/totp/confirm", `{"secret":"`+enr.Secret+`","code":"`+code+`"}`, nil); cr.code != http.StatusOK {
 		t.Fatalf("confirm status %d: %s", cr.code, cr.body)
 	}
 	if rec := f.doAuthRecorder(http.MethodGet, "/api/v1/tree", "", nil); rec.code != http.StatusOK {
