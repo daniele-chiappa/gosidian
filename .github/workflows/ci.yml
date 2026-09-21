@@ -140,8 +140,10 @@ jobs:
           set -eu
           VERSION="${GITHUB_REF_NAME#v}"
           IMAGE_REF="${REGISTRY}/${IMAGE}:${GITHUB_REF_NAME}"
+          # OCI packages carry the version only in the identifier tag: the
+          # registry rejects a package-level `version` field at publish time.
           jq --arg v "$VERSION" --arg img "$IMAGE_REF" \
-            '.version = $v | .packages[0].version = $v | .packages[0].identifier = $img' \
+            '.version = $v | .packages[0].identifier = $img' \
             server.json > server.json.tmp && mv server.json.tmp server.json
           ./mcp-publisher validate
           cat server.json

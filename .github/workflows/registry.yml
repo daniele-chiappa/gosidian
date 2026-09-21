@@ -1,0 +1,57 @@
+name: MCP Registry
+
+# Publish an EXISTING release tag to the official MCP Registry by hand.
+# The normal path is the `registry` job in ci.yml on every tag push; this
+# workflow is the retry (registry outage, a server.json fix after the
+# tag). It checks out main — server.json as maintained now — and points
+# it at the tag's image, which must already be public on GHCR.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to publish (e.g. v2.28.0)"
+        required: true
+
+permissions:
+  id-token: write   # GitHub OIDC login to the registry (io.github.* namespace)
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: daniele-chiappa/gosidian
+  MCP_PUBLISHER_VERSION: v1.8.1
+
+jobs:
+  publish:
+    name: Publish to the MCP Registry
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install mcp-publisher (pinned)
+        run: |
+          set -eu
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz" \
+            | tar -xz mcp-publisher
+          ./mcp-publisher --version
+
+      - name: Point server.json at the tag
+        run: |
+          set -eu
+          VERSION="${TAG#v}"
+          IMAGE_REF="${REGISTRY}/${IMAGE}:${TAG}"
+          # OCI packages carry the version only in the identifier tag.
+          jq --arg v "$VERSION" --arg img "$IMAGE_REF" \
+            '.version = $v | .packages[0].identifier = $img' \
+            server.json > server.json.tmp && mv server.json.tmp server.json
+          ./mcp-publisher validate
+          cat server.json
+
+      - name: Login (GitHub OIDC)
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish
+        run: ./mcp-publisher publish
