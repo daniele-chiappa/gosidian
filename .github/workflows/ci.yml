@@ -108,3 +108,46 @@ jobs:
           for T in ${{ steps.meta.outputs.tags }}; do
             echo "- \`$T\`" >> "$GITHUB_STEP_SUMMARY"
           done
+
+  registry:
+    name: Publish to the MCP Registry
+    # The registry verifies ownership of an OCI package by reading the
+    # io.modelcontextprotocol.server.name label inside the image that
+    # server.json references, so this must run after the tagged image is
+    # on GHCR. Tags only: main pushes keep the last published version.
+    # See docs/development.md → Releasing.
+    needs: docker
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # GitHub OIDC login to the registry (io.github.* namespace)
+      contents: read
+    env:
+      MCP_PUBLISHER_VERSION: v1.8.1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install mcp-publisher (pinned)
+        run: |
+          set -eu
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz" \
+            | tar -xz mcp-publisher
+          ./mcp-publisher --version
+
+      - name: Point server.json at this release
+        run: |
+          set -eu
+          VERSION="${GITHUB_REF_NAME#v}"
+          IMAGE_REF="${REGISTRY}/${IMAGE}:${GITHUB_REF_NAME}"
+          jq --arg v "$VERSION" --arg img "$IMAGE_REF" \
+            '.version = $v | .packages[0].version = $v | .packages[0].identifier = $img' \
+            server.json > server.json.tmp && mv server.json.tmp server.json
+          ./mcp-publisher validate
+          cat server.json
+
+      - name: Login (GitHub OIDC)
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish
+        run: ./mcp-publisher publish
