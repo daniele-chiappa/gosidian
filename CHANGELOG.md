@@ -8,6 +8,77 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.28.0] — 2026-09-21 — "streamable HTTP"
+
+The MCP server now speaks the current MCP transport: `POST /mcp` on the
+web port, next to the legacy HTTP+SSE endpoint at `/mcp/sse`, which stays
+as it is with no removal date. Same bearer tokens, same tools, same
+project scoping — point Claude Code at `/mcp` with `--transport http` and
+nothing else changes. gosidian is also listed in the official MCP
+Registry from this release. No migration: existing SSE clients keep
+working unchanged.
+
+### Added
+- **Streamable HTTP transport** — `POST /mcp` serves JSON-RPC over the
+  current MCP transport (protocol revisions 2024-11-05 through
+  2026-07-28). The standalone `GET /mcp` stream answers `405` because
+  gosidian sends nothing server→client — change events travel inside
+  `memory_wait_changes` — so no long-lived connection sits behind a
+  reverse proxy. Wire Claude Code with
+  `claude mcp add gosidian http://<host>:8080/mcp --transport http --header "Authorization: Bearer …"`;
+  a `.mcp.json` entry takes `"type": "http"`. `/mcp/sse` and the legacy
+  standalone SSE listener (`GOSIDIAN_MCP_ADDR`) are unchanged.
+- **Listed in the official MCP Registry** — the repository ships a
+  `server.json` describing gosidian as an OCI package on GHCR with the
+  Streamable HTTP transport, the image carries the
+  `io.modelcontextprotocol.server.name` label the registry uses to verify
+  ownership, and every release tag publishes
+  `io.github.daniele-chiappa/gosidian` from CI (GitHub OIDC, no stored
+  secret). The entry is for discovery: gosidian is a server you run (vault
+  volume, token from the web UI), so registry clients still follow the
+  [client setup](docs/mcp/client-setup.md). A `glama.json` claims the
+  Glama listing.
+- **`mcp.disable_dns_rebinding_protection`** (env
+  `GOSIDIAN_MCP_DISABLE_DNS_REBINDING_PROTECTION`, default `false`) — both
+  MCP endpoints refuse with `403` a request that arrived on a
+  loopback-bound connection with a `Host` header that is not a localhost
+  value (the transport library's DNS-rebinding guard, on `/mcp/sse` since
+  v2.24.0 and now documented). Containers and LAN listeners never trip
+  it; a same-host reverse proxy forwarding over `127.0.0.1` with the
+  public `Host` does — send `Host: localhost` or set the flag.
+
+### Fixed
+- **MCP correlation id is per session again** — both transports run the
+  context hook once per JSON-RPC message, so the id meant to tag one
+  session's mutations in the audit log and in git auto-commits was minted
+  per call, and the two guards keyed on it — the `memory_wait_changes`
+  one-waiter rule and the self-improve nudge budget — never applied. The
+  id is now derived (hashed) from the transport session id: stable for an
+  SSE connection or a Streamable HTTP `Mcp-Session-Id`; sessionless
+  messages keep a fresh id.
+- **MCP responses opt out of proxy buffering** — `/mcp` and `/mcp/sse`
+  send `X-Accel-Buffering: no`, so an nginx-style proxy with
+  `proxy_buffering on` no longer holds the SSE stream (only
+  `/api/v1/events` had it).
+
+### Changed
+- Tool hints describe `/upload`, `/download` and the ingest ticket
+  relative to the MCP base URL ("drop a trailing `/sse`") instead of
+  "your /sse URL"; `gosidian token create` prints the `--transport http`
+  command; the boot log names both endpoints.
+- Docs: [client setup](docs/mcp/client-setup.md) rewritten around
+  `--transport http` (Claude Code, Zed, Cursor/Continue, stdio through a
+  bridge, registry), [deployment](docs/deployment.md) notes for same-host
+  proxies and buffering, [development](docs/development.md) → Releasing
+  describes the registry publish step.
+
+### Notes
+- Upgrade: pull the image and restart; nothing to migrate. Clients on
+  `/mcp/sse` need no change. To switch a Claude Code client:
+  `claude mcp remove gosidian`, then the `claude mcp add … --transport http`
+  command above.
+- `GET /mcp` returning `405` is by design, not a misconfiguration.
+
 ## [2.27.0] — 2026-09-20 — "two-factor recovery"
 
 A lost authenticator is no longer a dead end: TOTP enrolment now hands out

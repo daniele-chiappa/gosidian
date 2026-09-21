@@ -60,7 +60,7 @@ working):
   `internal/i18n/catalogs/` (shared with the Go side); a strict CSP
   (`script-src 'self'`, no eval) is enforced
 - The Go backend serves only the SPA shell, fingerprinted assets, the
-  `/api/v1/*` REST API, and `/mcp/sse`
+  `/api/v1/*` REST API, and the MCP transports at `/mcp` and `/mcp/sse`
 
 ## Language switching
 

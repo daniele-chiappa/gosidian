@@ -41,7 +41,7 @@ CAS.
 ```
 
 ```bash
-# 2. POST the bytes — same host as your MCP /sse URL, no Authorization header
+# 2. POST the bytes — same host as your MCP URL, no Authorization header
 curl -sf -F "file=@audit-q3.csv" "https://host/mcp/ingest/<ticket>"
 # → the server executes the intent and answers like the tool would:
 #   { "path": "Work/q3-audit.md", "kind": "table", "columns": [...], "rows": 812 }
@@ -78,15 +78,17 @@ used for the SSE stream. No base64 through the model context, no login,
 no shared filesystem. (Prefer the `memory_ingest` ticket flow above when
 you also want the note created in the same round trip.)
 
-**The path mirrors your `/sse` endpoint** — replace `/sse` with `/upload`:
+**The path is your MCP base URL plus `/upload`** — the URL you
+configured for gosidian, minus any trailing `/sse`:
 
-| Your MCP `/sse` URL | Upload endpoint |
+| Your MCP URL | Upload endpoint |
 |---|---|
-| `https://host/mcp/sse` (single-port web) | `https://host/mcp/upload` |
-| `http://host:8765/sse` (legacy listener) | `http://host:8765/upload` |
+| `https://host/mcp` (Streamable HTTP, single-port web) | `https://host/mcp/upload` |
+| `https://host/mcp/sse` (legacy SSE, single-port web) | `https://host/mcp/upload` |
+| `http://host:8765/sse` (legacy standalone listener) | `http://host:8765/upload` |
 
 ```bash
-# $UPLOAD = your /sse URL with /sse -> /upload
+# $UPLOAD = your MCP base URL + /upload
 curl -X POST "$UPLOAD?project=Work" \
   -H "Authorization: Bearer $MCP_TOKEN" \
   -F "file=@diagram.png"
@@ -101,7 +103,7 @@ curl -X POST "$UPLOAD?project=Work" \
 }
 ```
 
-- Mounted on the single web port next to `/mcp/sse` — one SSH tunnel
+- Mounted on the single web port next to `/mcp` — one SSH tunnel
   forwards both. `$BASE` is the same origin you point the MCP client at.
 - Enforces the token's **write scope** and **project scope** (the
   `?project=` is intersected with a scoped token's project).
@@ -120,11 +122,11 @@ endpoint makes the read side token-free too: `memory_get` streams a body
 through the model context at ~1 token per character, while `GET
 /download` hands the bytes to `curl`.
 
-**The path mirrors your `/sse` endpoint** — replace `/sse` with
-`/download`, and pass the vault-relative note path as `?path=`:
+**The path is your MCP base URL plus `/download`** (drop a trailing
+`/sse`), with the vault-relative note path as `?path=`:
 
 ```bash
-# $DOWNLOAD = your /sse URL with /sse -> /download
+# $DOWNLOAD = your MCP base URL + /download
 curl -sf -D headers.txt "$DOWNLOAD?path=Work/docs/report.html" \
   -H "Authorization: Bearer $MCP_TOKEN" -o report.html
 # … edit report.html locally …
@@ -378,6 +380,6 @@ it — check `memory_attachment_info` first to find references).
 - [Tool catalogue](tools.md#attachments) — full tool list with
   signatures
 - [Client setup](client-setup.md) — the single-port endpoint that
-  serves both `/api/upload` and `/mcp/sse` on the web port
+  serves both `/api/upload` and `/mcp` on the web port
 - [Authentication](authentication.md) — bearer token scoping for the
   MCP tools (REST does not use bearer auth)

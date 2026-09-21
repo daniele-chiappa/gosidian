@@ -11,10 +11,14 @@ memory. Clients (Claude Code, Zed, Cursor, Continue, custom agents)
 connect to MCP servers and call typed tools. gosidian implements the
 **server** side.
 
-Transport: **HTTP + SSE** at `/mcp/sse` on the web port (single-port
-mode, recommended). A legacy standalone listener at `/sse` on a
-separate port is still supported for backward compatibility, opt-in
-via `--mcp-addr` / `GOSIDIAN_MCP_ADDR`.
+Transport: **Streamable HTTP** at `/mcp` on the web port (single-port
+mode, recommended — the current MCP transport, `--transport http` in
+Claude Code). The legacy **HTTP + SSE** transport stays available at
+`/mcp/sse` for older clients, with no removal date; a legacy standalone
+SSE listener on a separate port is opt-in via `--mcp-addr` /
+`GOSIDIAN_MCP_ADDR`. gosidian sends nothing server→client (change
+events travel inside `memory_wait_changes`), so `GET /mcp` answers 405
+and no long-lived stream sits behind your reverse proxy.
 Auth: **Bearer tokens** with per-project scoping.
 
 ## Why typed retrieval

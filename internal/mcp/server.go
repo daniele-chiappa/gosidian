@@ -5,6 +5,8 @@ package mcp
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"strings"
@@ -42,8 +44,8 @@ func basePathFromContext(ctx context.Context) string {
 }
 
 // LangFromContext returns the Accept-Language value (first tag) extracted
-// from the SSE handshake headers, or empty when the caller did not supply
-// one. Tool handlers pick this up to localise error messages.
+// from the request headers, or empty when the caller did not supply one.
+// Tool handlers pick this up to localise error messages.
 func LangFromContext(ctx context.Context) string {
 	if v, ok := ctx.Value(langCtxKey).(string); ok {
 		return v
@@ -51,22 +53,36 @@ func LangFromContext(ctx context.Context) string {
 	return ""
 }
 
-// generateCorrelationID returns a short random hex identifier suitable for
-// tagging a single MCP session's mutations in the audit log and in git
-// auto-commit messages. 8 hex chars = 32 bits = enough to disambiguate
-// concurrent agent sessions on a self-hosted instance.
+// generateCorrelationID returns a short random hex identifier for a message
+// that carries no MCP session (protocol 2026-07-28 clients, tests). 8 hex
+// chars = 32 bits = enough to disambiguate concurrent agent sessions on a
+// self-hosted instance.
 func generateCorrelationID() string {
 	var buf [4]byte
 	if _, err := rand.Read(buf[:]); err != nil {
 		return "noid"
 	}
-	const hex = "0123456789abcdef"
-	out := make([]byte, 8)
-	for i, b := range buf {
-		out[i*2] = hex[b>>4]
-		out[i*2+1] = hex[b&0x0f]
+	return hex.EncodeToString(buf[:])
+}
+
+// correlationIDFor returns the id that tags one MCP session's tool calls in
+// the audit log, in git auto-commit messages, in the self-improve nudge
+// budget and in the memory_wait_changes one-waiter guard. Both transports
+// run the context func once per JSON-RPC message, after mcp-go attached the
+// client session, so minting a random id there tagged nothing (BUG-053):
+// the id is derived from the transport session id instead — stable for the
+// life of an SSE connection or of a Streamable HTTP Mcp-Session-Id — and
+// hashed, because the raw SSE session id authorises POSTs on the message
+// endpoint and must not land in a log line. Sessionless messages keep a
+// fresh random id.
+func correlationIDFor(ctx context.Context) string {
+	if cs := server.ClientSessionFromContext(ctx); cs != nil {
+		if sid := cs.SessionID(); sid != "" {
+			sum := sha256.Sum256([]byte(sid))
+			return hex.EncodeToString(sum[:4])
+		}
 	}
-	return string(out)
+	return generateCorrelationID()
 }
 
 // Server wraps a mark3labs MCPServer wired against a gosidian vault + index.
@@ -134,6 +150,13 @@ type Server struct {
 	ingestTicketsMu sync.Mutex
 	// ingestTicketTTL overrides the ticket lifetime; <= 0 uses the default.
 	ingestTicketTTL time.Duration
+	// dnsRebindingOff disables mcp-go's DNS-rebinding guard on both MCP
+	// transports (403 for a request that arrived on a loopback-bound
+	// connection with a Host header that is not a localhost value). The zero
+	// value keeps the guard on; only a same-host reverse proxy that forwards
+	// over 127.0.0.1 while preserving the public Host header needs it off.
+	// Wired by main from [mcp] disable_dns_rebinding_protection.
+	dnsRebindingOff bool
 }
 
 // SetEvents wires the SSE hub used to broadcast note/tree changes
@@ -193,6 +216,12 @@ func (s *Server) SetGlobal(enabled bool, public, private string) {
 // anchors payload. Per-project opt-in is projects.Flags.UseAnchors.
 func (s *Server) SetAgentAnchors(enabled bool) {
 	s.anchorsEnabled = enabled
+}
+
+// SetDNSRebindingProtection toggles mcp-go's DNS-rebinding guard on both
+// MCP transports. On by default; see dnsRebindingOff.
+func (s *Server) SetDNSRebindingProtection(enabled bool) {
+	s.dnsRebindingOff = !enabled
 }
 
 // publishNoteChange broadcasts a note-level write (create/update/
@@ -355,7 +384,7 @@ func (s *Server) auditWrite(ctx context.Context, action audit.Action, path, to s
 }
 
 // correlationIDFromContext returns the per-session id, or empty string when
-// the request didn't go through the SSE pipeline (tests).
+// the request didn't go through an HTTP transport (tests).
 func correlationIDFromContext(ctx context.Context) string {
 	if v, ok := ctx.Value(correlationCtxKey).(string); ok {
 		return v
@@ -393,60 +422,43 @@ func New(v *vault.Vault, idx *index.Index, tokens *auth.Store) *Server {
 	return s
 }
 
-// Handler returns an http.Handler exposing the MCP SSE transport, ready to
-// be mounted on any mux. basePath sets the URL prefix the SSE server
-// announces to clients during the initial handshake (it ships back the
-// "endpoint" event with the URL the client must POST messages to). Pass
-// "" to mount at the root of an http.Server (legacy standalone shape);
-// pass e.g. "/mcp" when mounting on a shared mux under that prefix —
-// otherwise the announced message URL is a path the public mux won't
-// route, and the client reports "SSE streaming not supported" because
-// its POST to /message fails.
+// Handler returns an http.Handler exposing both MCP HTTP transports and the
+// sibling byte endpoints, ready to be mounted on any mux under basePath:
 //
-// The handler is wrapped with bearer-token auth when the underlying
-// token store is non-empty (unknown bearers → 401; valid ones threaded
-// through the per-session context for tool handlers).
+//   - <basePath>          Streamable HTTP (POST JSON-RPC). GET answers 405:
+//     gosidian sends nothing server→client — change events travel inside
+//     memory_wait_changes — so no long-lived stream sits behind a proxy.
+//   - <basePath>/sse      HTTP+SSE, the legacy transport, kept for older
+//     clients; <basePath>/message carries its client→server messages.
+//   - <basePath>/upload, /download, /ingest/<ticket>  byte endpoints.
 //
-// Each invocation constructs a fresh SSEServer instance — callers should
-// obtain one handler per mount point. Internal session state is per
-// SSEServer so this is correct: clients connect to one endpoint at a time.
+// basePath is the prefix the transports announce to clients (the SSE
+// handshake ships back the /message URL to POST to; tickets advertise the
+// /ingest/ URL). Pass "" for the legacy standalone listener: it stays
+// SSE-only because Streamable HTTP needs a non-empty exact path to route on.
 //
-// Path semantics with basePath="/mcp": the SSEServer matches /mcp/sse for
-// the event stream and /mcp/message for client→server messages, using
-// exact path matching against r.URL.Path. The mux must therefore route
-// the prefix /mcp/ to this handler WITHOUT StripPrefix, so the SSE
-// server still sees the full path.
+// Both transports share one context func (bearer → token, correlation id,
+// Accept-Language, basePath) and one bearer guard when the token store is
+// non-empty (unknown bearers → 401). Each invocation constructs fresh
+// transport servers — obtain one handler per mount point.
+//
+// The mux must route both the exact prefix and the prefix subtree to this
+// handler WITHOUT StripPrefix: the transports match r.URL.Path exactly.
 func (s *Server) Handler(basePath string) http.Handler {
+	ctxFn := s.httpContext(basePath)
 	opts := []server.SSEOption{
-		server.WithSSEContextFunc(func(ctx context.Context, r *http.Request) context.Context {
-			ctx = context.WithValue(ctx, correlationCtxKey, generateCorrelationID())
-			ctx = context.WithValue(ctx, basePathCtxKey, basePath)
-			if lang := r.Header.Get("Accept-Language"); lang != "" {
-				ctx = context.WithValue(ctx, langCtxKey, lang)
-			}
-			tok := s.authenticate(r)
-			if tok != nil {
-				ctx = context.WithValue(ctx, tokenCtxKey, tok)
-			}
-			return ctx
-		}),
+		server.WithSSEContextFunc(ctxFn),
+		server.WithSSEDisableLocalhostProtection(s.dnsRebindingOff),
 	}
 	if basePath != "" {
 		opts = append(opts, server.WithStaticBasePath(basePath))
 	}
 	sse := server.NewSSEServer(s.impl, opts...)
 
-	handler := http.Handler(sse)
-	if s.tokens != nil && !s.tokens.Empty() {
-		handler = s.requireToken(sse)
-	}
-
-	// Mount a sibling HTTP upload endpoint at <basePath>/upload, sharing the
-	// same MCP bearer auth (IMP-059). It lets agents POST file bytes over HTTP
-	// instead of pushing them through the model context as base64 — the primary
-	// cheap-ingestion path. The SSE handler keeps exact-matching
-	// <basePath>/sse and /message under the catch-all.
 	mux := http.NewServeMux()
+	// Sibling HTTP upload endpoint at <basePath>/upload, sharing the MCP
+	// bearer auth (IMP-059): agents POST file bytes over HTTP instead of
+	// pushing them through the model context as base64.
 	mux.HandleFunc(basePath+"/upload", s.handleHTTPUpload)
 	// Read-side twin: GET the raw bytes of a note with the same bearer, so a
 	// large note reaches the agent's disk without crossing the model context
@@ -456,8 +468,50 @@ func (s *Server) Handler(basePath string) http.Handler {
 	// No bearer here: the unguessable ticket id, bound to the minting token,
 	// is the credential.
 	mux.HandleFunc(basePath+"/ingest/", s.handleIngestTicketRedeem)
-	mux.Handle("/", handler)
+	if basePath != "" {
+		streamable := server.NewStreamableHTTPServer(s.impl,
+			server.WithHTTPContextFunc(ctxFn),
+			server.WithDisableStreaming(true),
+			server.WithDisableLocalhostProtection(s.dnsRebindingOff),
+		)
+		// Exact path only: the subtree below stays with the SSE server.
+		mux.Handle(basePath, s.transport(streamable))
+	}
+	mux.Handle("/", s.transport(sse))
 	return mux
+}
+
+// httpContext returns the per-message context decorator shared by both HTTP
+// transports: the correlation id (see correlationIDFor), the mount prefix
+// the message arrived on (tickets advertise it), Accept-Language for
+// localised errors, and the bearer token when valid. mcp-go invokes it once
+// per JSON-RPC message with the client session already in ctx.
+func (s *Server) httpContext(basePath string) func(ctx context.Context, r *http.Request) context.Context {
+	return func(ctx context.Context, r *http.Request) context.Context {
+		ctx = context.WithValue(ctx, correlationCtxKey, correlationIDFor(ctx))
+		ctx = context.WithValue(ctx, basePathCtxKey, basePath)
+		if lang := r.Header.Get("Accept-Language"); lang != "" {
+			ctx = context.WithValue(ctx, langCtxKey, lang)
+		}
+		if tok := s.authenticate(r); tok != nil {
+			ctx = context.WithValue(ctx, tokenCtxKey, tok)
+		}
+		return ctx
+	}
+}
+
+// transport wraps a transport handler with what both share: the bearer guard
+// when the token store is non-empty, and X-Accel-Buffering: no, which tells
+// nginx-style proxies not to buffer the response — an SSE stream held in a
+// proxy buffer never reaches the client.
+func (s *Server) transport(next http.Handler) http.Handler {
+	if s.tokens != nil && !s.tokens.Empty() {
+		next = s.requireToken(next)
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Accel-Buffering", "no")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // ServeSSE starts a standalone HTTP listener serving the MCP SSE endpoint
@@ -492,7 +546,8 @@ func (s *Server) authenticate(r *http.Request) *auth.Token {
 	return tok
 }
 
-// requireToken enforces Bearer auth at the HTTP layer before any SSE handshake.
+// requireToken enforces Bearer auth at the HTTP layer before any transport
+// handshake.
 func (s *Server) requireToken(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.authenticate(r) == nil {

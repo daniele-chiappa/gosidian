@@ -155,8 +155,8 @@ func (s *Server) buildCapabilities() bootstrapCapabilities {
 		Attachments: bootstrapAttachCapability{
 			MaxMiB:               attach.MaxBytes >> 20,
 			Extensions:           exts,
-			UploadEndpointHint:   "to save a file use memory_ingest (routes by extension; sources: bridge_filename, source_path, url, or transfer:\"http\" for a single-use upload ticket). Raw bytes can also be POSTed multipart (field 'file', bearer token) to your MCP /sse URL with /sse replaced by /upload — bytes travel over HTTP, not the model context",
-			DownloadEndpointHint: "to get a note's full bytes on your disk without context tokens (edit a large .html report locally, then re-ingest it), GET your MCP /sse URL with /sse replaced by /download?path=<vault path> (bearer token, read scope): raw .md/.html body, ETag reusable as if_match on the next write. Attachments are served at /vault-files/<path> with the same bearer",
+			UploadEndpointHint:   "to save a file use memory_ingest (routes by extension; sources: bridge_filename, source_path, url, or transfer:\"http\" for a single-use upload ticket). Raw bytes can also be POSTed multipart (field 'file', bearer token) to your MCP base URL plus /upload (the URL you configured, minus any trailing /sse) — bytes travel over HTTP, not the model context",
+			DownloadEndpointHint: "to get a note's full bytes on your disk without context tokens (edit a large .html report locally, then re-ingest it), GET your MCP base URL plus /download?path=<vault path> (the URL you configured, minus any trailing /sse; bearer token, read scope): raw .md/.html body, ETag reusable as if_match on the next write. Attachments are served at /vault-files/<path> with the same bearer",
 			Tools:                []string{"memory_ingest", "memory_upload_attachment", "memory_upload_resource"},
 			BridgeDir:            s.bridgeDir,
 			AllowedUploadRoots:   s.allowedUploadRoots,

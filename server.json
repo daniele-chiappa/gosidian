@@ -1,0 +1,62 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.daniele-chiappa/gosidian",
+  "title": "gosidian",
+  "description": "Self-hosted Obsidian-compatible markdown vault with a web UI and a 57-tool MCP server for AI agents",
+  "version": "2.28.0",
+  "websiteUrl": "https://github.com/daniele-chiappa/gosidian#readme",
+  "repository": {
+    "url": "https://github.com/daniele-chiappa/gosidian",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/daniele-chiappa/gosidian:v2.28.0",
+      "version": "2.28.0",
+      "transport": {
+        "type": "streamable-http",
+        "url": "http://localhost:8080/mcp",
+        "headers": [
+          {
+            "name": "Authorization",
+            "description": "Bearer token created in the web UI at /admin/tokens after the first start",
+            "value": "Bearer {token}",
+            "isRequired": true,
+            "isSecret": true,
+            "variables": {
+              "token": {
+                "description": "gosidian MCP token (gosidian_...)",
+                "isRequired": true,
+                "isSecret": true
+              }
+            }
+          }
+        ]
+      },
+      "runtimeArguments": [
+        {
+          "type": "named",
+          "name": "-p",
+          "value": "8080:8080",
+          "description": "Web UI and MCP on port 8080",
+          "isRequired": true
+        },
+        {
+          "type": "named",
+          "name": "-v",
+          "value": "./vault:/vault",
+          "description": "Host folder holding the markdown vault (plain .md files, Obsidian-compatible)",
+          "isRequired": true
+        }
+      ],
+      "environmentVariables": [
+        {
+          "name": "GOSIDIAN_VAULT",
+          "description": "Vault path inside the container",
+          "default": "/vault"
+        }
+      ]
+    }
+  ]
+}

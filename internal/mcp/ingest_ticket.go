@@ -106,7 +106,7 @@ func (s *Server) mintIngestTicket(ctx context.Context, project, as string, req m
 		"method":     "POST",
 		"field":      "file",
 		"single_use": true,
-		"hint":       "POST the file as multipart field 'file' to this endpoint on the SAME host as your MCP /sse URL — no Authorization header needed, the ticket is the credential. Single-use: any attempt consumes it; on failure mint a new one. Example: curl -sf -F file=@report.html <mcp-host>" + endpoint,
+		"hint":       "POST the file as multipart field 'file' to this endpoint on the SAME host as your MCP URL — no Authorization header needed, the ticket is the credential. Single-use: any attempt consumes it; on failure mint a new one. Example: curl -sf -F file=@report.html <mcp-host>" + endpoint,
 	})
 }
 

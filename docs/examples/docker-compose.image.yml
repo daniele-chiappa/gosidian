@@ -44,7 +44,7 @@ services:
       # Legacy MCP listener (separate port). Uncomment ONLY if you need
       # backward-compat with clients pinned to the old `:8765/sse` URL,
       # and also uncomment GOSIDIAN_MCP_ADDR below. New deployments
-      # should leave both commented and migrate clients to /mcp/sse.
+      # should leave both commented and migrate clients to /mcp.
       # - "8765:8765"
 
     volumes:

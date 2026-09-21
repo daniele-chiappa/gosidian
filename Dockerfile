@@ -71,6 +71,11 @@ RUN apk add --no-cache git ca-certificates \
 
 COPY --from=go-builder /out/gosidian /gosidian
 
+# The official MCP Registry verifies ownership of an OCI package by reading
+# this label from the referenced image; it must equal the server name in
+# server.json (IMP-093).
+LABEL io.modelcontextprotocol.server.name="io.github.daniele-chiappa/gosidian"
+
 USER 65532:65532
 # /data is the recommended mount for GOSIDIAN_STATE_DIR (ADR-023): mount a
 # volume there and set the env to keep credentials, config, audit log and

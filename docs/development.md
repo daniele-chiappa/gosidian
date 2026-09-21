@@ -84,6 +84,22 @@ new tool, new config surface, visible behaviour change — so every
 `v1.N` is meaningful for downstream Go module consumers. A
 maintainer cuts the tag from `main` when that threshold is reached.
 
+**MCP Registry.** Every release tag also publishes
+`io.github.daniele-chiappa/gosidian` to the
+[official MCP Registry](https://registry.modelcontextprotocol.io) from
+CI: the `registry` job runs after the tagged image is on GHCR, rewrites
+`version` and the OCI `identifier` in `server.json` from the tag, runs
+`mcp-publisher validate`, logs in with GitHub OIDC (no stored secret)
+and publishes. The registry verifies ownership through the
+`io.modelcontextprotocol.server.name` label baked into the image by the
+`Dockerfile`, so an image built without it cannot be listed. To check a
+`server.json` change locally before tagging:
+
+```bash
+curl -fsSL https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_linux_amd64.tar.gz | tar -xz mcp-publisher
+./mcp-publisher validate
+```
+
 See [CHANGELOG.md](../CHANGELOG.md) for the release history.
 
 ## Architecture & internals

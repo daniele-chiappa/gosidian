@@ -30,9 +30,9 @@ services:
     environment:
       GOSIDIAN_VAULT: /vault
       GOSIDIAN_ADDR: ":8080"
-      # MCP is mounted on the web port at /mcp/sse by default.
-      # Enable a legacy standalone MCP listener only when you need it
-      # for backward compatibility with older clients:
+      # MCP is mounted on the web port: /mcp (Streamable HTTP) and
+      # /mcp/sse (legacy HTTP+SSE). Enable a legacy standalone SSE
+      # listener only for clients pinned to the old separate port:
       # GOSIDIAN_MCP_ADDR: "0.0.0.0:8765"
       # optional: git sync
       # GOSIDIAN_GIT_ENABLED: "true"
@@ -66,6 +66,8 @@ Smoke test once it's up:
 ```bash
 curl -s   http://localhost:8080/healthz                 # → ok
 curl -sI  http://localhost:8080/mcp/sse | head -1        # → 401 (auth required, route mounted)
+curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:8080/mcp \
+  -H "Content-Type: application/json" -d '{}'         # → 401 (Streamable HTTP mounted)
 ```
 
 Open `http://localhost:8080` in a browser to provision the first
@@ -87,8 +89,22 @@ notes.example.com {
 }
 ```
 
-Both the web UI and the MCP transport (`/mcp/sse`) are served from
-port 8080, so a single virtual host suffices. If you have the legacy
+Both the web UI and the MCP transports (`/mcp`, `/mcp/sse`) are served
+from port 8080, so a single virtual host suffices. Two proxy details
+matter for MCP:
+
+- **Same-host proxy over loopback.** Both MCP endpoints refuse a
+  request that arrived on a loopback-bound connection with a `Host`
+  header that is not `localhost`/`127.0.0.1` (DNS-rebinding guard,
+  403). Containers and LAN bind addresses never trip it. If your
+  proxy runs on the same machine and forwards to `127.0.0.1:8080` with
+  `proxy_set_header Host $host`, either make it send `Host: localhost`
+  or set `mcp.disable_dns_rebinding_protection = true`
+  (`GOSIDIAN_MCP_DISABLE_DNS_REBINDING_PROTECTION=true`).
+- **Buffering.** gosidian answers `/mcp` and `/mcp/sse` with
+  `X-Accel-Buffering: no`, so nginx-style proxies pass the SSE stream
+  through even with `proxy_buffering on`. Keep `proxy_read_timeout` at
+  60 s or more: `memory_wait_changes` may hold a request for up to 55 s. If you have the legacy
 standalone listener enabled (`GOSIDIAN_MCP_ADDR` set), you can
 optionally publish it under a separate hostname:
 

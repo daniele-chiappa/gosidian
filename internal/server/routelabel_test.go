@@ -18,6 +18,7 @@ func TestRouteLabel_Bounded(t *testing.T) {
 		"/api/v1/admin/whatever/1":            "/api/v1/admin/other",
 		"/api/v1/does-not-exist/1234":         "/api/v1/other",
 		"/api/v1/login":                       "/api/v1/login",
+		"/mcp":                                "/mcp",
 		"/mcp/sse":                            "/mcp/*",
 		"/static/app.js":                      "/static/*",
 		"/vault-files/proj/attachments/a.png": "/vault-files/*",

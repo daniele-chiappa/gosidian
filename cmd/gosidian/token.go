@@ -147,7 +147,7 @@ func tokenCreate(args []string) {
 		fmt.Printf("  expires: %s\n", tok.ExpiresAt.Format(time.RFC3339))
 	}
 	fmt.Printf("\n  Plaintext (shown only once — save it now):\n\n    %s\n\n", plaintext)
-	fmt.Printf("Configure Claude Code with:\n    claude mcp add gosidian http://127.0.0.1:8765/sse --transport sse --header \"Authorization: Bearer %s\"\n", plaintext)
+	fmt.Printf("Configure Claude Code with:\n    claude mcp add gosidian http://127.0.0.1:8080/mcp --transport http --header \"Authorization: Bearer %s\"\n", plaintext)
 }
 
 func tokenList(args []string) {

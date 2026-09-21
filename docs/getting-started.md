@@ -17,7 +17,8 @@ go build -o gosidian ./cmd/gosidian
 ```
 
 - Web UI:   `http://127.0.0.1:8080`
-- MCP SSE:  `http://127.0.0.1:8080/mcp/sse`
+- MCP:      `http://127.0.0.1:8080/mcp` (Streamable HTTP; legacy
+  HTTP+SSE at `/mcp/sse`)
 
 (MCP is mounted on the web port by default. To enable the legacy
 standalone listener for backward compatibility, append

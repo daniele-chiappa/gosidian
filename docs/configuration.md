@@ -15,7 +15,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_ADDR` | — (CLI `--addr`) | `:8080` |
 | `GOSIDIAN_STATE_DIR` | `--state-dir` | `<vault>/.gosidian` (see [State directory](#state-directory)) |
 | `GOSIDIAN_DB` | — (CLI `--db`) | `<state-dir>/index.db` |
-| `GOSIDIAN_MCP_ADDR` | — (CLI `--mcp-addr`) | empty (legacy listener disabled; MCP is always at `/mcp/sse` on the web port) |
+| `GOSIDIAN_MCP_ADDR` | — (CLI `--mcp-addr`) | empty (legacy SSE listener disabled; MCP is always at `/mcp` and `/mcp/sse` on the web port) |
 | `GOSIDIAN_LOG_LEVEL` | — | `info` (`debug`, `warn`, `error`) |
 | `GOSIDIAN_LOG_FORMAT` | — | `text` (`json`) |
 | `GOSIDIAN_GIT_ENABLED` | `git.enabled` | `false` |
@@ -30,6 +30,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_MCP_MAX_NOTE_BYTES` | `mcp.max_note_bytes` | `1048576` (1 MiB) |
 | `GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS` | `mcp.allowed_upload_roots` | empty (vault only) |
 | `GOSIDIAN_MCP_BRIDGE_DIR` | `mcp.bridge_dir` | empty (off; staging dir for cheap `bridge_filename` uploads, IMP-059) |
+| `GOSIDIAN_MCP_DISABLE_DNS_REBINDING_PROTECTION` | `mcp.disable_dns_rebinding_protection` | `false` (both MCP endpoints, `/mcp` and `/mcp/sse`, answer 403 to a request that arrived on a loopback-bound connection with a non-localhost `Host` header; Docker and LAN listeners never trip it — set `true` only for a same-host reverse proxy that forwards over `127.0.0.1` while keeping the public `Host`, or make the proxy send `Host: localhost`) |
 | `GOSIDIAN_INGEST_URL_ALLOWLIST` | `mcp.ingest_url_allowlist` | empty (off; comma-separated absolute `http(s)` URLs the `memory_ingest` `url` source may fetch from — each entry is matched structurally on scheme, host, port and path segment (never as a text prefix, so `https://api.example.com` does not admit `https://api.example.com.evil/`); the allowlist is the SSRF boundary and also gates every redirect hop) |
 | `GOSIDIAN_TRASH_ENABLED` | `trash.enabled` | `false` |
 | `GOSIDIAN_TRASH_RETENTION` | `trash.retention` | `720h` |

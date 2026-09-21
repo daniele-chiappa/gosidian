@@ -198,6 +198,11 @@ type MCPConfig struct {
 	AllowedUploadRoots []string `toml:"allowed_upload_roots"` // fs roots for source_path uploads
 	BridgeDir          string   `toml:"bridge_dir"`           // staging dir for bridge_filename uploads (auto-allowed root; IMP-059)
 	IngestURLAllowlist []string `toml:"ingest_url_allowlist"` // URL prefixes memory_ingest may fetch from; empty disables the url source (ADR-018)
+	// DisableDNSRebindingProtection turns off the MCP transports' built-in
+	// guard (403 for a loopback-bound connection whose Host header is not a
+	// localhost value). Off by default; only a same-host reverse proxy
+	// forwarding over 127.0.0.1 with the public Host header needs it.
+	DisableDNSRebindingProtection bool `toml:"disable_dns_rebinding_protection"`
 }
 
 // GitConfig controls the auto-sync of the vault to a git remote.
@@ -316,6 +321,9 @@ func (c *Config) ApplyEnv() error {
 	}
 	if v := os.Getenv("GOSIDIAN_MCP_BRIDGE_DIR"); v != "" {
 		c.MCP.BridgeDir = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("GOSIDIAN_MCP_DISABLE_DNS_REBINDING_PROTECTION"); v != "" {
+		c.MCP.DisableDNSRebindingProtection = envBool(v)
 	}
 	if v := os.Getenv("GOSIDIAN_INGEST_URL_ALLOWLIST"); v != "" {
 		var prefixes []string

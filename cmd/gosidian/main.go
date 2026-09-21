@@ -93,7 +93,7 @@ func main() {
 	addr := flag.String("addr", ":8080", "HTTP listen address")
 	dbPath := flag.String("db", "", "path to SQLite index file (default: <state-dir>/index.db)")
 	stateDir := flag.String("state-dir", "", "directory for machine-owned state — credentials, config, project flags, audit log, index (default: <vault>/.gosidian; env GOSIDIAN_STATE_DIR). Setting it moves those files out of the vault root, migrating them once at boot.")
-	mcpAddr := flag.String("mcp-addr", "", "Optional standalone MCP (HTTP+SSE) listen address (e.g. 127.0.0.1:8765). Deprecated: MCP is always served on the web port at /mcp/sse. Set this only when a separate listener is required for backward compatibility.")
+	mcpAddr := flag.String("mcp-addr", "", "Optional standalone MCP (HTTP+SSE) listen address (e.g. 127.0.0.1:8765). Deprecated: MCP is always served on the web port at /mcp (Streamable HTTP) and /mcp/sse (HTTP+SSE). Set this only when a separate listener is required for backward compatibility.")
 	flag.Parse()
 
 	// Env var overrides: CLI > env > default.
@@ -410,7 +410,8 @@ func main() {
 		}
 		log.Printf("trash: enabled (retention %s)", cfg.Trash.Retention)
 	}
-	// MCP is always wired and mounted on the web mux at /mcp/sse — single-port
+	// MCP is always wired and mounted on the web mux at /mcp (Streamable HTTP)
+	// and /mcp/sse (legacy HTTP+SSE) — single-port
 	// mode is the recommended deployment shape (one SSH tunnel forwards
 	// :8080 and exposes both web UI and MCP). The legacy standalone listener
 	// is opt-in via --mcp-addr / GOSIDIAN_MCP_ADDR for backward compatibility.
@@ -438,6 +439,10 @@ func main() {
 	mcpServer.SetSelfImproveNudge(cfg.SelfImprove.EveryNCalls, cfg.SelfImprove.MaxNudgesPerSession, time.Duration(cfg.SelfImprove.CooldownMinutes)*time.Minute)
 	mcpServer.SetGlobal(cfg.Global.Enabled, cfg.Global.PublicProject, cfg.Global.PrivateProject)
 	mcpServer.SetAgentAnchors(cfg.AgentAnchors.Enabled)
+	mcpServer.SetDNSRebindingProtection(!cfg.MCP.DisableDNSRebindingProtection)
+	if cfg.MCP.DisableDNSRebindingProtection {
+		log.Printf("mcp: DNS-rebinding protection disabled on /mcp and /mcp/sse (mcp.disable_dns_rebinding_protection)")
+	}
 
 	// v2.0: REST API router under /api/v1/. Mounted always (purely
 	// additive). The SPA shell on `/` is gated by env var below.
@@ -504,7 +509,7 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() {
-		log.Printf("listening on %s (web + MCP at /mcp/sse)", *addr)
+		log.Printf("listening on %s (web + MCP at /mcp, legacy SSE at /mcp/sse)", *addr)
 		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("http: %v", err)
 		}
@@ -512,7 +517,7 @@ func main() {
 
 	var legacyMCPSrv *http.Server
 	if *mcpAddr != "" {
-		log.Printf("MCP legacy listener on %s (DEPRECATED — clients should use %s/mcp/sse)", *mcpAddr, *addr)
+		log.Printf("MCP legacy listener on %s (DEPRECATED — clients should use %s/mcp)", *mcpAddr, *addr)
 		legacyMCPSrv = &http.Server{
 			Addr:              *mcpAddr,
 			Handler:           mcpServer.Handler(""),

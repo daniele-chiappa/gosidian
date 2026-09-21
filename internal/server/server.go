@@ -1,6 +1,6 @@
 // Package server wires the v2.0 HTTP surface: the Vue SPA shell at /,
 // the embedded Vite assets at /static/dist/*, the REST API under
-// /api/v1/*, and the MCP SSE bridge at /mcp/*. The legacy HTMX
+// /api/v1/*, and the MCP transports at /mcp and /mcp/*. The legacy HTMX
 // templates + per-page handlers were retired at the v2.0 cutover;
 // see docs/migration-v2.md for the downgrade path.
 package server
@@ -90,12 +90,17 @@ func (s *Server) MountAPIv1(handler http.Handler) {
 	s.mux.Handle("/api/v1/", handler)
 }
 
-// MountMCP wires the MCP SSE bridge under /mcp/. The handler must
-// be configured with a basePath that matches the mount prefix (see
-// internal/mcp.Server.Handler) so the SSE handshake announces the
-// correct /mcp/message URL — otherwise clients fall back to "SSE
-// streaming not supported" because their POST 404s on the mux.
+// MountMCP wires the MCP transports under /mcp: the exact path serves
+// Streamable HTTP, the /mcp/ subtree carries /mcp/sse, /mcp/message and
+// the byte endpoints. Both patterns are required — with only the subtree
+// registered, http.ServeMux answers a POST on /mcp with a 301 to /mcp/,
+// which MCP clients do not follow. The handler must be configured with a
+// basePath that matches the mount prefix (see internal/mcp.Server.Handler)
+// so the SSE handshake announces the correct /mcp/message URL — otherwise
+// clients fall back to "SSE streaming not supported" because their POST
+// 404s on the mux.
 func (s *Server) MountMCP(handler http.Handler) {
+	s.mux.Handle("/mcp", handler)
 	s.mux.Handle("/mcp/", handler)
 }
 
@@ -243,7 +248,7 @@ var apiAdminFamilies = map[string]bool{
 // share one label per route family, and unknown paths never mint a series.
 func routeLabel(p string) string {
 	switch {
-	case p == "/" || p == "/healthz" || p == "/metrics":
+	case p == "/" || p == "/healthz" || p == "/metrics" || p == "/mcp":
 		return p
 	case strings.HasPrefix(p, "/api/v1/"):
 		first, rest, more := strings.Cut(strings.TrimPrefix(p, "/api/v1/"), "/")

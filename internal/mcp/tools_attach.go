@@ -26,7 +26,7 @@ func (s *Server) bridgeHint(dataB64 string) string {
 		return ""
 	}
 	msg := fmt.Sprintf("this base64 upload pushed ~%d KiB through the context (≈ that many tokens). "+
-		"Cheaper: POST the file (multipart, field 'file') with your bearer token to the upload endpoint — it is your MCP /sse URL with /sse replaced by /upload (e.g. .../mcp/sse -> .../mcp/upload, or legacy :8765/sse -> :8765/upload). The bytes go over HTTP, not the context; the response carries the path to reference.",
+		"Cheaper: POST the file (multipart, field 'file') with your bearer token to the upload endpoint — your MCP base URL plus /upload (the URL you configured for gosidian, minus any trailing /sse: .../mcp -> .../mcp/upload, legacy :8765/sse -> :8765/upload). The bytes go over HTTP, not the context; the response carries the path to reference.",
 		len(dataB64)>>10)
 	if s.bridgeDir != "" {
 		msg += fmt.Sprintf(" Or stage it in the bridge dir %q and pass bridge_filename.", s.bridgeDir)
@@ -38,7 +38,7 @@ func (s *Server) bridgeHint(dataB64 string) string {
 // Called from registerTools().
 func (s *Server) registerAttachmentTools() {
 	s.impl.AddTool(mcp.NewTool("memory_upload_attachment",
-		mcp.WithDescription("Upload a file attachment to the vault and get a ready-to-splice markdown embed. CHEAPEST for large files: POST multipart (field 'file', bearer token) to the /upload endpoint — your MCP /sse URL with /sse replaced by /upload; bytes travel over HTTP, not the model context. This tool takes ONE source: base64 `data`, server-side `source_path`, or `bridge_filename` (staged in the bridge dir). Size cap and allowed extensions are in bootstrap `capabilities`."),
+		mcp.WithDescription("Upload a file attachment to the vault and get a ready-to-splice markdown embed. CHEAPEST for large files: POST multipart (field 'file', bearer token) to the /upload endpoint — your MCP base URL plus /upload (drop a trailing /sse from the URL you configured); bytes travel over HTTP, not the model context. This tool takes ONE source: base64 `data`, server-side `source_path`, or `bridge_filename` (staged in the bridge dir). Size cap and allowed extensions are in bootstrap `capabilities`."),
 		mcp.WithString("bridge_filename", mcp.Description("PREFERRED for images/binaries: the basename of a file you staged in the server's bridge dir (GOSIDIAN_MCP_BRIDGE_DIR). The server reads it from there and consumes it — near-zero token cost (no base64 through the context).")),
 		mcp.WithString("data", mcp.Description("Base64-encoded file content. Costly for large files (~1 token/char) — prefer bridge_filename/source_path. Required only when neither of those is used.")),
 		mcp.WithString("source_path", mcp.Description("Absolute filesystem path to the file — RESOLVED ON THE SERVER, not the client. Use this when gosidian and the agent share a filesystem (local install, Docker volume mount, co-located deploy). For remote setups use 'data' or bridge_filename. Must be inside the vault, the bridge dir, or an allowed upload root (GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS).")),
@@ -62,7 +62,7 @@ func (s *Server) registerAttachmentTools() {
 	), s.handleAttachmentInfo)
 
 	s.impl.AddTool(mcp.NewTool("memory_upload_resource",
-		mcp.WithDescription("Upload a file resource decoupled from any note (returns the handle path/url/hash/mime/kind/size, no embed markdown) — the pre-uploader for the stage-then-attach pattern. CHEAPEST for large files: POST multipart (field 'file', bearer token) to the /upload endpoint (your /sse URL with /sse → /upload). ONE source: base64 `data`, `source_path`, or `bridge_filename`. Storage is <project>/attachments/<hash>.<ext>, magic-bytes verified; caps/extensions in bootstrap `capabilities`."),
+		mcp.WithDescription("Upload a file resource decoupled from any note (returns the handle path/url/hash/mime/kind/size, no embed markdown) — the pre-uploader for the stage-then-attach pattern. CHEAPEST for large files: POST multipart (field 'file', bearer token) to the /upload endpoint (your MCP base URL plus /upload; drop a trailing /sse). ONE source: base64 `data`, `source_path`, or `bridge_filename`. Storage is <project>/attachments/<hash>.<ext>, magic-bytes verified; caps/extensions in bootstrap `capabilities`."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Vault project to store the resource in. Required (resources without a project context are rare and intentionally not auto-routed).")),
 		mcp.WithString("bridge_filename", mcp.Description("PREFERRED for images/binaries: the basename of a file you staged in the server's bridge dir (GOSIDIAN_MCP_BRIDGE_DIR). Read and consumed server-side — near-zero token cost.")),
 		mcp.WithString("data", mcp.Description("Base64-encoded file content. Costly for large files (~1 token/char) — prefer bridge_filename/source_path. Required only when neither of those is used.")),
@@ -114,7 +114,7 @@ func (s *Server) storeAttachmentFromRequest(ctx context.Context, project, filena
 	}
 
 	if sourcePath == "" && dataB64 == "" {
-		return nil, 0, mcp.NewToolResultError("provide one of: bridge_filename (staged file), source_path (server path), or data (base64). For large files avoid base64: POST the bytes to the HTTP /upload endpoint (your /sse URL with /sse→/upload, bearer token) or mint a single-use upload URL with memory_ingest transfer:\"http\"")
+		return nil, 0, mcp.NewToolResultError("provide one of: bridge_filename (staged file), source_path (server path), or data (base64). For large files avoid base64: POST the bytes to the HTTP /upload endpoint (your MCP base URL plus /upload, bearer token) or mint a single-use upload URL with memory_ingest transfer:\"http\"")
 	}
 
 	if sourcePath != "" {

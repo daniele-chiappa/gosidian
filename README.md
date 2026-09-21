@@ -27,8 +27,8 @@ docker run -d --name gosidian \
   -v "$(pwd)/vault:/vault" \
   ghcr.io/daniele-chiappa/gosidian:latest
 # open http://localhost:8080, create admin, copy the MCP token from /admin/tokens
-claude mcp add gosidian http://localhost:8080/mcp/sse \
-  --transport sse --header "Authorization: Bearer $TOKEN"
+claude mcp add gosidian http://localhost:8080/mcp \
+  --transport http --header "Authorization: Bearer $TOKEN"
 ```
 
 Three commands: Docker up → token created from the web UI → agent
@@ -88,7 +88,7 @@ is a cache — drop it and it rebuilds.
 - **Plancia** tiling window manager (niri-style): notes, graph, search
   and config forms open as resizable, side-by-side windows in a
   horizontally-scrollable workspace, restorable from the URL
-- MCP server over HTTP + SSE with 57 typed tools
+- MCP server over Streamable HTTP (legacy HTTP+SSE kept) with 57 typed tools
 - Bearer tokens with scopes (`read` / `write`) and per-project
   restriction — including multi-project tokens for orchestrators;
   cascade-revoke on user disable
