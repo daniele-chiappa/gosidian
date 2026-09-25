@@ -87,8 +87,16 @@ const (
 	VisibilityPrivate  = "private"
 )
 
+// GrantSource is one explicit grant the principal holds on a project — a
+// direct grant or one inherited from a team — with the label the access
+// views show for it ("grant:write", "team:devs:read").
+type GrantSource struct {
+	Level Level
+	Via   string
+}
+
 // AccessConfig carries the per-request lookups the predicate needs beyond
-// the principal: a project's visibility and the principal's explicit grant.
+// the principal: a project's visibility and the principal's explicit grants.
 // Both are resolved by the caller that owns the projects store
 // (projects.Store.AccessConfig) so the same config serves the API, the SSE
 // stream and the MCP runtime. nil lookups fail closed: everything private,
@@ -96,14 +104,15 @@ const (
 type AccessConfig struct {
 	// Visibility returns public | internal | private for a project.
 	Visibility func(project string) string
-	// GrantLevel returns the explicit grant userID holds on project, or
-	// LevelNone.
-	GrantLevel func(userID, project string) Level
+	// Grants returns every explicit grant userID holds on project, direct or
+	// through a team; the highest level wins.
+	Grants func(userID, project string) []GrantSource
 }
 
 // Explain computes the principal's level on the project and the reasons
-// that produced it ("owner", "public", "internal", "grant:<level>"), for
-// the access views that show a user why they see a project.
+// that produced it ("owner", "public", "internal", "grant:<level>",
+// "team:<name>:<level>"), for the access views that show a user why they
+// see a project.
 func (p Principal) Explain(project string, cfg AccessConfig) (Level, []string) {
 	if p.Role == webauth.RoleOwner {
 		return LevelAdmin, []string{"owner"}
@@ -126,12 +135,15 @@ func (p Principal) Explain(project string, cfg AccessConfig) (Level, []string) {
 	}
 	// Grants apply to the known non-owner roles only: a zero-value or unknown
 	// role fails closed and keeps at most the public read above.
-	if (p.Role == webauth.RoleMember || p.Role == webauth.RoleGuest) && cfg.GrantLevel != nil && p.UserID != "" {
-		if g := cfg.GrantLevel(p.UserID, project); g > LevelNone {
-			if g > lvl {
-				lvl = g
+	if (p.Role == webauth.RoleMember || p.Role == webauth.RoleGuest) && cfg.Grants != nil && p.UserID != "" {
+		for _, g := range cfg.Grants(p.UserID, project) {
+			if g.Level <= LevelNone {
+				continue
 			}
-			via = append(via, "grant:"+g.String())
+			if g.Level > lvl {
+				lvl = g.Level
+			}
+			via = append(via, g.Via)
 		}
 	}
 	// Role ceiling: guests read at most, whatever the grant says.

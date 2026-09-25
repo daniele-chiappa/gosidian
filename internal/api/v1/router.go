@@ -146,6 +146,8 @@ func (r *Router) registerAuthed() {
 	r.mux.Handle("/api/v1/admin/spa-tokens/", owner(r.handleAdminSpaTokenItem))
 	r.mux.Handle("/api/v1/admin/users", owner(r.handleAdminUsers))
 	r.mux.Handle("/api/v1/admin/users/", owner(r.handleAdminUserItem))
+	r.mux.Handle("/api/v1/admin/teams", owner(r.handleAdminTeams))
+	r.mux.Handle("/api/v1/admin/teams/", owner(r.handleAdminTeamItem))
 	r.mux.Handle("/api/v1/admin/invites", owner(r.handleAdminInvites))
 	r.mux.Handle("/api/v1/admin/invites/", owner(r.handleAdminInviteItem))
 	r.mux.Handle("/api/v1/admin/audit", owner(r.handleAdminAudit))

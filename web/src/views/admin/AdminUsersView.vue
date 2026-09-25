@@ -56,7 +56,14 @@ function levelClass(level: string): string {
 
 function viaLabel(via: string[]): string {
   return via
-    .map((v) => (v.startsWith('grant:') ? `grant (${v.slice(6)})` : v))
+    .map((v) => {
+      if (v.startsWith('grant:')) return `grant (${v.slice(6)})`
+      if (v.startsWith('team:')) {
+        const i = v.lastIndexOf(':')
+        return `team ${v.slice(5, i)} (${v.slice(i + 1)})`
+      }
+      return v
+    })
     .join(' + ')
 }
 const loading = ref(false)

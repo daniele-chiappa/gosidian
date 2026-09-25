@@ -127,6 +127,7 @@ type Store struct {
 	mu                sync.RWMutex
 	data              map[string]Flags
 	members           map[string][]ProjectMember // project -> grants
+	teams             map[string]Team            // team id -> team (IMP-101 phase 2)
 	memberScope       string                     // legacy switch, consumed by the migration
 	defaultVisibility string                     // visibility of projects without an entry; "" = private
 	accessModel       int                        // 0 = pre-v2.30 file, accessModelVersion = migrated
@@ -136,6 +137,7 @@ type Store struct {
 type storeFile struct {
 	Projects          map[string]Flags           `json:"projects"`
 	Members           map[string][]ProjectMember `json:"members,omitempty"`
+	Teams             map[string]Team            `json:"teams,omitempty"`
 	MemberScope       string                     `json:"member_scope,omitempty"`
 	DefaultVisibility string                     `json:"default_visibility,omitempty"`
 	AccessModel       int                        `json:"access_model,omitempty"`
@@ -159,6 +161,7 @@ func (s *Store) Path() string { return s.path }
 func (s *Store) reset() {
 	s.data = map[string]Flags{}
 	s.members = map[string][]ProjectMember{}
+	s.teams = map[string]Team{}
 	s.memberScope = ""
 	s.defaultVisibility = ""
 	s.accessModel = 0
@@ -188,8 +191,12 @@ func (s *Store) load() error {
 	if sf.Members == nil {
 		sf.Members = map[string][]ProjectMember{}
 	}
+	if sf.Teams == nil {
+		sf.Teams = map[string]Team{}
+	}
 	s.data = sf.Projects
 	s.members = sf.Members
+	s.teams = sf.Teams
 	s.memberScope = sf.MemberScope
 	s.defaultVisibility = sf.DefaultVisibility
 	s.accessModel = sf.AccessModel
@@ -205,7 +212,7 @@ func (s *Store) reloadIfStale() {
 	st, err := os.Stat(s.path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			if !s.mtime.IsZero() || len(s.data) > 0 || len(s.members) > 0 || s.memberScope != "" || s.defaultVisibility != "" || s.accessModel != 0 {
+			if !s.mtime.IsZero() || len(s.data) > 0 || len(s.members) > 0 || len(s.teams) > 0 || s.memberScope != "" || s.defaultVisibility != "" || s.accessModel != 0 {
 				s.reset()
 			}
 		}
@@ -226,6 +233,7 @@ func (s *Store) save() error {
 	data, err := json.MarshalIndent(storeFile{
 		Projects:          s.data,
 		Members:           s.members,
+		Teams:             s.teams,
 		MemberScope:       s.memberScope,
 		DefaultVisibility: s.defaultVisibility,
 		AccessModel:       s.accessModel,
@@ -282,11 +290,19 @@ func (s *Store) Delete(name string) error {
 	s.reloadIfStale()
 	_, hadFlags := s.data[name]
 	_, hadMembers := s.members[name]
-	if !hadFlags && !hadMembers {
-		return nil
-	}
+	changed := hadFlags || hadMembers
 	delete(s.data, name)
 	delete(s.members, name)
+	for id, t := range s.teams {
+		if _, ok := t.Grants[name]; ok {
+			delete(t.Grants, name)
+			s.teams[id] = t
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
 	return s.save()
 }
 
@@ -301,9 +317,7 @@ func (s *Store) Rename(oldName, newName string) error {
 	s.reloadIfStale()
 	f, hadFlags := s.data[oldName]
 	m, hadMembers := s.members[oldName]
-	if !hadFlags && !hadMembers {
-		return nil
-	}
+	changed := hadFlags || hadMembers
 	if hadFlags {
 		delete(s.data, oldName)
 		s.data[newName] = f
@@ -314,6 +328,17 @@ func (s *Store) Rename(oldName, newName string) error {
 			s.members = map[string][]ProjectMember{}
 		}
 		s.members[newName] = m
+	}
+	for id, t := range s.teams {
+		if lvl, ok := t.Grants[oldName]; ok {
+			delete(t.Grants, oldName)
+			t.Grants[newName] = lvl
+			s.teams[id] = t
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
 	}
 	return s.save()
 }
@@ -520,13 +545,27 @@ func (s *Store) RemoveMember(project, userID string) error {
 	return s.save()
 }
 
-// RemoveUserEverywhere strips a user from every project's grants. Called when
-// a user is disabled/removed so stale grants don't linger.
+// RemoveUserEverywhere strips a user from every project's grants and from
+// every team. Called when a user is disabled/removed so stale grants don't
+// linger.
 func (s *Store) RemoveUserEverywhere(userID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.reloadIfStale()
 	changed := false
+	for id, t := range s.teams {
+		kept := t.Users[:0:0]
+		for _, u := range t.Users {
+			if u != userID {
+				kept = append(kept, u)
+			}
+		}
+		if len(kept) != len(t.Users) {
+			t.Users = kept
+			s.teams[id] = t
+			changed = true
+		}
+	}
 	for proj, list := range s.members {
 		out := list[:0:0]
 		for _, m := range list {

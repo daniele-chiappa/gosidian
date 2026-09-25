@@ -17,7 +17,34 @@ func mk(vis map[string]string, grants map[string]string) AccessConfig {
 			}
 			return VisibilityPrivate
 		},
-		GrantLevel: func(u, p string) Level { return ParseLevel(grants[u+"|"+p]) },
+		Grants: func(u, p string) []GrantSource {
+			l := ParseLevel(grants[u+"|"+p])
+			if l == LevelNone {
+				return nil
+			}
+			return []GrantSource{{Level: l, Via: "grant:" + l.String()}}
+		},
+	}
+}
+
+// Several sources: the highest wins and every one is reported.
+func TestExplain_TeamSources(t *testing.T) {
+	cfg := AccessConfig{
+		Visibility: func(string) string { return VisibilityPrivate },
+		Grants: func(u, p string) []GrantSource {
+			return []GrantSource{
+				{Level: LevelRead, Via: "grant:read"},
+				{Level: LevelWrite, Via: "team:devs:write"},
+				{Level: LevelNone, Via: "ignored"},
+			}
+		},
+	}
+	lvl, via := (Principal{"u", webauth.RoleMember}).Explain("P", cfg)
+	if lvl != LevelWrite || strings.Join(via, ",") != "grant:read,team:devs:write" {
+		t.Errorf("level %s via %v", lvl, via)
+	}
+	if lvl := (Principal{"g", webauth.RoleGuest}).Level("P", cfg); lvl != LevelRead {
+		t.Errorf("guest with a team write grant must be capped to read, got %s", lvl)
 	}
 }
 

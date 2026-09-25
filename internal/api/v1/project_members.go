@@ -5,7 +5,6 @@ import (
 
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/projects"
-	"github.com/gosidian/gosidian/internal/webauth"
 )
 
 // projectMemberView is the JSON shape for a per-project membership. Username is
@@ -13,7 +12,7 @@ import (
 type projectMemberView struct {
 	UserID   string `json:"user_id"`
 	Username string `json:"username"`
-	Level    string `json:"level"` // read | write
+	Level    string `json:"level"` // read | write | admin
 }
 
 type setMemberRequest struct {
@@ -21,31 +20,18 @@ type setMemberRequest struct {
 	Level  string `json:"level"`
 }
 
-// handleProjectMembers manages the per-project membership ACL (owner-only):
+// handleProjectMembers manages the per-user grants on a project:
 //
-//	GET    /projects/{name}/members            list members
+//	GET    /projects/{name}/members            list grants
 //	PUT    /projects/{name}/members            upsert {user_id, level}
 //	DELETE /projects/{name}/members/{user_id}  remove
 //
-// Membership only changes who may access a project under member_scope=members;
-// in legacy mode the ACL is recorded but inert. Owner-only because sharing is an
-// administrative decision (a write member manages content, not the member list).
+// Owner or project admin (an admin grant on the project): sharing is an
+// administrative decision, and phase 2 delegates it to the accounts that
+// administer the project. A write grant manages content, not the grant list.
 func (r *Router) handleProjectMembers(w http.ResponseWriter, req *http.Request, project, userID string) {
-	user := UserFromContext(req.Context())
-	if user == nil {
-		WriteError(w, http.StatusUnauthorized, CodeAuthTokenInvalid, "no user in context")
-		return
-	}
-	if user.Role != webauth.RoleOwner {
-		WriteError(w, http.StatusForbidden, CodeAuthOwnerOnly, "owner role required to manage project members")
-		return
-	}
-	if r.deps.Projects == nil || r.deps.Auth == nil || r.deps.Auth.WebAuth == nil {
-		WriteError(w, http.StatusServiceUnavailable, CodeServerUnavailable, "membership store not configured")
-		return
-	}
-	if !r.projectExists(project) {
-		WriteError(w, http.StatusNotFound, CodeNotFound, "project not found")
+	user, ok := r.requireProjectAdmin(w, req, project)
+	if !ok {
 		return
 	}
 	switch req.Method {
@@ -72,16 +58,22 @@ func (r *Router) handleProjectMembers(w http.ResponseWriter, req *http.Request, 
 	}
 }
 
-func (r *Router) listProjectMembers(w http.ResponseWriter, project string) {
+// projectMemberViews resolves the direct grants on a project for display.
+func (r *Router) projectMemberViews(project string) []projectMemberView {
 	members := r.deps.Projects.MembersOf(project)
 	out := make([]projectMemberView, 0, len(members))
 	for _, m := range members {
-		username := m.UserID
+		v := projectMemberView{UserID: m.UserID, Username: m.UserID, Level: m.Level}
 		if u, ok := r.deps.Auth.WebAuth.UserByID(m.UserID); ok {
-			username = u.Username
+			v.Username = u.Username
 		}
-		out = append(out, projectMemberView{UserID: m.UserID, Username: username, Level: m.Level})
+		out = append(out, v)
 	}
+	return out
+}
+
+func (r *Router) listProjectMembers(w http.ResponseWriter, project string) {
+	out := r.projectMemberViews(project)
 	WriteJSON(w, http.StatusOK, map[string]any{"items": out, "total": len(out)})
 }
 
@@ -96,7 +88,7 @@ func (r *Router) setProjectMember(w http.ResponseWriter, req *http.Request, acto
 		return
 	}
 	if !projects.ValidLevel(body.Level) {
-		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "level must be read or write")
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "level must be read, write or admin")
 		return
 	}
 	target, ok := r.deps.Auth.WebAuth.UserByID(body.UserID)

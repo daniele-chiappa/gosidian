@@ -27,8 +27,10 @@ type projectView struct {
 	// Access is the caller's own effective level on the project (read | write
 	// | admin) so the SPA gates its controls without a second request.
 	Access string `json:"access"`
-	// MembersCount is how many accounts hold an explicit grant.
+	// MembersCount is how many accounts hold a direct grant; TeamsCount how
+	// many teams hold one.
 	MembersCount int `json:"members_count"`
+	TeamsCount   int `json:"teams_count"`
 	// UseGlobals opts the project into the shared "global" projects merge at
 	// bootstrap. UseAnchors opts it into local agent-anchor materialisation.
 	// Both only take effect when the respective server master switch is on
@@ -88,14 +90,20 @@ func (r *Router) handleProjectByName(w http.ResponseWriter, req *http.Request) {
 		r.handleProjects(w, req)
 		return
 	}
-	// Sub-resource routing: /{name}/members[/{userID}].
+	// Sub-resource routing: /{name}/members[/{userID}], /{name}/teams[/{teamID}],
+	// /{name}/access.
 	if name, sub, ok := strings.Cut(rest, "/"); ok {
 		seg, tail, _ := strings.Cut(sub, "/")
-		if seg == "members" {
+		switch seg {
+		case "members":
 			r.handleProjectMembers(w, req, name, tail)
-			return
+		case "teams":
+			r.handleProjectTeams(w, req, name, tail)
+		case "access":
+			r.handleProjectAccess(w, req, name)
+		default:
+			WriteError(w, http.StatusNotFound, CodeNotFound, "sub-resource not implemented")
 		}
-		WriteError(w, http.StatusNotFound, CodeNotFound, "sub-resource not implemented")
 		return
 	}
 	switch req.Method {
@@ -148,9 +156,10 @@ func (r *Router) projectVisibility(name string) string {
 func (r *Router) projectViewFor(name string, lvl authz.Level, noteCount int) projectView {
 	flags := r.projectFlag(name)
 	vis := r.projectVisibility(name)
-	members := 0
+	members, teams := 0, 0
 	if r.deps.Projects != nil {
 		members = r.deps.Projects.MembersCount(name)
+		teams = r.deps.Projects.TeamsCount(name)
 	}
 	return projectView{
 		Name:             name,
@@ -161,6 +170,7 @@ func (r *Router) projectViewFor(name string, lvl authz.Level, noteCount int) pro
 		Public:           vis == projects.VisibilityPublic,
 		Access:           lvl.String(),
 		MembersCount:     members,
+		TeamsCount:       teams,
 		UseGlobals:       flags.UseGlobals,
 		UseAnchors:       flags.UseAnchors,
 		UseTagVocabulary: flags.UseTagVocabulary,

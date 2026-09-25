@@ -54,17 +54,27 @@ Who can do what on a project is the combination of two things:
   - **admin** — may also change its settings (visibility, flags), rename
     and delete it.
 
-The effective level is the higher of the two, capped by the role: a guest
-never exceeds read, the owner is admin everywhere. **Writing always takes
-a grant** — visibility alone never lets anyone edit.
+A grant can go to an account or to a **team**: every account in the team
+gets the team's level on the project. The effective level is the highest
+of the visibility, the direct grant and the teams' grants, capped by the
+role: a guest never exceeds read, the owner is admin everywhere.
+**Writing always takes a grant** — visibility alone never lets anyone
+edit.
 
 Where to manage it in the web UI:
 
 - **Projects** shows each project with its visibility (lock = private,
-  globe = public), your own level, and how many accounts hold a grant.
-  Project admins change the visibility from the row (public is the
-  owner's alone); the owner opens **Members** to add, change or remove
-  grants.
+  globe = public), your own level, and how many accounts and teams hold
+  a grant. Project admins change the visibility from the row (public is
+  the owner's alone) and open **Access** to add, change or remove the
+  grants of accounts and teams — the owner can too, everywhere. Anyone
+  who can read the project sees who has access; only admins see the
+  candidates and the controls.
+- **Admin → Teams** (owner) creates teams, adds accounts to them and
+  gives each team a level on the projects it should cover. Renaming a
+  team follows through everywhere; deleting one drops its grants and
+  leaves the accounts untouched; disabling an account removes it from
+  every team.
 - The sidebar draws the same lock/globe cue next to project roots, and
   shows the "new note" button only where you may write.
 - **Admin → Users** shows each account's access at a glance (how many
@@ -77,8 +87,8 @@ Where to manage it in the web UI:
 
 New accounts start with the projects their role and the visibilities
 give them — a member sees internal and public projects, a guest public
-ones — and gain the rest through grants. The account that creates a
-project is its admin.
+ones — and gain the rest through grants, directly or by joining a team.
+The account that creates a project is its admin.
 
 ### Upgrading from 2.29 and earlier
 
@@ -96,9 +106,14 @@ first start after the upgrade the store is converted once:
 
 The API keeps `public` as an alias (`true` → public, `false` →
 internal) and adds `visibility`, `access` (the caller's level) and
-`members_count` to the project payloads; `GET /api/v1/me/access` lists
-the caller's effective access and `GET /api/v1/admin/users/{id}/access`
-the same for any account.
+`members_count` / `teams_count` to the project payloads;
+`GET /api/v1/me/access` lists the caller's effective access (with the
+reasons: `owner`, `public`, `internal`, `grant:<level>`,
+`team:<name>:<level>`) and `GET /api/v1/admin/users/{id}/access` the
+same for any account. `GET /api/v1/projects/{name}/access` shows who
+holds a grant on a project; `PUT`/`DELETE` on `/members` and `/teams`
+under it change the grants (owner or project admin); `/api/v1/admin/teams`
+manages the teams themselves (owner).
 
 ## Invites
 

@@ -14,6 +14,7 @@ const lazy = (loader: () => Promise<unknown>): Component =>
 interface Tab { key: string; label: string; comp: Component }
 const tabs: Tab[] = [
   { key: 'users', label: 'Users', comp: lazy(() => import('./AdminUsersView.vue')) },
+  { key: 'teams', label: 'Teams', comp: lazy(() => import('./AdminTeamsView.vue')) },
   { key: 'tokens', label: 'MCP tokens', comp: lazy(() => import('./AdminTokensView.vue')) },
   { key: 'spa-tokens', label: 'SPA tokens', comp: lazy(() => import('./AdminSpaTokensView.vue')) },
   { key: 'invites', label: 'Invites', comp: lazy(() => import('./AdminInvitesView.vue')) },

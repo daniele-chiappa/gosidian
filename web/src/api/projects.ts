@@ -15,8 +15,9 @@ export interface Project {
   public: boolean
   /** The caller's own effective level on the project. */
   access: AccessLevel
-  /** How many accounts hold an explicit grant. */
+  /** How many accounts / teams hold an explicit grant. */
   members_count: number
+  teams_count: number
   /** Opt the project into the shared "global" projects merge at bootstrap.
    *  Only effective when the server master switch (settings.globals_enabled)
    *  is on. */

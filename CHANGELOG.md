@@ -8,6 +8,41 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.31.0] — 2026-09-25 — "teams"
+
+Grants can now go to teams, and the accounts that administer a project
+manage who can use it. Pull the image and restart; nothing to migrate.
+
+### Added
+- **Teams** — a team groups accounts so one grant per project covers all
+  of them; an account's effective level is the highest of its direct
+  grant and its teams' grants, capped by the role. **Admin → Teams**
+  (owner) creates teams, adds accounts and grants projects at
+  read/write/admin. Renaming a team follows through everywhere,
+  deleting it drops its grants and leaves the accounts untouched,
+  disabling an account removes it from every team, and renaming or
+  deleting a project keeps the team grants in step.
+- **Delegated access management** — besides the owner, any account
+  holding the admin level on a project changes its account and team
+  grants from the new **Access** window (Projects → the "accounts · teams"
+  counter). Anyone who can read the project may open it to see who has
+  access; only admins see the candidates and the controls. Making a
+  project public stays the owner's alone.
+- **API** — `GET /api/v1/projects/{name}/access` (grants of accounts and
+  teams, with the candidates for admins), `PUT`/`DELETE
+  /api/v1/projects/{name}/teams[/{team_id}]`, the existing `/members`
+  routes now open to project admins,
+  `/api/v1/admin/teams[/{id}[/users[/{user_id}]|/grants[/{project}]]]`
+  (owner). Access views report team-derived levels as
+  `team:<name>:<level>`; project payloads carry `teams_count`; audit
+  actions `team_*` and `project_team_*`.
+
+### Changed
+- Admin → Users → **View** labels levels inherited from a team as
+  `team <name> (<level>)`.
+- Docs: [authentication & roles](docs/web-ui/authentication.md) covers
+  teams, delegation and the access endpoints.
+
 ## [2.30.0] — 2026-09-25 — "project access"
 
 Who may do what on a project is now decided on the project itself, and

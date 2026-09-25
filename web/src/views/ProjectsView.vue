@@ -13,7 +13,7 @@ import { useTreeStore } from '@/stores/tree'
 import { useAuthStore } from '@/stores/auth'
 import { useAccessStore } from '@/stores/access'
 import { useWindowsStore, type OpenSpec } from 'plancia'
-import { Lock, Globe, Users } from 'lucide-vue-next'
+import { Lock, Globe, Users, UsersRound } from 'lucide-vue-next'
 
 const projects = ref<Project[]>([])
 const loading = ref(false)
@@ -42,12 +42,12 @@ function openProjectGraph(name: string) {
   })
 }
 
-/** Manage who holds a grant on a project (owner-only until phase 2). */
-function openProjectMembers(name: string) {
+/** Who holds a grant on a project; editable by the owner and project admins. */
+function openProjectAccess(name: string) {
   openWindow({
     type: 'project-members',
     key: 'project-members:' + name,
-    title: `Members · ${name}`,
+    title: `Access · ${name}`,
     props: { project: name },
   })
 }
@@ -113,10 +113,9 @@ function anchorsTitle(p: Project): string {
     : 'Click to materialise this project’s vault agents as local subagent anchors at bootstrap.'
 }
 
-function membersTitle(p: Project): string {
-  const n = p.members_count
-  const who = n === 1 ? '1 account holds a grant' : `${n} accounts hold a grant`
-  return auth.isOwner ? `${who} — click to manage` : who
+function accessTitle(p: Project): string {
+  const who = `${p.members_count} account(s) and ${p.teams_count} team(s) hold a grant`
+  return p.access === 'admin' ? `${who} — click to manage` : `${who} — click to see who`
 }
 
 /** Master switches decide whether use_anchors/use_globals have any effect.
@@ -167,7 +166,8 @@ onMounted(() => {
       Top-level vault folders. <em>Visibility</em> says who can read a project —
       <em>private</em> (accounts with a grant), <em>internal</em> (every member) or
       <em>public</em> (every account, guests included); writing and administering
-      always come from a grant (Members). Your own level shows on each row.
+      always come from a grant, to an account or to a team (Access). Your own level
+      shows on each row.
       <em>skip-git</em> excludes from auto-commit; <em>hidden</em> keeps the project
       invisible to MCP agents; <em>globals</em> merges the shared global skills/agents
       at bootstrap; <em>anchors</em> materialises vault agents as local subagent files
@@ -247,18 +247,19 @@ onMounted(() => {
           :title="VISIBILITY_HELP[p.visibility]"
         >{{ VISIBILITY_LABEL[p.visibility].toLowerCase() }}</span>
 
-        <!-- Grants -->
-        <component
-          :is="auth.isOwner ? 'button' : 'span'"
-          :type="auth.isOwner ? 'button' : undefined"
-          class="text-xs px-2 py-1 rounded border border-border inline-flex items-center gap-1"
-          :class="auth.isOwner ? 'hover:bg-surface-hover' : 'text-text-muted'"
-          :title="membersTitle(p)"
-          @click="auth.isOwner && openProjectMembers(p.name)"
+        <!-- Grants: accounts + teams; opens the Access window -->
+        <button
+          type="button"
+          class="text-xs px-2 py-1 rounded border border-border inline-flex items-center gap-1 hover:bg-surface-hover"
+          :title="accessTitle(p)"
+          @click="openProjectAccess(p.name)"
         >
           <Users class="w-3 h-3" />
           <span>{{ p.members_count }}</span>
-        </component>
+          <span class="text-text-muted">·</span>
+          <UsersRound class="w-3 h-3" />
+          <span>{{ p.teams_count }}</span>
+        </button>
 
         <template v-if="p.access === 'admin'">
           <button
