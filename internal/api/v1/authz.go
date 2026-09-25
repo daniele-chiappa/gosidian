@@ -2,8 +2,8 @@ package v1
 
 import (
 	"net/http"
-	"strings"
 
+	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/gosidian/gosidian/internal/authz"
 	"github.com/gosidian/gosidian/internal/projects"
 	"github.com/gosidian/gosidian/internal/webauth"
@@ -39,12 +39,7 @@ func (r *Router) isPublic(name string) bool {
 // path ("gosidian/plans/x.md" -> "gosidian"). A path without a slash has no
 // project folder and is returned as-is; since such a name won't match a
 // Public project, guests are denied — consistent with private-by-default.
-func projectOf(path string) string {
-	if i := strings.IndexByte(path, '/'); i >= 0 {
-		return path[:i]
-	}
-	return path
-}
+func projectOf(path string) string { return auth.ProjectOf(path) }
 
 // memberScopeEnforced reports whether per-project membership gates access
 // (member_scope = members). False = legacy: owner/member see every project.
@@ -53,27 +48,10 @@ func (r *Router) memberScopeEnforced() bool {
 }
 
 // accessConfig builds the per-request inputs the shared authz predicate needs.
-// The membership funcs resolve a project member's level to a boolean here, so
-// the authz package stays free of the projects store.
+// It is the projects store's own AccessConfig (nil-safe), shared with the MCP
+// runtime so both surfaces resolve membership identically.
 func (r *Router) accessConfig() authz.AccessConfig {
-	return authz.AccessConfig{
-		Enforced: r.memberScopeEnforced(),
-		IsPublic: r.isPublic,
-		IsMember: func(userID, project string) bool {
-			if r.deps.Projects == nil {
-				return false
-			}
-			_, ok := r.deps.Projects.MemberLevel(project, userID)
-			return ok
-		},
-		MemberCanWrite: func(userID, project string) bool {
-			if r.deps.Projects == nil {
-				return false
-			}
-			lvl, ok := r.deps.Projects.MemberLevel(project, userID)
-			return ok && lvl == projects.LevelWrite
-		},
-	}
+	return r.deps.Projects.AccessConfig()
 }
 
 // canAccessProject reports whether the principal may read the named project.

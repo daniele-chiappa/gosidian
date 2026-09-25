@@ -88,7 +88,7 @@ function onEnrolled(codeCount: number) {
 
 /** Settings window, same spec the sidebar entry uses. */
 function openSettings(): void {
-  openWindow({ type: 'settings', key: planciaKey('settings') })
+  openWindow({ type: 'settings', key: planciaKey('settings'), title: t('nav.settings') })
 }
 </script>
 

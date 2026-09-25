@@ -45,6 +45,9 @@ func (s *Server) authorizeWrite(ctx context.Context, path string) (*auth.Token, 
 	if !tok.AllowsPath(path) {
 		return nil, mcp.NewToolResultErrorf("path %q is outside the token's project scope %q", path, tok.ScopeLabel())
 	}
+	if !tok.AllowsWrite(path) {
+		return nil, mcp.NewToolResultErrorf("the account behind this token may only read project %q", auth.ProjectOf(path))
+	}
 	return tok, nil
 }
 

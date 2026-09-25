@@ -15,10 +15,12 @@ import (
 
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/auth"
+	"github.com/gosidian/gosidian/internal/authz"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/projects"
 	"github.com/gosidian/gosidian/internal/server/events"
 	"github.com/gosidian/gosidian/internal/vault"
+	"github.com/gosidian/gosidian/internal/webauth"
 	"github.com/mark3labs/mcp-go/server"
 )
 
@@ -154,6 +156,11 @@ type Server struct {
 	// it was issued for; nil when OAuth is off. Consulted only for bearers the
 	// static token store does not know.
 	accessResolver func(plaintext string) (*auth.Token, bool)
+	// principalResolver maps a token's OwnerUserID to that account's authz
+	// principal (role) so a token can never outrun the account it belongs to:
+	// see effectiveToken (BUG-055). nil (tests, deployments without web
+	// accounts) leaves the token's own scope as the only gate.
+	principalResolver func(userID string) (authz.Principal, bool)
 	// oauthChallenge is the WWW-Authenticate value advertised on 401 when the
 	// OAuth authorization server is enabled (carries resource_metadata so
 	// clients can discover it); empty falls back to the plain realm.
@@ -238,6 +245,14 @@ func (s *Server) SetDNSRebindingProtection(enabled bool) {
 // like a static token with the same projects and scopes.
 func (s *Server) SetAccessTokenResolver(fn func(plaintext string) (*auth.Token, bool)) {
 	s.accessResolver = fn
+}
+
+// SetPrincipalResolver installs the lookup from a token's OwnerUserID to the
+// account's authz principal; a miss means the account is gone or disabled.
+// With it set, every bearer owned by a non-owner account is narrowed on each
+// request to what that account may currently read and write (BUG-055).
+func (s *Server) SetPrincipalResolver(fn func(userID string) (authz.Principal, bool)) {
+	s.principalResolver = fn
 }
 
 // SetOAuthChallenge sets the WWW-Authenticate value sent on 401 responses
@@ -571,14 +586,91 @@ func (s *Server) authenticate(r *http.Request) *auth.Token {
 		return nil
 	}
 	if tok, err := s.tokens.Validate(raw); err == nil {
-		return tok
+		return s.effectiveToken(tok)
 	}
 	if s.accessResolver != nil {
 		if tok, ok := s.accessResolver(raw); ok {
-			return tok
+			return s.effectiveToken(tok)
 		}
 	}
 	return nil
+}
+
+// effectiveToken narrows a validated token to the live access of the account
+// that owns it. A token records the projects and scopes granted at creation
+// (or at OAuth consent); the account's project access can shrink afterwards
+// — a membership removed or downgraded to read, member_scope switched, a
+// project made private — and nothing rewrites the token, so the runtime
+// re-derives the effective scope on every request instead:
+//
+//   - tokens without an owner (CLI/admin) or owned by the owner account keep
+//     their scope unchanged;
+//   - an owner that no longer resolves (deleted/disabled) fails closed (nil);
+//   - otherwise the project list becomes the declared list — or every project
+//     when the record is unscoped — filtered by CanAccessProject, the write
+//     scope is dropped when the account may write none of them, and narrowed
+//     per project when it may write only some (Token.AllowsWrite);
+//   - an account left with no readable project is refused (nil): an empty
+//     project list would otherwise mean "admin".
+//
+// The result is a copy; the stored record is never modified.
+func (s *Server) effectiveToken(tok *auth.Token) *auth.Token {
+	if tok == nil || tok.OwnerUserID == "" || s.principalResolver == nil {
+		return tok
+	}
+	princ, ok := s.principalResolver(tok.OwnerUserID)
+	if !ok {
+		return nil
+	}
+	if princ.Role == webauth.RoleOwner {
+		return tok
+	}
+	cfg := s.projects.AccessConfig()
+	candidates := tok.ProjectList()
+	if len(candidates) == 0 {
+		projs, err := s.vault.Projects()
+		if err != nil {
+			return nil
+		}
+		for _, p := range projs {
+			candidates = append(candidates, p.Name)
+		}
+	}
+	readable := make([]string, 0, len(candidates))
+	writable := map[string]bool{}
+	for _, p := range candidates {
+		if !princ.CanAccessProject(p, cfg) {
+			continue
+		}
+		readable = append(readable, p)
+		if princ.CanWriteProject(p, cfg) {
+			writable[p] = true
+		}
+	}
+	if len(readable) == 0 {
+		return nil
+	}
+	eff := *tok
+	eff.Project = ""
+	eff.Projects = readable
+	switch {
+	case len(writable) == 0:
+		eff.Scopes = withoutScope(tok.Scopes, auth.ScopeWrite)
+	case len(writable) < len(readable):
+		return eff.WithWriteFilter(func(project string) bool { return writable[project] })
+	}
+	return &eff
+}
+
+// withoutScope returns scopes minus the named one, leaving the input as is.
+func withoutScope(scopes []string, drop string) []string {
+	out := make([]string, 0, len(scopes))
+	for _, sc := range scopes {
+		if sc != drop {
+			out = append(out, sc)
+		}
+	}
+	return out
 }
 
 // requireToken enforces Bearer auth at the HTTP layer before any transport

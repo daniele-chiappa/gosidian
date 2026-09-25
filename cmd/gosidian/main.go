@@ -16,6 +16,7 @@ import (
 	apiv1 "github.com/gosidian/gosidian/internal/api/v1"
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/auth"
+	"github.com/gosidian/gosidian/internal/authz"
 	"github.com/gosidian/gosidian/internal/config"
 	"github.com/gosidian/gosidian/internal/gitsync"
 	"github.com/gosidian/gosidian/internal/i18n"
@@ -431,6 +432,16 @@ func main() {
 		log.Printf("mcp ingest url allowlist: %s (memory_ingest url source enabled)", strings.Join(cfg.MCP.IngestURLAllowlist, ", "))
 	}
 	mcpServer.SetProjects(projectsStore)
+	// A token owned by a web account is narrowed on every request to what
+	// that account may currently read and write (BUG-055): the resolver maps
+	// the token's owner id to its live role; a disabled account fails closed.
+	mcpServer.SetPrincipalResolver(func(userID string) (authz.Principal, bool) {
+		u, ok := webauthStore.UserByID(userID)
+		if !ok || !u.Enabled() {
+			return authz.Principal{}, false
+		}
+		return authz.Principal{UserID: u.ID, Role: u.Role}, true
+	})
 	// MCP write handlers publish on the SSE hub so SPA subscribers
 	// see external-tab + agent edits in real time.
 	mcpServer.SetEvents(eventsHub)

@@ -62,6 +62,12 @@ type Token struct {
 	// ClientID is the OAuth client the grant was issued to (DCR id or CIMD
 	// URL); empty for static bearers.
 	ClientID string `json:"client_id,omitempty"`
+	// writeFilter, when set, narrows the write scope per project on top of
+	// Scopes: the runtime derives it for a token whose owning account may
+	// write some of the token's projects but only read others (per-project
+	// membership levels). Runtime-only, never persisted; nil means Scopes and
+	// the project list alone decide. See AllowsWrite and WithWriteFilter.
+	writeFilter func(project string) bool
 	// RefreshHash is the sha256 of the current refresh token; rotated on every
 	// use. RefreshExpiresAt bounds it independently of ExpiresAt.
 	RefreshHash      string    `json:"refresh_hash,omitempty"`
@@ -154,6 +160,35 @@ func (t *Token) AllowsPath(path string) bool {
 		}
 	}
 	return false
+}
+
+// ProjectOf returns the top-level project folder of a vault-relative path
+// ("gosidian/plans/x.md" -> "gosidian"); a bare name is returned as-is.
+func ProjectOf(path string) string {
+	if i := strings.IndexByte(path, '/'); i >= 0 {
+		return path[:i]
+	}
+	return path
+}
+
+// AllowsWrite reports whether the token may mutate the given vault-relative
+// path: it needs the write scope, the path inside its project scope, and —
+// when the runtime narrowed the token to its owner's live access — a
+// write-level membership on that project.
+func (t *Token) AllowsWrite(path string) bool {
+	if !t.HasScope(ScopeWrite) || !t.AllowsPath(path) {
+		return false
+	}
+	return t.writeFilter == nil || t.writeFilter(ProjectOf(path))
+}
+
+// WithWriteFilter returns a copy of the token whose writes are additionally
+// gated by fn (see AllowsWrite). The receiver is left untouched so the stored
+// record never carries runtime state.
+func (t *Token) WithWriteFilter(fn func(project string) bool) *Token {
+	cp := *t
+	cp.writeFilter = fn
+	return &cp
 }
 
 // ScopeLabel renders the project scope for error messages and displays:

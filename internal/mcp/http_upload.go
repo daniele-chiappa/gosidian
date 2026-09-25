@@ -49,6 +49,10 @@ func (s *Server) handleHTTPUpload(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusForbidden, err.Error())
 		return
 	}
+	if project != "" && !tok.AllowsWrite(project) {
+		writeJSONError(w, http.StatusForbidden, "the account behind this token may only read project "+project)
+		return
+	}
 
 	// The cap must sit on the body itself: ParseMultipartForm's argument only
 	// bounds in-memory buffering, everything beyond it is spooled to disk

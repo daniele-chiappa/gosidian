@@ -16,7 +16,7 @@ const ui = useUIStore()
 const windows = useWindowsStore()
 
 function openSearch() {
-  windows.open({ type: 'search', key: planciaKey('search') })
+  windows.open({ type: 'search', key: planciaKey('search'), title: t('nav.search', 'Search') })
 }
 
 async function handleLogout() {

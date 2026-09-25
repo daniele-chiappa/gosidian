@@ -1,12 +1,15 @@
 package v1
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/gosidian/gosidian/internal/authz"
 	"github.com/gosidian/gosidian/internal/server/events"
+	"github.com/gosidian/gosidian/internal/webauth"
 )
 
 // sseHeartbeatInterval governs how often we send a comment-only frame
@@ -114,6 +117,13 @@ func (r *Router) handleEvents(w http.ResponseWriter, req *http.Request) {
 			if !open {
 				return
 			}
+			princ, alive := r.streamPrincipal(spaTok.UserID)
+			if !alive {
+				return // account disabled or gone: end the stream like requireAuth would
+			}
+			if !r.mayStream(princ, ev) {
+				continue
+			}
 			if _, err := fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", ev.ID, ev.Topic, ev.Data); err != nil {
 				return
 			}
@@ -124,6 +134,39 @@ func (r *Router) handleEvents(w http.ResponseWriter, req *http.Request) {
 			}
 			flusher.Flush()
 		}
+	}
+}
+
+// streamPrincipal re-resolves the subscriber's account on every frame, so a
+// demotion takes effect on the next event and a disabled account ends the
+// stream without waiting for a reconnect. alive=false means "close".
+func (r *Router) streamPrincipal(userID string) (authz.Principal, bool) {
+	user, ok := r.deps.Auth.WebAuth.UserByID(userID)
+	if !ok || !user.Enabled() {
+		return authz.Principal{}, false
+	}
+	return authz.Principal{UserID: user.ID, Role: user.Role}, true
+}
+
+// mayStream applies the read predicate that gates every REST read to one SSE
+// frame: the hub is a single shared stream, so without this filter a guest or
+// a member outside a project would learn the paths and names of private
+// notes and projects from the events about them (BUG-054). Frames that name
+// a path or a project are gated by canSee on that project; frames that name
+// neither (nothing to scope them to) go to the owner only.
+func (r *Router) mayStream(p authz.Principal, ev events.Event) bool {
+	var ref struct {
+		Path    string `json:"path"`
+		Project string `json:"project"`
+	}
+	_ = json.Unmarshal(ev.Data, &ref)
+	switch {
+	case ref.Path != "":
+		return r.canSee(p, ref.Path)
+	case ref.Project != "":
+		return r.canAccessProject(p, ref.Project)
+	default:
+		return p.Role == webauth.RoleOwner
 	}
 }
 

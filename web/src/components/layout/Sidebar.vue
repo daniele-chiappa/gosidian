@@ -55,18 +55,26 @@ function toggleMenu() {
 
 interface MenuItem { key: string; label: string; icon: unknown; spec: OpenSpec }
 const menuItems = computed<MenuItem[]>(() => {
+  // The menu label doubles as the window title: these views never emit one
+  // themselves, and plancia renders an empty tab for a title-less window.
+  const item = (key: string, label: string, icon: unknown): MenuItem => ({
+    key,
+    label,
+    icon,
+    spec: { type: key, key: planciaKey(key), title: label },
+  })
   const items: MenuItem[] = [
-    { key: 'search', label: t('nav.search', 'Search'), icon: Search, spec: { type: 'search', key: planciaKey('search') } },
-    { key: 'graph', label: t('nav.graph'), icon: Network, spec: { type: 'graph', key: planciaKey('graph') } },
-    { key: 'projects', label: t('nav.projects'), icon: Folder, spec: { type: 'projects', key: planciaKey('projects') } },
-    { key: 'tags', label: t('nav.tags'), icon: Tags, spec: { type: 'tags', key: planciaKey('tags') } },
+    item('search', t('nav.search', 'Search'), Search),
+    item('graph', t('nav.graph'), Network),
+    item('projects', t('nav.projects'), Folder),
+    item('tags', t('nav.tags'), Tags),
   ]
   if (auth.canWrite) {
-    items.push({ key: 'trash', label: t('nav.trash'), icon: Trash2, spec: { type: 'trash', key: planciaKey('trash') } })
-    items.push({ key: 'settings', label: t('nav.settings'), icon: Settings, spec: { type: 'settings', key: planciaKey('settings') } })
+    items.push(item('trash', t('nav.trash'), Trash2))
+    items.push(item('settings', t('nav.settings'), Settings))
   }
   if (auth.isOwner) {
-    items.push({ key: 'admin', label: t('nav.admin', 'Admin'), icon: Shield, spec: { type: 'admin', key: planciaKey('admin') } })
+    items.push(item('admin', t('nav.admin', 'Admin'), Shield))
   }
   return items
 })

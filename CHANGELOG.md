@@ -8,6 +8,47 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.29.1] — 2026-09-25 — "access scoping"
+
+Security patch. The centralized read predicate that gates every REST
+read did not cover two surfaces derived from it: the Server-Sent Events
+stream and the MCP tokens owned by member and guest accounts. Both are
+now bound to what the account may currently see. A small web UI fix
+rides along. Pull the image and restart; nothing to migrate.
+
+### Security
+- **SSE stream scoped to the account** — `GET /api/v1/events` forwarded
+  every published event to every authenticated subscriber, so a guest, or
+  a member outside a project under `member_scope = members`, learned the
+  paths of private notes and the names of private projects from the
+  `note`, `tree` and `sidebar` frames about them. Each frame is now gated
+  by the same read predicate as the REST API on the project it names
+  (frames naming none go to the owner only); the account is re-resolved
+  per frame, so a demotion applies at the next event and a disabled
+  account ends the stream.
+- **MCP tokens narrowed to their owner's live access** — a static token
+  or OAuth grant recorded the projects and scopes granted at creation and
+  nothing revisited them afterwards: a membership removed or downgraded
+  to read, or `member_scope` switched to `members`, left the grant
+  intact, and a consent given under `member_scope = all` had enumerated
+  every project. Every request now intersects the token's projects with
+  what the owning account may read, drops the write scope when it may
+  write none of them and narrows it per project when it may write only
+  some; an account that no longer resolves fails closed, and an account
+  with no readable project left is refused. Tokens owned by the owner
+  account or minted from the CLI are unchanged.
+
+### Fixed
+- **Menu windows have a title** — Search, Graph, Projects, Tags, Trash,
+  Settings and Admin opened from the sidebar, the top bar or the command
+  palette carried no window title, so the tabs view showed them as blank
+  tabs; the menu label is now the window title.
+
+### Changed
+- Docs: [authentication](docs/mcp/authentication.md) states that static
+  tokens are owner-only (members and guests connect through OAuth grants)
+  and describes the live intersection above.
+
 ## [2.29.0] — 2026-09-25 — "OAuth 2.1"
 
 gosidian can now be added as a custom connector on claude.ai and Claude

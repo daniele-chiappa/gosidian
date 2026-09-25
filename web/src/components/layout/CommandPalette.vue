@@ -11,6 +11,7 @@
  * extra dependencies.
  */
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { fetchCommandPalette, type CommandPaletteData } from '@/api/commandPalette'
 import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
 import { useWindowsStore, type OpenSpec } from 'plancia'
@@ -25,6 +26,7 @@ interface PaletteItem {
   path?: string
 }
 
+const { t } = useI18n()
 const windows = useWindowsStore()
 const recents = useRecentlyViewed()
 
@@ -56,7 +58,7 @@ const baseItems = computed<PaletteItem[]>(() => {
       kind: 'project',
       label: p.name,
       detail: `${p.noteCount} notes`,
-      open: { type: 'projects', key: planciaKey('projects'), props: { project: p.name } },
+      open: { type: 'projects', key: planciaKey('projects'), title: t('nav.projects'), props: { project: p.name } },
     })
   }
   for (const t of dataset.value.tags) {
