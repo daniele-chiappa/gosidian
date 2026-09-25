@@ -34,7 +34,7 @@ func (s *Server) handleHTTPUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	tok := s.authenticate(r)
 	if tok == nil {
-		w.Header().Set("WWW-Authenticate", `Bearer realm="gosidian"`)
+		w.Header().Set("WWW-Authenticate", s.wwwAuthenticate())
 		writeJSONError(w, http.StatusUnauthorized, "missing or invalid bearer token")
 		return
 	}

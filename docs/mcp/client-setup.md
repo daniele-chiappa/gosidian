@@ -45,6 +45,28 @@ callable from any conversation. See
 [Agent patterns](patterns.md) for the recommended session opening.
 `claude mcp list` shows the server as `(HTTP) - ✓ Connected`.
 
+## claude.ai / Claude Desktop custom connector (OAuth)
+
+With `[oauth]` enabled (see [Authentication → OAuth 2.1](authentication.md#oauth-21-for-hosted-clients-claudeai-chatgpt-claude-code)),
+add gosidian as a custom connector from *Settings → Connectors*: remote
+MCP server URL `https://<issuer>/mcp`, no client ID or secret. Claude
+discovers the authorization server, opens the gosidian consent screen in
+the browser (log in if asked), and receives its own token. The same works
+for ChatGPT connectors and for any client that implements MCP
+authorization.
+
+## Claude Code without a pasted token (OAuth)
+
+```bash
+claude mcp add gosidian https://<issuer>/mcp --transport http
+```
+
+On first use Claude Code answers `401`, opens the consent screen in your
+browser and stores the token it receives; `/mcp` inside Claude Code shows
+the connection and lets you re-authenticate. Bearer tokens (the
+`--header` form above) keep working and are the right choice for CI and
+for LAN deployments without HTTPS.
+
 ## Zed
 
 Add to your `settings.json`:

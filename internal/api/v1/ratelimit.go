@@ -134,6 +134,11 @@ func (l *loginLimiter) sweep(now time.Time) {
 	}
 }
 
+// ClientIP is the exported form of clientIP for sibling packages that rate
+// limit unauthenticated endpoints (the OAuth server): the peer address, or
+// the X-Forwarded-For origin when the peer is a trusted proxy.
+func ClientIP(r *http.Request) string { return clientIP(r) }
+
 // trustedProxies holds the networks whose X-Forwarded-For header is
 // believed. Written once at startup, read on every login attempt.
 var trustedProxies atomic.Pointer[[]*net.IPNet]

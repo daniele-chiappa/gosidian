@@ -7,6 +7,13 @@ edit through a web UI, agents talk to it over MCP, everything lives
 in plain `.md` files that Obsidian (and every other markdown tool)
 reads natively.
 
+**Listed on** the [official MCP Registry](https://registry.modelcontextprotocol.io/v0/servers?search=gosidian)
+as `io.github.daniele-chiappa/gosidian`,
+[Glama](https://glama.ai/mcp/servers/daniele-chiappa/gosidian) and
+[mcpservers.org](https://mcpservers.org/servers/daniele-chiappa/gosidian)
+[![Glama score](https://glama.ai/mcp/servers/daniele-chiappa/gosidian/badges/score.svg)](https://glama.ai/mcp/servers/daniele-chiappa/gosidian)
+[![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/daniele-chiappa/gosidian)
+
 ![gosidian in action](docs/demo.gif)
 
 ## Try it in your browser
@@ -79,6 +86,25 @@ is a cache — drop it and it rebuilds.
 
 [FAQ](docs/faq.md) covers the long form.
 
+## Compared to similar projects
+
+The "markdown vault + agents" space is crowded. This is where gosidian
+sits and where it doesn't, as of September 2026:
+
+| If you are looking at… | What those projects do | Where gosidian differs |
+|---|---|---|
+| **Obsidian MCP bridges** — [mcp-obsidian](https://github.com/MarkusPfundstein/mcp-obsidian), [obsidian-local-rest-api](https://github.com/coddingtonbear/obsidian-local-rest-api), wrappers around the Obsidian CLI | Expose a running Obsidian desktop app to agents over MCP. | Headless server: no Obsidian process needed, runs on a box or in a container, multi-user with roles, per-project tokens, audit trail. The vault stays a plain Obsidian vault. |
+| **Markdown memory servers** — [basic-memory](https://github.com/basicmachines-co/basic-memory), [mcp-vault](https://github.com/cyt-666/mcp-vault) | Same "files, not a database" idea; usually add hybrid semantic search, a cloud tier or WebDAV sync. | Ships a full web UI, real multi-user, an agent handoff bus and a server-served working method (versioned directives, lint, stale detection). No semantic search by design ([ADR-007](docs/faq.md#why-not-rag-or-vector-search)), no hosted tier. |
+| **Client-side wiki skills** — [obsidian-wiki](https://github.com/Ar9av/obsidian-wiki) and the "LLM Wiki" pattern | Slash-commands the agent runs locally to compile and maintain a wiki. No server, no auth, no UI. | The same pattern implemented server-side and agent-agnostic: one-call scaffold, directives served at bootstrap, handoffs, audit. Complementary: those skills work against a gosidian vault too. |
+| **Agent memory services** — [mem0](https://github.com/mem0ai/mem0), [agentmemory](https://github.com/rohitg00/agentmemory), [mcp-memory-service](https://github.com/doobidoo/mcp-memory-service) | Memory as an opaque store: embeddings, recall benchmarks, auto-capture hooks. | Memory is markdown that humans read in Obsidian or the web UI; no embeddings, no LLM calls in the binary, retrieval by identity and graph. No published recall numbers yet, no auto-capture hooks. |
+| **Note apps with community MCP servers** — [SilverBullet](https://github.com/silverbulletmd/silverbullet), [Trilium](https://github.com/TriliumNext/Trilium), [SiYuan](https://github.com/siyuan-note/siyuan) | Mature editors, mobile apps, sometimes real-time collaboration; MCP added by third-party servers on top of their API. | MCP-first: the server is in the binary, behind the same login, roles and audit as the UI. No mobile app, no real-time collaboration, no WYSIWYG editor. |
+
+Honest gaps, in the order they come up: semantic / hybrid search
+(deferred, see the [FAQ](docs/faq.md#why-not-rag-or-vector-search)),
+mobile sync beyond git, real-time collaboration, a hosted offering,
+published retrieval benchmarks. The [roadmap](docs/faq.md#whats-the-roadmap)
+says which of these are planned.
+
 ## Feature highlights
 
 - Single binary, ≤50 MB, Alpine-based Docker image
@@ -101,6 +127,9 @@ is a cache — drop it and it rebuilds.
   (24h TTL)
 - Optional **TOTP two-factor** (global mode + per-user override) and
   **LDAP / Active Directory** login with guest auto-provisioning
+- Opt-in **OAuth 2.1 authorization server** so claude.ai / Claude Desktop
+  custom connectors, ChatGPT connectors and Claude Code's browser login
+  get their own tokens through a consent screen — no pasted bearer
 - Optional git sync (debounced commits, push with token auth)
 - SQLite FTS5 full-text search + ETag optimistic locking
 - First-class `.html` notes, rendered in a sandboxed iframe (off by
@@ -152,4 +181,3 @@ Released under the [MIT License](LICENSE).
   philosophy, and a comparison with Obsidian / Logseq / RAG-based
   knowledge stacks.
 - [CHANGELOG.md](CHANGELOG.md) — release history.
-- [Design philosophy & project genesis](PROJECT-STORY.md).

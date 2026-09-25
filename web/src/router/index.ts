@@ -20,6 +20,14 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: false, layout: 'bare' },
   },
   {
+    // OAuth consent (IMP-092): reached by a 302 from /oauth/authorize; the
+    // guard below routes through /login?next= when there is no session.
+    path: '/oauth/consent',
+    name: 'oauth-consent',
+    component: () => import('@/views/OAuthConsentView.vue'),
+    meta: { requiresAuth: true, layout: 'bare' },
+  },
+  {
     path: '/',
     name: 'home',
     component: () => import('@/components/layout/AppShell.vue'),

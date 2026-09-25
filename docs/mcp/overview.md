@@ -23,7 +23,7 @@ Auth: **Bearer tokens** with per-project scoping.
 
 ## Why typed retrieval
 
-gosidian exposes 55 typed tools (`memory_bootstrap`, `memory_search`,
+gosidian exposes 57 typed tools (`memory_bootstrap`, `memory_search`,
 `memory_plans`, `memory_lint`, …) that retrieve notes by **identity**:
 path, tag, frontmatter, backlinks. It does **not** ship vector
 embeddings or fuzzy semantic search — that's a deliberate design

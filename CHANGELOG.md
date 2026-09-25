@@ -8,6 +8,67 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.29.0] — 2026-09-25 — "OAuth 2.1"
+
+gosidian can now be added as a custom connector on claude.ai and Claude
+Desktop, as a ChatGPT connector, and to Claude Code without pasting a
+bearer token: an opt-in OAuth 2.1 authorization server built into the
+binary runs the MCP authorization flow end to end and turns every consent
+into an ordinary, revocable MCP token. Off by default — nothing changes
+for existing bearer tokens. The README now says where gosidian is listed
+and how it compares with neighbouring projects.
+
+### Added
+- **OAuth 2.1 authorization server** — with `[oauth] enabled = true` and
+  `issuer = "https://…"` (env `GOSIDIAN_OAUTH_ENABLED`,
+  `GOSIDIAN_OAUTH_ISSUER`) gosidian publishes the discovery documents
+  (`/.well-known/oauth-authorization-server`,
+  `/.well-known/oauth-protected-resource[/mcp]`), every `401` from the MCP
+  endpoints carries `resource_metadata` and `scope`, and clients identify
+  themselves with a Client ID Metadata Document (claude.ai, Claude Code)
+  or through Dynamic Client Registration (`/oauth/register`; public
+  clients only, PKCE S256 mandatory, redirects HTTPS or loopback, optional
+  `oauth.allowed_redirect_hosts`). `/oauth/authorize` sends the browser to
+  a consent screen in the web UI (`/oauth/consent`, behind the normal
+  login and second factor) where the user picks the projects and whether
+  the client may write; guests can grant read only. A consent becomes an
+  MCP token record (`<client> · oauth`) listed and revocable in
+  Admin → Tokens and swept by the user-disable cascade; access tokens
+  (`gsa_…`, 1 h) live in memory and resolve to that grant, refresh tokens
+  (`gsr_…`, 30 days) rotate on every use and a replayed one revokes the
+  grant. `/oauth/revoke` (RFC 7009), per-IP rate limits on the
+  unauthenticated endpoints, audit actions `oauth_client_register` /
+  `oauth_grant` / `oauth_refresh` / `oauth_revoke`, registered clients in
+  `oauth_clients.json` in the state dir, metadata documents fetched behind
+  an SSRF guard. Verified end to end against a claude.ai custom connector
+  and `claude mcp login`.
+
+### Changed
+- README: a "Listed on" line (MCP Registry entry, Glama score badge,
+  mcpservers.org badge) and a "Compared to similar projects" section that
+  places gosidian against Obsidian MCP bridges, markdown memory servers,
+  client-side wiki skills, agent memory services and note apps with
+  community MCP servers, gaps included.
+- Docs: [authentication](docs/mcp/authentication.md) gains the OAuth
+  section, [client setup](docs/mcp/client-setup.md) describes the
+  claude.ai custom connector and `claude mcp add … --transport http`
+  without a header, [configuration](docs/configuration.md) and
+  [deployment](docs/deployment.md) cover `[oauth]` and the public issuer
+  behind a reverse proxy. The MCP tool count reads 57 everywhere.
+
+### Notes
+- Upgrade: pull the image and restart; nothing to migrate. OAuth stays
+  off until you set `[oauth] enabled = true` **and** an `issuer` — the
+  exact public HTTPS URL clients will use (the MCP URL to enter in
+  claude.ai is `<issuer>/mcp`). Loopback and plain-HTTP deployments keep
+  using bearer tokens.
+- A restart invalidates the in-memory access tokens; clients refresh
+  transparently on the next `401`. Grants survive restarts in the state
+  dir.
+- Claude Code: `claude mcp add gosidian https://<issuer>/mcp --transport http`
+  (no `--header`), then `/mcp` or `claude mcp login gosidian` to log in
+  through the browser; `--no-browser` prints the URL on headless hosts.
+
 ## [2.28.0] — 2026-09-21 — "streamable HTTP"
 
 The MCP server now speaks the current MCP transport: `POST /mcp` on the

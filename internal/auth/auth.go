@@ -53,7 +53,27 @@ type Token struct {
 	OwnerUserID      string    `json:"owner_user_id,omitempty"`       // webauth user id; empty = admin-owned (CLI)
 	SelfImproveOptIn bool      `json:"self_improve_opt_in,omitempty"` // opt-in to the self-improve nudge loop (per-token)
 	ToolProfile      string    `json:"tool_profile,omitempty"`        // MCP tool surface: "" | "full" (everything) or "core" (worker subset)
+	// Kind distinguishes a static bearer ("" — the plaintext is the credential)
+	// from an OAuth grant (KindOAuth — minted by the consent flow, IMP-092).
+	// A grant is never presented directly: short-lived access tokens resolve
+	// to it in memory and the refresh token below renews them. Revoking the
+	// record (admin UI, CLI, user-disable cascade) kills both.
+	Kind string `json:"kind,omitempty"`
+	// ClientID is the OAuth client the grant was issued to (DCR id or CIMD
+	// URL); empty for static bearers.
+	ClientID string `json:"client_id,omitempty"`
+	// RefreshHash is the sha256 of the current refresh token; rotated on every
+	// use. RefreshExpiresAt bounds it independently of ExpiresAt.
+	RefreshHash      string    `json:"refresh_hash,omitempty"`
+	RefreshExpiresAt time.Time `json:"refresh_expires_at,omitempty"`
 }
+
+// KindOAuth marks a token record minted by the OAuth consent flow (a grant).
+const KindOAuth = "oauth"
+
+// IsOAuthGrant reports whether the record is an OAuth grant rather than a
+// static bearer.
+func (t *Token) IsOAuthGrant() bool { return t.Kind == KindOAuth }
 
 // Tool profiles: which MCP tool surface a token sees. Empty means full —
 // existing tokens keep the whole catalogue (backward compatible). "core"
@@ -272,33 +292,95 @@ func (s *Store) List() []Token {
 // tokens pass "" and behave as admin-owned. projects is the scope list (nil
 // or empty = admin); entries are trimmed and deduplicated, order preserved.
 func (s *Store) Create(name string, projects []string, scopes []string, ttl time.Duration, ownerUserID string) (plaintext string, tok Token, err error) {
-	if name == "" {
-		return "", Token{}, errors.New("token name required")
+	if err := validateCreate(name, scopes); err != nil {
+		return "", Token{}, err
 	}
-	if len(scopes) == 0 {
-		return "", Token{}, errors.New("at least one scope required")
+	cleanProjects, err := cleanProjectList(projects)
+	if err != nil {
+		return "", Token{}, err
 	}
-	for _, sc := range scopes {
-		if sc != ScopeRead && sc != ScopeWrite {
-			return "", Token{}, fmt.Errorf("unknown scope %q", sc)
-		}
-	}
-	cleanProjects := normalizeProjects(projects)
-	for _, p := range cleanProjects {
-		if strings.ContainsAny(p, "/\\:") || p == "." || p == ".." || strings.HasPrefix(p, ".") {
-			return "", Token{}, fmt.Errorf("invalid project name %q", p)
-		}
-	}
-
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return "", Token{}, err
 	}
 	plaintext = tokenPrefix + base64.RawURLEncoding.EncodeToString(raw)
+	tok, err = s.mint(plaintext, name, cleanProjects, scopes, ttl, ownerUserID)
+	if err != nil {
+		return "", Token{}, err
+	}
+	return plaintext, tok, nil
+}
+
+// CreateGrant persists an OAuth grant: a token record with no presentable
+// plaintext (its hash is derived from random bytes that are discarded, so
+// Validate can never match it). Access tokens resolve to it by ID and the
+// refresh token set with SetRefresh renews them; see internal/oauth. Same
+// validation and project normalization as Create.
+func (s *Store) CreateGrant(name string, projects []string, scopes []string, ttl time.Duration, ownerUserID, clientID string) (Token, error) {
+	if err := validateCreate(name, scopes); err != nil {
+		return Token{}, err
+	}
+	cleanProjects, err := cleanProjectList(projects)
+	if err != nil {
+		return Token{}, err
+	}
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return Token{}, err
+	}
+	// Not a presentable credential: the "plaintext" hashed here is never
+	// returned to anyone.
+	tok, err := s.mint("grant:"+base64.RawURLEncoding.EncodeToString(raw), name, cleanProjects, scopes, ttl, ownerUserID)
+	if err != nil {
+		return Token{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reloadIfStale()
+	for i := range s.tokens {
+		if s.tokens[i].ID == tok.ID {
+			s.tokens[i].Kind = KindOAuth
+			s.tokens[i].ClientID = clientID
+			tok = s.tokens[i]
+			return tok, s.save()
+		}
+	}
+	return Token{}, errors.New("grant vanished after mint")
+}
+
+// validateCreate holds the argument checks shared by Create and CreateGrant.
+func validateCreate(name string, scopes []string) error {
+	if name == "" {
+		return errors.New("token name required")
+	}
+	if len(scopes) == 0 {
+		return errors.New("at least one scope required")
+	}
+	for _, sc := range scopes {
+		if sc != ScopeRead && sc != ScopeWrite {
+			return fmt.Errorf("unknown scope %q", sc)
+		}
+	}
+	return nil
+}
+
+// cleanProjectList normalizes and validates a project scope list.
+func cleanProjectList(projects []string) ([]string, error) {
+	cleanProjects := normalizeProjects(projects)
+	for _, p := range cleanProjects {
+		if strings.ContainsAny(p, "/\\:") || p == "." || p == ".." || strings.HasPrefix(p, ".") {
+			return nil, fmt.Errorf("invalid project name %q", p)
+		}
+	}
+	return cleanProjects, nil
+}
+
+// mint builds the record for plaintext, appends it and saves. cleanProjects
+// must already be normalized.
+func (s *Store) mint(plaintext, name string, cleanProjects, scopes []string, ttl time.Duration, ownerUserID string) (Token, error) {
 	hash := sha256.Sum256([]byte(plaintext))
 	hashHex := hex.EncodeToString(hash[:])
-
-	tok = Token{
+	tok := Token{
 		ID:          hashHex[:8],
 		Name:        name,
 		Hash:        hashHex,
@@ -325,10 +407,58 @@ func (s *Store) Create(name string, projects []string, scopes []string, ttl time
 	if err := s.save(); err != nil {
 		s.tokens = s.tokens[:len(s.tokens)-1]
 		s.mu.Unlock()
-		return "", Token{}, err
+		return Token{}, err
 	}
 	s.mu.Unlock()
-	return plaintext, tok, nil
+	return tok, nil
+}
+
+// ByID returns a copy of the token with the given ID, reloading the file
+// first so a revocation made by the CLI is honoured. Used by the OAuth
+// access-token resolver on every request.
+func (s *Store) ByID(id string) (*Token, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reloadIfStale()
+	for i := range s.tokens {
+		if s.tokens[i].ID == id {
+			out := s.tokens[i]
+			return &out, true
+		}
+	}
+	return nil, false
+}
+
+// ByRefreshHash returns a copy of the OAuth grant whose current refresh token
+// hashes to hash (hex sha256). Constant-time compare per record.
+func (s *Store) ByRefreshHash(hash string) (*Token, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reloadIfStale()
+	for i := range s.tokens {
+		t := &s.tokens[i]
+		if t.RefreshHash != "" && subtle.ConstantTimeCompare([]byte(t.RefreshHash), []byte(hash)) == 1 {
+			out := *t
+			return &out, true
+		}
+	}
+	return nil, false
+}
+
+// SetRefresh stores the hash of a grant's current refresh token and its
+// expiry, replacing the previous one (rotation). An empty hash clears it.
+func (s *Store) SetRefresh(id, refreshHash string, expiresAt time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reloadIfStale()
+	for i := range s.tokens {
+		if s.tokens[i].ID == id {
+			s.tokens[i].RefreshHash = refreshHash
+			s.tokens[i].RefreshExpiresAt = expiresAt
+			return s.save()
+		}
+	}
+	return fmt.Errorf("token %q not found", id)
 }
 
 // Revoke deletes a token identified by its ID prefix (first 8 hex of hash).

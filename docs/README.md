@@ -15,7 +15,7 @@ trial, read the [root README](../README.md) first.
 ## MCP server
 
 - [Overview](mcp/overview.md) — what MCP is, why gosidian uses it
-- [Tool catalogue](mcp/tools.md) — all 55 typed tools, grouped by purpose
+- [Tool catalogue](mcp/tools.md) — all 57 typed tools, grouped by purpose
 - [Authentication](mcp/authentication.md) — bearer tokens, scopes,
   rotation
 - [Self-improvement loop](mcp/self-improvement.md) — *experimental, off

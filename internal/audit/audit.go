@@ -82,6 +82,14 @@ const (
 	ActionTOTPRecoveryUsed  Action = "totp_recovery_used"
 	ActionTOTPRecoveryRegen Action = "totp_recovery_regen"
 	ActionTOTPReset         Action = "totp_reset"
+
+	// OAuth 2.1 authorization server (IMP-092): a client registered itself,
+	// a user consented (a grant token was minted), a grant renewed its
+	// access token, a grant was revoked (client request or refresh reuse).
+	ActionOAuthClientRegister Action = "oauth_client_register"
+	ActionOAuthGrant          Action = "oauth_grant"
+	ActionOAuthRefresh        Action = "oauth_refresh"
+	ActionOAuthRevoke         Action = "oauth_revoke"
 )
 
 // Entry is the on-disk shape. Keep field names short; this file may grow.

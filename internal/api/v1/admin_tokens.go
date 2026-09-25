@@ -25,6 +25,8 @@ type mcpTokenView struct {
 	Expired          bool     `json:"expired,omitempty"`
 	SelfImproveOptIn bool     `json:"self_improve_opt_in"`
 	ToolProfile      string   `json:"tool_profile,omitempty"` // "" | "full" | "core"
+	Kind             string   `json:"kind,omitempty"`         // "" static bearer | "oauth" grant minted by a consent (IMP-092)
+	ClientID         string   `json:"client_id,omitempty"`    // OAuth client the grant was issued to
 }
 
 type mcpTokenCreatedResponse struct {
@@ -241,6 +243,8 @@ func mcpTokenToView(t *auth.Token) mcpTokenView {
 		CreatedAt:        t.CreatedAt.UTC().Format(rfc3339Z),
 		SelfImproveOptIn: t.SelfImproveOptIn,
 		ToolProfile:      t.ToolProfile,
+		Kind:             t.Kind,
+		ClientID:         t.ClientID,
 	}
 	if !t.ExpiresAt.IsZero() {
 		v.ExpiresAt = t.ExpiresAt.UTC().Format(rfc3339Z)

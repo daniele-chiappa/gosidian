@@ -106,6 +106,66 @@ From the web UI at `/admin/tokens`:
 Revocation is immediate: the SSE connection using a revoked token
 gets disconnected at the next request.
 
+## OAuth 2.1 for hosted clients (claude.ai, ChatGPT, Claude Code)
+
+Static bearer tokens are the default and work everywhere a header can be
+set. Hosted clients — claude.ai custom connectors, ChatGPT connectors —
+and Claude Code's browser login expect the MCP authorization flow
+instead: OAuth 2.1 with PKCE, discovery documents and a consent screen.
+gosidian ships that authorization server, off by default:
+
+```toml
+[oauth]
+enabled = true
+issuer  = "https://notes.example.com"   # the public origin clients use
+```
+
+(or `GOSIDIAN_OAUTH_ENABLED=true` and `GOSIDIAN_OAUTH_ISSUER=…`). The
+issuer must be the exact URL users type into their client, served over
+HTTPS by your reverse proxy: the MCP resource is `<issuer>/mcp` and every
+OAuth endpoint hangs off the same origin.
+
+What happens when a client connects:
+
+1. The client calls `/mcp` without a token and gets `401` with
+   `WWW-Authenticate: Bearer resource_metadata="<issuer>/.well-known/oauth-protected-resource/mcp", scope="read write"`.
+2. It reads that document and the authorization-server metadata at
+   `/.well-known/oauth-authorization-server`, then identifies itself:
+   with a **Client ID Metadata Document** (an HTTPS URL as `client_id`,
+   the way claude.ai, ChatGPT and Claude Code do) or through **Dynamic
+   Client Registration** (`POST /oauth/register`). Only public clients
+   exist; there is no client secret.
+3. It opens `/oauth/authorize` in the browser. gosidian validates the
+   request and sends the browser to the SPA consent screen — through
+   the normal login first if there is no session, two-factor included.
+4. On the consent screen you pick the **projects** the client may use
+   (all visible ones by default; an owner keeping them all gets an
+   unscoped grant that also covers future projects) and whether it may
+   **write**. Guests can only grant read.
+5. The client exchanges the code at `/oauth/token` (PKCE S256 verified)
+   for an **access token** (1 hour, held in memory) and a **refresh
+   token** (30 days, rotated on every use). Presenting a rotated refresh
+   token again revokes the whole grant.
+
+The consent becomes a **grant**: an ordinary MCP token record named
+`<client> · oauth`, listed in Admin → Tokens with its projects and
+scopes. Revoke it there (or from the CLI) and every access token dies
+with it; disabling the user revokes their grants like any other token.
+Access tokens do not survive a restart — clients refresh transparently.
+Audit actions: `oauth_client_register`, `oauth_grant`, `oauth_refresh`,
+`oauth_revoke`.
+
+Redirect URIs must be HTTPS, or HTTP on a loopback host; loopback
+redirects match regardless of port (Claude Code binds an ephemeral one).
+`oauth.allowed_redirect_hosts` can pin the non-loopback hosts you accept.
+Registered clients are kept in `oauth_clients.json` in the state dir,
+capped and expired when idle; metadata documents are fetched with an
+SSRF guard (public HTTPS hosts only, no redirects, 64 KiB) and cached.
+
+Scopes: `read`, `write` and `offline_access` (the client's way of asking
+for a refresh token; one is issued regardless). A client asking for
+`resource` must name `<issuer>/mcp` exactly.
+
 ## Web UI login
 
 For the web UI (not MCP), gosidian supports an optional login layer

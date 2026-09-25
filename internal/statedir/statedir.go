@@ -37,6 +37,7 @@ var Files = []string{
 	"auth.json",
 	"tokens.json",
 	"spa_tokens.json",
+	"oauth_clients.json",
 	"gitsync.json",
 	"config.toml",
 	"projects.json",

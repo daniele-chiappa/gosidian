@@ -282,5 +282,31 @@
     "skip_git_sync_help": "When enabled, this project is not included in auto-commits. It stays in the vault and visible in the web UI.",
     "hidden_from_mcp": "Hide from MCP server",
     "hidden_from_mcp_help": "When enabled, MCP agents do not see this project in lists and receive an error when naming it explicitly."
+  },
+  "oauth": {
+    "title": "Autoriser {client}",
+    "subtitle": "Cette application souhaite accéder à votre vault gosidian via MCP.",
+    "signed_in_as": "Connecté en tant que {user}",
+    "redirect_to": "Après votre décision vous serez renvoyé vers",
+    "client_id": "Client",
+    "loopback_warning": "Ce client n'a enregistré que des adresses locales (loopback). N'importe quel programme sur votre ordinateur pourrait se faire passer pour lui : continuez seulement si vous avez lancé cette connexion vous-même, à l'instant.",
+    "projects": "Projets auxquels l'application peut accéder",
+    "all_projects": "Tous les projets, y compris ceux créés plus tard",
+    "select_all": "Tout sélectionner",
+    "no_projects": "Aucun projet ne peut être accordé.",
+    "none_selected": "Sélectionnez au moins un projet.",
+    "note_count": "{n} notes",
+    "public": "public",
+    "scopes": "Permissions",
+    "scope_read": "Lire les notes",
+    "scope_write": "Créer, modifier et supprimer des notes",
+    "write_unavailable": "votre rôle ne peut accorder que la lecture",
+    "expires": "Cette demande expire à {time}.",
+    "approve": "Autoriser",
+    "deny": "Refuser",
+    "working": "Un instant…",
+    "redirecting": "Retour vers l'application…",
+    "error_missing": "Cette demande d'autorisation est inconnue ou a expiré. Recommencez depuis l'application.",
+    "error_generic": "Une erreur est survenue. Réessayez depuis l'application."
   }
 }

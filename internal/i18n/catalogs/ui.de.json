@@ -282,5 +282,31 @@
     "skip_git_sync_help": "When enabled, this project is not included in auto-commits. It stays in the vault and visible in the web UI.",
     "hidden_from_mcp": "Hide from MCP server",
     "hidden_from_mcp_help": "When enabled, MCP agents do not see this project in lists and receive an error when naming it explicitly."
+  },
+  "oauth": {
+    "title": "{client} autorisieren",
+    "subtitle": "Diese Anwendung möchte über MCP auf deinen gosidian-Vault zugreifen.",
+    "signed_in_as": "Angemeldet als {user}",
+    "redirect_to": "Nach deiner Entscheidung geht es zurück zu",
+    "client_id": "Client",
+    "loopback_warning": "Dieser Client hat nur lokale (Loopback-)Adressen registriert. Jedes Programm auf deinem Rechner könnte sich als dieser Client ausgeben: Fahre nur fort, wenn du diese Anmeldung gerade selbst gestartet hast.",
+    "projects": "Projekte, auf die die Anwendung zugreifen darf",
+    "all_projects": "Alle Projekte, auch später angelegte",
+    "select_all": "Alle auswählen",
+    "no_projects": "Es gibt kein Projekt, das du freigeben kannst.",
+    "none_selected": "Wähle mindestens ein Projekt.",
+    "note_count": "{n} Notizen",
+    "public": "öffentlich",
+    "scopes": "Berechtigungen",
+    "scope_read": "Notizen lesen",
+    "scope_write": "Notizen anlegen, bearbeiten und löschen",
+    "write_unavailable": "deine Rolle kann nur Lesezugriff gewähren",
+    "expires": "Diese Anfrage läuft um {time} ab.",
+    "approve": "Erlauben",
+    "deny": "Ablehnen",
+    "working": "Einen Moment…",
+    "redirecting": "Zurück zur Anwendung…",
+    "error_missing": "Diese Autorisierungsanfrage ist unbekannt oder abgelaufen. Beginne erneut in der Anwendung.",
+    "error_generic": "Etwas ist schiefgelaufen. Versuche es erneut aus der Anwendung."
   }
 }

@@ -30,6 +30,11 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_MCP_MAX_NOTE_BYTES` | `mcp.max_note_bytes` | `1048576` (1 MiB) |
 | `GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS` | `mcp.allowed_upload_roots` | empty (vault only) |
 | `GOSIDIAN_MCP_BRIDGE_DIR` | `mcp.bridge_dir` | empty (off; staging dir for cheap `bridge_filename` uploads, IMP-059) |
+| `GOSIDIAN_OAUTH_ENABLED` | `oauth.enabled` | `false` (embedded OAuth 2.1 authorization server for claude.ai / ChatGPT / Claude Code logins, see [Authentication](mcp/authentication.md#oauth-21-for-hosted-clients-claudeai-chatgpt-claude-code)) |
+| `GOSIDIAN_OAUTH_ISSUER` | `oauth.issuer` | empty (required when enabled: the public HTTPS origin clients use, e.g. `https://notes.example.com`; the MCP resource is `<issuer>/mcp`) |
+| `GOSIDIAN_OAUTH_ACCESS_TTL` | `oauth.access_ttl` | `1h` (in-memory access tokens) |
+| `GOSIDIAN_OAUTH_REFRESH_TTL` | `oauth.refresh_ttl` | `720h` (grant lifetime; refresh tokens rotate on use) |
+| `GOSIDIAN_OAUTH_ALLOWED_REDIRECT_HOSTS` | `oauth.allowed_redirect_hosts` | empty (any HTTPS redirect host; loopback always allowed). `oauth.client_max` (`1000`) and `oauth.client_idle_ttl` (`2160h`) bound the registered clients, config file only |
 | `GOSIDIAN_MCP_DISABLE_DNS_REBINDING_PROTECTION` | `mcp.disable_dns_rebinding_protection` | `false` (both MCP endpoints, `/mcp` and `/mcp/sse`, answer 403 to a request that arrived on a loopback-bound connection with a non-localhost `Host` header; Docker and LAN listeners never trip it — set `true` only for a same-host reverse proxy that forwards over `127.0.0.1` while keeping the public `Host`, or make the proxy send `Host: localhost`) |
 | `GOSIDIAN_INGEST_URL_ALLOWLIST` | `mcp.ingest_url_allowlist` | empty (off; comma-separated absolute `http(s)` URLs the `memory_ingest` `url` source may fetch from — each entry is matched structurally on scheme, host, port and path segment (never as a text prefix, so `https://api.example.com` does not admit `https://api.example.com.evil/`); the allowlist is the SSRF boundary and also gates every redirect hop) |
 | `GOSIDIAN_TRASH_ENABLED` | `trash.enabled` | `false` |

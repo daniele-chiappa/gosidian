@@ -101,6 +101,10 @@ matter for MCP:
   `proxy_set_header Host $host`, either make it send `Host: localhost`
   or set `mcp.disable_dns_rebinding_protection = true`
   (`GOSIDIAN_MCP_DISABLE_DNS_REBINDING_PROTECTION=true`).
+- **OAuth issuer.** With `[oauth]` enabled, `oauth.issuer` must be the
+  public HTTPS origin of this virtual host (`https://notes.example.com`):
+  the discovery documents under `/.well-known/` and `/oauth/*` are served
+  from it, and hosted clients refuse a plain-HTTP authorization server.
 - **Buffering.** gosidian answers `/mcp` and `/mcp/sse` with
   `X-Accel-Buffering: no`, so nginx-style proxies pass the SSE stream
   through even with `proxy_buffering on`. Keep `proxy_read_timeout` at
@@ -121,7 +125,8 @@ Back up the **vault directory** and the **state dir** (`--state-dir` / `GOSIDIAN
 - The SQLite index (`<state-dir>/index.db`) is **safe to drop** — it
   rebuilds from the markdown files at the next start.
 - `<state-dir>/tokens.json`, `spa_tokens.json`, `auth.json`,
-  `gitsync.json`, `projects.json`, `audit.jsonl` and `config.toml` are
+  `oauth_clients.json`, `gitsync.json`, `projects.json`, `audit.jsonl`
+  and `config.toml` are
   the only stateful files outside the vault proper. Include them in
   backups — `auth.json` and `gitsync.json` hold secrets, keep the
   archive private.

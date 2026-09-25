@@ -104,6 +104,16 @@ func (s *Server) MountMCP(handler http.Handler) {
 	s.mux.Handle("/mcp/", handler)
 }
 
+// MountOAuth wires the OAuth authorization-server endpoints (IMP-092) at the
+// exact paths the handler serves: the RFC 8414 / RFC 9728 discovery documents
+// under /.well-known/ and the /oauth/* endpoints. Registered individually so
+// the SPA fallback keeps every other /.well-known/* path.
+func (s *Server) MountOAuth(paths []string, handler http.Handler) {
+	for _, p := range paths {
+		s.mux.Handle(p, handler)
+	}
+}
+
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
 	rw := &statusRecorder{ResponseWriter: w, status: 200}
@@ -270,6 +280,10 @@ func routeLabel(p string) string {
 		return label
 	case strings.HasPrefix(p, "/mcp/"):
 		return "/mcp/*"
+	case strings.HasPrefix(p, "/oauth/"):
+		return "/oauth/*"
+	case strings.HasPrefix(p, "/.well-known/"):
+		return "/.well-known/*"
 	case strings.HasPrefix(p, "/static/"):
 		return "/static/*"
 	case strings.HasPrefix(p, "/vault-files/"):

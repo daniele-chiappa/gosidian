@@ -31,6 +31,28 @@ type Config struct {
 	SelfImprove  SelfImproveConfig  `toml:"self_improve"`
 	Global       GlobalConfig       `toml:"global"`
 	AgentAnchors AgentAnchorsConfig `toml:"agent_anchors"`
+	OAuth        OAuthConfig        `toml:"oauth"`
+}
+
+// OAuthConfig enables the embedded OAuth 2.1 authorization server that lets
+// MCP clients (claude.ai, ChatGPT, Claude Code…) obtain gosidian credentials
+// through a browser consent instead of a pasted bearer token (IMP-092).
+// Off by default. Issuer is the public origin clients reach gosidian at; it
+// must be served over HTTPS for the hosted clients to accept it.
+type OAuthConfig struct {
+	Enabled bool   `toml:"enabled"`
+	Issuer  string `toml:"issuer"` // e.g. https://notes.example.com; required when enabled
+	// AccessTTL bounds the in-memory access tokens (default 1h); RefreshTTL
+	// is the grant lifetime, renewed by refresh-token rotation (default 720h).
+	AccessTTL  time.Duration `toml:"access_ttl"`
+	RefreshTTL time.Duration `toml:"refresh_ttl"`
+	// ClientMax caps dynamically registered clients (default 1000);
+	// ClientIdleTTL lets unused ones be evicted at the cap (default 2160h).
+	ClientMax     int           `toml:"client_max"`
+	ClientIdleTTL time.Duration `toml:"client_idle_ttl"`
+	// AllowedRedirectHosts restricts non-loopback redirect URIs to these
+	// hosts; empty allows any HTTPS host (claude.ai, chatgpt.com, …).
+	AllowedRedirectHosts []string `toml:"allowed_redirect_hosts"`
 }
 
 // SelfImproveConfig enables the agent-sourced self-improvement loop: opted-in
@@ -325,6 +347,35 @@ func (c *Config) ApplyEnv() error {
 	if v := os.Getenv("GOSIDIAN_MCP_DISABLE_DNS_REBINDING_PROTECTION"); v != "" {
 		c.MCP.DisableDNSRebindingProtection = envBool(v)
 	}
+	if v := os.Getenv("GOSIDIAN_OAUTH_ENABLED"); v != "" {
+		c.OAuth.Enabled = envBool(v)
+	}
+	if v := os.Getenv("GOSIDIAN_OAUTH_ISSUER"); v != "" {
+		c.OAuth.Issuer = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("GOSIDIAN_OAUTH_ACCESS_TTL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("GOSIDIAN_OAUTH_ACCESS_TTL: %w", err)
+		}
+		c.OAuth.AccessTTL = d
+	}
+	if v := os.Getenv("GOSIDIAN_OAUTH_REFRESH_TTL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("GOSIDIAN_OAUTH_REFRESH_TTL: %w", err)
+		}
+		c.OAuth.RefreshTTL = d
+	}
+	if v := os.Getenv("GOSIDIAN_OAUTH_ALLOWED_REDIRECT_HOSTS"); v != "" {
+		var hosts []string
+		for _, h := range strings.Split(v, ",") {
+			if h = strings.TrimSpace(h); h != "" {
+				hosts = append(hosts, h)
+			}
+		}
+		c.OAuth.AllowedRedirectHosts = hosts
+	}
 	if v := os.Getenv("GOSIDIAN_INGEST_URL_ALLOWLIST"); v != "" {
 		var prefixes []string
 		for _, p := range strings.Split(v, ",") {
@@ -541,6 +592,18 @@ func (c *Config) applyDefaults() {
 	}
 	if c.MCP.MaxNoteBytes == 0 {
 		c.MCP.MaxNoteBytes = 1 << 20 // 1 MiB
+	}
+	if c.OAuth.AccessTTL == 0 {
+		c.OAuth.AccessTTL = time.Hour
+	}
+	if c.OAuth.RefreshTTL == 0 {
+		c.OAuth.RefreshTTL = 30 * 24 * time.Hour
+	}
+	if c.OAuth.ClientMax == 0 {
+		c.OAuth.ClientMax = 1000
+	}
+	if c.OAuth.ClientIdleTTL == 0 {
+		c.OAuth.ClientIdleTTL = 90 * 24 * time.Hour
 	}
 	if c.Trash.Retention == 0 {
 		c.Trash.Retention = 30 * 24 * time.Hour

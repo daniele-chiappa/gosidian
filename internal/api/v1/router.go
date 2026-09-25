@@ -6,6 +6,7 @@ import (
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/gitsync"
 	"github.com/gosidian/gosidian/internal/index"
+	"github.com/gosidian/gosidian/internal/oauth"
 	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/gosidian/gosidian/internal/projects"
 	"github.com/gosidian/gosidian/internal/server/events"
@@ -30,6 +31,7 @@ type Deps struct {
 	Projects   *projects.Store
 	GitSync    *gitsync.Sync // optional; nil disables /history
 	ConfigPath string        // path to cfg.toml; "" disables /settings PUT
+	OAuth      *oauth.Server // optional; nil disables the consent API (IMP-092)
 }
 
 // Router owns the http.Handler tree under /api/v1/*. A separate type
@@ -109,6 +111,9 @@ func (r *Router) registerAuthed() {
 	r.mux.Handle("/api/v1/totp/enroll", authed(r.handleTOTPEnroll))
 	r.mux.Handle("/api/v1/totp/confirm", authed(r.handleTOTPConfirm))
 	r.mux.Handle("/api/v1/totp/recovery-codes", authed(r.handleTOTPRecoveryCodes))
+	// OAuth consent (IMP-092): the SPA screen reads the pending request and
+	// posts the decision; the OAuth server itself lives outside /api/v1.
+	r.mux.Handle("/api/v1/oauth/requests/", authed(r.handleOAuthRequest))
 
 	r.mux.Handle("/api/v1/notes", authed(r.handleNotes))
 	r.mux.Handle("/api/v1/notes/", authed(r.handleNoteByPath))

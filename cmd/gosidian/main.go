@@ -24,6 +24,7 @@ import (
 	"github.com/gosidian/gosidian/internal/ldap"
 	mcpsrv "github.com/gosidian/gosidian/internal/mcp"
 	"github.com/gosidian/gosidian/internal/metrics"
+	"github.com/gosidian/gosidian/internal/oauth"
 	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/gosidian/gosidian/internal/projects"
 	"github.com/gosidian/gosidian/internal/scaffold"
@@ -443,6 +444,30 @@ func main() {
 	if cfg.MCP.DisableDNSRebindingProtection {
 		log.Printf("mcp: DNS-rebinding protection disabled on /mcp and /mcp/sse (mcp.disable_dns_rebinding_protection)")
 	}
+	// IMP-092: embedded OAuth 2.1 authorization server. Off by default; when
+	// on, MCP clients discover it from the 401 challenge, consent in the SPA
+	// and receive short-lived access tokens that resolve to an auth.Token
+	// grant (visible in /admin/tokens like any other credential).
+	var oauthSrv *oauth.Server
+	if cfg.OAuth.Enabled {
+		oauthSrv, err = oauth.New(oauth.Config{
+			Issuer:               cfg.OAuth.Issuer,
+			AccessTTL:            cfg.OAuth.AccessTTL,
+			RefreshTTL:           cfg.OAuth.RefreshTTL,
+			ClientMax:            cfg.OAuth.ClientMax,
+			ClientIdleTTL:        cfg.OAuth.ClientIdleTTL,
+			ClientsPath:          filepath.Join(hiddenDir, "oauth_clients.json"),
+			AllowedRedirectHosts: cfg.OAuth.AllowedRedirectHosts,
+			ClientIP:             apiv1.ClientIP,
+			Logger:               slog.Default(),
+		}, tokenStore, auditLog)
+		if err != nil {
+			log.Fatalf("oauth: %v", err)
+		}
+		mcpServer.SetAccessTokenResolver(oauthSrv.Resolve)
+		mcpServer.SetOAuthChallenge(oauthSrv.Challenge())
+		log.Printf("oauth: authorization server enabled (issuer %s, resource %s)", oauthSrv.Issuer(), oauthSrv.ResourceURL())
+	}
 
 	// v2.0: REST API router under /api/v1/. Mounted always (purely
 	// additive). The SPA shell on `/` is gated by env var below.
@@ -495,10 +520,14 @@ func main() {
 		Projects:   projectsStore,
 		GitSync:    syncer, // nil-safe; History returns "git sync disabled" when cfg off
 		ConfigPath: cfgPath,
+		OAuth:      oauthSrv, // nil when [oauth] is off: /api/v1/oauth/* answers 404
 	})
 	srv.MountAPIv1(apiRouter)
 	srv.SetVaultFileAuthorizer(apiRouter.VaultFileAuthorizer()) // ADR-022: attachments share the API auth
 	srv.MountMCP(mcpServer.Handler("/mcp"))
+	if oauthSrv != nil {
+		srv.MountOAuth(oauthSrv.Paths(), oauthSrv.Handler())
+	}
 	// v2.0 cutover: the SPA is the only frontend. The legacy
 	// GOSIDIAN_SPA_MODE flag was retired alongside the HTMX
 	// templates and per-page handlers — see docs/migration-v2.md.

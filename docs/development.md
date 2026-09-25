@@ -92,8 +92,14 @@ CI: the `registry` job runs after the tagged image is on GHCR, rewrites
 `mcp-publisher validate`, logs in with GitHub OIDC (no stored secret)
 and publishes. The registry verifies ownership through the
 `io.modelcontextprotocol.server.name` label baked into the image by the
-`Dockerfile`, so an image built without it cannot be listed. To check a
-`server.json` change locally before tagging:
+`Dockerfile`, so an image built without it cannot be listed. Two rules
+the registry enforces only at publish time (`mcp-publisher validate`
+does not run them): an OCI package carries its version **only** in the
+identifier tag — no `version` or `registryBaseUrl` field — and the image
+must already be public on GHCR. A failed publish can be retried for an
+existing tag with the manual `MCP Registry` workflow (`gh workflow run
+registry.yml -f tag=vX.Y.Z`). To check a `server.json` change locally
+before tagging:
 
 ```bash
 curl -fsSL https://github.com/modelcontextprotocol/registry/releases/download/v1.8.1/mcp-publisher_linux_amd64.tar.gz | tar -xz mcp-publisher

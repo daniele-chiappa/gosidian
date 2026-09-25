@@ -351,5 +351,31 @@
     "skip_git_sync_help": "When enabled, this project is not included in auto-commits. It stays in the vault and visible in the web UI.",
     "hidden_from_mcp": "Hide from MCP server",
     "hidden_from_mcp_help": "When enabled, MCP agents do not see this project in lists and receive an error when naming it explicitly."
+  },
+  "oauth": {
+    "title": "Authorize {client}",
+    "subtitle": "This application wants to access your gosidian vault through MCP.",
+    "signed_in_as": "Signed in as {user}",
+    "redirect_to": "After you decide you will be sent back to",
+    "client_id": "Client",
+    "loopback_warning": "This client only registered local (loopback) addresses. Any program on your computer could claim to be it — continue only if you started this login yourself, right now.",
+    "projects": "Projects the application may access",
+    "all_projects": "All projects, including ones created later",
+    "select_all": "Select all",
+    "no_projects": "There is no project you can grant.",
+    "none_selected": "Select at least one project.",
+    "note_count": "{n} notes",
+    "public": "public",
+    "scopes": "Permissions",
+    "scope_read": "Read notes",
+    "scope_write": "Create, edit and delete notes",
+    "write_unavailable": "your role can only grant read access",
+    "expires": "This request expires at {time}.",
+    "approve": "Allow",
+    "deny": "Deny",
+    "working": "Working…",
+    "redirecting": "Sending you back to the application…",
+    "error_missing": "This authorization request is unknown or has expired. Start again from the application.",
+    "error_generic": "Something went wrong. Try again from the application."
   }
 }

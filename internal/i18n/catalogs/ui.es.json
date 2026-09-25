@@ -282,5 +282,31 @@
     "skip_git_sync_help": "When enabled, this project is not included in auto-commits. It stays in the vault and visible in the web UI.",
     "hidden_from_mcp": "Hide from MCP server",
     "hidden_from_mcp_help": "When enabled, MCP agents do not see this project in lists and receive an error when naming it explicitly."
+  },
+  "oauth": {
+    "title": "Autorizar {client}",
+    "subtitle": "Esta aplicación quiere acceder a tu vault de gosidian mediante MCP.",
+    "signed_in_as": "Sesión iniciada como {user}",
+    "redirect_to": "Tras decidir volverás a",
+    "client_id": "Cliente",
+    "loopback_warning": "Este cliente solo registró direcciones locales (loopback). Cualquier programa de tu equipo podría hacerse pasar por él: continúa solo si tú iniciaste este acceso ahora mismo.",
+    "projects": "Proyectos a los que puede acceder la aplicación",
+    "all_projects": "Todos los proyectos, incluidos los creados más adelante",
+    "select_all": "Seleccionar todos",
+    "no_projects": "No hay ningún proyecto que puedas conceder.",
+    "none_selected": "Selecciona al menos un proyecto.",
+    "note_count": "{n} notas",
+    "public": "público",
+    "scopes": "Permisos",
+    "scope_read": "Leer notas",
+    "scope_write": "Crear, editar y eliminar notas",
+    "write_unavailable": "tu rol solo puede conceder lectura",
+    "expires": "Esta solicitud caduca a las {time}.",
+    "approve": "Permitir",
+    "deny": "Denegar",
+    "working": "Un momento…",
+    "redirecting": "Volviendo a la aplicación…",
+    "error_missing": "Esta solicitud de autorización es desconocida o ha caducado. Empieza de nuevo desde la aplicación.",
+    "error_generic": "Algo ha fallado. Inténtalo de nuevo desde la aplicación."
   }
 }

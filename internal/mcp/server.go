@@ -150,6 +150,14 @@ type Server struct {
 	ingestTicketsMu sync.Mutex
 	// ingestTicketTTL overrides the ticket lifetime; <= 0 uses the default.
 	ingestTicketTTL time.Duration
+	// accessResolver maps an OAuth access token (internal/oauth) to the grant
+	// it was issued for; nil when OAuth is off. Consulted only for bearers the
+	// static token store does not know.
+	accessResolver func(plaintext string) (*auth.Token, bool)
+	// oauthChallenge is the WWW-Authenticate value advertised on 401 when the
+	// OAuth authorization server is enabled (carries resource_metadata so
+	// clients can discover it); empty falls back to the plain realm.
+	oauthChallenge string
 	// dnsRebindingOff disables mcp-go's DNS-rebinding guard on both MCP
 	// transports (403 for a request that arrived on a loopback-bound
 	// connection with a Host header that is not a localhost value). The zero
@@ -222,6 +230,29 @@ func (s *Server) SetAgentAnchors(enabled bool) {
 // MCP transports. On by default; see dnsRebindingOff.
 func (s *Server) SetDNSRebindingProtection(enabled bool) {
 	s.dnsRebindingOff = !enabled
+}
+
+// SetAccessTokenResolver installs the OAuth access-token resolver (IMP-092).
+// Bearers that are not static tokens are handed to fn; a hit yields the
+// grant the token was minted for, which then authorizes the call exactly
+// like a static token with the same projects and scopes.
+func (s *Server) SetAccessTokenResolver(fn func(plaintext string) (*auth.Token, bool)) {
+	s.accessResolver = fn
+}
+
+// SetOAuthChallenge sets the WWW-Authenticate value sent on 401 responses
+// from every MCP endpoint (transports and byte endpoints), e.g. the one
+// oauth.Server.Challenge builds with resource_metadata and scope.
+func (s *Server) SetOAuthChallenge(challenge string) {
+	s.oauthChallenge = challenge
+}
+
+// wwwAuthenticate is the 401 challenge shared by every MCP endpoint.
+func (s *Server) wwwAuthenticate() string {
+	if s.oauthChallenge != "" {
+		return s.oauthChallenge
+	}
+	return `Bearer realm="gosidian"`
 }
 
 // publishNoteChange broadcasts a note-level write (create/update/
@@ -539,11 +570,15 @@ func (s *Server) authenticate(r *http.Request) *auth.Token {
 	if raw == "" {
 		return nil
 	}
-	tok, err := s.tokens.Validate(raw)
-	if err != nil {
-		return nil
+	if tok, err := s.tokens.Validate(raw); err == nil {
+		return tok
 	}
-	return tok
+	if s.accessResolver != nil {
+		if tok, ok := s.accessResolver(raw); ok {
+			return tok
+		}
+	}
+	return nil
 }
 
 // requireToken enforces Bearer auth at the HTTP layer before any transport
@@ -551,7 +586,7 @@ func (s *Server) authenticate(r *http.Request) *auth.Token {
 func (s *Server) requireToken(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.authenticate(r) == nil {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="gosidian"`)
+			w.Header().Set("WWW-Authenticate", s.wwwAuthenticate())
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
