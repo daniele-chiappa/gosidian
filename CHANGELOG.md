@@ -8,6 +8,42 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.33.0] — 2026-09-25 — "hooks"
+
+The two things an agent forgets most — reading `hot.md` at the start of
+a session and leaving a trace at the end — no longer depend on
+discipline: a Claude Code hooks package does both over HTTP, and the
+server gained the append endpoint it needs. Pull the image and restart;
+nothing to migrate.
+
+### Added
+- **`POST /mcp/append?path=`** — append-only write to a note for callers
+  that hold a bearer token but no MCP session. It runs the very same
+  pipeline as `memory_append` (per-note lock, `If-Match` → 412,
+  separator-aware merge, size and rate limits → 413/429, index, audit,
+  live events), now shared by both; write scope required, 404 outside
+  the token's projects, 403 without write access on the project, body
+  capped at the note size limit. The bootstrap advertises it as
+  `capabilities.attachments.append_endpoint_hint`.
+- **Claude Code hooks** — [`contrib/claude-code/`](contrib/claude-code/README.md):
+  one script plus a `settings.json.example`. At `SessionStart` it injects
+  the **Current focus** of `<project>/hot.md` into the context (and this
+  session's checkpoint after a resume or a compaction) and reminds the
+  agent to run `memory_bootstrap`; at `PreCompact` and `SessionEnd` it
+  appends a digest built without any LLM — first prompt, turns, tools,
+  files touched, last assistant message — to
+  `<project>/sessions/<date>-<id>.md`; `Stop` and a one-line pointer in
+  `log.md` are opt-in. Tolerant of malformed transcript lines, never
+  blocks Claude Code, ships with a fake-server test harness. Requires
+  bash, curl and jq.
+
+### Changed
+- README, docs index and FAQ roadmap aligned with the access model,
+  teams, restricted accounts, self-service tokens and the hooks; the
+  [agent patterns](docs/mcp/patterns.md), [client setup](docs/mcp/client-setup.md),
+  [tools](docs/mcp/tools.md) and [upload flow](docs/mcp/upload.md) pages
+  document the hooks and the append endpoint.
+
 ## [2.32.0] — 2026-09-25 — "accounts"
 
 New accounts start with nothing but their own project, every account

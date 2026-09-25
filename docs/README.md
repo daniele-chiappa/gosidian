@@ -35,8 +35,10 @@ trial, read the [root README](../README.md) first.
 - [Overview](web-ui/overview.md) — the Vue 3 SPA, the **plancia** window
   manager, deep-link routes, web login
 - [Editor](web-ui/editor.md) — markdown editor, live preview, CodeMirror 6
-- [Authentication & roles](web-ui/authentication.md) — owner/member/guest
-  roles, public/private projects, TOTP two-factor, LDAP / Active Directory
+- [Authentication & roles](web-ui/authentication.md) — Admin/User/Read-only
+  roles, per-project visibility and grants (accounts and teams),
+  restricted accounts and personal projects, self-service MCP tokens,
+  TOTP two-factor, LDAP / Active Directory
 - [Settings](web-ui/settings.md) — theme presets, language selector,
   git sync config
 

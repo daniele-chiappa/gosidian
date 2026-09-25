@@ -125,8 +125,12 @@ type bootstrapAttachCapability struct {
 	UploadEndpointHint string   `json:"upload_endpoint_hint"`
 	// DownloadEndpointHint is the read-side twin (IMP-081): how to get a
 	// note's raw bytes onto the agent's disk without crossing the context.
-	DownloadEndpointHint string   `json:"download_endpoint_hint"`
-	Tools                []string `json:"tools"`
+	DownloadEndpointHint string `json:"download_endpoint_hint"`
+	// AppendEndpointHint is the append-only write twin (IMP-094): how a
+	// script with a bearer but no MCP session (a Claude Code hook) adds to a
+	// note through the same pipeline as memory_append.
+	AppendEndpointHint string   `json:"append_endpoint_hint"`
+	Tools              []string `json:"tools"`
 	// BridgeDir is the server-side staging directory for bridge_filename
 	// sources, when configured. Surfacing it here closes the ADR-018
 	// chicken-and-egg: a co-located agent learns the cheap path up front
@@ -157,6 +161,7 @@ func (s *Server) buildCapabilities() bootstrapCapabilities {
 			Extensions:           exts,
 			UploadEndpointHint:   "to save a file use memory_ingest (routes by extension; sources: bridge_filename, source_path, url, or transfer:\"http\" for a single-use upload ticket). Raw bytes can also be POSTed multipart (field 'file', bearer token) to your MCP base URL plus /upload (the URL you configured, minus any trailing /sse) — bytes travel over HTTP, not the model context",
 			DownloadEndpointHint: "to get a note's full bytes on your disk without context tokens (edit a large .html report locally, then re-ingest it), GET your MCP base URL plus /download?path=<vault path> (the URL you configured, minus any trailing /sse; bearer token, read scope): raw .md/.html body, ETag reusable as if_match on the next write. Attachments are served at /vault-files/<path> with the same bearer",
+			AppendEndpointHint:   "to append to a note from a script that has a bearer but no MCP session (e.g. a Claude Code hook), POST the markdown body to your MCP base URL plus /append?path=<vault path> (bearer token, write scope; optional If-Match header with the ETag from /download): same locks, limits, audit and events as memory_append; a missing note is created",
 			Tools:                []string{"memory_ingest", "memory_upload_attachment", "memory_upload_resource"},
 			BridgeDir:            s.bridgeDir,
 			AllowedUploadRoots:   s.allowedUploadRoots,

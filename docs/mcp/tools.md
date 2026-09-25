@@ -132,7 +132,10 @@ The single-step / pre-uploader split, the equivalent REST endpoint
 [Upload flow](upload.md). The read-side twin — `GET /mcp/download?path=`
 serving a note's raw bytes with the same bearer token, so a large note
 reaches the agent's disk without crossing the model context — is
-documented there too.
+documented there too, as is `POST /mcp/append?path=`, the append-only
+write for scripts that hold a bearer but no MCP session (the Claude Code
+hooks in `contrib/claude-code/`); it runs the same pipeline as
+`memory_append`.
 
 ## Orchestration (agent-to-agent handoffs + change feed)
 

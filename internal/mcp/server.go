@@ -476,7 +476,7 @@ func New(v *vault.Vault, idx *index.Index, tokens *auth.Store) *Server {
 //     memory_wait_changes — so no long-lived stream sits behind a proxy.
 //   - <basePath>/sse      HTTP+SSE, the legacy transport, kept for older
 //     clients; <basePath>/message carries its client→server messages.
-//   - <basePath>/upload, /download, /ingest/<ticket>  byte endpoints.
+//   - <basePath>/upload, /download, /append, /ingest/<ticket>  byte endpoints.
 //
 // basePath is the prefix the transports announce to clients (the SSE
 // handshake ships back the /message URL to POST to; tickets advertise the
@@ -510,6 +510,9 @@ func (s *Server) Handler(basePath string) http.Handler {
 	// large note reaches the agent's disk without crossing the model context
 	// (IMP-081).
 	mux.HandleFunc(basePath+"/download", s.handleHTTPDownload)
+	// Append-only write endpoint for scripts that hold a bearer but no MCP
+	// session (Claude Code hooks, IMP-094); same pipeline as memory_append.
+	mux.HandleFunc(basePath+"/append", s.handleHTTPAppend)
 	// Single-use ticket redemption for memory_ingest transfer:http (ADR-018).
 	// No bearer here: the unguessable ticket id, bound to the minting token,
 	// is the credential.

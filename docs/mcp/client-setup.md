@@ -45,6 +45,11 @@ callable from any conversation. See
 [Agent patterns](patterns.md) for the recommended session opening.
 `claude mcp list` shows the server as `(HTTP) - ✓ Connected`.
 
+Optional: the hooks in [`contrib/claude-code/`](../../contrib/claude-code/README.md)
+inject the project's `hot.md` focus at every session start and append a
+digest of the session to the vault at compaction and at the end — a
+safety net for agents that skip the bootstrap or the closing log.
+
 ## claude.ai / Claude Desktop custom connector (OAuth)
 
 With `[oauth]` enabled (see [Authentication → OAuth 2.1](authentication.md#oauth-21-for-hosted-clients-claudeai-chatgpt-claude-code)),

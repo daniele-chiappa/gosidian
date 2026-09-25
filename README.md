@@ -52,8 +52,9 @@ Other installation paths (source, custom compose, bare-metal):
   Zero lock-in: delete `.gosidian/` and you have a pure Obsidian
   vault.
 - **An MCP server.** 57 typed tools let agents bootstrap a session, ingest files,
-  search, read, write, link, handoff, self-check, audit. Bearer-token
-  authentication with per-project scoping.
+  search, read, write, link, handoff, self-check, audit. Bearer tokens
+  and OAuth grants, each narrowed on every request to what its account
+  may read and write.
 - **A web UI.** A Vue 3 single-page app served from the same binary
   (built with Vite, embedded via `go:embed`). Notes, graph, search and
   config forms open as windows in a tiling "plancia" workspace —
@@ -69,7 +70,9 @@ is a cache — drop it and it rebuilds.
   memory: note-taking, plans, skills, ADRs, handoffs, audit.
 - **Obsidian users** who want a programmable layer on top of a vault
   they already trust.
-- **Teams** with shared vault + per-project scoped tokens per agent.
+- **Teams** sharing one vault: per-project visibility and grants to
+  accounts and teams, restricted new accounts with their own project,
+  self-service tokens per agent that never outrun their owner.
 
 ## Why gosidian instead of X
 
@@ -93,10 +96,10 @@ sits and where it doesn't, as of September 2026:
 
 | If you are looking at… | What those projects do | Where gosidian differs |
 |---|---|---|
-| **Obsidian MCP bridges** — [mcp-obsidian](https://github.com/MarkusPfundstein/mcp-obsidian), [obsidian-local-rest-api](https://github.com/coddingtonbear/obsidian-local-rest-api), wrappers around the Obsidian CLI | Expose a running Obsidian desktop app to agents over MCP. | Headless server: no Obsidian process needed, runs on a box or in a container, multi-user with roles, per-project tokens, audit trail. The vault stays a plain Obsidian vault. |
+| **Obsidian MCP bridges** — [mcp-obsidian](https://github.com/MarkusPfundstein/mcp-obsidian), [obsidian-local-rest-api](https://github.com/coddingtonbear/obsidian-local-rest-api), wrappers around the Obsidian CLI | Expose a running Obsidian desktop app to agents over MCP. | Headless server: no Obsidian process needed, runs on a box or in a container, multi-user with roles, per-project visibility and grants (accounts and teams), tokens narrowed to each account, audit trail. The vault stays a plain Obsidian vault. |
 | **Markdown memory servers** — [basic-memory](https://github.com/basicmachines-co/basic-memory), [mcp-vault](https://github.com/cyt-666/mcp-vault) | Same "files, not a database" idea; usually add hybrid semantic search, a cloud tier or WebDAV sync. | Ships a full web UI, real multi-user, an agent handoff bus and a server-served working method (versioned directives, lint, stale detection). No semantic search by design ([ADR-007](docs/faq.md#why-not-rag-or-vector-search)), no hosted tier. |
 | **Client-side wiki skills** — [obsidian-wiki](https://github.com/Ar9av/obsidian-wiki) and the "LLM Wiki" pattern | Slash-commands the agent runs locally to compile and maintain a wiki. No server, no auth, no UI. | The same pattern implemented server-side and agent-agnostic: one-call scaffold, directives served at bootstrap, handoffs, audit. Complementary: those skills work against a gosidian vault too. |
-| **Agent memory services** — [mem0](https://github.com/mem0ai/mem0), [agentmemory](https://github.com/rohitg00/agentmemory), [mcp-memory-service](https://github.com/doobidoo/mcp-memory-service) | Memory as an opaque store: embeddings, recall benchmarks, auto-capture hooks. | Memory is markdown that humans read in Obsidian or the web UI; no embeddings, no LLM calls in the binary, retrieval by identity and graph. No published recall numbers yet, no auto-capture hooks. |
+| **Agent memory services** — [mem0](https://github.com/mem0ai/mem0), [agentmemory](https://github.com/rohitg00/agentmemory), [mcp-memory-service](https://github.com/doobidoo/mcp-memory-service) | Memory as an opaque store: embeddings, recall benchmarks, auto-capture hooks. | Memory is markdown that humans read in Obsidian or the web UI; no embeddings, no LLM calls in the binary, retrieval by identity and graph. Auto-capture through Claude Code hooks (`contrib/claude-code/`: focus injected at session start, session digests at compaction and end) rather than inside the binary. No published recall numbers yet. |
 | **Note apps with community MCP servers** — [SilverBullet](https://github.com/silverbulletmd/silverbullet), [Trilium](https://github.com/TriliumNext/Trilium), [SiYuan](https://github.com/siyuan-note/siyuan) | Mature editors, mobile apps, sometimes real-time collaboration; MCP added by third-party servers on top of their API. | MCP-first: the server is in the binary, behind the same login, roles and audit as the UI. No mobile app, no real-time collaboration, no WYSIWYG editor. |
 
 Honest gaps, in the order they come up: semantic / hybrid search
@@ -117,19 +120,29 @@ says which of these are planned.
 - MCP server over Streamable HTTP (legacy HTTP+SSE kept) with 57 typed tools
 - Bearer tokens with scopes (`read` / `write`) and per-project
   restriction — including multi-project tokens for orchestrators;
-  cascade-revoke on user disable
+  every token owned by an account is narrowed on each request to what
+  that account may read and write, accounts mint their own (*inherit*
+  follows their access, *custom* pins a subset), cascade-revoke on
+  user disable
 - **Agent orchestration bus**: handoff notes with an atomic
   claim/complete lifecycle, server-stamped identity, and a
   `memory_wait_changes` long-poll change feed — a minimal multi-agent
   task queue where everything stays plain markdown
-- Multi-user web login with **role-based access** (owner / member /
-  guest), per-project public/private visibility, and invite-only signup
-  (24h TTL)
+- Multi-user web login with roles (Admin / User / Read-only) as the
+  ceiling, per-project **visibility** (private / internal / public) for
+  reading and **grants** (read / write / admin) to accounts and
+  **teams** for everything else, delegated to project admins; new
+  accounts start restricted with a personal project of their own;
+  invite-only signup (24h TTL)
 - Optional **TOTP two-factor** (global mode + per-user override) and
   **LDAP / Active Directory** login with guest auto-provisioning
 - Opt-in **OAuth 2.1 authorization server** so claude.ai / Claude Desktop
   custom connectors, ChatGPT connectors and Claude Code's browser login
   get their own tokens through a consent screen — no pasted bearer
+- **Claude Code hooks** ([`contrib/claude-code/`](contrib/claude-code/README.md)):
+  the project's `hot.md` focus injected at every session start, a
+  digest of the session appended to the vault at compaction and at the
+  end — no LLM, over `POST /mcp/append`, never blocking the session
 - Optional git sync (debounced commits, push with token auth)
 - SQLite FTS5 full-text search + ETag optimistic locking
 - First-class `.html` notes, rendered in a sandboxed iframe (off by
@@ -153,7 +166,7 @@ says which of these are planned.
 | Area | Start here |
 |---|---|
 | **Install + configure** | [Getting started](docs/getting-started.md), [Configuration](docs/configuration.md), [Deployment](docs/deployment.md) |
-| **MCP integration** | [Overview](docs/mcp/overview.md), [Tool catalogue](docs/mcp/tools.md), [Authentication](docs/mcp/authentication.md), [Client setup](docs/mcp/client-setup.md), [Agent patterns](docs/mcp/patterns.md) |
+| **MCP integration** | [Overview](docs/mcp/overview.md), [Tool catalogue](docs/mcp/tools.md), [Authentication](docs/mcp/authentication.md), [Client setup](docs/mcp/client-setup.md), [Agent patterns](docs/mcp/patterns.md), [Claude Code hooks](contrib/claude-code/README.md) |
 | **Web UI** | [Overview](docs/web-ui/overview.md), [Editor](docs/web-ui/editor.md), [Authentication & roles](docs/web-ui/authentication.md), [Settings](docs/web-ui/settings.md) |
 | **Vault** | [Format](docs/vault/format.md), [Conventions](docs/vault/conventions.md), [Multi-project](docs/vault/multi-project.md), [Global projects](docs/vault/global-projects.md), [Obsidian compatibility](docs/vault/obsidian-compat.md) |
 | **Internals** | [Architecture](docs/architecture.md), [Development](docs/development.md) |

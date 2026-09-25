@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path"
 	"strings"
@@ -774,21 +775,54 @@ func (s *Server) handleAppend(ctx context.Context, req mcp.CallToolRequest) (*mc
 	if errRes != nil {
 		return errRes, nil
 	}
+	res, aerr := s.appendNote(ctx, tok, rel, addition, req.GetString("if_match", ""))
+	if aerr != nil {
+		return mcp.NewToolResultError(aerr.msg), nil
+	}
+	out := map[string]any{"path": res.Path}
+	if res.ETag != "" {
+		out["etag"] = res.ETag
+	}
+	return mcp.NewToolResultJSON(out)
+}
+
+// appendOutcome is what a successful append reports: the note path, its new
+// ETag and whether the note was created by this append.
+type appendOutcome struct {
+	Path    string
+	ETag    string
+	Created bool
+}
+
+// appendError is an append failure with the HTTP status the byte endpoint
+// answers; the MCP tool uses the message alone.
+type appendError struct {
+	status int
+	msg    string
+}
+
+// appendNote is the one append pipeline behind memory_append and
+// POST /mcp/append (IMP-094, the first slice of IMP-086): per-path lock,
+// optional ETag precondition, separator-aware merge, size and rate limits,
+// write + index, audit, and the note/tree events. Authorization (scope and
+// path) is the caller's job — both surfaces check it before getting here, so
+// a new caller cannot skip a guard by mistake: everything below the auth
+// line lives in one place.
+func (s *Server) appendNote(ctx context.Context, tok *auth.Token, rel, addition, ifMatch string) (appendOutcome, *appendError) {
 	unlock := s.vault.LockPath(rel)
 	defer unlock()
 	var existing []byte
-	ifMatch := req.GetString("if_match", "")
 	if note, err := s.vault.Load(rel); err == nil {
 		existing = note.Content
 		if errRes := checkIfMatch(note, ifMatch); errRes != nil {
-			return errRes, nil
+			return appendOutcome{}, &appendError{http.StatusPreconditionFailed, toolErrorText(errRes)}
 		}
 	} else if !errors.Is(err, os.ErrNotExist) && !strings.Contains(err.Error(), "no such file") {
-		return mcp.NewToolResultErrorFromErr("load failed", err), nil
+		return appendOutcome{}, &appendError{http.StatusInternalServerError, "load failed: " + err.Error()}
 	} else if ifMatch != "" {
 		// Client provided if_match but the note doesn't exist — that's a
 		// mismatch too (they thought it was there).
-		return mcp.NewToolResultErrorf("etag mismatch: note %q does not exist", rel), nil
+		return appendOutcome{}, &appendError{http.StatusPreconditionFailed, fmt.Sprintf("etag mismatch: note %q does not exist", rel)}
 	}
 	var merged []byte
 	if len(existing) == 0 {
@@ -804,27 +838,40 @@ func (s *Server) handleAppend(ctx context.Context, req mcp.CallToolRequest) (*mc
 		}
 		merged = []byte(string(existing) + sep + addition)
 	}
-	if errRes := s.checkWriteLimits(tok, len(merged)); errRes != nil {
-		return errRes, nil
+	if msg := s.writeLimitViolation(tok, len(merged)); msg != "" {
+		status := http.StatusRequestEntityTooLarge
+		if strings.Contains(msg, "rate limit") {
+			status = http.StatusTooManyRequests
+		}
+		return appendOutcome{}, &appendError{status, msg}
 	}
 	if err := s.writeAndIndex(rel, merged); err != nil {
-		return mcp.NewToolResultErrorFromErr("write failed", err), nil
+		return appendOutcome{}, &appendError{http.StatusInternalServerError, "write failed: " + err.Error()}
 	}
 	s.auditWrite(ctx, audit.ActionAppend, rel, "", int64(len(merged)))
-	out := map[string]any{"path": rel}
-	freshETag := ""
+	res := appendOutcome{Path: rel, Created: len(existing) == 0}
 	if fresh, err := s.vault.Load(rel); err == nil {
-		freshETag = fresh.ETag()
-		out["etag"] = freshETag
+		res.ETag = fresh.ETag()
 	}
 	// An append onto a missing note is a create for subscribers too: the
 	// tree changes and per-note listeners have no record to update.
 	action := "update"
-	if len(existing) == 0 {
+	if res.Created {
 		action = "create"
 	}
-	s.publishNoteChange(action, rel, freshETag, len(existing) == 0)
-	return mcp.NewToolResultJSON(out)
+	s.publishNoteChange(action, rel, res.ETag, res.Created)
+	return res, nil
+}
+
+// toolErrorText flattens a tool error result to its message.
+func toolErrorText(r *mcp.CallToolResult) string {
+	var sb strings.Builder
+	for _, c := range r.Content {
+		if tc, ok := c.(mcp.TextContent); ok {
+			sb.WriteString(tc.Text)
+		}
+	}
+	return sb.String()
 }
 
 func (s *Server) handleEdit(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

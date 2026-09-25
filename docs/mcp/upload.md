@@ -70,6 +70,7 @@ The dedicated tools remain for explicit workflows (and for the web UI):
 | **MCP `memory_upload_resource`** | Two-step stage-then-attach: upload first, decide note placement later. |
 | REST `/api/v1/upload` | Web-UI editor path (drag-and-drop). Authenticated by a **SPA** token (from login), not the MCP token. |
 | **HTTP download (`/download`)** | The read-side twin: `GET` the raw bytes of a **note** with the same MCP bearer token, onto your disk, without crossing the model context. See [below](#http-download-endpoint-notes). |
+| **HTTP append (`/append`)** | Append-only write to a **note** with the same bearer, for scripts without an MCP session (Claude Code hooks). Same pipeline as `memory_append`. See [below](#http-append-endpoint-notes). |
 
 ## HTTP upload endpoint
 
@@ -155,6 +156,29 @@ curl -sf -F "file=@report.html" "https://host/mcp/ingest/<ticket>"
 - `memory_bootstrap` advertises it in
   `capabilities.attachments.download_endpoint_hint`, and a truncated
   `memory_get` points here in its `hint`.
+
+## HTTP append endpoint (notes)
+
+The write-side twin of `/download` for callers that hold a bearer token
+but no MCP session — the Claude Code hooks in
+[`contrib/claude-code/`](../../contrib/claude-code/README.md) use it to
+leave a session digest in the vault. **The path is your MCP base URL
+plus `/append`**; the body is the markdown to append, the `path` query
+parameter names the note (created if missing, `.md` or `.html`).
+
+```bash
+# $APPEND = your MCP base URL + /append
+curl -sS -X POST "$APPEND?path=Work/log.md"   -H "Authorization: Bearer $GOSIDIAN_TOKEN"   -H "Content-Type: text/markdown"   -H 'If-Match: "<ETag from /download, optional>"'   --data-binary @entry.md
+# → {"path":"Work/log.md","etag":"<new stamp>","created":false}
+```
+
+Rules, identical to `memory_append` because both run the same
+pipeline: the token needs the **write** scope and write access to the
+project (404 outside the token's projects, 403 with read-only access);
+an `If-Match` that no longer matches answers **412**; the merged note
+must stay under the size limit (**413**) and the per-token mutation
+rate (**429**); the write is indexed, audited (`append`) and announced
+on the live event stream; a blank body is refused (400).
 
 ## REST `/api/upload`
 

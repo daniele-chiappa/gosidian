@@ -105,13 +105,16 @@ Docker Compose + reverse proxy recipe. Backup the vault + the
 
 ## What's the roadmap?
 
-The short list as of v2.6.0:
+The short list as of v2.33.0:
 
 - **v2.x** — incremental SPA polish, more localisation, theme
-  refinements, and features requested by adopters (file an issue)
-- **Deferred** — Semantic search (ADR-007), multi-tenant mode,
-  real-time collaborative editing, the whole-vault zip download
-  parked during the v2.0 cutover (see [migration guide](migration-v2.md))
+  refinements, and features requested by adopters (file an issue);
+  candidates on the table: a published retrieval benchmark, a WebDAV
+  endpoint for Obsidian mobile, hooks for other agent CLIs
+- **Deferred** — Semantic search (ADR-007, an opt-in rerank spike is
+  the planned first step), multi-tenant / hosted mode, real-time
+  collaborative editing, the whole-vault zip download parked during
+  the v2.0 cutover (see [migration guide](migration-v2.md))
 
 Reopening the semantic search question depends on usage evidence, not
 dates. See ADR-007 triggers.
