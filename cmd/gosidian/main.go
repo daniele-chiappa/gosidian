@@ -291,6 +291,31 @@ func main() {
 	}
 
 	v := vault.New(absVault)
+	// One-time conversion of projects.json to the visibility + grants model
+	// (v2.30, ADR-026). Accounts that could read and write everywhere keep
+	// that access on the existing projects through explicit write grants.
+	{
+		var names []string
+		if projs, err := v.Projects(); err == nil {
+			for _, p := range projs {
+				names = append(names, p.Name)
+			}
+		}
+		var seed []string
+		for _, u := range webauthStore.ListUsers() {
+			if u.Enabled() && u.Role == webauth.RoleMember {
+				seed = append(seed, u.ID)
+			}
+		}
+		rep, err := projectsStore.MigrateAccessModel(names, seed)
+		if err != nil {
+			log.Fatalf("projects: access model migration: %v", err)
+		}
+		if rep.Applied {
+			log.Printf("projects: access model migrated (%d projects, %d write grants seeded, legacy members mode=%v, default visibility for new projects=%s)",
+				rep.Projects, rep.GrantsSeeded, rep.LegacyMembersMode, rep.DefaultVisibility)
+		}
+	}
 	if cfg.Vault.CacheSize != 128 {
 		v.SetCacheSize(cfg.Vault.CacheSize)
 		log.Printf("vault cache size set to %d", cfg.Vault.CacheSize)

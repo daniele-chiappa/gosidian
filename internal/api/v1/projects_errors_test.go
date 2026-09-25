@@ -24,9 +24,6 @@ func breakProjectsStore(t *testing.T, f *notesFixture) {
 // hear about it instead of getting 201 and an empty project list (BUG-051).
 func TestCreateProject_MembershipFailureSurfaces(t *testing.T) {
 	f := newNotesFixture(t)
-	if err := f.projects.SetMemberScope(projects.MemberScopeMembers); err != nil {
-		t.Fatal(err)
-	}
 	_, bearer := f.memberUser(t, "creator")
 	breakProjectsStore(t, f)
 	rec := f.request(http.MethodPost, "/api/v1/projects", `{"name":"fresh"}`, map[string]string{"Authorization": "Bearer " + bearer})

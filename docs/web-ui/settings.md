@@ -86,3 +86,13 @@ factor — live in **Admin → Users**. Full policy semantics, including how
 `off` acts as a lockout-proof master switch and how to recover a lost
 authenticator, are in
 [Authentication & roles](authentication.md#two-factor-authentication-totp).
+
+## Project access
+
+**Default visibility for new projects** (owner-only) — `private`,
+`internal` or `public`. It applies to projects created from now on (from
+the web UI, the API or MCP) and to folders that appear on disk without
+settings; each existing project keeps its own visibility, managed from
+**Projects**. Fresh installations default to private, upgraded ones to
+internal. See [Authentication & roles](authentication.md#project-access-visibility-and-grants)
+for how visibility and grants combine.

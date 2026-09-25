@@ -1,12 +1,16 @@
-// Package projects persists per-project flags (skip git sync, hidden from
-// MCP, public/private visibility) in <vault>/.gosidian/projects.json. The store is concurrent-safe and
-// reloads transparently when the underlying file's mtime changes, so flags
-// written from the CLI or another process become effective without a
-// restart (mirrors the pattern of internal/auth.Store).
+// Package projects persists per-project settings — visibility, the per-user
+// access grants, skip git sync, hidden from MCP, opt-in features — in
+// <state-dir>/projects.json. The store is concurrent-safe and reloads
+// transparently when the underlying file's mtime changes, so edits from the
+// CLI or another process become effective without a restart (mirrors the
+// pattern of internal/auth.Store).
 //
-// Default behaviour: a project without an entry yields zero-value Flags
-// (false/false), preserving the current "everything in, everything visible"
-// invariant for projects that pre-existed this feature.
+// Access model (v2.30, IMP-101 / ADR-026): a project's visibility says who
+// may READ it — public (every signed-in account, guests included), internal
+// (every non-guest account) or private (only accounts holding a grant). WRITE
+// and ADMIN always come from a grant, never from visibility; the account's
+// role is the ceiling (guests never write, the owner is always admin). A
+// project without an entry takes the store's default visibility.
 package projects
 
 import (
@@ -21,14 +25,30 @@ import (
 	"time"
 )
 
+// Visibility values. See the package doc for what each one grants.
+const (
+	VisibilityPublic   = "public"
+	VisibilityInternal = "internal"
+	VisibilityPrivate  = "private"
+)
+
+// ValidVisibility reports whether s is an accepted visibility value.
+func ValidVisibility(s string) bool {
+	return s == VisibilityPublic || s == VisibilityInternal || s == VisibilityPrivate
+}
+
 // Flags are the configurable per-project knobs. JSON keys use snake_case
 // for human-edited file ergonomics.
 type Flags struct {
 	SkipGitSync   bool `json:"skip_git_sync,omitempty"`
 	HiddenFromMCP bool `json:"hidden_from_mcp,omitempty"`
-	// Public marks a project as visible to guest-role users (read-only).
-	// Default false = private (only owner/member). "Public" here means visible
-	// to all authenticated users including guests — not anonymous/world-readable.
+	// Visibility is who may read the project: public | internal | private.
+	// Empty means "not set": Store.Visibility resolves it from the legacy
+	// Public flag, then from the store default.
+	Visibility string `json:"visibility,omitempty"`
+	// Public is the pre-v2.30 visibility flag (true = readable by guests).
+	// Read by the one-time migration and by Store.Visibility as a fallback,
+	// never written any more; the API still accepts it as an alias.
 	Public bool `json:"public,omitempty"`
 	// UseGlobals opts the project into the shared "global" projects: when set,
 	// the project's session bootstrap merges in the global skills/agents
@@ -53,55 +73,77 @@ type Entry struct {
 	Flags
 }
 
-// Permission levels for a project membership. Stored verbatim in
-// projects.json; the authz layer maps them to access/write decisions.
+// Grant levels, in increasing order. Stored verbatim in projects.json; the
+// authz layer maps them onto its ordered Level type.
+//   - read:  may read the project even when its visibility would not allow it
+//   - write: may also create, edit and delete notes and attachments
+//   - admin: may also change the project's settings (visibility, flags,
+//     rename, delete) and, from phase 2, manage its grants
 const (
 	LevelRead  = "read"
 	LevelWrite = "write"
+	LevelAdmin = "admin"
 )
 
-// ProjectMember grants a specific user access to a (private) project at a
-// permission level. The role is still the ceiling: a guest with a "write"
-// membership stays read-only. Persisted in a separate map from Flags so Flags
-// stays a comparable struct (Set relies on `f == Flags{}`).
-type ProjectMember struct {
-	UserID string `json:"user_id"`
-	Level  string `json:"level"` // read | write
+// ValidLevel reports whether s is an accepted grant level.
+func ValidLevel(s string) bool { return s == LevelRead || s == LevelWrite || s == LevelAdmin }
+
+// LevelRank orders the grant levels (unknown → 0) so callers can compare
+// them without string switches.
+func LevelRank(s string) int {
+	switch s {
+	case LevelRead:
+		return 1
+	case LevelWrite:
+		return 2
+	case LevelAdmin:
+		return 3
+	}
+	return 0
 }
 
-// Member-scope modes (global). MemberScopeAll is the legacy default: owner and
-// member see every project. MemberScopeMembers gates private projects behind
-// explicit per-project membership — members and guests then see only the
-// projects they belong to, plus public ones.
-const (
-	MemberScopeAll     = "all"
-	MemberScopeMembers = "members"
-)
+// ProjectMember is a per-user grant on a project. The account's role stays
+// the ceiling: a guest with a write grant is still read-only. Persisted in a
+// separate map from Flags so Flags stays a comparable struct (Set relies on
+// `f == Flags{}`). The JSON key is still "members" for file compatibility.
+type ProjectMember struct {
+	UserID string `json:"user_id"`
+	Level  string `json:"level"` // read | write | admin
+}
 
-// ValidLevel reports whether s is an accepted membership level.
-func ValidLevel(s string) bool { return s == LevelRead || s == LevelWrite }
+// MemberScopeMembers is the pre-v2.30 global switch value that gated private
+// projects behind memberships. Only read by MigrateAccessModel.
+const MemberScopeMembers = "members"
 
-// Store is a concurrent-safe per-project flags store backed by a JSON file.
-// Like auth.Store, it re-reads the file when its mtime changes so out-of-band
-// edits become effective without a restart.
+// accessModelVersion marks a projects.json already migrated to the
+// visibility + grants model. Bump it only with a new migration.
+const accessModelVersion = 2
+
+// Store is a concurrent-safe per-project settings store backed by a JSON
+// file. Like auth.Store, it re-reads the file when its mtime changes so
+// out-of-band edits become effective without a restart.
 type Store struct {
-	path        string
-	mu          sync.RWMutex
-	data        map[string]Flags
-	members     map[string][]ProjectMember // project -> members (per-project ACL)
-	memberScope string                     // "" / all (legacy) | members
-	mtime       time.Time
+	path              string
+	mu                sync.RWMutex
+	data              map[string]Flags
+	members           map[string][]ProjectMember // project -> grants
+	memberScope       string                     // legacy switch, consumed by the migration
+	defaultVisibility string                     // visibility of projects without an entry; "" = private
+	accessModel       int                        // 0 = pre-v2.30 file, accessModelVersion = migrated
+	mtime             time.Time
 }
 
 type storeFile struct {
-	Projects    map[string]Flags           `json:"projects"`
-	Members     map[string][]ProjectMember `json:"members,omitempty"`
-	MemberScope string                     `json:"member_scope,omitempty"`
+	Projects          map[string]Flags           `json:"projects"`
+	Members           map[string][]ProjectMember `json:"members,omitempty"`
+	MemberScope       string                     `json:"member_scope,omitempty"`
+	DefaultVisibility string                     `json:"default_visibility,omitempty"`
+	AccessModel       int                        `json:"access_model,omitempty"`
 }
 
 // Open loads the store from the given file path. A missing file is not an
 // error — it returns an empty store, and the file is created lazily on the
-// first Set/Delete/Rename.
+// first write.
 func Open(path string) (*Store, error) {
 	s := &Store{path: path, data: map[string]Flags{}}
 	if err := s.load(); err != nil {
@@ -113,16 +155,23 @@ func Open(path string) (*Store, error) {
 // Path returns the on-disk path the store reads/writes.
 func (s *Store) Path() string { return s.path }
 
+// reset returns the in-memory snapshot to the empty state. Caller holds s.mu.
+func (s *Store) reset() {
+	s.data = map[string]Flags{}
+	s.members = map[string][]ProjectMember{}
+	s.memberScope = ""
+	s.defaultVisibility = ""
+	s.accessModel = 0
+	s.mtime = time.Time{}
+}
+
 // load replaces the in-memory snapshot with what's on disk. Caller must hold
 // s.mu in write mode or be in an initialization context.
 func (s *Store) load() error {
 	data, err := os.ReadFile(s.path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			s.data = map[string]Flags{}
-			s.members = map[string][]ProjectMember{}
-			s.memberScope = ""
-			s.mtime = time.Time{}
+			s.reset()
 			return nil
 		}
 		return err
@@ -142,6 +191,8 @@ func (s *Store) load() error {
 	s.data = sf.Projects
 	s.members = sf.Members
 	s.memberScope = sf.MemberScope
+	s.defaultVisibility = sf.DefaultVisibility
+	s.accessModel = sf.AccessModel
 	if st, err := os.Stat(s.path); err == nil {
 		s.mtime = st.ModTime()
 	}
@@ -154,11 +205,8 @@ func (s *Store) reloadIfStale() {
 	st, err := os.Stat(s.path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			if !s.mtime.IsZero() || len(s.data) > 0 || len(s.members) > 0 || s.memberScope != "" {
-				s.data = map[string]Flags{}
-				s.members = map[string][]ProjectMember{}
-				s.memberScope = ""
-				s.mtime = time.Time{}
+			if !s.mtime.IsZero() || len(s.data) > 0 || len(s.members) > 0 || s.memberScope != "" || s.defaultVisibility != "" || s.accessModel != 0 {
+				s.reset()
 			}
 		}
 		return
@@ -175,7 +223,13 @@ func (s *Store) save() error {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(storeFile{Projects: s.data, Members: s.members, MemberScope: s.memberScope}, "", "  ")
+	data, err := json.MarshalIndent(storeFile{
+		Projects:          s.data,
+		Members:           s.members,
+		MemberScope:       s.memberScope,
+		DefaultVisibility: s.defaultVisibility,
+		AccessModel:       s.accessModel,
+	}, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -201,11 +255,14 @@ func (s *Store) Get(name string) Flags {
 	return s.data[name]
 }
 
-// Set persists the flags for a project. If both fields are zero the entry is
+// Set persists the flags for a project. If every field is zero the entry is
 // removed instead, keeping projects.json minimal.
 func (s *Store) Set(name string, f Flags) error {
 	if name == "" || strings.ContainsAny(name, "/\\") {
 		return fmt.Errorf("invalid project name")
+	}
+	if f.Visibility != "" && !ValidVisibility(f.Visibility) {
+		return fmt.Errorf("invalid visibility %q", f.Visibility)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -291,10 +348,65 @@ func (s *Store) SkipNamesForGit() []string {
 	return out
 }
 
-// IsPublic reports whether the project is flagged Public=true (visible to
-// guests). Unknown projects default to private.
+// Visibility resolves who may read the project: the explicit value, else
+// the legacy Public flag, else the store default. Never empty.
+func (s *Store) Visibility(name string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reloadIfStale()
+	return s.visibilityLocked(name)
+}
+
+// visibilityLocked is Visibility for callers already holding s.mu.
+func (s *Store) visibilityLocked(name string) string {
+	f := s.data[name]
+	switch {
+	case f.Visibility != "":
+		return f.Visibility
+	case f.Public:
+		return VisibilityPublic
+	}
+	return s.defaultVisibilityLocked()
+}
+
+// IsPublic reports whether the project is readable by every signed-in
+// account, guests included.
 func (s *Store) IsPublic(name string) bool {
-	return s.Get(name).Public
+	return s.Visibility(name) == VisibilityPublic
+}
+
+// DefaultVisibility is the visibility applied to projects without an entry
+// (folders that appeared on disk, projects created before this store knew
+// them). Private unless the migration or the owner chose otherwise.
+func (s *Store) DefaultVisibility() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reloadIfStale()
+	return s.defaultVisibilityLocked()
+}
+
+func (s *Store) defaultVisibilityLocked() string {
+	if ValidVisibility(s.defaultVisibility) {
+		return s.defaultVisibility
+	}
+	return VisibilityPrivate
+}
+
+// SetDefaultVisibility changes the default for projects without an entry.
+func (s *Store) SetDefaultVisibility(v string) error {
+	if !ValidVisibility(v) {
+		return fmt.Errorf("invalid visibility %q", v)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reloadIfStale()
+	// Private is the zero value: keep the file minimal.
+	if v == VisibilityPrivate {
+		s.defaultVisibility = ""
+	} else {
+		s.defaultVisibility = v
+	}
+	return s.save()
 }
 
 // UsesGlobals reports whether the project opted into the shared global skills/
@@ -316,24 +428,8 @@ func (s *Store) UsesTagVocabulary(name string) bool {
 	return s.Get(name).UseTagVocabulary
 }
 
-// PublicNames returns the set of project names flagged Public=true, sorted.
-// Used by the authz layer to compute the guest-visible project set.
-func (s *Store) PublicNames() []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.reloadIfStale()
-	out := make([]string, 0)
-	for n, f := range s.data {
-		if f.Public {
-			out = append(out, n)
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
-// MemberLevel returns the membership level a user holds on a project, and
-// whether such a membership exists. Used by the authz layer.
+// MemberLevel returns the grant level a user holds on a project, and whether
+// such a grant exists. Used by the authz layer.
 func (s *Store) MemberLevel(project, userID string) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -346,7 +442,7 @@ func (s *Store) MemberLevel(project, userID string) (string, bool) {
 	return "", false
 }
 
-// MembersOf returns a copy of the members of a project, sorted by user id.
+// MembersOf returns a copy of the grants on a project, sorted by user id.
 func (s *Store) MembersOf(project string) []ProjectMember {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -358,8 +454,16 @@ func (s *Store) MembersOf(project string) []ProjectMember {
 	return out
 }
 
-// SetMember adds or updates a user's membership of a project. level must be
-// read or write.
+// MembersCount returns how many accounts hold a grant on the project.
+func (s *Store) MembersCount(project string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reloadIfStale()
+	return len(s.members[project])
+}
+
+// SetMember adds or updates a user's grant on a project. level must be read,
+// write or admin.
 func (s *Store) SetMember(project, userID, level string) error {
 	if project == "" || strings.ContainsAny(project, "/\\") {
 		return fmt.Errorf("invalid project name")
@@ -373,6 +477,12 @@ func (s *Store) SetMember(project, userID, level string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.reloadIfStale()
+	s.setMemberLocked(project, userID, level)
+	return s.save()
+}
+
+// setMemberLocked upserts a grant in memory. Caller holds s.mu and saves.
+func (s *Store) setMemberLocked(project, userID, level string) {
 	if s.members == nil {
 		s.members = map[string][]ProjectMember{}
 	}
@@ -381,14 +491,13 @@ func (s *Store) SetMember(project, userID, level string) error {
 		if list[i].UserID == userID {
 			list[i].Level = level
 			s.members[project] = list
-			return s.save()
+			return
 		}
 	}
 	s.members[project] = append(list, ProjectMember{UserID: userID, Level: level})
-	return s.save()
 }
 
-// RemoveMember drops a user's membership of a project. No-op if absent.
+// RemoveMember drops a user's grant on a project. No-op if absent.
 func (s *Store) RemoveMember(project, userID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -411,8 +520,8 @@ func (s *Store) RemoveMember(project, userID string) error {
 	return s.save()
 }
 
-// RemoveUserEverywhere strips a user from every project ACL. Called when a user
-// is disabled/removed so stale memberships don't linger.
+// RemoveUserEverywhere strips a user from every project's grants. Called when
+// a user is disabled/removed so stale grants don't linger.
 func (s *Store) RemoveUserEverywhere(userID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -439,32 +548,119 @@ func (s *Store) RemoveUserEverywhere(userID string) error {
 	return s.save()
 }
 
-// MemberScope returns the global member-scope mode, defaulting to "all"
-// (legacy: owner/member see every project).
-func (s *Store) MemberScope() string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.reloadIfStale()
-	if s.memberScope == MemberScopeMembers {
-		return MemberScopeMembers
-	}
-	return MemberScopeAll
+// MigrationReport says what MigrateAccessModel did, for the boot log.
+type MigrationReport struct {
+	// Applied is false when the file was already on the current model.
+	Applied bool
+	// LegacyMembersMode is true when the file carried member_scope=members.
+	LegacyMembersMode bool
+	// Projects is the number of entries given an explicit visibility.
+	Projects int
+	// GrantsSeeded is the number of write grants created so accounts that
+	// could write everywhere keep that access on the existing projects.
+	GrantsSeeded int
+	// DefaultVisibility is the default chosen for projects created later.
+	DefaultVisibility string
 }
 
-// SetMemberScope sets the global member-scope mode. Unknown values normalize to
-// "all".
-func (s *Store) SetMemberScope(mode string) error {
-	if mode != MemberScopeMembers {
-		mode = MemberScopeAll
-	}
+// MigrateAccessModel converts a pre-v2.30 file (Public flag + global
+// member_scope + memberships) to the visibility + grants model, once. It is
+// idempotent: a file already on the current model is left untouched.
+//
+// vaultProjects are the project folders on disk (they may have no entry
+// yet); seedUsers are the enabled accounts that were neither owner nor guest
+// — under the legacy default (member_scope=all) they could read and write
+// every project, so each of them receives a write grant on every existing
+// project, which preserves their access exactly. Existing memberships keep
+// their level.
+//
+// Visibility: Public → public; otherwise private under member_scope=members
+// (memberships already gated access) and internal under the legacy default
+// (every member could read). A fresh installation (no file yet, no account
+// besides the owner) gets private everywhere; the default for projects
+// created afterwards is private there and internal on an upgraded one, so
+// upgrading changes nothing for existing accounts except that writing a NEW
+// project now takes a grant.
+func (s *Store) MigrateAccessModel(vaultProjects []string, seedUsers []string) (MigrationReport, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.reloadIfStale()
-	// Store "" for the default to keep projects.json minimal.
-	if mode == MemberScopeAll {
-		s.memberScope = ""
-	} else {
-		s.memberScope = mode
+	if s.accessModel >= accessModelVersion {
+		return MigrationReport{Applied: false, DefaultVisibility: s.defaultVisibilityLocked()}, nil
 	}
-	return s.save()
+	rep := MigrationReport{Applied: true, LegacyMembersMode: s.memberScope == MemberScopeMembers}
+	// A file that never existed and no account besides the owner: nothing to
+	// preserve, so the default-deny model applies from the start.
+	fresh := s.mtime.IsZero() && len(seedUsers) == 0
+
+	names := map[string]bool{}
+	for _, n := range vaultProjects {
+		if n != "" {
+			names[n] = true
+		}
+	}
+	for n := range s.data {
+		names[n] = true
+	}
+	for n := range s.members {
+		names[n] = true
+	}
+	sorted := make([]string, 0, len(names))
+	for n := range names {
+		sorted = append(sorted, n)
+	}
+	sort.Strings(sorted)
+
+	for _, n := range sorted {
+		f := s.data[n]
+		if f.Visibility == "" {
+			switch {
+			case f.Public:
+				f.Visibility = VisibilityPublic
+			case rep.LegacyMembersMode, fresh:
+				f.Visibility = VisibilityPrivate
+			default:
+				f.Visibility = VisibilityInternal
+			}
+		}
+		f.Public = false
+		s.data[n] = f
+		rep.Projects++
+	}
+	if !rep.LegacyMembersMode {
+		for _, u := range seedUsers {
+			if u == "" {
+				continue
+			}
+			for _, n := range sorted {
+				if _, ok := s.memberLevelLocked(n, u); ok {
+					continue
+				}
+				s.setMemberLocked(n, u, LevelWrite)
+				rep.GrantsSeeded++
+			}
+		}
+	}
+	if rep.LegacyMembersMode || fresh {
+		s.defaultVisibility = "" // private: memberships already gated access, or nothing to preserve
+	} else {
+		s.defaultVisibility = VisibilityInternal // upgraded installation: members keep reading new projects
+	}
+	rep.DefaultVisibility = s.defaultVisibilityLocked()
+	s.memberScope = ""
+	s.accessModel = accessModelVersion
+	if err := s.save(); err != nil {
+		return rep, err
+	}
+	return rep, nil
+}
+
+// memberLevelLocked is MemberLevel for callers already holding s.mu.
+func (s *Store) memberLevelLocked(project, userID string) (string, bool) {
+	for _, m := range s.members[project] {
+		if m.UserID == userID {
+			return m.Level, true
+		}
+	}
+	return "", false
 }

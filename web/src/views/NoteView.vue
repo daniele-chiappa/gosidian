@@ -26,7 +26,7 @@ import MediaPreview from '@/components/domain/MediaPreview.vue'
 import TablePreview from '@/components/domain/TablePreview.vue'
 import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
 import { planciaKey } from '@/composables/planciaKey'
-import { useAuthStore } from '@/stores/auth'
+import { useAccessStore } from '@/stores/access'
 import { useTreeStore } from '@/stores/tree'
 import { useWindowsStore, type OpenSpec } from 'plancia'
 
@@ -41,7 +41,7 @@ const props = defineProps<{ path: string; mode?: Mode }>()
 const emit = defineEmits<{ title: [string]; dirty: [boolean]; close: [] }>()
 
 const { t } = useI18n()
-const auth = useAuthStore()
+const access = useAccessStore()
 const recents = useRecentlyViewed()
 const treeStore = useTreeStore()
 const store = useWindowsStore()
@@ -63,7 +63,7 @@ let copiedTimer: ReturnType<typeof setTimeout> | null = null
 
 // Read by default; honour an explicit edit intent (legacy /notes/:path/edit
 // deep-link) only when the user may write.
-const mode = ref<Mode>(props.mode === 'edit' && auth.canWrite ? 'edit' : 'view')
+const mode = ref<Mode>(props.mode === 'edit' && access.canWrite(props.path) ? 'edit' : 'view')
 
 const path = computed(() => props.path)
 // HTML notes (.html) render through the sandboxed iframe (HTMLPreview) instead
@@ -139,7 +139,7 @@ watch(draft, () => {
 watch(dirty, (d) => emit('dirty', d))
 
 function enterEdit() {
-  if (!auth.canWrite) return
+  if (!access.canWrite(props.path)) return
   mode.value = 'edit'
 }
 async function enterView() {
@@ -329,7 +329,7 @@ watch(path, load)
           @click="enterView"
         >View</button>
         <button
-          v-if="auth.canWrite"
+          v-if="access.canWrite(props.path)"
           type="button"
           class="px-2 py-1"
           :class="mode === 'edit' ? 'bg-accent text-accent-fg' : 'hover:bg-surface-hover'"

@@ -6,6 +6,7 @@ import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
 import { useSSE } from '@/composables/useSSE'
 import { useWindowsStore, type OpenSpec } from 'plancia'
 import { useAuthStore } from '@/stores/auth'
+import { useAccessStore } from '@/stores/access'
 import { planciaKey } from '@/composables/planciaKey'
 import TreeNode from '@/components/domain/TreeNode.vue'
 import {
@@ -26,7 +27,8 @@ const treeStore = useTreeStore()
 const recents = useRecentlyViewed()
 const windows = useWindowsStore()
 const auth = useAuthStore()
-const sse = useSSE(['tree'])
+const access = useAccessStore()
+const sse = useSSE(['tree', 'sidebar'])
 
 const root = computed(() => treeStore.byProject[''])
 const loading = computed(() => Boolean(treeStore.loading['']))
@@ -88,10 +90,16 @@ function openRecent(path: string, title: string) {
 
 onMounted(() => {
   void treeStore.load()
+  void access.load()
   sse.on('tree', () => {
     treeStore.invalidate()
     void treeStore.load()
+    // A project may have appeared or gone: refresh the per-project levels
+    // that gate the + buttons and draw the visibility cues.
+    void access.load()
   })
+  // Grants and visibility changes publish on the sidebar topic.
+  sse.on('sidebar', () => void access.load())
 })
 </script>
 

@@ -8,55 +8,70 @@ import (
 	"github.com/gosidian/gosidian/internal/webauth"
 )
 
-func TestAccessConfig_NilStoreIsLegacy(t *testing.T) {
+// No store wired: every project internal, no grants — members read, guests
+// see nothing, only the owner writes.
+func TestAccessConfig_NilStoreIsInternalReadOnly(t *testing.T) {
 	var s *Store
 	cfg := s.AccessConfig()
 	member := authz.Principal{UserID: "u", Role: webauth.RoleMember}
 	guest := authz.Principal{UserID: "g", Role: webauth.RoleGuest}
-	if !member.CanAccessProject("p", cfg) {
-		t.Error("nil store: member must keep legacy access to every project")
+	owner := authz.Principal{UserID: "o", Role: webauth.RoleOwner}
+	if !member.CanAccessProject("p", cfg) || member.CanWriteProject("p", cfg) {
+		t.Error("nil store: member reads every project, writes none")
 	}
 	if guest.CanAccessProject("p", cfg) {
 		t.Error("nil store: nothing is public, guest must see nothing")
 	}
+	if !owner.CanAdminProject("p", cfg) {
+		t.Error("nil store: owner keeps full access")
+	}
 }
 
+// The closures read the store on every call: visibility and grants changed
+// after the config was built are honoured.
 func TestAccessConfig_ReflectsStoreLive(t *testing.T) {
 	s, err := Open(filepath.Join(t.TempDir(), "projects.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	member := authz.Principal{UserID: "u", Role: webauth.RoleMember}
+	guest := authz.Principal{UserID: "g", Role: webauth.RoleGuest}
 	cfg := s.AccessConfig()
 
-	if !member.CanAccessProject("p", cfg) || !member.CanWriteProject("p", cfg) {
-		t.Fatal("legacy mode: member reads and writes everywhere")
-	}
-	if err := s.SetMemberScope(MemberScopeMembers); err != nil {
-		t.Fatal(err)
-	}
-	// Enforced is sampled when the config is built (callers build one per
-	// request); the membership closures read the store on every call.
-	cfg = s.AccessConfig()
 	if member.CanAccessProject("p", cfg) {
-		t.Fatal("enforced without membership: no access")
+		t.Fatal("private by default: no access without a grant")
 	}
-	if err := s.SetMember("p", "u", LevelRead); err != nil {
+	if err := s.Set("p", Flags{Visibility: VisibilityInternal}); err != nil {
 		t.Fatal(err)
 	}
 	if !member.CanAccessProject("p", cfg) || member.CanWriteProject("p", cfg) {
-		t.Fatal("read membership: read yes, write no")
+		t.Fatal("internal: member reads, does not write")
+	}
+	if guest.CanAccessProject("p", cfg) {
+		t.Fatal("internal: guest does not read")
 	}
 	if err := s.SetMember("p", "u", LevelWrite); err != nil {
 		t.Fatal(err)
 	}
-	if !member.CanWriteProject("p", cfg) {
-		t.Fatal("write membership: write yes")
+	if !member.CanWriteProject("p", cfg) || member.CanAdminProject("p", cfg) {
+		t.Fatal("write grant: write yes, admin no")
 	}
-	if err := s.Set("pub", Flags{Public: true}); err != nil {
+	if err := s.SetMember("p", "u", LevelAdmin); err != nil {
 		t.Fatal(err)
 	}
-	if !member.CanAccessProject("pub", cfg) || member.CanWriteProject("pub", cfg) {
-		t.Fatal("public project: readable without membership, not writable")
+	if !member.CanAdminProject("p", cfg) {
+		t.Fatal("admin grant: admin yes")
+	}
+	if err := s.Set("pub", Flags{Visibility: VisibilityPublic}); err != nil {
+		t.Fatal(err)
+	}
+	if !guest.CanAccessProject("pub", cfg) || guest.CanWriteProject("pub", cfg) {
+		t.Fatal("public project: guest reads, never writes")
+	}
+	if err := s.SetMember("pub", "g", LevelWrite); err != nil {
+		t.Fatal(err)
+	}
+	if guest.CanWriteProject("pub", cfg) {
+		t.Fatal("guest role is the ceiling: a write grant still reads only")
 	}
 }

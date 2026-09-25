@@ -398,8 +398,9 @@ func (s *Server) handleListNotes(ctx context.Context, req mcp.CallToolRequest) (
 }
 
 type projectEntry struct {
-	Name      string `json:"name"`
-	NoteCount int    `json:"noteCount"`
+	Name       string `json:"name"`
+	NoteCount  int    `json:"noteCount"`
+	Visibility string `json:"visibility,omitempty"` // public | internal | private
 }
 
 func (s *Server) handleListProjects(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -419,7 +420,7 @@ func (s *Server) handleListProjects(ctx context.Context, req mcp.CallToolRequest
 		if s.projectHidden(p.Name) {
 			continue
 		}
-		out = append(out, projectEntry{Name: p.Name, NoteCount: p.NoteCount})
+		out = append(out, projectEntry{Name: p.Name, NoteCount: p.NoteCount, Visibility: s.projectVisibility(p.Name)})
 	}
 	return mcp.NewToolResultJSON(map[string]any{"projects": out})
 }
@@ -955,8 +956,19 @@ func (s *Server) handleCreateProject(ctx context.Context, req mcp.CallToolReques
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("create project failed", err), nil
 	}
+	// Pin the visibility at creation so a later change of the store default
+	// does not retroactively reclassify this project.
+	if s.projects != nil {
+		f := s.projects.Get(clean)
+		if f.Visibility == "" {
+			f.Visibility = s.projects.DefaultVisibility()
+			if err := s.projects.Set(clean, f); err != nil {
+				return mcp.NewToolResultErrorFromErr("project created, but its visibility could not be saved", err), nil
+			}
+		}
+	}
 	s.auditWrite(ctx, audit.ActionCreateProject, clean, "", 0)
-	return mcp.NewToolResultJSON(map[string]any{"name": clean})
+	return mcp.NewToolResultJSON(map[string]any{"name": clean, "visibility": s.projectVisibility(clean)})
 }
 
 func (s *Server) handleRenameNote(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

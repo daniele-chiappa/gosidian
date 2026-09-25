@@ -12,42 +12,93 @@ Directory login.
 
 ## Roles
 
-Three roles, in decreasing privilege: **owner → member → guest**.
+Three roles, in decreasing privilege: **owner → member → guest**. The
+role is a **ceiling**: it says what an account may ever do. What it may
+do on a *given project* comes from the project's visibility and from the
+grants it holds (next section).
 
 | Capability | owner | member | guest |
 |---|:--:|:--:|:--:|
-| Read notes (visible projects) | ✅ | ✅ | ✅ |
-| Create / edit / delete notes | ✅ | ✅ | — |
-| Create / rename / delete projects | ✅ | ✅ | — |
-| See **private** projects | ✅ | ✅ | — |
-| See **public** projects | ✅ | ✅ | ✅ |
-| Create MCP tokens | ✅ | ✅ | — |
+| Read notes of projects visible to the account | ✅ | ✅ | ✅ |
+| Create / edit / delete notes (with a write grant) | ✅ | ✅ | — |
+| Create projects (becoming their admin) | ✅ | ✅ | — |
+| Change a project's settings, rename, delete (with an admin grant) | ✅ | ✅ | — |
+| Make a project **public** | ✅ | — | — |
+| Manage grants (Projects → Members) | ✅ | — | — |
+| Create static MCP tokens | ✅ | — | — |
+| Connect MCP clients through OAuth | ✅ | ✅ | ✅ (read) |
 | Manage users, invites, roles | ✅ | — | — |
 | Edit server settings (`/settings`) | ✅ | — | — |
 
 Enforcement is centralized and **fail-closed**: an unrecognized role is
-treated as guest (public-read only). A *read* that the role may not
+treated as guest (public-read only). A *read* that the account may not
 perform returns **404** (the resource's existence is hidden); a *write*
-it may not perform returns **403**.
+it may not perform returns **403**. The same predicate gates the REST
+API, the live event stream and every MCP token (see
+[MCP authentication](../mcp/authentication.md)).
 
-Guests can never hold MCP tokens — token creation is owner/member-only,
-and demoting a user to guest cascade-revokes any tokens they held. So a
-guest account is structurally read-only across both the web UI and MCP.
+## Project access: visibility and grants
 
-## Project visibility: public vs private
+Who can do what on a project is the combination of two things:
 
-Every project carries a **`public`** flag (default **private**). Owners
-toggle it from **Projects** (or `PUT /api/v1/projects/{name}`):
+- **Visibility** says who may **read** it. Every project has one:
+  - **private** — only accounts holding a grant (and the owner).
+  - **internal** — every member account.
+  - **public** — every signed-in account, guests included. This is *not*
+    anonymous access: visitors still hit the login wall (unless the
+    server runs in open mode).
+- **Grants** give a specific account a level on the project, whatever
+  its visibility:
+  - **read** — may open it even when the visibility would not allow it;
+  - **write** — may also create, edit and delete notes and attachments;
+  - **admin** — may also change its settings (visibility, flags), rename
+    and delete it.
 
-- **private** — visible only to owners and members.
-- **public** — additionally visible to **guests**, read-only.
+The effective level is the higher of the two, capped by the role: a guest
+never exceeds read, the owner is admin everywhere. **Writing always takes
+a grant** — visibility alone never lets anyone edit.
 
-"Public" means *visible to any signed-in user including guests* — it is
-**not** anonymous access. Anonymous visitors still hit the login wall.
+Where to manage it in the web UI:
 
-This is what lets you hand a contractor or a read-only stakeholder a
-guest account: they see exactly the projects you flag public, and
-nothing else — in the sidebar, search, tags, and the graph view alike.
+- **Projects** shows each project with its visibility (lock = private,
+  globe = public), your own level, and how many accounts hold a grant.
+  Project admins change the visibility from the row (public is the
+  owner's alone); the owner opens **Members** to add, change or remove
+  grants.
+- The sidebar draws the same lock/globe cue next to project roots, and
+  shows the "new note" button only where you may write.
+- **Admin → Users** shows each account's access at a glance (how many
+  projects it can read and write) and a **View** button listing exactly
+  which projects it sees, at which level and why.
+- **Settings → Project access** sets the **default visibility** for
+  projects created from now on (and for folders that appear on disk
+  without settings). Fresh installations default to private; upgraded
+  ones to internal.
+
+New accounts start with the projects their role and the visibilities
+give them — a member sees internal and public projects, a guest public
+ones — and gain the rest through grants. The account that creates a
+project is its admin.
+
+### Upgrading from 2.29 and earlier
+
+Earlier releases had a `public` flag plus a global *member scope*
+switch: by default every member saw and edited every project, and the
+per-project memberships only applied after flipping the switch. On the
+first start after the upgrade the store is converted once:
+
+- `public` projects stay **public**; the others become **internal** when
+  the switch was off (its default) or **private** when it was on;
+- existing memberships become grants with the same level;
+- when the switch was off, every member account receives a **write
+  grant on every existing project**, so nobody loses access they had.
+  Writing a project created *after* the upgrade takes a grant.
+
+The API keeps `public` as an alias (`true` → public, `false` →
+internal) and adds `visibility`, `access` (the caller's level) and
+`members_count` to the project payloads; `GET /api/v1/me/access` lists
+the caller's effective access and `GET /api/v1/admin/users/{id}/access`
+the same for any account.
 
 ## Invites
 

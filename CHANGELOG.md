@@ -8,6 +8,70 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.30.0] — 2026-09-25 — "project access"
+
+Who may do what on a project is now decided on the project itself, and
+the web UI shows it. Every project has a **visibility** that says who may
+*read* it; per-account **grants** say who may *edit* it or change its
+settings. The global *member scope* switch is gone. Existing
+installations are converted once at the first start and nobody loses
+access they had. Pull the image and restart.
+
+### Added
+- **Visibility per project** — `private` (only accounts holding a grant,
+  plus the owner), `internal` (every member account) or `public` (every
+  signed-in account, guests included). Visibility grants reading only.
+- **Grants at three levels** — `read` opens a project whatever its
+  visibility, `write` also creates, edits and deletes notes and
+  attachments, `admin` also changes the project's settings, renames and
+  deletes it. Writing always takes a grant; the role stays the ceiling
+  (guests read at most, the owner is admin everywhere) and the account
+  that creates a project becomes its admin. Making a project public is
+  the owner's alone.
+- **Web UI cues** — a lock (private) or globe (public) next to project
+  roots in the sidebar and in **Projects**, your own level on every
+  project row, a visibility selector for project admins, a counter of
+  the accounts holding a grant, levels read/write/admin in **Members**
+  with a note on what the visibility already gives, an **Access** column
+  in **Admin → Users** with a **View** button listing which projects an
+  account sees, at which level and why, a `member` badge in the top bar
+  with the account's reach, and the "new note" button only where you may
+  write. **Settings → Project access** holds the default visibility for
+  projects created from now on.
+- **API** — `GET /api/v1/me/access` (the caller's effective access with
+  the reasons) and `GET /api/v1/admin/users/{id}/access` (the same for
+  any account, owner-only); project payloads carry `visibility`, `access`
+  (the caller's level) and `members_count`; `PUT /api/v1/projects/{name}`
+  accepts `visibility`; `GET /api/v1/admin/users` reports how many
+  projects each account can read and write; `default_visibility` in
+  `/api/v1/settings`. `memory_list_projects` reports the visibility and
+  `memory_create_project` pins the default on the new project.
+
+### Changed
+- Changing a project's settings, renaming or deleting it requires the
+  `admin` level on that project (a write grant no longer suffices).
+- The `public` project field stays as an alias (`true` → public, `false`
+  → internal) for older clients; new code reads `visibility`.
+- Docs: [authentication & roles](docs/web-ui/authentication.md) rewritten
+  around visibility and grants, with the upgrade notes;
+  [settings](docs/web-ui/settings.md) and [MCP authentication](docs/mcp/authentication.md)
+  updated.
+
+### Removed
+- The global `member_scope` setting (Settings → Member scope and the
+  `member_scope` field of `/api/v1/settings`). It is read once by the
+  migration below and then dropped from `projects.json`.
+
+### Notes
+- **Upgrade**: at the first start `projects.json` is converted once —
+  `public` projects stay public; the others become internal (or private
+  when member scope was on); memberships become grants with the same
+  level; when member scope was off, every member account receives a
+  write grant on every existing project, so nobody loses access. New
+  projects default to internal on an upgraded installation and to
+  private on a fresh one; writing a project created *after* the upgrade
+  takes a grant. Nothing else to migrate.
+
 ## [2.29.1] — 2026-09-25 — "access scoping"
 
 Security patch. The centralized read predicate that gates every REST

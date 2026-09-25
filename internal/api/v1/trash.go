@@ -38,10 +38,9 @@ func (r *Router) handleTrash(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	princ := principalFromContext(req)
-	enforced := r.memberScopeEnforced()
 	out := make([]trashView, 0, len(entries))
 	for _, e := range entries {
-		if enforced && !r.canSee(princ, e.OriginPath) {
+		if !r.canSee(princ, e.OriginPath) {
 			continue // hide trashed notes from projects the user can't access
 		}
 		out = append(out, trashView{
@@ -103,10 +102,10 @@ func (r *Router) handleTrashItem(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) restoreTrash(w http.ResponseWriter, req *http.Request, id string, user *RequestUser) {
-	// Under member_scope=members, restoring re-creates a note in its origin
-	// project — gate it on write access there. Look the origin up before the
-	// restore mutates anything. See BUG-020 / per-project membership.
-	if r.memberScopeEnforced() {
+	// Restoring re-creates a note in its origin project — gate it on write
+	// access there. Look the origin up before the restore mutates anything.
+	// See BUG-020 / per-project access.
+	{
 		if entries, lerr := r.deps.Trash.List(); lerr == nil {
 			for _, e := range entries {
 				if e.ID == id {
@@ -147,8 +146,8 @@ func (r *Router) restoreTrash(w http.ResponseWriter, req *http.Request, id strin
 
 func (r *Router) purgeTrash(w http.ResponseWriter, req *http.Request, id string, user *RequestUser) {
 	// Permanently deleting a trashed note from a project the user can't write to
-	// would be a cross-project mutation — gate it under enforcement.
-	if r.memberScopeEnforced() {
+	// would be a cross-project mutation — gate it on write access there.
+	{
 		if entries, lerr := r.deps.Trash.List(); lerr == nil {
 			for _, e := range entries {
 				if e.ID == id {

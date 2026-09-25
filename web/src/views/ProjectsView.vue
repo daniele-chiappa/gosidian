@@ -7,10 +7,13 @@ import {
   deleteProject,
   type Project,
 } from '@/api/projects'
+import { VISIBILITY_HELP, VISIBILITY_LABEL, type Visibility } from '@/api/access'
 import { getSettings } from '@/api/settings'
 import { useTreeStore } from '@/stores/tree'
 import { useAuthStore } from '@/stores/auth'
+import { useAccessStore } from '@/stores/access'
 import { useWindowsStore, type OpenSpec } from 'plancia'
+import { Lock, Globe, Users } from 'lucide-vue-next'
 
 const projects = ref<Project[]>([])
 const loading = ref(false)
@@ -18,6 +21,7 @@ const error = ref<string | null>(null)
 const newName = ref('')
 const treeStore = useTreeStore()
 const auth = useAuthStore()
+const access = useAccessStore()
 const store = useWindowsStore()
 const openWindow = inject<(spec: OpenSpec) => string>('openWindow', (s) => store.open(s))
 
@@ -25,6 +29,8 @@ const openWindow = inject<(spec: OpenSpec) => string>('openWindow', (s) => store
 // master switch is on. We surface them so the toggles can flag "no effect yet".
 const anchorsMaster = ref(false)
 const globalsMaster = ref(false)
+
+const VISIBILITIES: Visibility[] = ['private', 'internal', 'public']
 
 /** Explore a project as a graph window (its link neighbourhood). */
 function openProjectGraph(name: string) {
@@ -36,7 +42,7 @@ function openProjectGraph(name: string) {
   })
 }
 
-/** Manage who can access a project (owner-only; effective under member_scope=members). */
+/** Manage who holds a grant on a project (owner-only until phase 2). */
 function openProjectMembers(name: string) {
   openWindow({
     type: 'project-members',
@@ -58,46 +64,37 @@ async function load() {
   }
 }
 
+/** Reload the list and the per-project levels the sidebar and tabs rely on. */
+async function refresh() {
+  await load()
+  void access.load()
+}
+
 async function handleCreate() {
   if (!newName.value.trim()) return
   try {
     await createProject(newName.value.trim())
     newName.value = ''
-    await load()
+    await refresh()
     treeStore.invalidateAll()
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Create failed'
   }
 }
 
-async function toggleHidden(p: Project) {
-  await updateProject(p.name, { hidden_from_mcp: !p.hidden_from_mcp })
-  await load()
+async function apply(p: Project, patch: Parameters<typeof updateProject>[1], label: string) {
+  error.value = null
+  try {
+    await updateProject(p.name, patch)
+    await refresh()
+  } catch (e) {
+    error.value = e instanceof Error ? `${label}: ${e.message}` : `${label} failed`
+  }
 }
 
-async function toggleSkip(p: Project) {
-  await updateProject(p.name, { skip_git_sync: !p.skip_git_sync })
-  await load()
-}
-
-async function togglePublic(p: Project) {
-  await updateProject(p.name, { public: !p.public })
-  await load()
-}
-
-async function toggleGlobals(p: Project) {
-  await updateProject(p.name, { use_globals: !p.use_globals })
-  await load()
-}
-
-async function toggleAnchors(p: Project) {
-  await updateProject(p.name, { use_anchors: !p.use_anchors })
-  await load()
-}
-
-async function toggleTagVocabulary(p: Project) {
-  await updateProject(p.name, { use_tag_vocabulary: !p.use_tag_vocabulary })
-  await load()
+function changeVisibility(p: Project, value: string) {
+  if (!VISIBILITIES.includes(value as Visibility) || value === p.visibility) return
+  void apply(p, { visibility: value as Visibility }, 'Visibility')
 }
 
 function globalsTitle(p: Project): string {
@@ -114,6 +111,12 @@ function anchorsTitle(p: Project): string {
   return p.use_anchors
     ? "Anchors on: this project's vault agents are materialised as local .claude/agents anchors at bootstrap. Click to disable."
     : 'Click to materialise this project’s vault agents as local subagent anchors at bootstrap.'
+}
+
+function membersTitle(p: Project): string {
+  const n = p.members_count
+  const who = n === 1 ? '1 account holds a grant' : `${n} accounts hold a grant`
+  return auth.isOwner ? `${who} — click to manage` : who
 }
 
 /** Master switches decide whether use_anchors/use_globals have any effect.
@@ -133,7 +136,7 @@ async function rename(p: Project) {
   if (!newSlug || newSlug === p.name) return
   try {
     await updateProject(p.name, { new_name: newSlug })
-    await load()
+    await refresh()
     treeStore.invalidateAll()
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Rename failed'
@@ -144,7 +147,7 @@ async function destroy(p: Project) {
   if (!confirm(`Delete project "${p.name}" and ${p.note_count} note(s)?`)) return
   try {
     await deleteProject(p.name)
-    await load()
+    await refresh()
     treeStore.invalidateAll()
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Delete failed'
@@ -158,15 +161,17 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="p-8 max-w-3xl mx-auto">
+  <div class="p-8 max-w-4xl mx-auto">
     <h1 class="text-2xl font-semibold mb-1">Projects</h1>
     <p class="text-sm text-text-muted mb-6">
-      Top-level vault folders. <em>private</em>/<em>public</em> controls guest visibility
-      (public = readable by guest-role users); <em>skip-git</em> excludes from auto-commit;
-      <em>hidden</em> keeps the project invisible to MCP agents;
-      <em>globals</em> merges the shared global skills/agents at bootstrap;
-      <em>anchors</em> materialises vault agents as local subagent files at bootstrap
-      (both need their server master switch on — dimmed when off);
+      Top-level vault folders. <em>Visibility</em> says who can read a project —
+      <em>private</em> (accounts with a grant), <em>internal</em> (every member) or
+      <em>public</em> (every account, guests included); writing and administering
+      always come from a grant (Members). Your own level shows on each row.
+      <em>skip-git</em> excludes from auto-commit; <em>hidden</em> keeps the project
+      invisible to MCP agents; <em>globals</em> merges the shared global skills/agents
+      at bootstrap; <em>anchors</em> materialises vault agents as local subagent files
+      at bootstrap (both need their server master switch on — dimmed when off);
       <em>tag-vocab</em> lets the project extend the lint tag vocabulary from
       memory/conventions.md.
     </p>
@@ -189,43 +194,86 @@ onMounted(() => {
     </form>
 
     <p v-if="loading" class="text-text-muted">Loading…</p>
-    <p v-else-if="error" class="text-danger">{{ error }}</p>
+    <p v-if="error" class="text-danger mb-3">{{ error }}</p>
 
-    <ul v-else class="space-y-2">
+    <ul v-if="!loading" class="space-y-2">
       <li
         v-for="p in projects"
         :key="p.name"
-        class="rounded border border-border bg-surface px-4 py-3 flex items-center gap-3"
+        class="rounded border border-border bg-surface px-4 py-3 flex items-center gap-2 flex-wrap"
       >
+        <!-- Visibility cue + name -->
+        <span
+          class="inline-flex items-center justify-center w-5 shrink-0"
+          :title="VISIBILITY_HELP[p.visibility]"
+        >
+          <Lock v-if="p.visibility === 'private'" class="w-3.5 h-3.5 text-text-muted" aria-label="Private" />
+          <Globe v-else-if="p.visibility === 'public'" class="w-3.5 h-3.5 text-success" aria-label="Public" />
+          <Users v-else class="w-3.5 h-3.5 text-info" aria-label="Internal" />
+        </span>
         <button
           type="button"
-          class="font-medium hover:text-accent flex-1 text-left"
+          class="font-medium hover:text-accent flex-1 text-left min-w-[8rem]"
           title="Open project graph"
           @click="openProjectGraph(p.name)"
         >{{ p.name }}</button>
         <span class="text-xs text-text-muted">{{ p.note_count }} notes</span>
 
-        <template v-if="auth.canWrite">
-          <button
-            type="button"
-            class="text-xs px-2 py-1 rounded"
-            :class="p.public ? 'bg-success/20 text-success' : 'border border-border'"
-            :title="p.public ? 'Public — visible to guest users. Click to make private.' : 'Private. Click to make public (readable by guests).'"
-            @click="togglePublic(p)"
-          >{{ p.public ? 'public' : 'private' }}</button>
+        <!-- Your own level -->
+        <span
+          class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded"
+          :class="p.access === 'admin' ? 'bg-accent/20 text-accent' : p.access === 'write' ? 'bg-success/20 text-success' : 'border border-border text-text-muted'"
+          :title="`Your level on this project: ${p.access}`"
+        >{{ p.access }}</span>
+
+        <!-- Visibility: a selector for project admins, a badge for everyone else -->
+        <select
+          v-if="p.access === 'admin'"
+          class="text-xs rounded bg-bg-elevated border border-border px-2 py-1"
+          :value="p.visibility"
+          :title="VISIBILITY_HELP[p.visibility]"
+          @change="changeVisibility(p, ($event.target as HTMLSelectElement).value)"
+        >
+          <option
+            v-for="v in VISIBILITIES"
+            :key="v"
+            :value="v"
+            :disabled="v === 'public' && !auth.isOwner"
+          >{{ VISIBILITY_LABEL[v] }}{{ v === 'public' && !auth.isOwner ? ' (owner only)' : '' }}</option>
+        </select>
+        <span
+          v-else
+          class="text-xs px-2 py-1 rounded border border-border text-text-muted"
+          :title="VISIBILITY_HELP[p.visibility]"
+        >{{ VISIBILITY_LABEL[p.visibility].toLowerCase() }}</span>
+
+        <!-- Grants -->
+        <component
+          :is="auth.isOwner ? 'button' : 'span'"
+          :type="auth.isOwner ? 'button' : undefined"
+          class="text-xs px-2 py-1 rounded border border-border inline-flex items-center gap-1"
+          :class="auth.isOwner ? 'hover:bg-surface-hover' : 'text-text-muted'"
+          :title="membersTitle(p)"
+          @click="auth.isOwner && openProjectMembers(p.name)"
+        >
+          <Users class="w-3 h-3" />
+          <span>{{ p.members_count }}</span>
+        </component>
+
+        <template v-if="p.access === 'admin'">
           <button
             type="button"
             class="text-xs px-2 py-1 rounded"
             :class="p.skip_git_sync ? 'bg-warning/20 text-warning' : 'border border-border'"
             :title="p.skip_git_sync ? 'Click to re-enable git sync' : 'Click to skip from git sync'"
-            @click="toggleSkip(p)"
+            @click="apply(p, { skip_git_sync: !p.skip_git_sync }, 'skip-git')"
           >skip-git</button>
           <button
             type="button"
             class="text-xs px-2 py-1 rounded"
             :class="p.hidden_from_mcp ? 'bg-warning/20 text-warning' : 'border border-border'"
             :title="p.hidden_from_mcp ? 'Click to expose to MCP again' : 'Click to hide from MCP'"
-            @click="toggleHidden(p)"
+            @click="apply(p, { hidden_from_mcp: !p.hidden_from_mcp }, 'hidden')"
           >hidden</button>
           <button
             type="button"
@@ -235,7 +283,7 @@ onMounted(() => {
               globalsMaster ? '' : 'opacity-50',
             ]"
             :title="globalsTitle(p)"
-            @click="toggleGlobals(p)"
+            @click="apply(p, { use_globals: !p.use_globals }, 'globals')"
           >globals</button>
           <button
             type="button"
@@ -245,7 +293,7 @@ onMounted(() => {
               anchorsMaster ? '' : 'opacity-50',
             ]"
             :title="anchorsTitle(p)"
-            @click="toggleAnchors(p)"
+            @click="apply(p, { use_anchors: !p.use_anchors }, 'anchors')"
           >anchors</button>
           <button
             type="button"
@@ -254,16 +302,8 @@ onMounted(() => {
             :title="p.use_tag_vocabulary
               ? 'Tag vocabulary on: memory_lint accepts the extra tags declared in this project\'s memory/conventions.md frontmatter (tag_vocabulary). Click to disable.'
               : 'Click to let this project extend the lint tag vocabulary via memory/conventions.md frontmatter (tag_vocabulary: exact tags or ns:* wildcards).'"
-            @click="toggleTagVocabulary(p)"
+            @click="apply(p, { use_tag_vocabulary: !p.use_tag_vocabulary }, 'tag-vocab')"
           >tag-vocab</button>
-
-          <button
-            v-if="auth.isOwner"
-            type="button"
-            class="text-xs px-2 py-1 rounded border border-border hover:bg-surface-hover"
-            title="Manage who can access this project"
-            @click="openProjectMembers(p.name)"
-          >Members</button>
           <button
             type="button"
             class="text-xs px-2 py-1 rounded hover:bg-surface-hover"
@@ -275,11 +315,9 @@ onMounted(() => {
             @click="destroy(p)"
           >Delete</button>
         </template>
-        <span
-          v-else
-          class="text-xs px-2 py-0.5 rounded"
-          :class="p.public ? 'bg-success/20 text-success' : 'border border-border'"
-        >{{ p.public ? 'public' : 'private' }}</span>
+      </li>
+      <li v-if="projects.length === 0" class="text-sm text-text-muted">
+        No project is visible to you yet.
       </li>
     </ul>
   </div>

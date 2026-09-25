@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
+	"github.com/gosidian/gosidian/internal/authz"
 	"github.com/gosidian/gosidian/internal/projects"
 	"github.com/gosidian/gosidian/internal/server/events"
 )
@@ -18,8 +19,16 @@ type projectView struct {
 	NoteCount     int    `json:"note_count"`
 	HiddenFromMCP bool   `json:"hidden_from_mcp"`
 	SkipGitSync   bool   `json:"skip_git_sync"`
-	// Public marks the project as visible to guest-role users (read-only).
+	// Visibility is who may read the project: public | internal | private.
+	Visibility string `json:"visibility"`
+	// Public is the pre-v2.30 alias (visibility == public), kept for older
+	// clients; new code reads Visibility.
 	Public bool `json:"public"`
+	// Access is the caller's own effective level on the project (read | write
+	// | admin) so the SPA gates its controls without a second request.
+	Access string `json:"access"`
+	// MembersCount is how many accounts hold an explicit grant.
+	MembersCount int `json:"members_count"`
 	// UseGlobals opts the project into the shared "global" projects merge at
 	// bootstrap. UseAnchors opts it into local agent-anchor materialisation.
 	// Both only take effect when the respective server master switch is on
@@ -44,13 +53,16 @@ type createProjectRequest struct {
 // set. NewName uses pointer-to-string so the JSON `null` means "no
 // change" while empty string `""` means "validation error".
 type updateProjectRequest struct {
-	NewName          *string `json:"new_name,omitempty"`
-	HiddenFromMCP    *bool   `json:"hidden_from_mcp,omitempty"`
-	SkipGitSync      *bool   `json:"skip_git_sync,omitempty"`
-	Public           *bool   `json:"public,omitempty"`
-	UseGlobals       *bool   `json:"use_globals,omitempty"`
-	UseAnchors       *bool   `json:"use_anchors,omitempty"`
-	UseTagVocabulary *bool   `json:"use_tag_vocabulary,omitempty"`
+	NewName       *string `json:"new_name,omitempty"`
+	HiddenFromMCP *bool   `json:"hidden_from_mcp,omitempty"`
+	SkipGitSync   *bool   `json:"skip_git_sync,omitempty"`
+	// Visibility sets who may read the project; public is owner-only.
+	Visibility *string `json:"visibility,omitempty"`
+	// Public is the pre-v2.30 alias: true → public, false → internal.
+	Public           *bool `json:"public,omitempty"`
+	UseGlobals       *bool `json:"use_globals,omitempty"`
+	UseAnchors       *bool `json:"use_anchors,omitempty"`
+	UseTagVocabulary *bool `json:"use_tag_vocabulary,omitempty"`
 }
 
 // handleProjects dispatches GET (list) / POST (create) on /projects.
@@ -110,23 +122,49 @@ func (r *Router) listProjects(w http.ResponseWriter, req *http.Request) {
 	princ := principalFromContext(req)
 	out := make([]projectView, 0, len(projs))
 	for _, p := range projs {
-		if !r.canAccessProject(princ, p.Name) {
-			continue // gated by visibility / membership
+		lvl := r.levelOf(princ, p.Name)
+		if lvl < authz.LevelRead {
+			continue // gated by visibility / grants
 		}
-		flags := r.projectFlag(p.Name)
-		out = append(out, projectView{
-			Name:             p.Name,
-			NoteCount:        p.NoteCount,
-			HiddenFromMCP:    flags.HiddenFromMCP,
-			SkipGitSync:      flags.SkipGitSync,
-			Public:           flags.Public,
-			UseGlobals:       flags.UseGlobals,
-			UseAnchors:       flags.UseAnchors,
-			UseTagVocabulary: flags.UseTagVocabulary,
-			ModTime:          formatModTime(p.ModTime),
-		})
+		pv := r.projectViewFor(p.Name, lvl, p.NoteCount)
+		pv.ModTime = formatModTime(p.ModTime)
+		out = append(out, pv)
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"items": out, "total": len(out)})
+}
+
+// projectVisibility resolves a project's visibility, nil-safe (no store →
+// the legacy everything-open default the nil AccessConfig also assumes).
+func (r *Router) projectVisibility(name string) string {
+	if r.deps.Projects == nil {
+		return projects.VisibilityInternal
+	}
+	return r.deps.Projects.Visibility(name)
+}
+
+// projectViewFor assembles the wire shape of a project for a caller whose
+// effective level is lvl. One place builds it so list, get and update never
+// disagree on which fields exist.
+func (r *Router) projectViewFor(name string, lvl authz.Level, noteCount int) projectView {
+	flags := r.projectFlag(name)
+	vis := r.projectVisibility(name)
+	members := 0
+	if r.deps.Projects != nil {
+		members = r.deps.Projects.MembersCount(name)
+	}
+	return projectView{
+		Name:             name,
+		NoteCount:        noteCount,
+		HiddenFromMCP:    flags.HiddenFromMCP,
+		SkipGitSync:      flags.SkipGitSync,
+		Visibility:       vis,
+		Public:           vis == projects.VisibilityPublic,
+		Access:           lvl.String(),
+		MembersCount:     members,
+		UseGlobals:       flags.UseGlobals,
+		UseAnchors:       flags.UseAnchors,
+		UseTagVocabulary: flags.UseTagVocabulary,
+	}
 }
 
 func formatModTime(t time.Time) string {
@@ -137,8 +175,9 @@ func formatModTime(t time.Time) string {
 }
 
 func (r *Router) getProject(w http.ResponseWriter, req *http.Request, name string) {
-	if !r.canAccessProject(principalFromContext(req), name) {
-		// No visibility/membership — 404 hides existence.
+	lvl := r.levelOf(principalFromContext(req), name)
+	if lvl < authz.LevelRead {
+		// No visibility/grant — 404 hides existence.
 		WriteError(w, http.StatusNotFound, CodeNotFound, "project not found")
 		return
 	}
@@ -149,17 +188,7 @@ func (r *Router) getProject(w http.ResponseWriter, req *http.Request, name strin
 	}
 	for _, p := range projs {
 		if p.Name == name {
-			f := r.projectFlag(name)
-			WriteJSON(w, http.StatusOK, projectView{
-				Name:             p.Name,
-				NoteCount:        p.NoteCount,
-				HiddenFromMCP:    f.HiddenFromMCP,
-				SkipGitSync:      f.SkipGitSync,
-				Public:           f.Public,
-				UseGlobals:       f.UseGlobals,
-				UseAnchors:       f.UseAnchors,
-				UseTagVocabulary: f.UseTagVocabulary,
-			})
+			WriteJSON(w, http.StatusOK, r.projectViewFor(name, lvl, p.NoteCount))
 			return
 		}
 	}
@@ -194,19 +223,29 @@ func (r *Router) createProject(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
 		return
 	}
-	// Under member_scope=members the creator must keep access to what they just
-	// made; owners see everything, so only non-owner creators need a membership.
-	if r.deps.Projects != nil && !user.principal().CanAdmin() {
-		if err := r.deps.Projects.SetMember(clean, user.ID, projects.LevelWrite); err != nil {
-			// The directory exists but the creator has no access to it: say
-			// so, rather than answering 201 to someone who is now locked out.
-			WriteError(w, http.StatusInternalServerError, CodeServerInternal, "project created, but the membership grant could not be saved (an owner can grant access): "+err.Error())
-			return
+	if r.deps.Projects != nil {
+		// Pin the visibility at creation so a later change of the store
+		// default does not retroactively reclassify this project.
+		if f := r.deps.Projects.Get(clean); f.Visibility == "" {
+			f.Visibility = r.deps.Projects.DefaultVisibility()
+			if err := r.deps.Projects.Set(clean, f); err != nil {
+				WriteError(w, http.StatusInternalServerError, CodeServerInternal, "project created, but its visibility could not be saved: "+err.Error())
+				return
+			}
+		}
+		// The creator administers what they just made; the owner already
+		// does. Say so if the grant cannot be saved, rather than answering
+		// 201 to someone who is now locked out of a private project.
+		if !user.principal().CanAdmin() {
+			if err := r.deps.Projects.SetMember(clean, user.ID, projects.LevelAdmin); err != nil {
+				WriteError(w, http.StatusInternalServerError, CodeServerInternal, "project created, but the creator's grant could not be saved (an owner can grant access): "+err.Error())
+				return
+			}
 		}
 	}
 	r.auditNote(req, audit.ActionCreateProject, user, clean, "", 0)
 	r.publishSidebarEvent("create", clean)
-	WriteJSON(w, http.StatusCreated, projectView{Name: clean})
+	WriteJSON(w, http.StatusCreated, r.projectViewFor(clean, r.levelOf(user.principal(), clean), 0))
 }
 
 func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name string) {
@@ -218,7 +257,15 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 	if denyGuestWrite(w, user) {
 		return
 	}
-	if r.denyWriteProject(w, user.principal(), name) {
+	// Settings, visibility, rename and delete are project administration:
+	// the owner or an admin grant. A 404 for a project the caller cannot
+	// even read comes first so existence is not revealed by a 403.
+	princ := user.principal()
+	if !r.canAccessProject(princ, name) {
+		WriteError(w, http.StatusNotFound, CodeNotFound, "project not found")
+		return
+	}
+	if r.denyAdminProject(w, princ, name) {
 		return
 	}
 	var body updateProjectRequest
@@ -233,10 +280,31 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 		return
 	}
 
+	// Resolve the visibility change: the explicit field wins over the legacy
+	// public alias. Making a project public opens it to every account, guests
+	// included, so that step is the owner's alone.
+	var newVisibility string
+	if body.Visibility != nil {
+		newVisibility = strings.TrimSpace(*body.Visibility)
+		if !projects.ValidVisibility(newVisibility) {
+			WriteError(w, http.StatusBadRequest, CodeValidationFormat, "visibility must be public, internal or private")
+			return
+		}
+	} else if body.Public != nil {
+		newVisibility = projects.VisibilityInternal
+		if *body.Public {
+			newVisibility = projects.VisibilityPublic
+		}
+	}
+	if newVisibility == projects.VisibilityPublic && !princ.CanAdmin() {
+		WriteError(w, http.StatusForbidden, CodeAuthForbidden, "only the owner can make a project public")
+		return
+	}
+
 	// Apply flags first (cheap, no fs movement) so a failing rename
 	// still leaves the flags durable.
 	flagsChanged := false
-	if body.HiddenFromMCP != nil || body.SkipGitSync != nil || body.Public != nil || body.UseGlobals != nil || body.UseAnchors != nil || body.UseTagVocabulary != nil {
+	if body.HiddenFromMCP != nil || body.SkipGitSync != nil || newVisibility != "" || body.UseGlobals != nil || body.UseAnchors != nil || body.UseTagVocabulary != nil {
 		current := r.projectFlag(name)
 		if body.HiddenFromMCP != nil {
 			current.HiddenFromMCP = *body.HiddenFromMCP
@@ -244,8 +312,9 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 		if body.SkipGitSync != nil {
 			current.SkipGitSync = *body.SkipGitSync
 		}
-		if body.Public != nil {
-			current.Public = *body.Public
+		if newVisibility != "" {
+			current.Visibility = newVisibility
+			current.Public = false
 		}
 		if body.UseGlobals != nil {
 			current.UseGlobals = *body.UseGlobals
@@ -296,7 +365,6 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 	}
 	r.publishSidebarEvent("update", finalName)
 
-	flags := r.projectFlag(finalName)
 	projs, _ := r.deps.Vault.Projects()
 	count := 0
 	for _, p := range projs {
@@ -305,16 +373,7 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 			break
 		}
 	}
-	WriteJSON(w, http.StatusOK, projectView{
-		Name:             finalName,
-		NoteCount:        count,
-		HiddenFromMCP:    flags.HiddenFromMCP,
-		SkipGitSync:      flags.SkipGitSync,
-		Public:           flags.Public,
-		UseGlobals:       flags.UseGlobals,
-		UseAnchors:       flags.UseAnchors,
-		UseTagVocabulary: flags.UseTagVocabulary,
-	})
+	WriteJSON(w, http.StatusOK, r.projectViewFor(finalName, r.levelOf(princ, finalName), count))
 }
 
 func (r *Router) deleteProject(w http.ResponseWriter, req *http.Request, name string) {
@@ -326,7 +385,11 @@ func (r *Router) deleteProject(w http.ResponseWriter, req *http.Request, name st
 	if denyGuestWrite(w, user) {
 		return
 	}
-	if r.denyWriteProject(w, user.principal(), name) {
+	if !r.canAccessProject(user.principal(), name) {
+		WriteError(w, http.StatusNotFound, CodeNotFound, "project not found")
+		return
+	}
+	if r.denyAdminProject(w, user.principal(), name) {
 		return
 	}
 	if !r.projectExists(name) {

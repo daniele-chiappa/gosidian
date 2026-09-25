@@ -105,11 +105,11 @@ From the web UI at `/admin/tokens`:
   revocable on the same page.
 - A token never outruns the account it belongs to. On every request the
   token's project list is intersected with what its owner may currently
-  read, and its write scope with what they may write (per-project
-  membership levels), so removing a membership, downgrading it to read or
-  switching `member_scope` takes effect immediately without touching the
-  token. Tokens owned by the owner account, or minted from the CLI, keep
-  their declared scope.
+  read (the project's visibility and the account's grants), and its write
+  scope with the projects the account holds a write or admin grant on, so
+  removing a grant, downgrading it to read or making a project private
+  takes effect immediately without touching the token. Tokens owned by
+  the owner account, or minted from the CLI, keep their declared scope.
 
 Revocation is immediate: the SSE connection using a revoked token
 gets disconnected at the next request.

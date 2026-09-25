@@ -19,13 +19,18 @@ func seedGlobalProjects(v *vault.Vault, pstore *projects.Store, cfg config.Globa
 		}
 		// "already exists" is fine — CreateProject is idempotent in effect.
 		_, _ = v.CreateProject(name)
+		// The public global project must be readable by every account; the
+		// private one is grants-only. Only fill an unset visibility so an
+		// owner's explicit choice survives restarts.
+		want := projects.VisibilityPrivate
 		if public {
-			f := pstore.Get(name)
-			if !f.Public {
-				f.Public = true
-				if err := pstore.Set(name, f); err != nil {
-					log.Printf("global: set public flag on %q: %v", name, err)
-				}
+			want = projects.VisibilityPublic
+		}
+		if f := pstore.Get(name); f.Visibility == "" {
+			f.Visibility = want
+			f.Public = false
+			if err := pstore.Set(name, f); err != nil {
+				log.Printf("global: set visibility on %q: %v", name, err)
 			}
 		}
 		readme := name + "/README.md"

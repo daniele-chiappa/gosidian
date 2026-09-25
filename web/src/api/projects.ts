@@ -1,14 +1,22 @@
 import client from './client'
 
+import type { AccessLevel, Visibility } from './access'
+
 export interface Project {
   name: string
   note_count: number
   hidden_from_mcp: boolean
   skip_git_sync: boolean
-  /** Public projects are readable by guest-role users; private (default) are
-   *  visible to owner/member only. "Public" = visible to all authenticated
-   *  users including guests, not anonymous. */
+  /** Who may read the project: public (every account, guests included),
+   *  internal (every member account) or private (grants only). Write and
+   *  admin always come from a grant. */
+  visibility: Visibility
+  /** Legacy alias of `visibility === 'public'`. */
   public: boolean
+  /** The caller's own effective level on the project. */
+  access: AccessLevel
+  /** How many accounts hold an explicit grant. */
+  members_count: number
   /** Opt the project into the shared "global" projects merge at bootstrap.
    *  Only effective when the server master switch (settings.globals_enabled)
    *  is on. */
@@ -36,7 +44,8 @@ export interface UpdateProjectRequest {
   new_name?: string
   hidden_from_mcp?: boolean
   skip_git_sync?: boolean
-  public?: boolean
+  /** Making a project public is the owner's alone. */
+  visibility?: Visibility
   use_globals?: boolean
   use_anchors?: boolean
   use_tag_vocabulary?: boolean
@@ -66,12 +75,14 @@ export async function deleteProject(slug: string): Promise<void> {
   await client.delete(`/projects/${encodeURIComponent(slug)}`)
 }
 
-// --- Per-project membership ACL (owner-only) ---
+// --- Per-project grants (owner-only management until phase 2) ---
+
+export type GrantLevel = 'read' | 'write' | 'admin'
 
 export interface ProjectMember {
   user_id: string
   username: string
-  level: string // read | write
+  level: GrantLevel
 }
 
 export async function listProjectMembers(slug: string): Promise<ProjectMember[]> {
@@ -84,7 +95,7 @@ export async function listProjectMembers(slug: string): Promise<ProjectMember[]>
 export async function setProjectMember(
   slug: string,
   userId: string,
-  level: 'read' | 'write',
+  level: GrantLevel,
 ): Promise<ProjectMember> {
   const { data } = await client.put<ProjectMember>(`/projects/${encodeURIComponent(slug)}/members`, {
     user_id: userId,

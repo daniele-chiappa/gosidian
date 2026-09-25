@@ -43,6 +43,9 @@ export interface AdminUser {
   totp_enrolled?: boolean
   created_at: string
   disabled_at?: string
+  /** Effective access summary; absent for the owner (everything). */
+  projects_readable?: number
+  projects_writable?: number
 }
 
 export interface Invite {

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
+	"github.com/gosidian/gosidian/internal/authz"
 	"github.com/gosidian/gosidian/internal/webauth"
 )
 
@@ -24,6 +25,11 @@ type adminUserView struct {
 	TOTPEnrolled bool   `json:"totp_enrolled"`
 	CreatedAt    string `json:"created_at"`
 	DisabledAt   string `json:"disabled_at,omitempty"`
+	// ProjectsReadable / ProjectsWritable summarise the account's effective
+	// access so the users list shows it at a glance; the per-project detail
+	// is GET /admin/users/{id}/access. Omitted for the owner (everything).
+	ProjectsReadable *int `json:"projects_readable,omitempty"`
+	ProjectsWritable *int `json:"projects_writable,omitempty"`
 }
 
 func toAdminUserView(u webauth.User) adminUserView {
@@ -61,9 +67,30 @@ func (r *Router) handleAdminUsers(w http.ResponseWriter, req *http.Request) {
 	switch req.Method {
 	case http.MethodGet:
 		users := r.deps.Auth.WebAuth.ListUsers()
+		projs, err := r.deps.Vault.Projects()
+		if err != nil {
+			WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
+			return
+		}
 		out := make([]adminUserView, 0, len(users))
 		for _, u := range users {
-			out = append(out, toAdminUserView(u))
+			uv := toAdminUserView(u)
+			if u.Role != webauth.RoleOwner {
+				readable, writable := 0, 0
+				princ := authz.Principal{UserID: u.ID, Role: u.Role}
+				for _, p := range projs {
+					switch lvl := r.levelOf(princ, p.Name); {
+					case lvl >= authz.LevelWrite:
+						writable++
+						readable++
+					case lvl >= authz.LevelRead:
+						readable++
+					}
+				}
+				uv.ProjectsReadable = &readable
+				uv.ProjectsWritable = &writable
+			}
+			out = append(out, uv)
 		}
 		WriteJSON(w, http.StatusOK, map[string]any{"items": out, "total": len(out)})
 	case http.MethodPost:
@@ -156,8 +183,21 @@ func (r *Router) handleAdminUserItem(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	id, sub, _ := strings.Cut(strings.TrimSuffix(strings.TrimPrefix(req.URL.Path, "/api/v1/admin/users/"), "/"), "/")
-	if id == "" || (sub != "" && sub != "totp") {
-		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "expected /api/v1/admin/users/{id} or /api/v1/admin/users/{id}/totp")
+	if id == "" || (sub != "" && sub != "totp" && sub != "access") {
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "expected /api/v1/admin/users/{id}, /api/v1/admin/users/{id}/totp or /api/v1/admin/users/{id}/access")
+		return
+	}
+	if sub == "access" {
+		if req.Method != http.MethodGet {
+			WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
+			return
+		}
+		u, ok := r.deps.Auth.WebAuth.UserByID(id)
+		if !ok {
+			WriteError(w, http.StatusNotFound, CodeNotFound, "user not found")
+			return
+		}
+		r.writeAccessView(w, authz.Principal{UserID: u.ID, Role: u.Role})
 		return
 	}
 	if sub == "totp" {

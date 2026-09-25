@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gosidian/gosidian/internal/projects"
 	"github.com/gosidian/gosidian/internal/webauth"
 )
 
@@ -38,9 +39,12 @@ func TestNotesInline_MemberCannotReadCredentialStore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Bob writes a note in a project, embedding the credential store.
+	// Bob writes a note in a project he can read, embedding the credential store.
 	f.seedNote(t, "scratch/pwn.md",
 		"![](/vault-files/.gosidian/auth.json)\n\n![[.gosidian/auth.json]]\n")
+	if err := f.projects.Set("scratch", projects.Flags{Visibility: projects.VisibilityInternal}); err != nil {
+		t.Fatal(err)
+	}
 
 	w := f.request(http.MethodGet, "/api/v1/notes/scratch/pwn.md?inline", "",
 		map[string]string{"Authorization": "Bearer " + bobBearer})

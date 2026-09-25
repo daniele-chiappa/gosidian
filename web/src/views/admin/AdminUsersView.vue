@@ -10,8 +10,55 @@ import {
   type AdminUser,
   type CreateUserRequest,
 } from '@/api/admin'
+import { getUserAccess, VISIBILITY_LABEL, type AccessProject } from '@/api/access'
 
 const users = ref<AdminUser[]>([])
+
+// --- "View as" access preview: one expanded row at a time, fetched on demand ---
+const expanded = ref<string | null>(null)
+const accessRows = ref<AccessProject[]>([])
+const accessLoading = ref(false)
+const accessError = ref<string | null>(null)
+
+async function toggleAccess(u: AdminUser) {
+  if (expanded.value === u.id) {
+    expanded.value = null
+    return
+  }
+  expanded.value = u.id
+  accessRows.value = []
+  accessError.value = null
+  accessLoading.value = true
+  try {
+    accessRows.value = (await getUserAccess(u.id)).projects
+  } catch (e) {
+    accessError.value = e instanceof Error ? e.message : 'Failed to load access'
+  } finally {
+    accessLoading.value = false
+  }
+}
+
+function accessSummary(u: AdminUser): string {
+  if (u.role === 'owner') return 'all projects'
+  const r = u.projects_readable ?? 0
+  const w = u.projects_writable ?? 0
+  if (r === 0) return 'no project'
+  return `${r} readable · ${w} writable`
+}
+
+function levelClass(level: string): string {
+  return level === 'admin'
+    ? 'bg-accent/20 text-accent'
+    : level === 'write'
+      ? 'bg-success/20 text-success'
+      : 'border border-border text-text-muted'
+}
+
+function viaLabel(via: string[]): string {
+  return via
+    .map((v) => (v.startsWith('grant:') ? `grant (${v.slice(6)})` : v))
+    .join(' + ')
+}
 const loading = ref(false)
 const error = ref<string | null>(null)
 
@@ -259,17 +306,14 @@ onMounted(load)
           <th class="text-left py-2 px-3">Username</th>
           <th class="text-left py-2 px-3">Role</th>
           <th class="text-left py-2 px-3">TOTP</th>
+          <th class="text-left py-2 px-3">Access</th>
           <th class="text-left py-2 px-3">Created</th>
           <th class="text-left py-2 px-3">Status</th>
           <th class="text-right py-2 px-3">Actions</th>
         </tr>
       </thead>
-      <tbody>
-        <tr
-          v-for="u in users"
-          :key="u.id"
-          class="border-t border-border"
-        >
+      <tbody v-for="u in users" :key="u.id">
+        <tr class="border-t border-border">
           <td class="py-2 px-3 font-medium">{{ u.username }}</td>
           <td class="py-2 px-3">
             <span
@@ -310,6 +354,18 @@ onMounted(load)
               >Reset</button>
             </div>
           </td>
+          <td class="py-2 px-3">
+            <div class="flex items-center gap-2">
+              <span class="text-xs" :class="u.role === 'owner' ? 'text-text-muted' : ''">{{ accessSummary(u) }}</span>
+              <button
+                v-if="u.role !== 'owner' && !u.disabled_at"
+                type="button"
+                class="text-xs px-2 py-0.5 rounded border border-border hover:bg-surface-hover"
+                :title="expanded === u.id ? 'Hide the projects this account can see' : 'Show the projects this account can see, and why'"
+                @click="toggleAccess(u)"
+              >{{ expanded === u.id ? 'Hide' : 'View' }}</button>
+            </div>
+          </td>
           <td class="py-2 px-3 font-mono text-xs">{{ u.created_at }}</td>
           <td class="py-2 px-3">
             <span
@@ -325,6 +381,28 @@ onMounted(load)
               class="text-xs px-2 py-1 rounded text-danger hover:bg-surface-hover"
               @click="disable(u)"
             >Disable</button>
+          </td>
+        </tr>
+        <!-- "View as": what this account sees and why -->
+        <tr v-if="expanded === u.id" class="bg-bg-elevated/40">
+          <td colspan="7" class="px-3 py-2">
+            <p v-if="accessLoading" class="text-xs text-text-muted">Loading…</p>
+            <p v-else-if="accessError" class="text-xs text-danger">{{ accessError }}</p>
+            <p v-else-if="accessRows.length === 0" class="text-xs text-text-muted">
+              This account cannot see any project. Make a project internal or public, or add a grant from Projects → Members.
+            </p>
+            <ul v-else class="flex flex-wrap gap-2">
+              <li
+                v-for="row in accessRows"
+                :key="row.name"
+                class="inline-flex items-center gap-1.5 rounded border border-border px-2 py-1 text-xs"
+                :title="`${VISIBILITY_LABEL[row.visibility]} project — ${row.level} via ${viaLabel(row.via)}`"
+              >
+                <span class="font-medium">{{ row.name }}</span>
+                <span class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded" :class="levelClass(row.level)">{{ row.level }}</span>
+                <span class="text-text-muted">{{ viaLabel(row.via) }}</span>
+              </li>
+            </ul>
           </td>
         </tr>
       </tbody>

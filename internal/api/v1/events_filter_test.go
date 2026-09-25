@@ -57,7 +57,7 @@ func TestEvents_FiltersFramesByPrincipal(t *testing.T) {
 	srv, f := startEventsServer(t)
 
 	// One public project; everything else is private. A guest reads public only.
-	if err := f.projects.Set("Open", projects.Flags{Public: true}); err != nil {
+	if err := f.projects.Set("Open", projects.Flags{Visibility: projects.VisibilityPublic}); err != nil {
 		t.Fatal(err)
 	}
 	guest, err := f.webauth.AddUser("g1", "guest-pass-1234", webauth.RoleGuest)

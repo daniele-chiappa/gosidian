@@ -2,6 +2,7 @@ package v1
 
 import (
 	"errors"
+	"github.com/gosidian/gosidian/internal/projects"
 	"net/http"
 	"strings"
 
@@ -20,9 +21,10 @@ type oauthConsentView struct {
 }
 
 type oauthProjectView struct {
-	Name      string `json:"name"`
-	Public    bool   `json:"public"`
-	NoteCount int    `json:"note_count"`
+	Name       string `json:"name"`
+	Public     bool   `json:"public"` // legacy alias of visibility == public
+	Visibility string `json:"visibility"`
+	NoteCount  int    `json:"note_count"`
 }
 
 // oauthDecisionRequest is the approve body. Empty projects means "every
@@ -77,7 +79,8 @@ func (r *Router) visibleProjects(req *http.Request) ([]oauthProjectView, error) 
 		if !r.canAccessProject(princ, p.Name) {
 			continue
 		}
-		out = append(out, oauthProjectView{Name: p.Name, Public: r.projectFlag(p.Name).Public, NoteCount: p.NoteCount})
+		vis := r.projectVisibility(p.Name)
+		out = append(out, oauthProjectView{Name: p.Name, Public: vis == projects.VisibilityPublic, Visibility: vis, NoteCount: p.NoteCount})
 	}
 	return out, nil
 }

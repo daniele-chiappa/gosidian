@@ -104,6 +104,7 @@ func (r *Router) registerAuthed() {
 	}
 
 	r.mux.Handle("/api/v1/me", authed(r.handleMe))
+	r.mux.Handle("/api/v1/me/access", authed(r.handleMeAccess))
 	r.mux.Handle("/api/v1/refresh", authed(r.handleRefresh))
 	r.mux.Handle("/api/v1/logout", authed(r.handleLogout))
 

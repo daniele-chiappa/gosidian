@@ -32,3 +32,12 @@ func (s *Server) rejectIfHidden(name string) *mcp.CallToolResult {
 func (s *Server) pathInHiddenProject(path string) bool {
 	return s.projectHidden(topLevelProject(path))
 }
+
+// projectVisibility returns who may read the project (public | internal |
+// private), or "" when no projects store is wired.
+func (s *Server) projectVisibility(name string) string {
+	if s == nil || s.projects == nil || name == "" {
+		return ""
+	}
+	return s.projects.Visibility(name)
+}

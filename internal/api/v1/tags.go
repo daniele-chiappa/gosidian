@@ -100,9 +100,9 @@ type indexTagCount struct {
 	Count int
 }
 
-// visibleTags returns the tag counts the principal may see. Owner/member get
-// the full vault tag set; a guest (or unknown role) gets tags aggregated over
-// public projects only, so private tags never leak through the tag list.
+// visibleTags returns the tag counts the principal may see. The owner gets
+// the full vault tag set; everyone else gets tags aggregated over the
+// projects they may read, so private tags never leak through the tag list.
 func (r *Router) visibleTags(p authz.Principal) ([]indexTagCount, error) {
 	if r.seesAllProjects(p) {
 		raw, err := r.deps.Index.Tags()
@@ -116,15 +116,20 @@ func (r *Router) visibleTags(p authz.Principal) ([]indexTagCount, error) {
 		return out, nil
 	}
 	merged := map[string]int{}
-	if r.deps.Projects != nil {
-		for _, proj := range r.deps.Projects.PublicNames() {
-			raw, err := r.deps.Index.TagsByProject(proj)
-			if err != nil {
-				return nil, err
-			}
-			for _, t := range raw {
-				merged[t.Tag] += t.Count
-			}
+	projs, err := r.deps.Vault.Projects()
+	if err != nil {
+		return nil, err
+	}
+	for _, proj := range projs {
+		if !r.canAccessProject(p, proj.Name) {
+			continue
+		}
+		raw, err := r.deps.Index.TagsByProject(proj.Name)
+		if err != nil {
+			return nil, err
+		}
+		for _, t := range raw {
+			merged[t.Tag] += t.Count
 		}
 	}
 	out := make([]indexTagCount, 0, len(merged))

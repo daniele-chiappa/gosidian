@@ -28,7 +28,7 @@ export interface Settings {
   i18n: I18nSettings
   mcp: MCPSettings
   totp_mode: string // off | optional | required (global two-factor policy)
-  member_scope: string // all (legacy) | members (per-project membership gating)
+  default_visibility: string // public | internal | private, for projects created from now on
   anchors_enabled: boolean // read-only master switch GOSIDIAN_ANCHORS_ENABLED
   globals_enabled: boolean // read-only master switch GOSIDIAN_GLOBAL_ENABLED
 }
@@ -57,7 +57,7 @@ export interface UpdateSettings {
     max_note_bytes: number
   }>
   totp_mode?: string
-  member_scope?: string
+  default_visibility?: string
 }
 
 export async function getSettings(): Promise<Settings> {

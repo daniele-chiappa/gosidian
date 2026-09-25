@@ -82,13 +82,13 @@ const draft = reactive<{
   trash: { enabled: boolean; retention_ms: number }
   i18n: { default_lang: string; enabled_langs: string }
   totp_mode: string
-  member_scope: string
+  default_visibility: string
 }>({
   git: { enabled: false, remote: '', branch: '', debounce_ms: 30000, push: false, token_env: '' },
   trash: { enabled: false, retention_ms: 0 },
   i18n: { default_lang: 'en', enabled_langs: 'it,en' },
   totp_mode: 'off',
-  member_scope: 'all',
+  default_visibility: 'private',
 })
 const loading = ref(false)
 const saving = ref(false)
@@ -111,7 +111,7 @@ function hydrate(s: Settings) {
     enabled_langs: (s.i18n.enabled_langs ?? []).join(','),
   }
   draft.totp_mode = s.totp_mode ?? 'off'
-  draft.member_scope = s.member_scope ?? 'all'
+  draft.default_visibility = s.default_visibility || 'private'
 }
 
 async function load() {
@@ -142,7 +142,7 @@ async function save() {
           .filter(Boolean),
       },
       totp_mode: draft.totp_mode,
-      member_scope: draft.member_scope,
+      default_visibility: draft.default_visibility,
     })
     hydrate(result)
     message.value = 'Saved.'
@@ -239,17 +239,19 @@ onMounted(load)
     <fieldset v-if="auth.isOwner" class="rounded border border-border bg-surface p-4 space-y-3 mb-6">
       <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">Project access</legend>
       <label class="block text-sm">
-        <span class="text-text-muted">Member scope</span>
+        <span class="text-text-muted">Default visibility for new projects</span>
         <select
-          v-model="draft.member_scope"
+          v-model="draft.default_visibility"
           class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
           @change="save"
         >
-          <option value="all">All projects — every member sees every project (default)</option>
-          <option value="members">Per-project — members see only projects they're added to</option>
+          <option value="private">Private — only accounts with a grant (and the owner)</option>
+          <option value="internal">Internal — every member can read; writing takes a grant</option>
+          <option value="public">Public — every account can read, guests included; writing takes a grant</option>
         </select>
         <span class="text-xs text-text-muted">
-          With “Per-project”, grant access from Projects → Members. Owners always see everything; public projects stay readable by all.
+          Applies to projects created from now on and to folders that appear on disk without settings.
+          Each project's own visibility and grants are managed from Projects.
         </span>
       </label>
     </fieldset>

@@ -1,35 +1,68 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import {
+  getProject,
   listProjectMembers,
   setProjectMember,
   removeProjectMember,
+  type GrantLevel,
+  type Project,
   type ProjectMember,
 } from '@/api/projects'
 import { listUsers, type AdminUser } from '@/api/admin'
+import { VISIBILITY_LABEL } from '@/api/access'
+import { useAccessStore } from '@/stores/access'
 
 const props = defineProps<{ project: string }>()
 
+const access = useAccessStore()
+const project = ref<Project | null>(null)
 const members = ref<ProjectMember[]>([])
 const users = ref<AdminUser[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
 const addUser = ref('')
-const addLevel = ref<'read' | 'write'>('read')
+const addLevel = ref<GrantLevel>('read')
 const busy = ref(false)
 
+const LEVELS: GrantLevel[] = ['read', 'write', 'admin']
+const LEVEL_HELP: Record<GrantLevel, string> = {
+  read: 'read — can open the project even when its visibility would not allow it',
+  write: 'write — can also create, edit and delete notes',
+  admin: 'admin — can also change the project settings, rename and delete it',
+}
+
 // Users eligible to add: not the owner (who sees everything), not disabled, and
-// not already a member.
+// not already granted.
 const candidates = computed(() => {
   const have = new Set(members.value.map((m) => m.user_id))
   return users.value.filter((u) => u.role !== 'owner' && !u.disabled_at && !have.has(u.id))
+})
+
+/** What the project's visibility already gives, so the grants read in context. */
+const visibilityNote = computed(() => {
+  switch (project.value?.visibility) {
+    case 'public':
+      return 'Every signed-in account, guests included, can already read it. Grants add write and admin.'
+    case 'internal':
+      return 'Every member account can already read it. Grants add write and admin.'
+    case 'private':
+      return 'Only the accounts listed here (and the owner) can see it.'
+    default:
+      return ''
+  }
 })
 
 async function load() {
   loading.value = true
   error.value = null
   try {
-    const [m, u] = await Promise.all([listProjectMembers(props.project), listUsers()])
+    const [p, m, u] = await Promise.all([
+      getProject(props.project),
+      listProjectMembers(props.project),
+      listUsers(),
+    ])
+    project.value = p
     members.value = m
     users.value = u
   } catch (e) {
@@ -37,6 +70,12 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+/** A grant change alters what the other account sees; refresh our own cues too. */
+async function reload() {
+  await load()
+  void access.load()
 }
 
 async function add() {
@@ -47,7 +86,7 @@ async function add() {
     await setProjectMember(props.project, addUser.value, addLevel.value)
     addUser.value = ''
     addLevel.value = 'read'
-    await load()
+    await reload()
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Add failed'
   } finally {
@@ -56,10 +95,10 @@ async function add() {
 }
 
 async function changeLevel(m: ProjectMember, level: string) {
-  if (level !== 'read' && level !== 'write') return
+  if (!LEVELS.includes(level as GrantLevel)) return
   try {
-    await setProjectMember(props.project, m.user_id, level)
-    await load()
+    await setProjectMember(props.project, m.user_id, level as GrantLevel)
+    await reload()
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Update failed'
   }
@@ -68,10 +107,18 @@ async function changeLevel(m: ProjectMember, level: string) {
 async function remove(m: ProjectMember) {
   try {
     await removeProjectMember(props.project, m.user_id)
-    await load()
+    await reload()
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Remove failed'
   }
+}
+
+function levelClass(level: GrantLevel): string {
+  return level === 'admin'
+    ? 'bg-accent/20 text-accent'
+    : level === 'write'
+      ? 'bg-success/20 text-success'
+      : 'border border-border text-text-muted'
 }
 
 onMounted(load)
@@ -79,11 +126,17 @@ onMounted(load)
 
 <template>
   <div class="p-6 max-w-xl mx-auto">
-    <h2 class="text-lg font-semibold mb-1">Members · {{ project }}</h2>
-    <p class="text-sm text-text-muted mb-4">
-      Grant specific users access to this project. Effective only when
-      <em>Project access</em> is set to per-project (Settings). Owners always have full access;
-      public projects stay readable by everyone.
+    <h2 class="text-lg font-semibold mb-1">Members · {{ project?.name ?? props.project }}</h2>
+    <p class="text-sm text-text-muted mb-1">
+      Grants give specific accounts a level on this project: <em>read</em>, <em>write</em>
+      or <em>admin</em>. The account's role is the ceiling — a guest stays read-only.
+      The owner always has full access.
+    </p>
+    <p v-if="project" class="text-sm mb-4">
+      <span
+        class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded border border-border text-text-muted mr-1"
+      >{{ VISIBILITY_LABEL[project.visibility] }}</span>
+      <span class="text-text-muted">{{ visibilityNote }}</span>
     </p>
 
     <p v-if="loading" class="text-text-muted">Loading…</p>
@@ -96,13 +149,17 @@ onMounted(load)
         class="flex items-center gap-3 rounded border border-border bg-surface px-3 py-2"
       >
         <span class="flex-1 text-sm font-medium">{{ m.username }}</span>
+        <span
+          class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded"
+          :class="levelClass(m.level)"
+        >{{ m.level }}</span>
         <select
           class="text-xs rounded bg-bg-elevated border border-border px-2 py-1"
           :value="m.level"
+          :title="LEVEL_HELP[m.level]"
           @change="changeLevel(m, ($event.target as HTMLSelectElement).value)"
         >
-          <option value="read">read</option>
-          <option value="write">write</option>
+          <option v-for="l in LEVELS" :key="l" :value="l">{{ l }}</option>
         </select>
         <button
           type="button"
@@ -111,18 +168,18 @@ onMounted(load)
         >Remove</button>
       </li>
       <li v-if="!loading && members.length === 0" class="text-sm text-text-muted">
-        No members yet.
+        No grants yet.
       </li>
     </ul>
 
     <form class="flex items-end gap-2" @submit.prevent="add">
       <label class="flex-1 text-sm">
-        <span class="text-text-muted text-xs">Add user</span>
+        <span class="text-text-muted text-xs">Add account</span>
         <select
           v-model="addUser"
           class="mt-1 w-full rounded bg-bg-elevated border border-border px-2 py-2"
         >
-          <option value="">Select a user…</option>
+          <option value="">Select an account…</option>
           <option v-for="u in candidates" :key="u.id" :value="u.id">
             {{ u.username }} ({{ u.role }})
           </option>
@@ -133,9 +190,9 @@ onMounted(load)
         <select
           v-model="addLevel"
           class="mt-1 rounded bg-bg-elevated border border-border px-2 py-2"
+          :title="LEVEL_HELP[addLevel]"
         >
-          <option value="read">read</option>
-          <option value="write">write</option>
+          <option v-for="l in LEVELS" :key="l" :value="l">{{ l }}</option>
         </select>
       </label>
       <button

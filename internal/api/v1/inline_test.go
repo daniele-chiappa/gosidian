@@ -35,8 +35,8 @@ func TestInlineImages(t *testing.T) {
 	// on the nil Auth dep); inlineImages only needs Vault + Index.
 	r := &Router{deps: &Deps{Vault: vault.New(vroot), Index: idx}}
 	// Owner principal: passes canSee for every project. Projects store is nil
-	// here, so member_scope is legacy (unenforced) and the per-note gate falls
-	// back to role — an empty Principal (guest) would be denied.
+	// here, so the legacy everything-open config applies to member-tier roles
+	// — a guest Principal would still be denied.
 	p := authz.Principal{Role: webauth.RoleOwner}
 
 	md := "![[x.png]]\n\nlink [[note]] and ![alt](/vault-files/attachments/x.png)\n"
@@ -141,8 +141,8 @@ func TestInlineImages_DeniesUnauthorizedPrincipal(t *testing.T) {
 	t.Cleanup(func() { idx.Close() })
 	r := &Router{deps: &Deps{Vault: vault.New(vroot), Index: idx}}
 
-	// Guest principal (empty role): with Projects nil, member_scope is legacy
-	// and canSee falls back to role, denying a non-member/non-owner.
+	// Guest principal: with Projects nil every project counts as internal,
+	// which a guest may not read, so canSee denies.
 	guest := authz.Principal{Role: webauth.RoleGuest}
 	md := "![alt](/vault-files/attachments/x.png)"
 	if out := r.inlineImages(md, "markdown", guest); out != md {

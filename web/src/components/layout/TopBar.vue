@@ -2,6 +2,7 @@
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
+import { useAccessStore } from '@/stores/access'
 import { useUIStore } from '@/stores/ui'
 import { useWindowsStore } from 'plancia'
 import { planciaKey } from '@/composables/planciaKey'
@@ -12,6 +13,7 @@ const { t } = useI18n()
 
 const router = useRouter()
 const auth = useAuthStore()
+const access = useAccessStore()
 const ui = useUIStore()
 const windows = useWindowsStore()
 
@@ -82,6 +84,11 @@ async function handleLogout() {
         v-if="auth.isOwner"
         class="px-2 py-0.5 rounded text-xs bg-accent/20 text-accent"
       >owner</span>
+      <span
+        v-else-if="auth.user?.role === 'member'"
+        class="px-2 py-0.5 rounded text-xs border border-border text-text-muted"
+        :title="`Member — ${access.readableCount} project(s) readable, ${access.writableCount} writable`"
+      >member</span>
       <span
         v-else-if="auth.isGuest"
         class="px-2 py-0.5 rounded text-xs border border-border text-text-muted"

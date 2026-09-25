@@ -48,23 +48,31 @@ func TestVaultFiles_Authorizer_Principals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// An internal project is readable by every member account.
+	if err := f.projects.Set("scratch", projects.Flags{Visibility: projects.VisibilityInternal}); err != nil {
+		t.Fatal(err)
+	}
 	if got := fn(vfReq(rel, "", bobTok), rel); got != 0 {
-		t.Errorf("member cookie (legacy scope): got %d, want allow", got)
+		t.Errorf("member cookie (internal project): got %d, want allow", got)
 	}
 	if got := fn(vfReq(rel, "", "gsp_bogus"), rel); got != http.StatusUnauthorized {
 		t.Errorf("garbage cookie: got %d, want 401", got)
 	}
-	if err := f.projects.SetMemberScope(projects.MemberScopeMembers); err != nil {
+	// A private project (the default) needs a grant.
+	if got := fn(vfReq(other, "", bobTok), other); got != http.StatusNotFound {
+		t.Errorf("member outside a private project: got %d, want 404", got)
+	}
+	if err := f.projects.Set("scratch", projects.Flags{Visibility: projects.VisibilityPrivate}); err != nil {
 		t.Fatal(err)
 	}
-	if got := fn(vfReq(other, "", bobTok), other); got != http.StatusNotFound {
-		t.Errorf("member outside project (scope enforced): got %d, want 404", got)
+	if got := fn(vfReq(rel, "", bobTok), rel); got != http.StatusNotFound {
+		t.Errorf("member on a project made private: got %d, want 404", got)
 	}
 	if err := f.projects.SetMember("scratch", bob.ID, projects.LevelRead); err != nil {
 		t.Fatal(err)
 	}
 	if got := fn(vfReq(rel, "", bobTok), rel); got != 0 {
-		t.Errorf("member inside project: got %d, want allow", got)
+		t.Errorf("member with a read grant: got %d, want allow", got)
 	}
 	if err := f.spaTokens.Revoke(bobTok); err != nil {
 		t.Fatal(err)
@@ -84,7 +92,7 @@ func TestVaultFiles_Authorizer_OpenModeAndMCPTokens(t *testing.T) {
 	if got := fn(vfReq(rel, "", ""), rel); got != http.StatusNotFound {
 		t.Errorf("open-mode guest on private project: got %d, want 404", got)
 	}
-	if err := f.projects.Set("scratch", projects.Flags{Public: true}); err != nil {
+	if err := f.projects.Set("scratch", projects.Flags{Visibility: projects.VisibilityPublic}); err != nil {
 		t.Fatal(err)
 	}
 	if got := fn(vfReq(rel, "", ""), rel); got != 0 {

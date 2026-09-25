@@ -1,23 +1,25 @@
 package authz
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/gosidian/gosidian/internal/webauth"
 )
 
-// pub builds an isPublic predicate from a set of public project names.
-func pub(names ...string) func(string) bool {
-	m := make(map[string]bool, len(names))
-	for _, n := range names {
-		m[n] = true
+// mk builds an AccessConfig from plain maps: vis is project → visibility
+// (missing = private), grants is "user|project" → level.
+func mk(vis map[string]string, grants map[string]string) AccessConfig {
+	return AccessConfig{
+		Visibility: func(p string) string {
+			if v, ok := vis[p]; ok {
+				return v
+			}
+			return VisibilityPrivate
+		},
+		GrantLevel: func(u, p string) Level { return ParseLevel(grants[u+"|"+p]) },
 	}
-	return func(p string) bool { return m[p] }
 }
-
-// lcfg builds a legacy-mode AccessConfig (membership not enforced) from an
-// isPublic predicate — the pre-feature behavior most of these tests assert.
-func lcfg(isPub func(string) bool) AccessConfig { return AccessConfig{IsPublic: isPub} }
 
 func TestCapabilities(t *testing.T) {
 	cases := []struct {
@@ -42,45 +44,118 @@ func TestCapabilities(t *testing.T) {
 	}
 }
 
-// Legacy mode (member_scope unset): guest sees only public; owner/member see all.
-func TestProjectVisibility(t *testing.T) {
-	isPub := pub("docs")
-
-	guest := Principal{Role: webauth.RoleGuest}
-	if guest.CanAccessProject("secret", lcfg(isPub)) {
-		t.Error("guest must NOT access a private project")
+// The whole model in one table: role × visibility × grant → level.
+func TestLevel_Matrix(t *testing.T) {
+	vis := map[string]string{"Pub": VisibilityPublic, "Int": VisibilityInternal, "Priv": VisibilityPrivate}
+	grants := map[string]string{
+		"alice|Priv": "read", "bob|Priv": "write", "carol|Priv": "admin",
+		"bob|Int": "write", "bob|Pub": "admin",
+		"gwrite|Priv": "write", "gread|Priv": "read",
+		"zed|Priv": "admin",
 	}
-	if !guest.CanAccessProject("docs", lcfg(isPub)) {
-		t.Error("guest must access a public project")
-	}
+	cfg := mk(vis, grants)
+	owner := webauth.RoleOwner
+	member := webauth.RoleMember
+	guest := webauth.RoleGuest
+	unknown := webauth.Role("")
 
-	for _, role := range []webauth.Role{webauth.RoleOwner, webauth.RoleMember} {
-		p := Principal{Role: role}
-		if !p.CanAccessProject("secret", lcfg(isPub)) {
-			t.Errorf("%s must access every project in legacy mode", role)
+	cases := []struct {
+		name    string
+		p       Principal
+		project string
+		want    Level
+	}{
+		{"owner-private", Principal{"o", owner}, "Priv", LevelAdmin},
+		{"owner-unknown-project", Principal{"o", owner}, "Nope", LevelAdmin},
+
+		{"member-public", Principal{"x", member}, "Pub", LevelRead},
+		{"member-internal", Principal{"x", member}, "Int", LevelRead},
+		{"member-private", Principal{"x", member}, "Priv", LevelNone},
+		{"member-unknown-project", Principal{"x", member}, "Nope", LevelNone},
+		{"member-private-read-grant", Principal{"alice", member}, "Priv", LevelRead},
+		{"member-private-write-grant", Principal{"bob", member}, "Priv", LevelWrite},
+		{"member-private-admin-grant", Principal{"carol", member}, "Priv", LevelAdmin},
+		{"member-internal-write-grant", Principal{"bob", member}, "Int", LevelWrite},
+		{"member-public-admin-grant", Principal{"bob", member}, "Pub", LevelAdmin},
+
+		{"guest-public", Principal{"g", guest}, "Pub", LevelRead},
+		{"guest-internal", Principal{"g", guest}, "Int", LevelNone},
+		{"guest-private", Principal{"g", guest}, "Priv", LevelNone},
+		{"guest-private-read-grant", Principal{"gread", guest}, "Priv", LevelRead},
+		{"guest-private-write-grant-capped", Principal{"gwrite", guest}, "Priv", LevelRead},
+
+		{"unknown-role-public", Principal{"u", unknown}, "Pub", LevelRead},
+		{"unknown-role-internal", Principal{"u", unknown}, "Int", LevelNone},
+		{"unknown-role-grant-ignored", Principal{"zed", unknown}, "Priv", LevelNone},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.p.Level(c.project, cfg); got != c.want {
+				t.Errorf("Level = %s want %s", got, c.want)
+			}
+		})
+	}
+}
+
+// The three helpers are thresholds on Level.
+func TestThresholds(t *testing.T) {
+	cfg := mk(map[string]string{"Int": VisibilityInternal}, map[string]string{"w|Int": "write", "a|Int": "admin"})
+	member := webauth.RoleMember
+	check := func(p Principal, access, write, admin bool) {
+		t.Helper()
+		if got := p.CanAccessProject("Int", cfg); got != access {
+			t.Errorf("%s CanAccessProject=%v want %v", p.UserID, got, access)
+		}
+		if got := p.CanWriteProject("Int", cfg); got != write {
+			t.Errorf("%s CanWriteProject=%v want %v", p.UserID, got, write)
+		}
+		if got := p.CanAdminProject("Int", cfg); got != admin {
+			t.Errorf("%s CanAdminProject=%v want %v", p.UserID, got, admin)
 		}
 	}
+	check(Principal{"r", member}, true, false, false)
+	check(Principal{"w", member}, true, true, false)
+	check(Principal{"a", member}, true, true, true)
+	check(Principal{"o", webauth.RoleOwner}, true, true, true)
 }
 
-// An unrecognized/zero-value role must fail closed: no write, no admin,
-// public-only reads, so a malformed Principal never widens access.
-func TestUnknownRoleFailsClosed(t *testing.T) {
-	p := Principal{Role: webauth.Role("")}
-	if p.CanWrite() || p.CanAdmin() {
-		t.Error("unknown role must not write or admin")
+// A zero-value config fails closed: everything private, no grants — only the
+// owner sees anything.
+func TestNilConfigFailsClosed(t *testing.T) {
+	for _, role := range []webauth.Role{webauth.RoleMember, webauth.RoleGuest, webauth.Role("")} {
+		if (Principal{"u", role}).CanAccessProject("any", AccessConfig{}) {
+			t.Errorf("%q must not read with a nil config", role)
+		}
 	}
-	if p.CanAccessProject("secret", lcfg(pub("docs"))) {
-		t.Error("unknown role must not access a private project")
-	}
-	if !p.CanAccessProject("docs", lcfg(pub("docs"))) {
-		t.Error("unknown role may still read a public project")
+	if !(Principal{"o", webauth.RoleOwner}).CanAdminProject("any", AccessConfig{}) {
+		t.Error("owner must remain admin with a nil config")
 	}
 }
 
-// A nil isPublic predicate must fail closed: guests see nothing.
-func TestGuestFailsClosedOnNilPredicate(t *testing.T) {
-	guest := Principal{Role: webauth.RoleGuest}
-	if guest.CanAccessProject("docs", AccessConfig{}) {
-		t.Error("guest with nil IsPublic must be denied")
+// Explain names every contributor, so the access views can say why.
+func TestExplain_Reasons(t *testing.T) {
+	cfg := mk(map[string]string{"Pub": VisibilityPublic}, map[string]string{"bob|Pub": "write"})
+	lvl, via := (Principal{"bob", webauth.RoleMember}).Explain("Pub", cfg)
+	if lvl != LevelWrite || strings.Join(via, ",") != "public,grant:write" {
+		t.Errorf("bob: %s via %v", lvl, via)
+	}
+	lvl, via = (Principal{"o", webauth.RoleOwner}).Explain("Pub", cfg)
+	if lvl != LevelAdmin || strings.Join(via, ",") != "owner" {
+		t.Errorf("owner: %s via %v", lvl, via)
+	}
+	lvl, via = (Principal{"x", webauth.RoleMember}).Explain("Other", cfg)
+	if lvl != LevelNone || len(via) != 0 {
+		t.Errorf("no access: %s via %v", lvl, via)
+	}
+}
+
+func TestLevelStrings(t *testing.T) {
+	for _, l := range []Level{LevelNone, LevelRead, LevelWrite, LevelAdmin} {
+		if l != LevelNone && ParseLevel(l.String()) != l {
+			t.Errorf("round trip failed for %s", l)
+		}
+	}
+	if ParseLevel("root") != LevelNone {
+		t.Error("unknown level must parse as none")
 	}
 }

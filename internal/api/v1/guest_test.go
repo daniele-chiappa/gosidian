@@ -16,7 +16,7 @@ func (f *notesFixture) seedTwoProjects(t *testing.T) string {
 	t.Helper()
 	f.seedNote(t, "pubproj/welcome.md", "# Welcome\nunicorn keyword in public")
 	f.seedNote(t, "privproj/secret.md", "# Secret\nunicorn keyword in private")
-	if err := f.projects.Set("pubproj", projects.Flags{Public: true}); err != nil {
+	if err := f.projects.Set("pubproj", projects.Flags{Visibility: projects.VisibilityPublic}); err != nil {
 		t.Fatal(err)
 	}
 	u, err := f.webauth.AddUser("guest1", "guest-pass-123", webauth.RoleGuest)

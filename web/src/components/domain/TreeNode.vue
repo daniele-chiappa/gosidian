@@ -5,26 +5,34 @@
  * keyboard accessibility + open/close persistence in localStorage
  * across reloads (mirrors the v1.x sidebar-tree.js behaviour).
  *
- * Phase 3.1 ships the read-only renderer; Phase 3.2 adds the
- * download icon next to the note count, in-progress badge, and the
- * filter input from the v1.x sidebar.
+ * Project roots carry a visibility cue (lock = private, globe = public;
+ * internal draws nothing) and the "+" (new note here) shows only where
+ * the account may write — both from the access store, never from the role.
  */
 import type { TreeNode as TN } from '@/api/tree'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Plus } from 'lucide-vue-next'
+import { Plus, Lock, Globe } from 'lucide-vue-next'
 import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
 import { useWindowsStore } from 'plancia'
-import { useAuthStore } from '@/stores/auth'
+import { useAccessStore } from '@/stores/access'
+import { VISIBILITY_HELP } from '@/api/access'
 import { planciaKey } from '@/composables/planciaKey'
 
 const props = defineProps<{ node: TN }>()
 const { t } = useI18n()
 const recents = useRecentlyViewed()
 const windows = useWindowsStore()
-const auth = useAuthStore()
+const access = useAccessStore()
 
 const expandedKey = computed(() => `gosidian.tree.open:${props.node.path}`)
+
+const canWriteHere = computed(() => access.canWrite(props.node.path))
+
+/** Visibility of a project root, for the cue next to its name. */
+const visibility = computed(() =>
+  props.node.is_project_root ? access.visibility(props.node.name) : undefined,
+)
 
 function toggleExpanded(open: boolean) {
   try {
@@ -77,8 +85,20 @@ function createHere() {
         >
           <span class="opacity-60 group-open:rotate-90 transition-transform">▸</span>
           <span class="flex-1 truncate">{{ node.name }}</span>
+          <Lock
+            v-if="visibility === 'private'"
+            class="h-3 w-3 shrink-0 text-text-muted"
+            :title="VISIBILITY_HELP.private"
+            aria-label="Private project"
+          />
+          <Globe
+            v-else-if="visibility === 'public'"
+            class="h-3 w-3 shrink-0 text-success"
+            :title="VISIBILITY_HELP.public"
+            aria-label="Public project"
+          />
           <button
-            v-if="auth.canWrite"
+            v-if="canWriteHere"
             type="button"
             class="rounded p-0.5 text-text-muted opacity-0 transition-opacity hover:bg-surface-hover hover:text-text group-hover/row:opacity-100 focus-visible:opacity-100"
             :title="t('tree.new_note_here')"

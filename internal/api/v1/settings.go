@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"github.com/gosidian/gosidian/internal/projects"
 	"net/http"
 	"strings"
 	"time"
@@ -24,9 +25,10 @@ type settingsView struct {
 	I18n     i18nSettings  `json:"i18n"`
 	MCP      mcpSettings   `json:"mcp"`
 	TOTPMode string        `json:"totp_mode"` // off | optional | required (global two-factor policy)
-	// MemberScope gates project access: "all" (legacy: owner/member see every
-	// project) or "members" (private projects require per-project membership).
-	MemberScope string `json:"member_scope"`
+	// DefaultVisibility is the visibility (public | internal | private) given
+	// to projects created from now on and to folders that appear on disk
+	// without an entry; existing projects keep their own value.
+	DefaultVisibility string `json:"default_visibility"`
 	// AnchorsEnabled / GlobalsEnabled are the read-only server master switches
 	// (GOSIDIAN_ANCHORS_ENABLED / GOSIDIAN_GLOBAL_ENABLED). The SPA reads them
 	// to tell whether a project's use_anchors/use_globals flag has any effect.
@@ -87,8 +89,8 @@ type updateSettingsRequest struct {
 		WritePerMinute *int   `json:"write_per_minute,omitempty"`
 		MaxNoteBytes   *int64 `json:"max_note_bytes,omitempty"`
 	} `json:"mcp,omitempty"`
-	TOTPMode    *string `json:"totp_mode,omitempty"`
-	MemberScope *string `json:"member_scope,omitempty"`
+	TOTPMode          *string `json:"totp_mode,omitempty"`
+	DefaultVisibility *string `json:"default_visibility,omitempty"`
 }
 
 func (r *Router) handleSettings(w http.ResponseWriter, req *http.Request) {
@@ -117,17 +119,17 @@ func (r *Router) getSettings(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	view := toSettingsView(cfg)
-	view.MemberScope = r.memberScopeSetting()
+	view.DefaultVisibility = r.defaultVisibilitySetting()
 	WriteJSON(w, http.StatusOK, view)
 }
 
-// memberScopeSetting returns the live member-scope mode ("all" | "members"),
-// stored in the projects store rather than config.toml.
-func (r *Router) memberScopeSetting() string {
+// defaultVisibilitySetting returns the live default visibility for new
+// projects, stored in the projects store rather than config.toml.
+func (r *Router) defaultVisibilitySetting() string {
 	if r.deps.Projects == nil {
-		return "all"
+		return projects.VisibilityPrivate
 	}
-	return r.deps.Projects.MemberScope()
+	return r.deps.Projects.DefaultVisibility()
 }
 
 // putSettings is owner-only. It loads the current config, applies
@@ -153,11 +155,9 @@ func (r *Router) putSettings(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
 		return
 	}
-	if body.MemberScope != nil {
-		if m := strings.TrimSpace(*body.MemberScope); m != "all" && m != "members" {
-			WriteError(w, http.StatusBadRequest, CodeValidationFormat, "member_scope must be all or members")
-			return
-		}
+	if body.DefaultVisibility != nil && !projects.ValidVisibility(strings.TrimSpace(*body.DefaultVisibility)) {
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "default_visibility must be public, internal or private")
+		return
 	}
 
 	cfg, err := r.loadConfig()
@@ -179,10 +179,11 @@ func (r *Router) putSettings(w http.ResponseWriter, req *http.Request) {
 	if r.deps.Auth != nil && r.deps.Auth.WebAuth != nil {
 		r.deps.Auth.WebAuth.SetTOTPMode(cfg.Webauth.TOTPMode)
 	}
-	// member_scope lives in the projects store (not config.toml); apply it live.
-	if body.MemberScope != nil && r.deps.Projects != nil {
-		if err := r.deps.Projects.SetMemberScope(strings.TrimSpace(*body.MemberScope)); err != nil {
-			WriteError(w, http.StatusInternalServerError, CodeServerInternal, "member_scope: "+err.Error())
+	// default_visibility lives in the projects store (not config.toml); apply
+	// it live.
+	if body.DefaultVisibility != nil && r.deps.Projects != nil {
+		if err := r.deps.Projects.SetDefaultVisibility(strings.TrimSpace(*body.DefaultVisibility)); err != nil {
+			WriteError(w, http.StatusInternalServerError, CodeServerInternal, "default_visibility: "+err.Error())
 			return
 		}
 	}
@@ -197,7 +198,9 @@ func (r *Router) putSettings(w http.ResponseWriter, req *http.Request) {
 		})
 	}
 
-	WriteJSON(w, http.StatusOK, toSettingsView(cfg))
+	view := toSettingsView(cfg)
+	view.DefaultVisibility = r.defaultVisibilitySetting()
+	WriteJSON(w, http.StatusOK, view)
 }
 
 func (r *Router) loadConfig() (*config.Config, error) {

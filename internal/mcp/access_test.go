@@ -83,9 +83,11 @@ func (f *accessFixture) token(t *testing.T, owner string, projs, scopes []string
 	return plain, &tok
 }
 
-func (f *accessFixture) enforce(t *testing.T) {
+func (f *accessFixture) visibility(t *testing.T, project, vis string) {
 	t.Helper()
-	if err := f.projects.SetMemberScope(projects.MemberScopeMembers); err != nil {
+	fl := f.projects.Get(project)
+	fl.Visibility = vis
+	if err := f.projects.Set(project, fl); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -101,7 +103,6 @@ var rw = []string{auth.ScopeRead, auth.ScopeWrite}
 
 func TestEffectiveToken_OwnerAndCLIUnchanged(t *testing.T) {
 	f := newAccessFixture(t)
-	f.enforce(t)
 
 	_, ownerTok := f.token(t, "owner", []string{"alpha"}, rw)
 	if eff := f.s.effectiveToken(ownerTok); eff != ownerTok {
@@ -113,22 +114,28 @@ func TestEffectiveToken_OwnerAndCLIUnchanged(t *testing.T) {
 	}
 }
 
-func TestEffectiveToken_LegacyModeKeepsMemberScope(t *testing.T) {
+// Internal projects are readable by every member; writing takes a grant.
+func TestEffectiveToken_InternalReadsWriteViaGrant(t *testing.T) {
 	f := newAccessFixture(t)
+	f.visibility(t, "alpha", projects.VisibilityInternal)
+	f.visibility(t, "beta", projects.VisibilityInternal)
+	f.grant(t, "beta", "m1", projects.LevelWrite)
 	_, tok := f.token(t, "m1", []string{"alpha", "beta"}, rw)
 
 	eff := f.s.effectiveToken(tok)
 	if eff == nil || strings.Join(eff.ProjectList(), ",") != "alpha,beta" {
-		t.Fatalf("legacy mode: member keeps declared projects, got %+v", eff)
+		t.Fatalf("internal projects must stay readable, got %+v", eff)
 	}
-	if !eff.AllowsWrite("beta/x.md") || !eff.HasScope(auth.ScopeWrite) {
-		t.Error("legacy mode: member writes everywhere")
+	if eff.AllowsWrite("alpha/x.md") {
+		t.Error("alpha: internal without a grant is read-only")
+	}
+	if !eff.AllowsWrite("beta/x.md") {
+		t.Error("beta: write grant must allow writes")
 	}
 }
 
-func TestEffectiveToken_MembersModeIntersectsLive(t *testing.T) {
+func TestEffectiveToken_PrivateIntersectsLive(t *testing.T) {
 	f := newAccessFixture(t)
-	f.enforce(t)
 	f.grant(t, "alpha", "m1", projects.LevelWrite)
 	f.grant(t, "beta", "m1", projects.LevelRead)
 	_, tok := f.token(t, "m1", []string{"alpha", "beta", "gamma"}, rw)
@@ -138,16 +145,16 @@ func TestEffectiveToken_MembersModeIntersectsLive(t *testing.T) {
 		t.Fatal("expected a narrowed token")
 	}
 	if got := strings.Join(eff.ProjectList(), ","); got != "alpha,beta" {
-		t.Fatalf("projects = %q, want alpha,beta (gamma has no membership)", got)
+		t.Fatalf("projects = %q, want alpha,beta (gamma is private with no grant)", got)
 	}
 	if !eff.HasScope(auth.ScopeWrite) {
 		t.Fatal("write scope must survive: alpha is writable")
 	}
 	if !eff.AllowsWrite("alpha/x.md") {
-		t.Error("alpha: write membership must allow writes")
+		t.Error("alpha: write grant must allow writes")
 	}
 	if eff.AllowsWrite("beta/x.md") {
-		t.Error("beta: read membership must block writes")
+		t.Error("beta: read grant must block writes")
 	}
 	if tok.ProjectList()[2] != "gamma" || !tok.AllowsWrite("beta/x.md") {
 		t.Error("the stored record must be left untouched")
@@ -163,11 +170,11 @@ func TestEffectiveToken_MembersModeIntersectsLive(t *testing.T) {
 	res, _ = f.s.handleCreate(ctx, call(map[string]any{"path": "alpha/new.md", "content": "# yes"}))
 	resultText(t, res)
 	res, _ = f.s.handleListProjects(ctx, call(nil))
-	if out := resultText(t, res); !strings.Contains(out, "alpha") || !strings.Contains(out, "beta") || strings.Contains(out, "gamma") {
+	if out := resultText(t, res); !strings.Contains(out, "alpha") || !strings.Contains(out, "beta") || strings.Contains(out, "gamma") || !strings.Contains(out, `"visibility":"private"`) {
 		t.Errorf("list_projects = %s", out)
 	}
 
-	// Membership changes apply on the next derivation, no token rewrite.
+	// Grant changes apply on the next derivation, no token rewrite.
 	if err := f.projects.RemoveMember("beta", "m1"); err != nil {
 		t.Fatal(err)
 	}
@@ -182,9 +189,8 @@ func TestEffectiveToken_MembersModeIntersectsLive(t *testing.T) {
 	}
 }
 
-func TestEffectiveToken_ReadOnlyMembershipDropsWrite(t *testing.T) {
+func TestEffectiveToken_ReadOnlyGrantDropsWrite(t *testing.T) {
 	f := newAccessFixture(t)
-	f.enforce(t)
 	f.grant(t, "alpha", "m1", projects.LevelRead)
 	_, tok := f.token(t, "m1", []string{"alpha"}, rw)
 
@@ -201,7 +207,6 @@ func TestEffectiveToken_ReadOnlyMembershipDropsWrite(t *testing.T) {
 
 func TestEffectiveToken_UnscopedNonOwnerIsNeverAdmin(t *testing.T) {
 	f := newAccessFixture(t)
-	f.enforce(t)
 	f.grant(t, "alpha", "m1", projects.LevelWrite)
 	_, tok := f.token(t, "m1", nil, rw)
 
@@ -221,9 +226,8 @@ func TestEffectiveToken_UnscopedNonOwnerIsNeverAdmin(t *testing.T) {
 
 func TestEffectiveToken_GuestReadsPublicOnly(t *testing.T) {
 	f := newAccessFixture(t)
-	if err := f.projects.Set("alpha", projects.Flags{Public: true}); err != nil {
-		t.Fatal(err)
-	}
+	f.visibility(t, "alpha", projects.VisibilityPublic)
+	f.visibility(t, "beta", projects.VisibilityInternal)
 	_, tok := f.token(t, "g1", []string{"alpha", "beta"}, rw)
 
 	eff := f.s.effectiveToken(tok)
@@ -237,6 +241,7 @@ func TestEffectiveToken_GuestReadsPublicOnly(t *testing.T) {
 
 func TestEffectiveToken_UnknownOwnerFailsClosed(t *testing.T) {
 	f := newAccessFixture(t)
+	f.visibility(t, "alpha", projects.VisibilityInternal)
 	_, tok := f.token(t, "ghost", []string{"alpha"}, rw)
 	if eff := f.s.effectiveToken(tok); eff != nil {
 		t.Errorf("owner that does not resolve must yield nil, got %+v", eff)
@@ -245,7 +250,6 @@ func TestEffectiveToken_UnknownOwnerFailsClosed(t *testing.T) {
 
 func TestAuthenticate_NarrowsBearer(t *testing.T) {
 	f := newAccessFixture(t)
-	f.enforce(t)
 	f.grant(t, "alpha", "m1", projects.LevelWrite)
 	plain, _ := f.token(t, "m1", []string{"alpha", "beta"}, rw)
 
@@ -262,5 +266,21 @@ func TestAuthenticate_NarrowsBearer(t *testing.T) {
 	}
 	if eff := f.s.authenticate(req); eff != nil {
 		t.Errorf("expected refusal, got %+v", eff)
+	}
+}
+
+// memory_create_project pins the store default on the new folder.
+func TestCreateProject_PinsDefaultVisibility(t *testing.T) {
+	f := newAccessFixture(t)
+	if err := f.projects.SetDefaultVisibility(projects.VisibilityInternal); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.WithValue(context.Background(), tokenCtxKey, auth.AdminToken())
+	res, _ := f.s.handleCreateProject(ctx, call(map[string]any{"name": "delta"}))
+	if out := resultText(t, res); !strings.Contains(out, `"visibility":"internal"`) {
+		t.Errorf("create = %s", out)
+	}
+	if f.projects.Get("delta").Visibility != projects.VisibilityInternal {
+		t.Error("visibility must be written to the store")
 	}
 }
