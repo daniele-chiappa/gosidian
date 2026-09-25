@@ -102,14 +102,34 @@ type User struct {
 	RecoveryCodes []RecoveryCode `json:"recovery_codes,omitempty"`
 	// AuthSource is "" / "local" for password accounts, or "ldap" for accounts
 	// auto-provisioned on first LDAP login (no local password hash).
-	AuthSource string     `json:"auth_source,omitempty"`
-	Role       Role       `json:"role"`
-	CreatedAt  time.Time  `json:"created_at"`
-	DisabledAt *time.Time `json:"disabled_at,omitempty"`
+	AuthSource string `json:"auth_source,omitempty"`
+	Role       Role   `json:"role"`
+	// Restricted makes the account ignore project visibility: it sees only
+	// the projects it holds a grant on, directly or through a team (like a
+	// Gitea "restricted user"). Set on every account created from v2.32 on;
+	// accounts from before keep the field absent (false). IMP-101 phase 3.
+	Restricted bool `json:"restricted,omitempty"`
+	// NoCreateProjects withdraws the member capability of creating projects
+	// (absent = may create). Guests never create, whatever the field says.
+	NoCreateProjects bool       `json:"no_create_projects,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	DisabledAt       *time.Time `json:"disabled_at,omitempty"`
 }
 
 // Enabled reports whether the user is active (not disabled).
 func (u *User) Enabled() bool { return u != nil && u.DisabledAt == nil }
+
+// CanCreateProjects reports whether the account may create projects: a role
+// that writes, without the capability withdrawn. The owner always may.
+func (u *User) CanCreateProjects() bool {
+	if u == nil {
+		return false
+	}
+	if u.Role == RoleOwner {
+		return true
+	}
+	return u.Role.CanWrite() && !u.NoCreateProjects
+}
 
 // Invite is a single-use owner-minted registration ticket.
 type Invite struct {
@@ -152,11 +172,24 @@ type Store struct {
 	// can cascade side-effects (e.g. revoke MCP tokens owned by that user).
 	// Called without holding Store.mu.
 	onUserDisabled func(userID string)
+	// onUserCreated, if set, is called after AddUser/AddLDAPUser persisted a
+	// new account (never for Setup: the owner has no personal space), so
+	// callers can provision what a new account starts with, e.g. its
+	// personal project. Called without holding Store.mu.
+	onUserCreated func(u User)
 }
 
 type session struct {
 	userID  string
 	expires time.Time
+}
+
+// SetOnUserCreated installs the provisioning hook for new accounts. Safe to
+// call at startup; not expected to change after that.
+func (s *Store) SetOnUserCreated(fn func(u User)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onUserCreated = fn
 }
 
 // SetOnUserDisabled installs the cascade hook. Safe to call at startup; not
@@ -527,22 +560,10 @@ func (s *Store) AddLDAPUser(username string) (*User, error) {
 		Username:   username,
 		Role:       RoleGuest,
 		AuthSource: "ldap",
+		Restricted: true, // new accounts start with their grants only (IMP-101 phase 3)
 		CreatedAt:  now,
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, existing := range s.file.Users {
-		if existing.Username == username {
-			return nil, fmt.Errorf("username %q already exists", username)
-		}
-	}
-	s.file.Users = append(s.file.Users, u)
-	if err := s.saveLocked(); err != nil {
-		s.file.Users = s.file.Users[:len(s.file.Users)-1]
-		return nil, err
-	}
-	cp := u
-	return &cp, nil
+	return s.addUser(u)
 }
 
 // AuthResult is what Authenticate returns on success: the user, plus whether
@@ -730,26 +751,81 @@ func (s *Store) AddUser(username, password string, role Role) (*User, error) {
 	}
 	now := time.Now().UTC()
 	u := User{
-		ID:        deriveUserID(username, now),
-		Username:  username,
-		Hash:      string(hash),
-		Role:      role,
-		CreatedAt: now,
+		ID:         deriveUserID(username, now),
+		Username:   username,
+		Hash:       string(hash),
+		Role:       role,
+		Restricted: true, // new accounts start with their grants only (IMP-101 phase 3)
+		CreatedAt:  now,
 	}
+	return s.addUser(u)
+}
+
+// addUser appends a new account, persists it and fires the creation hook
+// outside the lock.
+func (s *Store) addUser(u User) (*User, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	for _, existing := range s.file.Users {
-		if existing.Username == username {
-			return nil, fmt.Errorf("username %q already exists", username)
+		if existing.Username == u.Username {
+			s.mu.Unlock()
+			return nil, fmt.Errorf("username %q already exists", u.Username)
 		}
 	}
 	s.file.Users = append(s.file.Users, u)
 	if err := s.saveLocked(); err != nil {
 		s.file.Users = s.file.Users[:len(s.file.Users)-1]
+		s.mu.Unlock()
 		return nil, err
+	}
+	fn := s.onUserCreated
+	s.mu.Unlock()
+	if fn != nil {
+		fn(u)
 	}
 	cp := u
 	return &cp, nil
+}
+
+// SetRestricted toggles whether the account ignores project visibility and
+// sees only its grants. The owner is never restricted.
+func (s *Store) SetRestricted(id string, restricted bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.file.Users {
+		if s.file.Users[i].ID != id {
+			continue
+		}
+		if s.file.Users[i].Role == RoleOwner {
+			return errors.New("the owner cannot be restricted")
+		}
+		if s.file.Users[i].Restricted == restricted {
+			return nil
+		}
+		s.file.Users[i].Restricted = restricted
+		return s.saveLocked()
+	}
+	return fmt.Errorf("user %q not found", id)
+}
+
+// SetCanCreateProjects grants or withdraws the capability of creating
+// projects. The owner always may.
+func (s *Store) SetCanCreateProjects(id string, can bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.file.Users {
+		if s.file.Users[i].ID != id {
+			continue
+		}
+		if s.file.Users[i].Role == RoleOwner {
+			return errors.New("the owner always creates projects")
+		}
+		if s.file.Users[i].NoCreateProjects == !can {
+			return nil
+		}
+		s.file.Users[i].NoCreateProjects = !can
+		return s.saveLocked()
+	}
+	return fmt.Errorf("user %q not found", id)
 }
 
 // DisableUser marks the user as disabled, evicts their sessions, and invokes

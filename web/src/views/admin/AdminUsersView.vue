@@ -7,10 +7,12 @@ import {
   updateUserTOTPPolicy,
   resetUserTOTP,
   createUser,
+  updateUserFlags,
+  createPersonalProject,
   type AdminUser,
   type CreateUserRequest,
 } from '@/api/admin'
-import { getUserAccess, VISIBILITY_LABEL, type AccessProject } from '@/api/access'
+import { getUserAccess, VISIBILITY_LABEL, roleLabel, type AccessProject } from '@/api/access'
 
 const users = ref<AdminUser[]>([])
 
@@ -81,6 +83,8 @@ const newUser = reactive<CreateUserRequest>({
   password: '',
   role: 'member',
   totp_policy: '',
+  restricted: true,
+  can_create_projects: true,
 })
 
 function resetCreate() {
@@ -88,6 +92,8 @@ function resetCreate() {
   newUser.password = ''
   newUser.role = 'member'
   newUser.totp_policy = ''
+  newUser.restricted = true
+  newUser.can_create_projects = true
   createError.value = null
   showPassword.value = false
   copied.value = false
@@ -132,6 +138,8 @@ async function submitCreate() {
       password: newUser.password,
       role: newUser.role,
       totp_policy: newUser.totp_policy || undefined,
+      restricted: newUser.restricted,
+      can_create_projects: newUser.can_create_projects,
     })
     created.value = u.username
     resetCreate()
@@ -173,6 +181,33 @@ async function changeRole(u: AdminUser, role: string) {
     await load()
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Role change failed'
+  }
+}
+
+async function toggleRestricted(u: AdminUser) {
+  try {
+    await updateUserFlags(u.id, { restricted: !u.restricted })
+    await load()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Update failed'
+  }
+}
+
+async function toggleCanCreate(u: AdminUser) {
+  try {
+    await updateUserFlags(u.id, { can_create_projects: !u.can_create_projects })
+    await load()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Update failed'
+  }
+}
+
+async function provisionPersonal(u: AdminUser) {
+  try {
+    await createPersonalProject(u.id)
+    await load()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Personal project failed'
   }
 }
 
@@ -274,8 +309,8 @@ onMounted(load)
             v-model="newUser.role"
             class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
           >
-            <option value="member">member</option>
-            <option value="guest">guest</option>
+            <option value="member">{{ roleLabel('member') }} — reads and writes where granted</option>
+            <option value="guest">{{ roleLabel('guest') }} — reads only</option>
           </select>
         </label>
 
@@ -289,6 +324,21 @@ onMounted(load)
             <option value="enabled">required</option>
             <option value="disabled">exempt</option>
           </select>
+        </label>
+
+        <label class="flex items-start gap-2 text-sm">
+          <input v-model="newUser.restricted" type="checkbox" class="mt-1" />
+          <span>
+            <span class="block">Restricted</span>
+            <span class="text-xs text-text-muted">Sees only the projects it is granted (directly or through a team); public and internal projects stay hidden.</span>
+          </span>
+        </label>
+        <label class="flex items-start gap-2 text-sm">
+          <input v-model="newUser.can_create_projects" type="checkbox" class="mt-1" :disabled="newUser.role === 'guest'" />
+          <span>
+            <span class="block">Can create projects</span>
+            <span class="text-xs text-text-muted">Users only. A personal project is created with the account when the setting is on.</span>
+          </span>
         </label>
 
         <div class="sm:col-span-2 flex items-center gap-3">
@@ -314,6 +364,7 @@ onMounted(load)
           <th class="text-left py-2 px-3">Role</th>
           <th class="text-left py-2 px-3">TOTP</th>
           <th class="text-left py-2 px-3">Access</th>
+          <th class="text-left py-2 px-3">Flags</th>
           <th class="text-left py-2 px-3">Created</th>
           <th class="text-left py-2 px-3">Status</th>
           <th class="text-right py-2 px-3">Actions</th>
@@ -327,15 +378,15 @@ onMounted(load)
               v-if="u.role === 'owner' || u.disabled_at"
               class="text-xs px-2 py-0.5 rounded"
               :class="u.role === 'owner' ? 'bg-accent/20 text-accent' : 'border border-border'"
-            >{{ u.role }}</span>
+            >{{ roleLabel(u.role) }}</span>
             <select
               v-else
               class="text-xs rounded bg-bg-elevated border border-border px-2 py-1 focus:outline-none focus:ring-1 focus:ring-accent"
               :value="u.role"
               @change="changeRole(u, ($event.target as HTMLSelectElement).value)"
             >
-              <option value="member">member</option>
-              <option value="guest">guest</option>
+              <option value="member">{{ roleLabel('member') }}</option>
+              <option value="guest">{{ roleLabel('guest') }}</option>
             </select>
           </td>
           <td class="py-2 px-3">
@@ -373,6 +424,40 @@ onMounted(load)
               >{{ expanded === u.id ? 'Hide' : 'View' }}</button>
             </div>
           </td>
+          <td class="py-2 px-3">
+            <div v-if="u.role !== 'owner'" class="flex flex-wrap items-center gap-1">
+              <button
+                type="button"
+                class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded border"
+                :class="u.restricted ? 'border-warning text-warning' : 'border-border text-text-muted'"
+                :disabled="!!u.disabled_at"
+                :title="u.restricted ? 'Restricted: sees only its grants. Click to let visibility apply (internal/public projects).' : 'Not restricted: internal and public projects are visible. Click to restrict to grants only.'"
+                @click="toggleRestricted(u)"
+              >{{ u.restricted ? 'restricted' : 'open' }}</button>
+              <button
+                v-if="u.role === 'member'"
+                type="button"
+                class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded border"
+                :class="u.can_create_projects ? 'border-border text-text-muted' : 'border-warning text-warning'"
+                :disabled="!!u.disabled_at"
+                :title="u.can_create_projects ? 'May create projects. Click to withdraw.' : 'May not create projects. Click to allow.'"
+                @click="toggleCanCreate(u)"
+              >{{ u.can_create_projects ? 'creates' : 'no create' }}</button>
+              <span
+                v-if="u.personal_project"
+                class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded border border-border text-text-muted"
+                :title="`Personal project: ${u.personal_project}`"
+              >~{{ u.personal_project }}</span>
+              <button
+                v-else-if="u.role === 'member' && !u.disabled_at"
+                type="button"
+                class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded border border-border text-text-muted hover:bg-surface-hover"
+                title="Create the personal project (a private project named after the account, admin grant)"
+                @click="provisionPersonal(u)"
+              >+ personal</button>
+            </div>
+            <span v-else class="text-xs text-text-muted">—</span>
+          </td>
           <td class="py-2 px-3 font-mono text-xs">{{ u.created_at }}</td>
           <td class="py-2 px-3">
             <span
@@ -392,7 +477,7 @@ onMounted(load)
         </tr>
         <!-- "View as": what this account sees and why -->
         <tr v-if="expanded === u.id" class="bg-bg-elevated/40">
-          <td colspan="7" class="px-3 py-2">
+          <td colspan="8" class="px-3 py-2">
             <p v-if="accessLoading" class="text-xs text-text-muted">Loading…</p>
             <p v-else-if="accessError" class="text-xs text-danger">{{ accessError }}</p>
             <p v-else-if="accessRows.length === 0" class="text-xs text-text-muted">

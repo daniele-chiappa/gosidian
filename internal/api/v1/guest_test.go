@@ -23,6 +23,11 @@ func (f *notesFixture) seedTwoProjects(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Accounts created from v2.32 on are restricted (grants only); these
+	// tests exercise visibility, so lift it.
+	if err := f.webauth.SetRestricted(u.ID, false); err != nil {
+		t.Fatal(err)
+	}
 	bearer, _, err := f.spaTokens.Create(u.ID, "guest-agent")
 	if err != nil {
 		t.Fatal(err)
@@ -155,6 +160,11 @@ func TestAdminRoleEdit(t *testing.T) {
 	f := newNotesFixture(t)
 	u, err := f.webauth.AddUser("toedit", "edit-pass-123", webauth.RoleGuest)
 	if err != nil {
+		t.Fatal(err)
+	}
+	// Accounts created from v2.32 on are restricted (grants only); these
+	// tests exercise visibility, so lift it.
+	if err := f.webauth.SetRestricted(u.ID, false); err != nil {
 		t.Fatal(err)
 	}
 

@@ -177,7 +177,7 @@ onMounted(() => {
     </p>
 
     <form
-      v-if="auth.canWrite"
+      v-if="auth.canWrite && (auth.isOwner || access.canCreateProjects)"
       class="flex gap-2 mb-6"
       @submit.prevent="handleCreate"
     >

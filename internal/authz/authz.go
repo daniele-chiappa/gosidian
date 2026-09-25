@@ -20,6 +20,9 @@ import "github.com/gosidian/gosidian/internal/webauth"
 type Principal struct {
 	UserID string
 	Role   webauth.Role
+	// Restricted accounts ignore project visibility and see only their
+	// grants (webauth.User.Restricted).
+	Restricted bool
 }
 
 // CanWrite reports whether the principal's ROLE allows mutations at all
@@ -123,14 +126,16 @@ func (p Principal) Explain(project string, cfg AccessConfig) (Level, []string) {
 	}
 	lvl := LevelNone
 	var via []string
-	switch vis {
-	case VisibilityPublic:
-		lvl = LevelRead
-		via = append(via, "public")
-	case VisibilityInternal:
-		if p.Role == webauth.RoleMember {
+	if !p.Restricted {
+		switch vis {
+		case VisibilityPublic:
 			lvl = LevelRead
-			via = append(via, "internal")
+			via = append(via, "public")
+		case VisibilityInternal:
+			if p.Role == webauth.RoleMember {
+				lvl = LevelRead
+				via = append(via, "internal")
+			}
 		}
 	}
 	// Grants apply to the known non-owner roles only: a zero-value or unknown

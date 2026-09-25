@@ -145,7 +145,7 @@ func (r *Router) streamPrincipal(userID string) (authz.Principal, bool) {
 	if !ok || !user.Enabled() {
 		return authz.Principal{}, false
 	}
-	return authz.Principal{UserID: user.ID, Role: user.Role}, true
+	return authz.Principal{UserID: user.ID, Role: user.Role, Restricted: user.Restricted}, true
 }
 
 // mayStream applies the read predicate that gates every REST read to one SSE

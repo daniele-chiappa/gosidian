@@ -34,9 +34,10 @@ const anonymousUserID = "anonymous"
 // settings store (or the Accept-Language header) on a per-request basis;
 // it is not stored on webauth.User itself.
 type RequestUser struct {
-	ID       string
-	Username string
-	Role     webauth.Role
+	ID         string
+	Username   string
+	Role       webauth.Role
+	Restricted bool
 }
 
 // isAnonymous reports whether this is the synthetic open-mode guest (no real
@@ -123,9 +124,10 @@ func (d *AuthDeps) requireAuth(next http.Handler) http.Handler {
 			return
 		}
 		ru := &RequestUser{
-			ID:       user.ID,
-			Username: user.Username,
-			Role:     user.Role,
+			ID:         user.ID,
+			Username:   user.Username,
+			Role:       user.Role,
+			Restricted: user.Restricted,
 		}
 		// Self-healing attachment cookie (ADR-022): any authenticated API call
 		// (re)issues gosidian_files when the browser lacks it or holds another

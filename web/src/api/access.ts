@@ -19,7 +19,23 @@ export interface AccessProject {
 export interface AccessView {
   user_id: string
   role: string
+  /** Restricted accounts ignore visibility and see only their grants. */
+  restricted: boolean
+  can_create_projects: boolean
+  /** The account's own project, when it exists. */
+  personal_project?: string
   projects: AccessProject[]
+}
+
+/** Human labels for the stored role values. */
+export const ROLE_LABEL: Record<string, string> = {
+  owner: 'Admin',
+  member: 'User',
+  guest: 'Read-only',
+}
+
+export function roleLabel(role: string | undefined): string {
+  return (role && ROLE_LABEL[role]) || role || ''
 }
 
 /** The caller's own effective access to every project they may read. */

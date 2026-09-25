@@ -8,6 +8,58 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.32.0] — 2026-09-25 — "accounts"
+
+New accounts start with nothing but their own project, every account
+mints its own MCP tokens, and the web UI calls roles Admin, User and
+Read-only. Pull the image and restart; nothing to migrate — accounts that
+already exist are not restricted.
+
+### Added
+- **Restricted accounts** — an account created from now on (Admin → Users,
+  invite, LDAP) starts *restricted*: it ignores project visibility and
+  sees only what it is granted, directly or through a team. The owner
+  lifts the flag from Admin → Users (*restricted* / *open*); the
+  creation form has the checkbox, checked by default.
+- **Personal project** — unless switched off in Settings → Project
+  access, a new User account gets a private project named after it where
+  it is admin, so it can work and point an MCP client at it from the
+  first login. The owner can provision one by hand (*+ personal*).
+- **Project-creation capability** — per account (*creates* /
+  *no create*), withdrawn from Admin → Users; `POST /api/v1/projects`
+  honours it.
+- **Self-service MCP tokens** — every account mints its own from
+  Settings → My MCP tokens: *inherit* follows the account's live access,
+  later grants included; *custom* pins a subset of the projects visible
+  now; read-only accounts mint read tokens only; every token is narrowed
+  on each request to what the account may read and write. OAuth logins
+  are listed there too and can be revoked. Endpoints:
+  `GET`/`POST /api/v1/me/tokens`, `DELETE /api/v1/me/tokens/{id}`.
+- **API** — `restricted`, `can_create_projects` and `personal_project`
+  on the users list and on `/api/v1/me/access`;
+  `PATCH /api/v1/admin/users/{id}` accepts `restricted` and
+  `can_create_projects`, creation accepts both;
+  `POST /api/v1/admin/users/{id}/personal-project`; `personal_projects`
+  in `/api/v1/settings`.
+
+### Changed
+- Roles read **Admin** (owner), **User** (member) and **Read-only**
+  (guest) throughout the web UI; the stored values are unchanged.
+- An OAuth consent given without picking projects is an *inherit* grant
+  for every account, narrowed live, instead of a snapshot of the projects
+  visible at consent time.
+- Docs: [authentication & roles](docs/web-ui/authentication.md),
+  [settings](docs/web-ui/settings.md) and
+  [MCP authentication](docs/mcp/authentication.md) cover restricted
+  accounts, personal projects and self-service tokens.
+
+### Fixed
+- Signing out and back in as a different account in the same tab no
+  longer shows the previous account's tree, recently viewed notes and
+  window layout while the new account's requests are in flight: the
+  per-account client state is dropped on sign-out and when the account
+  differs from the last one seen in that browser.
+
 ## [2.31.0] — 2026-09-25 — "teams"
 
 Grants can now go to teams, and the accounts that administer a project

@@ -135,13 +135,16 @@ func (r *Router) oauthApprove(w http.ResponseWriter, req *http.Request, id strin
 	case princ.Role == webauth.RoleOwner:
 		projects = nil // unscoped: every project, including future ones
 	default:
-		for _, p := range visible {
-			projects = append(projects, p.Name)
-		}
-		if len(projects) == 0 {
+		// Inherit: an unscoped grant of a non-owner account is narrowed on
+		// every request to what the account may read at that moment (see
+		// internal/mcp effectiveToken), so it follows later grant changes
+		// instead of freezing today's project list. An account with nothing
+		// to see cannot consent to anything.
+		if len(visible) == 0 {
 			WriteError(w, http.StatusForbidden, CodeAuthForbidden, "this account has no project to grant")
 			return
 		}
+		projects = nil
 	}
 	scopes := body.Scopes
 	if len(scopes) == 0 {

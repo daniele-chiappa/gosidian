@@ -6,6 +6,8 @@ import { useAccessStore } from '@/stores/access'
 import { useUIStore } from '@/stores/ui'
 import { useWindowsStore } from 'plancia'
 import { planciaKey } from '@/composables/planciaKey'
+import { roleLabel } from '@/api/access'
+import { resetSessionState } from '@/composables/useSessionReset'
 import { Search, LogOut, LogIn, Columns2, SquareStack } from 'lucide-vue-next'
 import InsightsBadge from '@/components/layout/InsightsBadge.vue'
 
@@ -23,6 +25,10 @@ function openSearch() {
 
 async function handleLogout() {
   await auth.logout()
+  // Drop the tree, access map, recents and window layout of the account
+  // that just left, so the next one never glimpses them while its own
+  // requests are in flight.
+  resetSessionState()
   await router.push('/login')
 }
 </script>
@@ -83,17 +89,17 @@ async function handleLogout() {
       <span
         v-if="auth.isOwner"
         class="px-2 py-0.5 rounded text-xs bg-accent/20 text-accent"
-      >owner</span>
+      >{{ roleLabel('owner') }}</span>
       <span
         v-else-if="auth.user?.role === 'member'"
         class="px-2 py-0.5 rounded text-xs border border-border text-text-muted"
-        :title="`Member — ${access.readableCount} project(s) readable, ${access.writableCount} writable`"
-      >member</span>
+        :title="`${roleLabel('member')} — ${access.readableCount} project(s) readable, ${access.writableCount} writable${access.restricted ? ' (restricted: grants only)' : ''}`"
+      >{{ roleLabel('member') }}</span>
       <span
         v-else-if="auth.isGuest"
         class="px-2 py-0.5 rounded text-xs border border-border text-text-muted"
-        title="Read-only guest — public projects only"
-      >guest</span>
+        title="Read-only account"
+      >{{ roleLabel('guest') }}</span>
       <button
         v-if="auth.isAnonymous"
         type="button"

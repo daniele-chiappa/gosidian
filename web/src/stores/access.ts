@@ -13,6 +13,9 @@ import { useAuthStore } from '@/stores/auth'
 
 interface AccessState {
   projects: Record<string, AccessProject>
+  restricted: boolean
+  canCreateProjects: boolean
+  personalProject: string
   loaded: boolean
   loading: boolean
 }
@@ -24,7 +27,14 @@ function projectOf(path: string): string {
 }
 
 export const useAccessStore = defineStore('access', {
-  state: (): AccessState => ({ projects: {}, loaded: false, loading: false }),
+  state: (): AccessState => ({
+    projects: {},
+    restricted: false,
+    canCreateProjects: false,
+    personalProject: '',
+    loaded: false,
+    loading: false,
+  }),
 
   getters: {
     list: (s): AccessProject[] =>
@@ -43,6 +53,9 @@ export const useAccessStore = defineStore('access', {
         const next: Record<string, AccessProject> = {}
         for (const p of view.projects) next[p.name] = p
         this.projects = next
+        this.restricted = view.restricted
+        this.canCreateProjects = view.can_create_projects
+        this.personalProject = view.personal_project ?? ''
         this.loaded = true
       } catch {
         /* keep the previous snapshot; the server still enforces everything */
@@ -53,6 +66,9 @@ export const useAccessStore = defineStore('access', {
 
     reset() {
       this.projects = {}
+      this.restricted = false
+      this.canCreateProjects = false
+      this.personalProject = ''
       this.loaded = false
     },
 

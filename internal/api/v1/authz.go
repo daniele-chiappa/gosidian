@@ -11,7 +11,7 @@ import (
 // principal projects a RequestUser onto the authz.Principal used by the
 // shared authorization predicate.
 func (ru *RequestUser) principal() authz.Principal {
-	return authz.Principal{UserID: ru.ID, Role: ru.Role}
+	return authz.Principal{UserID: ru.ID, Role: ru.Role, Restricted: ru.Restricted}
 }
 
 // principalFromContext returns the Principal for the current request. Every

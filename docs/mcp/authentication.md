@@ -100,9 +100,10 @@ token. Semantics to know:
 
 From the web UI at `/admin/tokens`:
 
-- Only owner accounts can mint and revoke static tokens; members and
-  guests reach MCP through OAuth grants (below), which are listed and
-  revocable on the same page.
+- Owner accounts mint and revoke any token from `/admin/tokens`; every
+  other account mints its own from **Settings → My MCP tokens**
+  (`POST /api/v1/me/tokens`, mode `inherit` or `custom`; read-only
+  accounts get read tokens only) and sees its OAuth grants there too.
 - A token never outruns the account it belongs to. On every request the
   token's project list is intersected with what its owner may currently
   read (the project's visibility and the account's grants), and its write

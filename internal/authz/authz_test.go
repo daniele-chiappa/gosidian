@@ -39,11 +39,11 @@ func TestExplain_TeamSources(t *testing.T) {
 			}
 		},
 	}
-	lvl, via := (Principal{"u", webauth.RoleMember}).Explain("P", cfg)
+	lvl, via := (Principal{UserID: "u", Role: webauth.RoleMember}).Explain("P", cfg)
 	if lvl != LevelWrite || strings.Join(via, ",") != "grant:read,team:devs:write" {
 		t.Errorf("level %s via %v", lvl, via)
 	}
-	if lvl := (Principal{"g", webauth.RoleGuest}).Level("P", cfg); lvl != LevelRead {
+	if lvl := (Principal{UserID: "g", Role: webauth.RoleGuest}).Level("P", cfg); lvl != LevelRead {
 		t.Errorf("guest with a team write grant must be capped to read, got %s", lvl)
 	}
 }
@@ -92,28 +92,32 @@ func TestLevel_Matrix(t *testing.T) {
 		project string
 		want    Level
 	}{
-		{"owner-private", Principal{"o", owner}, "Priv", LevelAdmin},
-		{"owner-unknown-project", Principal{"o", owner}, "Nope", LevelAdmin},
+		{"owner-private", Principal{UserID: "o", Role: owner}, "Priv", LevelAdmin},
+		{"owner-unknown-project", Principal{UserID: "o", Role: owner}, "Nope", LevelAdmin},
 
-		{"member-public", Principal{"x", member}, "Pub", LevelRead},
-		{"member-internal", Principal{"x", member}, "Int", LevelRead},
-		{"member-private", Principal{"x", member}, "Priv", LevelNone},
-		{"member-unknown-project", Principal{"x", member}, "Nope", LevelNone},
-		{"member-private-read-grant", Principal{"alice", member}, "Priv", LevelRead},
-		{"member-private-write-grant", Principal{"bob", member}, "Priv", LevelWrite},
-		{"member-private-admin-grant", Principal{"carol", member}, "Priv", LevelAdmin},
-		{"member-internal-write-grant", Principal{"bob", member}, "Int", LevelWrite},
-		{"member-public-admin-grant", Principal{"bob", member}, "Pub", LevelAdmin},
+		{"member-public", Principal{UserID: "x", Role: member}, "Pub", LevelRead},
+		{"member-internal", Principal{UserID: "x", Role: member}, "Int", LevelRead},
+		{"member-private", Principal{UserID: "x", Role: member}, "Priv", LevelNone},
+		{"member-unknown-project", Principal{UserID: "x", Role: member}, "Nope", LevelNone},
+		{"member-private-read-grant", Principal{UserID: "alice", Role: member}, "Priv", LevelRead},
+		{"member-private-write-grant", Principal{UserID: "bob", Role: member}, "Priv", LevelWrite},
+		{"member-private-admin-grant", Principal{UserID: "carol", Role: member}, "Priv", LevelAdmin},
+		{"member-internal-write-grant", Principal{UserID: "bob", Role: member}, "Int", LevelWrite},
+		{"member-public-admin-grant", Principal{UserID: "bob", Role: member}, "Pub", LevelAdmin},
 
-		{"guest-public", Principal{"g", guest}, "Pub", LevelRead},
-		{"guest-internal", Principal{"g", guest}, "Int", LevelNone},
-		{"guest-private", Principal{"g", guest}, "Priv", LevelNone},
-		{"guest-private-read-grant", Principal{"gread", guest}, "Priv", LevelRead},
-		{"guest-private-write-grant-capped", Principal{"gwrite", guest}, "Priv", LevelRead},
+		{"guest-public", Principal{UserID: "g", Role: guest}, "Pub", LevelRead},
+		{"guest-internal", Principal{UserID: "g", Role: guest}, "Int", LevelNone},
+		{"guest-private", Principal{UserID: "g", Role: guest}, "Priv", LevelNone},
+		{"guest-private-read-grant", Principal{UserID: "gread", Role: guest}, "Priv", LevelRead},
+		{"guest-private-write-grant-capped", Principal{UserID: "gwrite", Role: guest}, "Priv", LevelRead},
 
-		{"unknown-role-public", Principal{"u", unknown}, "Pub", LevelRead},
-		{"unknown-role-internal", Principal{"u", unknown}, "Int", LevelNone},
-		{"unknown-role-grant-ignored", Principal{"zed", unknown}, "Priv", LevelNone},
+		{"restricted-member-public", Principal{UserID: "x", Role: member, Restricted: true}, "Pub", LevelNone},
+		{"restricted-member-internal", Principal{UserID: "x", Role: member, Restricted: true}, "Int", LevelNone},
+		{"restricted-member-grant", Principal{UserID: "bob", Role: member, Restricted: true}, "Priv", LevelWrite},
+		{"restricted-guest-public", Principal{UserID: "g", Role: guest, Restricted: true}, "Pub", LevelNone},
+		{"unknown-role-public", Principal{UserID: "u", Role: unknown}, "Pub", LevelRead},
+		{"unknown-role-internal", Principal{UserID: "u", Role: unknown}, "Int", LevelNone},
+		{"unknown-role-grant-ignored", Principal{UserID: "zed", Role: unknown}, "Priv", LevelNone},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -140,21 +144,21 @@ func TestThresholds(t *testing.T) {
 			t.Errorf("%s CanAdminProject=%v want %v", p.UserID, got, admin)
 		}
 	}
-	check(Principal{"r", member}, true, false, false)
-	check(Principal{"w", member}, true, true, false)
-	check(Principal{"a", member}, true, true, true)
-	check(Principal{"o", webauth.RoleOwner}, true, true, true)
+	check(Principal{UserID: "r", Role: member}, true, false, false)
+	check(Principal{UserID: "w", Role: member}, true, true, false)
+	check(Principal{UserID: "a", Role: member}, true, true, true)
+	check(Principal{UserID: "o", Role: webauth.RoleOwner}, true, true, true)
 }
 
 // A zero-value config fails closed: everything private, no grants — only the
 // owner sees anything.
 func TestNilConfigFailsClosed(t *testing.T) {
 	for _, role := range []webauth.Role{webauth.RoleMember, webauth.RoleGuest, webauth.Role("")} {
-		if (Principal{"u", role}).CanAccessProject("any", AccessConfig{}) {
+		if (Principal{UserID: "u", Role: role}).CanAccessProject("any", AccessConfig{}) {
 			t.Errorf("%q must not read with a nil config", role)
 		}
 	}
-	if !(Principal{"o", webauth.RoleOwner}).CanAdminProject("any", AccessConfig{}) {
+	if !(Principal{UserID: "o", Role: webauth.RoleOwner}).CanAdminProject("any", AccessConfig{}) {
 		t.Error("owner must remain admin with a nil config")
 	}
 }
@@ -162,15 +166,15 @@ func TestNilConfigFailsClosed(t *testing.T) {
 // Explain names every contributor, so the access views can say why.
 func TestExplain_Reasons(t *testing.T) {
 	cfg := mk(map[string]string{"Pub": VisibilityPublic}, map[string]string{"bob|Pub": "write"})
-	lvl, via := (Principal{"bob", webauth.RoleMember}).Explain("Pub", cfg)
+	lvl, via := (Principal{UserID: "bob", Role: webauth.RoleMember}).Explain("Pub", cfg)
 	if lvl != LevelWrite || strings.Join(via, ",") != "public,grant:write" {
 		t.Errorf("bob: %s via %v", lvl, via)
 	}
-	lvl, via = (Principal{"o", webauth.RoleOwner}).Explain("Pub", cfg)
+	lvl, via = (Principal{UserID: "o", Role: webauth.RoleOwner}).Explain("Pub", cfg)
 	if lvl != LevelAdmin || strings.Join(via, ",") != "owner" {
 		t.Errorf("owner: %s via %v", lvl, via)
 	}
-	lvl, via = (Principal{"x", webauth.RoleMember}).Explain("Other", cfg)
+	lvl, via = (Principal{UserID: "x", Role: webauth.RoleMember}).Explain("Other", cfg)
 	if lvl != LevelNone || len(via) != 0 {
 		t.Errorf("no access: %s via %v", lvl, via)
 	}

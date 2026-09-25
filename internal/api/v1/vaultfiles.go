@@ -101,7 +101,7 @@ func (r *Router) spaPrincipal(token string) (authz.Principal, bool) {
 	if !ok || !user.Enabled() || d.WebAuth.TOTPEnrollmentRequired(user) {
 		return authz.Principal{}, false
 	}
-	return authz.Principal{UserID: user.ID, Role: user.Role}, true
+	return authz.Principal{UserID: user.ID, Role: user.Role, Restricted: user.Restricted}, true
 }
 
 func (r *Router) seeOr404(p authz.Principal, rel string) int {

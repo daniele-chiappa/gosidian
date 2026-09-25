@@ -25,6 +25,12 @@ type adminUserView struct {
 	TOTPEnrolled bool   `json:"totp_enrolled"`
 	CreatedAt    string `json:"created_at"`
 	DisabledAt   string `json:"disabled_at,omitempty"`
+	// Restricted accounts ignore project visibility and see only their
+	// grants; CanCreateProjects is the member capability of creating
+	// projects; PersonalProject is the account's own project when it exists.
+	Restricted        bool   `json:"restricted"`
+	CanCreateProjects bool   `json:"can_create_projects"`
+	PersonalProject   string `json:"personal_project,omitempty"`
 	// ProjectsReadable / ProjectsWritable summarise the account's effective
 	// access so the users list shows it at a glance; the per-project detail
 	// is GET /admin/users/{id}/access. Omitted for the owner (everything).
@@ -34,12 +40,14 @@ type adminUserView struct {
 
 func toAdminUserView(u webauth.User) adminUserView {
 	uv := adminUserView{
-		ID:           u.ID,
-		Username:     u.Username,
-		Role:         string(u.Role),
-		TOTPPolicy:   u.TOTPPolicy,
-		TOTPEnrolled: u.TOTPSec != "",
-		CreatedAt:    u.CreatedAt.UTC().Format(rfc3339Z),
+		ID:                u.ID,
+		Username:          u.Username,
+		Role:              string(u.Role),
+		TOTPPolicy:        u.TOTPPolicy,
+		TOTPEnrolled:      u.TOTPSec != "",
+		CreatedAt:         u.CreatedAt.UTC().Format(rfc3339Z),
+		Restricted:        u.Restricted,
+		CanCreateProjects: u.CanCreateProjects(),
 	}
 	if u.DisabledAt != nil {
 		uv.DisabledAt = u.DisabledAt.UTC().Format(rfc3339Z)
@@ -75,9 +83,10 @@ func (r *Router) handleAdminUsers(w http.ResponseWriter, req *http.Request) {
 		out := make([]adminUserView, 0, len(users))
 		for _, u := range users {
 			uv := toAdminUserView(u)
+			uv.PersonalProject = r.personalProjectOf(u)
 			if u.Role != webauth.RoleOwner {
 				readable, writable := 0, 0
-				princ := authz.Principal{UserID: u.ID, Role: u.Role}
+				princ := authz.Principal{UserID: u.ID, Role: u.Role, Restricted: u.Restricted}
 				for _, p := range projs {
 					switch lvl := r.levelOf(princ, p.Name); {
 					case lvl >= authz.LevelWrite:
@@ -105,6 +114,10 @@ type createUserRequest struct {
 	Password   string `json:"password"`
 	Role       string `json:"role,omitempty"`        // member (default) | guest
 	TOTPPolicy string `json:"totp_policy,omitempty"` // "" inherit | enabled | disabled
+	// Restricted defaults to true (new accounts see only their grants);
+	// CanCreateProjects defaults to true for members.
+	Restricted        *bool `json:"restricted,omitempty"`
+	CanCreateProjects *bool `json:"can_create_projects,omitempty"`
 }
 
 // createUser provisions a new account directly (owner-only, POST /admin/users)
@@ -157,6 +170,18 @@ func (r *Router) createUser(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 	}
+	if body.Restricted != nil && !*body.Restricted {
+		if err := r.deps.Auth.WebAuth.SetRestricted(user.ID, false); err != nil {
+			WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
+			return
+		}
+	}
+	if body.CanCreateProjects != nil && !*body.CanCreateProjects {
+		if err := r.deps.Auth.WebAuth.SetCanCreateProjects(user.ID, false); err != nil {
+			WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
+			return
+		}
+	}
 	if actor != nil && r.deps.Audit != nil {
 		_ = r.deps.Audit.Write(audit.Entry{
 			Source: audit.SourceHTTP,
@@ -183,21 +208,24 @@ func (r *Router) handleAdminUserItem(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	id, sub, _ := strings.Cut(strings.TrimSuffix(strings.TrimPrefix(req.URL.Path, "/api/v1/admin/users/"), "/"), "/")
-	if id == "" || (sub != "" && sub != "totp" && sub != "access") {
-		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "expected /api/v1/admin/users/{id}, /api/v1/admin/users/{id}/totp or /api/v1/admin/users/{id}/access")
+	if id == "" || (sub != "" && sub != "totp" && sub != "access" && sub != "personal-project") {
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "expected /api/v1/admin/users/{id}[/totp|/access|/personal-project]")
 		return
 	}
-	if sub == "access" {
-		if req.Method != http.MethodGet {
-			WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
-			return
-		}
+	if sub == "access" || sub == "personal-project" {
 		u, ok := r.deps.Auth.WebAuth.UserByID(id)
 		if !ok {
 			WriteError(w, http.StatusNotFound, CodeNotFound, "user not found")
 			return
 		}
-		r.writeAccessView(w, authz.Principal{UserID: u.ID, Role: u.Role})
+		switch {
+		case sub == "access" && req.Method == http.MethodGet:
+			r.writeAccessView(w, *u)
+		case sub == "personal-project" && req.Method == http.MethodPost:
+			r.createPersonalProject(w, req, *u)
+		default:
+			WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
+		}
 		return
 	}
 	if sub == "totp" {
@@ -256,8 +284,10 @@ func (r *Router) handleAdminUserItem(w http.ResponseWriter, req *http.Request) {
 }
 
 type updateUserRequest struct {
-	Role       *string `json:"role,omitempty"`
-	TOTPPolicy *string `json:"totp_policy,omitempty"` // "" inherit | enabled | disabled
+	Role              *string `json:"role,omitempty"`
+	TOTPPolicy        *string `json:"totp_policy,omitempty"` // "" inherit | enabled | disabled
+	Restricted        *bool   `json:"restricted,omitempty"`
+	CanCreateProjects *bool   `json:"can_create_projects,omitempty"`
 }
 
 // updateUserRole changes a user's role (member↔guest) and/or their per-user
@@ -271,9 +301,21 @@ func (r *Router) updateUserRole(w http.ResponseWriter, req *http.Request, id str
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
 		return
 	}
-	if body.Role == nil && body.TOTPPolicy == nil {
-		WriteError(w, http.StatusBadRequest, CodeValidationRequired, "role or totp_policy required")
+	if body.Role == nil && body.TOTPPolicy == nil && body.Restricted == nil && body.CanCreateProjects == nil {
+		WriteError(w, http.StatusBadRequest, CodeValidationRequired, "role, totp_policy, restricted or can_create_projects required")
 		return
+	}
+	if body.Restricted != nil {
+		if err := r.deps.Auth.WebAuth.SetRestricted(id, *body.Restricted); err != nil {
+			r.writeUserUpdateError(w, err)
+			return
+		}
+	}
+	if body.CanCreateProjects != nil {
+		if err := r.deps.Auth.WebAuth.SetCanCreateProjects(id, *body.CanCreateProjects); err != nil {
+			r.writeUserUpdateError(w, err)
+			return
+		}
 	}
 	if body.Role != nil {
 		role := webauth.Role(strings.TrimSpace(*body.Role))
@@ -457,4 +499,17 @@ func (r *Router) handleAdminInviteItem(w http.ResponseWriter, req *http.Request)
 		})
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// writeUserUpdateError maps a webauth mutation error onto the status the SPA
+// expects: unknown user → 404, owner immutability → 403, the rest → 400.
+func (r *Router) writeUserUpdateError(w http.ResponseWriter, err error) {
+	switch {
+	case strings.Contains(err.Error(), "not found"):
+		WriteError(w, http.StatusNotFound, CodeNotFound, err.Error())
+	case strings.Contains(err.Error(), "owner"):
+		WriteError(w, http.StatusForbidden, CodeAuthForbidden, err.Error())
+	default:
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
+	}
 }

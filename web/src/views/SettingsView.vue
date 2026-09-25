@@ -4,6 +4,7 @@ import { getSettings, updateSettings, type Settings } from '@/api/settings'
 import { useAuthStore } from '@/stores/auth'
 import { useUIStore, type LocaleCode, type ThemePreset } from '@/stores/ui'
 import TotpEnroll from '@/components/domain/TotpEnroll.vue'
+import MyTokens from '@/components/domain/MyTokens.vue'
 import RecoveryCodes from '@/components/domain/RecoveryCodes.vue'
 import { disenrollTOTP, regenerateRecoveryCodes } from '@/api/totp'
 
@@ -83,12 +84,14 @@ const draft = reactive<{
   i18n: { default_lang: string; enabled_langs: string }
   totp_mode: string
   default_visibility: string
+  personal_projects: boolean
 }>({
   git: { enabled: false, remote: '', branch: '', debounce_ms: 30000, push: false, token_env: '' },
   trash: { enabled: false, retention_ms: 0 },
   i18n: { default_lang: 'en', enabled_langs: 'it,en' },
   totp_mode: 'off',
   default_visibility: 'private',
+  personal_projects: true,
 })
 const loading = ref(false)
 const saving = ref(false)
@@ -112,6 +115,7 @@ function hydrate(s: Settings) {
   }
   draft.totp_mode = s.totp_mode ?? 'off'
   draft.default_visibility = s.default_visibility || 'private'
+  draft.personal_projects = s.personal_projects ?? true
 }
 
 async function load() {
@@ -143,6 +147,7 @@ async function save() {
       },
       totp_mode: draft.totp_mode,
       default_visibility: draft.default_visibility,
+      personal_projects: draft.personal_projects,
     })
     hydrate(result)
     message.value = 'Saved.'
@@ -163,7 +168,7 @@ onMounted(load)
       v-if="!auth.isOwner"
       class="text-sm text-text-muted mb-6"
     >
-      Read-only — only owners can change server settings.
+      Server settings are read-only for your role; your own two-factor setup and MCP tokens below are yours to change.
     </p>
 
     <fieldset class="rounded border border-border bg-surface p-4 space-y-3 mb-6">
@@ -254,6 +259,27 @@ onMounted(load)
           Each project's own visibility and grants are managed from Projects.
         </span>
       </label>
+      <label class="flex items-start gap-2 text-sm">
+        <input
+          v-model="draft.personal_projects"
+          type="checkbox"
+          class="mt-1"
+          @change="save"
+        />
+        <span>
+          <span class="block">Personal project for new accounts</span>
+          <span class="text-xs text-text-muted">
+            Every new User account gets a private project named after it where it is admin, so it
+            has a place to work before anyone grants it anything. New accounts start
+            <em>restricted</em> (they see only their grants) — lift it from Admin → Users.
+          </span>
+        </span>
+      </label>
+    </fieldset>
+
+    <fieldset v-if="!auth.isOwner && !auth.isAnonymous" class="rounded border border-border bg-surface p-4 space-y-3 mb-6">
+      <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">My MCP tokens</legend>
+      <MyTokens />
     </fieldset>
 
     <fieldset class="rounded border border-border bg-surface p-4 space-y-3 mb-6">

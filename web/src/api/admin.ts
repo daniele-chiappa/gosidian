@@ -10,6 +10,12 @@ export interface MCPToken {
   expires_at?: string
   expired?: boolean
   self_improve_opt_in: boolean
+  /** Multi-project scope; absent = inherit (owner: unscoped). */
+  projects?: string[]
+  tool_profile?: string
+  /** "" static bearer | "oauth" grant minted by a consent. */
+  kind?: string
+  client_id?: string
 }
 
 export interface MCPTokenCreated {
@@ -43,6 +49,11 @@ export interface AdminUser {
   totp_enrolled?: boolean
   created_at: string
   disabled_at?: string
+  /** Restricted accounts ignore visibility and see only their grants. */
+  restricted: boolean
+  can_create_projects: boolean
+  /** The account's own project, when it exists. */
+  personal_project?: string
   /** Effective access summary; absent for the owner (everything). */
   projects_readable?: number
   projects_writable?: number
@@ -136,6 +147,10 @@ export interface CreateUserRequest {
   password: string
   role: 'member' | 'guest'
   totp_policy?: string // "" inherit | enabled | disabled
+  /** Default true: the account sees only its grants until the owner lifts it. */
+  restricted?: boolean
+  /** Default true for members. */
+  can_create_projects?: boolean
 }
 
 /** Create a new account directly (owner-only). The owner is a singleton, so only
@@ -162,6 +177,23 @@ export async function updateUserRole(id: string, role: 'member' | 'guest'): Prom
 export async function updateUserTOTPPolicy(id: string, totpPolicy: string): Promise<AdminUser> {
   const { data } = await client.patch<AdminUser>(`/admin/users/${encodeURIComponent(id)}`, { totp_policy: totpPolicy })
   return data
+}
+
+/** Toggle the restricted flag and/or the project-creation capability. */
+export async function updateUserFlags(
+  id: string,
+  patch: { restricted?: boolean; can_create_projects?: boolean },
+): Promise<AdminUser> {
+  const { data } = await client.patch<AdminUser>(`/admin/users/${encodeURIComponent(id)}`, patch)
+  return data
+}
+
+/** Provision the account's personal project by hand (owner-only). */
+export async function createPersonalProject(id: string): Promise<string> {
+  const { data } = await client.post<{ personal_project: string }>(
+    `/admin/users/${encodeURIComponent(id)}/personal-project`,
+  )
+  return data.personal_project
 }
 
 /** Clear a user's TOTP secret and recovery codes (owner-only): the escape

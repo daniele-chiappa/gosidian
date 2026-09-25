@@ -19,6 +19,7 @@ import {
 import { listUsers, type AdminUser } from '@/api/admin'
 import { listProjects, type GrantLevel, type Project } from '@/api/projects'
 import { useAccessStore } from '@/stores/access'
+import { roleLabel } from '@/api/access'
 
 const access = useAccessStore()
 const teams = ref<Team[]>([])
@@ -260,7 +261,7 @@ onMounted(load)
               class="flex items-center gap-2 text-sm rounded border border-border bg-surface px-2 py-1"
             >
               <span class="flex-1 truncate">{{ u.username }}</span>
-              <span class="text-[10px] uppercase text-text-muted">{{ u.role }}</span>
+              <span class="text-[10px] uppercase text-text-muted">{{ roleLabel(u.role) }}</span>
               <button
                 type="button"
                 class="text-xs px-1.5 rounded text-danger hover:bg-surface-hover"
@@ -276,7 +277,7 @@ onMounted(load)
               class="flex-1 rounded bg-bg-elevated border border-border px-2 py-1 text-sm"
             >
               <option value="">Add account…</option>
-              <option v-for="u in candidatesFor(t)" :key="u.id" :value="u.id">{{ u.username }} ({{ u.role }})</option>
+              <option v-for="u in candidatesFor(t)" :key="u.id" :value="u.id">{{ u.username }} ({{ roleLabel(u.role) }})</option>
             </select>
             <button
               type="submit"

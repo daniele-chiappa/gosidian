@@ -316,6 +316,17 @@ func main() {
 				rep.Projects, rep.GrantsSeeded, rep.LegacyMembersMode, rep.DefaultVisibility)
 		}
 	}
+	// A new account starts with its personal project (IMP-101 phase 3): a
+	// private project named after it where it is admin. Off via Settings.
+	webauthStore.SetOnUserCreated(func(u webauth.User) {
+		name, err := apiv1.ProvisionPersonalProject(v, projectsStore, auditLog, u, false)
+		switch {
+		case err != nil:
+			log.Printf("webauth: user %s created, personal project not provisioned: %v", u.Username, err)
+		case name != "":
+			log.Printf("webauth: user %s created, personal project %q provisioned", u.Username, name)
+		}
+	})
 	if cfg.Vault.CacheSize != 128 {
 		v.SetCacheSize(cfg.Vault.CacheSize)
 		log.Printf("vault cache size set to %d", cfg.Vault.CacheSize)
@@ -465,7 +476,7 @@ func main() {
 		if !ok || !u.Enabled() {
 			return authz.Principal{}, false
 		}
-		return authz.Principal{UserID: u.ID, Role: u.Role}, true
+		return authz.Principal{UserID: u.ID, Role: u.Role, Restricted: u.Restricted}, true
 	})
 	// MCP write handlers publish on the SSE hub so SPA subscribers
 	// see external-tab + agent edits in real time.

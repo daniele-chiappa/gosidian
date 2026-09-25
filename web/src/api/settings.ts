@@ -29,6 +29,7 @@ export interface Settings {
   mcp: MCPSettings
   totp_mode: string // off | optional | required (global two-factor policy)
   default_visibility: string // public | internal | private, for projects created from now on
+  personal_projects: boolean // new accounts get a private project named after them
   anchors_enabled: boolean // read-only master switch GOSIDIAN_ANCHORS_ENABLED
   globals_enabled: boolean // read-only master switch GOSIDIAN_GLOBAL_ENABLED
 }
@@ -58,6 +59,7 @@ export interface UpdateSettings {
   }>
   totp_mode?: string
   default_visibility?: string
+  personal_projects?: boolean
 }
 
 export async function getSettings(): Promise<Settings> {

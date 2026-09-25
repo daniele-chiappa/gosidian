@@ -130,6 +130,7 @@ type Store struct {
 	teams             map[string]Team            // team id -> team (IMP-101 phase 2)
 	memberScope       string                     // legacy switch, consumed by the migration
 	defaultVisibility string                     // visibility of projects without an entry; "" = private
+	personalOff       bool                       // personal projects for new accounts switched off (IMP-101 phase 3)
 	accessModel       int                        // 0 = pre-v2.30 file, accessModelVersion = migrated
 	mtime             time.Time
 }
@@ -140,6 +141,7 @@ type storeFile struct {
 	Teams             map[string]Team            `json:"teams,omitempty"`
 	MemberScope       string                     `json:"member_scope,omitempty"`
 	DefaultVisibility string                     `json:"default_visibility,omitempty"`
+	PersonalOff       bool                       `json:"personal_projects_off,omitempty"`
 	AccessModel       int                        `json:"access_model,omitempty"`
 }
 
@@ -164,6 +166,7 @@ func (s *Store) reset() {
 	s.teams = map[string]Team{}
 	s.memberScope = ""
 	s.defaultVisibility = ""
+	s.personalOff = false
 	s.accessModel = 0
 	s.mtime = time.Time{}
 }
@@ -199,6 +202,7 @@ func (s *Store) load() error {
 	s.teams = sf.Teams
 	s.memberScope = sf.MemberScope
 	s.defaultVisibility = sf.DefaultVisibility
+	s.personalOff = sf.PersonalOff
 	s.accessModel = sf.AccessModel
 	if st, err := os.Stat(s.path); err == nil {
 		s.mtime = st.ModTime()
@@ -236,6 +240,7 @@ func (s *Store) save() error {
 		Teams:             s.teams,
 		MemberScope:       s.memberScope,
 		DefaultVisibility: s.defaultVisibility,
+		PersonalOff:       s.personalOff,
 		AccessModel:       s.accessModel,
 	}, "", "  ")
 	if err != nil {
@@ -431,6 +436,28 @@ func (s *Store) SetDefaultVisibility(v string) error {
 	} else {
 		s.defaultVisibility = v
 	}
+	return s.save()
+}
+
+// PersonalProjectsEnabled reports whether a new account gets a private
+// project named after it (default on).
+func (s *Store) PersonalProjectsEnabled() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reloadIfStale()
+	return !s.personalOff
+}
+
+// SetPersonalProjects switches the provisioning of personal projects for new
+// accounts on or off.
+func (s *Store) SetPersonalProjects(on bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reloadIfStale()
+	if s.personalOff == !on {
+		return nil
+	}
+	s.personalOff = !on
 	return s.save()
 }
 

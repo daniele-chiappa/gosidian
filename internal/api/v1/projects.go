@@ -214,6 +214,10 @@ func (r *Router) createProject(w http.ResponseWriter, req *http.Request) {
 	if denyGuestWrite(w, user) {
 		return
 	}
+	if full, ok := r.deps.Auth.WebAuth.UserByID(user.ID); ok && !full.CanCreateProjects() {
+		WriteError(w, http.StatusForbidden, CodeAuthForbidden, "this account may not create projects")
+		return
+	}
 	var body createProjectRequest
 	if err := DecodeJSON(req, &body); err != nil {
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())

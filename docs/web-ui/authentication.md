@@ -21,11 +21,11 @@ grants it holds (next section).
 |---|:--:|:--:|:--:|
 | Read notes of projects visible to the account | ✅ | ✅ | ✅ |
 | Create / edit / delete notes (with a write grant) | ✅ | ✅ | — |
-| Create projects (becoming their admin) | ✅ | ✅ | — |
+| Create projects (becoming their admin; capability can be withdrawn) | ✅ | ✅ | — |
 | Change a project's settings, rename, delete (with an admin grant) | ✅ | ✅ | — |
 | Make a project **public** | ✅ | — | — |
 | Manage grants (Projects → Members) | ✅ | — | — |
-| Create static MCP tokens | ✅ | — | — |
+| Mint own MCP tokens (Settings → My MCP tokens) | ✅ | ✅ | ✅ (read) |
 | Connect MCP clients through OAuth | ✅ | ✅ | ✅ (read) |
 | Manage users, invites, roles | ✅ | — | — |
 | Edit server settings (`/settings`) | ✅ | — | — |
@@ -85,10 +85,36 @@ Where to manage it in the web UI:
   without settings). Fresh installations default to private; upgraded
   ones to internal.
 
-New accounts start with the projects their role and the visibilities
-give them — a member sees internal and public projects, a guest public
-ones — and gain the rest through grants, directly or by joining a team.
-The account that creates a project is its admin.
+### New accounts: restricted, with a personal project
+
+An account created from v2.32 on starts **restricted**: it ignores
+visibility and sees only the projects it is granted, directly or through
+a team — nothing, until the owner gives it something. Unless switched off
+in **Settings → Project access**, a new User account also gets a
+**personal project**, a private project named after the account where it
+is admin, so it has a place to work (and to point an MCP client at) from
+the first login. The owner lifts the restriction from **Admin → Users**
+(the *restricted* / *open* flag) when the account should also see
+internal and public projects, and can withdraw or grant the capability of
+**creating projects** there (*creates* / *no create*), or provision the
+personal project by hand (*+ personal*). Accounts that existed before the
+upgrade are not restricted.
+
+Roles are shown as **Admin** (owner), **User** (member) and
+**Read-only** (guest) in the web UI; the API keeps the stored values.
+
+### Your own MCP tokens
+
+Every account mints its own MCP tokens from **Settings → My MCP tokens**
+(the owner uses **Admin → Tokens**). A token never exceeds the account:
+on every request the server narrows it to the projects the account may
+read and write at that moment. **Inherit** records no project list and
+follows the account's access as it changes, later grants included;
+**custom** pins a subset of the projects visible when the token is made.
+Read-only accounts mint read tokens only. OAuth logins (claude.ai, Claude
+Code) are listed there too and can be revoked; a consent given without
+picking projects is an inherit grant as well. API: `GET`/`POST
+/api/v1/me/tokens`, `DELETE /api/v1/me/tokens/{id}`.
 
 ### Upgrading from 2.29 and earlier
 

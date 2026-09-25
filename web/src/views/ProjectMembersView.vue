@@ -13,7 +13,7 @@ import {
   type ProjectAccess,
   type ProjectTeamGrant,
 } from '@/api/teams'
-import { VISIBILITY_LABEL } from '@/api/access'
+import { VISIBILITY_LABEL, roleLabel } from '@/api/access'
 import { useAccessStore } from '@/stores/access'
 
 const props = defineProps<{ project: string }>()
@@ -184,7 +184,7 @@ onMounted(load)
           <span class="text-text-muted text-xs">Add account</span>
           <select v-model="addUser" class="mt-1 w-full rounded bg-bg-elevated border border-border px-2 py-2">
             <option value="">Select an account…</option>
-            <option v-for="u in view.candidates.users" :key="u.id" :value="u.id">{{ u.username }} ({{ u.role }})</option>
+            <option v-for="u in view.candidates.users" :key="u.id" :value="u.id">{{ u.username }} ({{ roleLabel(u.role) }})</option>
           </select>
         </label>
         <label class="text-sm">

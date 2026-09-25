@@ -34,6 +34,11 @@ func TestNotesInline_MemberCannotReadCredentialStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Accounts created from v2.32 on are restricted (grants only); these
+	// tests exercise visibility, so lift it.
+	if err := f.webauth.SetRestricted(bob.ID, false); err != nil {
+		t.Fatal(err)
+	}
 	bobBearer, _, err := f.spaTokens.Create(bob.ID, "bob-agent")
 	if err != nil {
 		t.Fatal(err)

@@ -29,6 +29,9 @@ type settingsView struct {
 	// to projects created from now on and to folders that appear on disk
 	// without an entry; existing projects keep their own value.
 	DefaultVisibility string `json:"default_visibility"`
+	// PersonalProjects: a new account gets a private project named after it
+	// where it is admin (default on).
+	PersonalProjects bool `json:"personal_projects"`
 	// AnchorsEnabled / GlobalsEnabled are the read-only server master switches
 	// (GOSIDIAN_ANCHORS_ENABLED / GOSIDIAN_GLOBAL_ENABLED). The SPA reads them
 	// to tell whether a project's use_anchors/use_globals flag has any effect.
@@ -91,6 +94,7 @@ type updateSettingsRequest struct {
 	} `json:"mcp,omitempty"`
 	TOTPMode          *string `json:"totp_mode,omitempty"`
 	DefaultVisibility *string `json:"default_visibility,omitempty"`
+	PersonalProjects  *bool   `json:"personal_projects,omitempty"`
 }
 
 func (r *Router) handleSettings(w http.ResponseWriter, req *http.Request) {
@@ -120,7 +124,13 @@ func (r *Router) getSettings(w http.ResponseWriter, req *http.Request) {
 	}
 	view := toSettingsView(cfg)
 	view.DefaultVisibility = r.defaultVisibilitySetting()
+	view.PersonalProjects = r.personalProjectsSetting()
 	WriteJSON(w, http.StatusOK, view)
+}
+
+// personalProjectsSetting reports whether new accounts get a personal project.
+func (r *Router) personalProjectsSetting() bool {
+	return r.deps.Projects != nil && r.deps.Projects.PersonalProjectsEnabled()
 }
 
 // defaultVisibilitySetting returns the live default visibility for new
@@ -187,6 +197,12 @@ func (r *Router) putSettings(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 	}
+	if body.PersonalProjects != nil && r.deps.Projects != nil {
+		if err := r.deps.Projects.SetPersonalProjects(*body.PersonalProjects); err != nil {
+			WriteError(w, http.StatusInternalServerError, CodeServerInternal, "personal_projects: "+err.Error())
+			return
+		}
+	}
 
 	if r.deps.Audit != nil {
 		_ = r.deps.Audit.Write(audit.Entry{
@@ -200,6 +216,7 @@ func (r *Router) putSettings(w http.ResponseWriter, req *http.Request) {
 
 	view := toSettingsView(cfg)
 	view.DefaultVisibility = r.defaultVisibilitySetting()
+	view.PersonalProjects = r.personalProjectsSetting()
 	WriteJSON(w, http.StatusOK, view)
 }
 

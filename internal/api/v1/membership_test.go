@@ -16,6 +16,11 @@ func (f *notesFixture) memberUser(t *testing.T, name string) (*webauth.User, str
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Accounts created from v2.32 on are restricted (grants only); these
+	// tests exercise visibility, so lift it.
+	if err := f.webauth.SetRestricted(u.ID, false); err != nil {
+		t.Fatal(err)
+	}
 	bearer, _, err := f.spaTokens.Create(u.ID, "test")
 	if err != nil {
 		t.Fatal(err)

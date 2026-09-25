@@ -147,3 +147,21 @@ func TestVisibility_DefaultsAndOverrides(t *testing.T) {
 		t.Error("invalid default visibility must be rejected")
 	}
 }
+
+func TestPersonalProjectsSwitch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "projects.json")
+	s, _ := Open(path)
+	if !s.PersonalProjectsEnabled() {
+		t.Fatal("personal projects must be on by default")
+	}
+	if err := s.SetPersonalProjects(false); err != nil {
+		t.Fatal(err)
+	}
+	s2, _ := Open(path)
+	if s2.PersonalProjectsEnabled() {
+		t.Error("switch must persist")
+	}
+	if err := s2.SetPersonalProjects(true); err != nil || !s2.PersonalProjectsEnabled() {
+		t.Error("switch back must work")
+	}
+}

@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { noteSignedIn } from '@/composables/useSessionReset'
 import { getAuthConfig } from '@/api/totp'
 
 const router = useRouter()
@@ -38,6 +39,8 @@ async function handleSubmit() {
   error.value = null
   try {
     await auth.login(username.value, password.value, totp.value || undefined)
+    // A different account than the last one in this browser: start clean.
+    noteSignedIn(auth.user?.id ?? '')
     await router.push(nextTarget.value)
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Login failed'

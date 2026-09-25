@@ -96,3 +96,19 @@ settings; each existing project keeps its own visibility, managed from
 **Projects**. Fresh installations default to private, upgraded ones to
 internal. See [Authentication & roles](authentication.md#project-access-visibility-and-grants)
 for how visibility and grants combine.
+
+**Personal project for new accounts** (owner-only, default on) — every
+new User account gets a private project named after it where it is
+admin. Switch it off to provision nothing; the owner can still create a
+personal project for an account from **Admin → Users**.
+
+## My MCP tokens
+
+Shown to every signed-in account except the owner (who uses
+**Admin → Tokens**). Create tokens for MCP clients in *inherit* mode
+(follows your access as it changes) or *custom* mode (a subset of the
+projects you see now), read-only or read + write where you may write,
+optionally with the `core` tool profile and an expiry; revoke them, and
+the OAuth logins listed alongside. A token never exceeds your own access:
+the server narrows it on every request. See
+[Authentication & roles](authentication.md#your-own-mcp-tokens).
