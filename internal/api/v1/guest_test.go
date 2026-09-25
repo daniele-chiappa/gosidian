@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -197,5 +198,29 @@ func TestAdminRoleEdit(t *testing.T) {
 	// The owner's own role is immutable (403).
 	if rec := f.doAuthRecorder(http.MethodPatch, "/api/v1/admin/users/"+f.owner.ID, `{"role":"member"}`, nil); rec.code != http.StatusForbidden {
 		t.Errorf("change owner role status=%d want 403 (%s)", rec.code, rec.body)
+	}
+}
+
+// BUG-058: a non-owner's search is scoped inside the index query, so a big
+// unreadable project outranking everything cannot empty the result.
+func TestSearchScopedBeforeLimit(t *testing.T) {
+	f := newNotesFixture(t)
+	guest := f.seedTwoProjects(t)
+	for k := 0; k < 40; k++ {
+		f.seedNote(t, fmt.Sprintf("privproj/z%02d.md", k), fmt.Sprintf("# Zephyr %d\nzephyr zephyr", k))
+	}
+	for k := 0; k < 3; k++ {
+		f.seedNote(t, fmt.Sprintf("pubproj/z%d.md", k), fmt.Sprintf("# Public %d\nlong prose that mentions zephyr once", k))
+	}
+	rec := f.req(t, http.MethodGet, "/api/v1/search?q=zephyr&limit=2", "", guest)
+	if rec.code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.code, rec.body)
+	}
+	if strings.Count(rec.body, `"pubproj/z`) != 2 || strings.Contains(rec.body, "privproj") {
+		t.Errorf("guest search = %s, want 2 public hits and no private", rec.body)
+	}
+	rec = f.req(t, http.MethodGet, "/api/v1/note-titles?q=zephyr&limit=5", "", guest)
+	if rec.code != http.StatusOK || strings.Count(rec.body, `"pubproj/z`) != 3 || strings.Contains(rec.body, "privproj") {
+		t.Errorf("guest note-titles = %d %s, want the 3 public notes", rec.code, rec.body)
 	}
 }

@@ -5,52 +5,25 @@ import (
 	"strings"
 )
 
+// SearchHit is one ranked search result.
 type SearchHit struct {
 	Path    string
 	Title   string
 	Snippet string // contains <mark>…</mark> tags; treat as trusted HTML in templates
+	// Score is relative to the best hit of the same response (1 = best);
+	// it is not comparable across searches.
+	Score float64
+	// Why names the signals behind Score: title match, backlinks,
+	// importance, recency, pinned, archived, fused phrasings.
+	Why []string
 }
 
-// Search runs an FTS5 query. Plain user input is sanitized; callers can pass
-// raw FTS syntax too.
+// Search runs a ranked FTS query over the whole vault. Plain user input is
+// sanitized (every word quoted, prefix-matched, ANDed). Callers that filter
+// by project or access use SearchWith, which applies the filter before the
+// limit.
 func (i *Index) Search(q string, limit int) ([]SearchHit, error) {
-	if limit <= 0 {
-		limit = 50
-	}
-	q = strings.TrimSpace(q)
-	if q == "" {
-		return nil, nil
-	}
-	// escape double quotes, wrap each token in quotes + prefix search
-	terms := strings.Fields(q)
-	for i, t := range terms {
-		t = strings.ReplaceAll(t, `"`, ``)
-		terms[i] = `"` + t + `"*`
-	}
-	ftsQuery := strings.Join(terms, " ")
-
-	rows, err := i.db.Query(`
-        SELECT n.path, n.title, snippet(notes_fts, 1, '<mark>', '</mark>', '…', 12)
-        FROM notes_fts
-        JOIN notes n ON n.id = notes_fts.rowid
-        WHERE notes_fts MATCH ?
-        ORDER BY rank
-        LIMIT ?
-    `, ftsQuery, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var out []SearchHit
-	for rows.Next() {
-		var h SearchHit
-		if err := rows.Scan(&h.Path, &h.Title, &h.Snippet); err != nil {
-			return nil, err
-		}
-		out = append(out, h)
-	}
-	return out, rows.Err()
+	return i.SearchWith(q, SearchOptions{Limit: limit})
 }
 
 type NoteRow struct {

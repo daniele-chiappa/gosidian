@@ -38,9 +38,17 @@ for precise schemas; the groupings below are the conceptual map.
 
 ## Read
 
-- `memory_search(query, projects?=[...], include_outline?,
+- `memory_search(query, any_of?=[...], projects?=[...], include_outline?,
   include_frontmatter?)` — FTS5 with optional enrichment and
-  cross-project scope
+  cross-project scope. Ranking weighs the title most, then the
+  frontmatter (tags, description, aliases), then the body, with small
+  bounded boosts for backlinks, `importance`, recent edits and the
+  `pinned` tag (`status:archived` sinks). Each hit carries `score`
+  (relative to the best hit, 1 = best) and `why`. The search is lexical:
+  `any_of` passes up to 8 alternative phrasings (synonyms, IT/EN
+  translations) that are searched alongside `query` and fused by
+  reciprocal rank — the agent supplies the vocabulary, the server stays
+  deterministic. Project and access filters apply before the limit
 - `memory_get(path, raw?, max_bytes?)`, `memory_get_section(path, heading)`,
   `memory_get_frontmatter(path)`, `memory_get_outline(path)` — full
   body vs cheap triage variants. `memory_get` has an **oversize

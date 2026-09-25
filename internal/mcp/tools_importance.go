@@ -15,8 +15,6 @@ package mcp
 import (
 	"context"
 	"sort"
-	"strconv"
-	"strings"
 
 	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -100,21 +98,5 @@ func (s *Server) readImportance(path string) int {
 	if err != nil {
 		return 3
 	}
-	raw := parser.FrontmatterRawForPath(path, note.Content)
-	fm := parser.ParseFrontmatterFields(raw)
-	v, ok := fm["importance"].(string)
-	if !ok || v == "" {
-		return 3
-	}
-	n, err := strconv.Atoi(strings.TrimSpace(v))
-	if err != nil {
-		return 3
-	}
-	if n < 1 {
-		return 1
-	}
-	if n > 5 {
-		return 5
-	}
-	return n
+	return parser.Importance(parser.FrontmatterRawForPath(path, note.Content))
 }

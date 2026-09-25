@@ -26,6 +26,21 @@ func (s *Server) rejectIfHidden(name string) *mcp.CallToolResult {
 	return mcp.NewToolResultErrorf("project %q is hidden from MCP by config", name)
 }
 
+// hiddenProjects lists the projects marked HiddenFromMCP, for filters that
+// run inside a query (memory_search) rather than on its output.
+func (s *Server) hiddenProjects() []string {
+	if s == nil || s.projects == nil {
+		return nil
+	}
+	var out []string
+	for _, e := range s.projects.All() {
+		if e.HiddenFromMCP {
+			out = append(out, e.Name)
+		}
+	}
+	return out
+}
+
 // pathInHiddenProject returns true when the path belongs to a project marked
 // HiddenFromMCP. Used to filter list-style tool outputs without a project
 // argument. Reuses the package-level topLevelProject helper.

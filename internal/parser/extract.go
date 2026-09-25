@@ -517,6 +517,21 @@ func replaceInlineCode(line string) string {
 	return b.String()
 }
 
+// Importance returns the `importance` scalar of a raw frontmatter block,
+// clamped to [1,5]. Missing or unparseable values return 3, the convention's
+// default, so an unannotated note ranks and filters as "normal".
+func Importance(raw string) int {
+	v, ok := ParseFrontmatterFields(raw)["importance"].(string)
+	if !ok {
+		return 3
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil {
+		return 3
+	}
+	return min(max(n, 1), 5)
+}
+
 // HasFrontmatterKey reports whether raw frontmatter carries key as a
 // top-level entry, whatever its shape (block, inline scalar, or empty).
 func HasFrontmatterKey(raw, key string) bool {

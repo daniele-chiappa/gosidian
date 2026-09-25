@@ -63,6 +63,34 @@ func (r *Router) seesAllProjects(p authz.Principal) bool {
 	return p.Role == webauth.RoleOwner
 }
 
+// searchScope returns the projects a search may return for the principal,
+// optionally narrowed to one project: nil = no restriction (the owner,
+// unfiltered), otherwise the readable subset — possibly empty, which
+// matches nothing. The index applies it inside the query, so the limit
+// counts only readable notes (BUG-058).
+func (r *Router) searchScope(p authz.Principal, project string) ([]string, error) {
+	if r.seesAllProjects(p) {
+		if project == "" {
+			return nil, nil
+		}
+		return []string{project}, nil
+	}
+	candidates := []string{project}
+	if project == "" {
+		var err error
+		if candidates, err = r.deps.Index.Projects(); err != nil {
+			return nil, err
+		}
+	}
+	out := []string{}
+	for _, name := range candidates {
+		if r.canAccessProject(p, name) {
+			out = append(out, name)
+		}
+	}
+	return out, nil
+}
+
 // canWriteProject reports whether the principal may mutate the project.
 func (r *Router) canWriteProject(p authz.Principal, project string) bool {
 	return p.CanWriteProject(project, r.accessConfig())

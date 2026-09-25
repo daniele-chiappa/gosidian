@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/gosidian/gosidian/internal/index"
 )
 
 // noteTitleHit is the wire shape consumed by the CodeMirror wikilink
@@ -79,20 +81,22 @@ func (r *Router) handleNoteTitles(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	rows, err := r.deps.Index.Search(q, fetch)
+	scope, err := r.searchScope(p, "")
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
+		return
+	}
+	rows, err := r.deps.Index.SearchWith(q, index.SearchOptions{Limit: limit, Projects: scope})
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
 		return
 	}
 	out := make([]noteTitleHit, 0, noteTitlesMaxLimit)
 	for _, h := range rows {
-		if !r.canSee(p, h.Path) {
+		if !r.canSee(p, h.Path) { // defence in depth: the scope already filtered
 			continue
 		}
 		out = append(out, noteTitleHit{Title: h.Title, Path: h.Path})
-		if len(out) >= limit {
-			break
-		}
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"items": out})
 }

@@ -1,9 +1,10 @@
 CREATE TABLE IF NOT EXISTS notes (
-    id    INTEGER PRIMARY KEY,
-    path  TEXT NOT NULL UNIQUE,
-    title TEXT NOT NULL,
-    mtime INTEGER NOT NULL,
-    size  INTEGER NOT NULL
+    id         INTEGER PRIMARY KEY,
+    path       TEXT NOT NULL UNIQUE,
+    title      TEXT NOT NULL,
+    mtime      INTEGER NOT NULL,
+    size       INTEGER NOT NULL,
+    importance INTEGER NOT NULL DEFAULT 3  -- frontmatter importance, 1..5 (v1)
 );
 
 CREATE TABLE IF NOT EXISTS links (
@@ -23,8 +24,11 @@ CREATE TABLE IF NOT EXISTS tags (
 CREATE INDEX IF NOT EXISTS tags_tag ON tags(tag);
 CREATE INDEX IF NOT EXISTS tags_note ON tags(note_id);
 
+-- Columns are weighted by search.go (bm25): title, meta = the raw
+-- frontmatter (tags, description, aliases…), body = the text without it.
 CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
     title,
+    meta,
     body,
     tokenize='unicode61 remove_diacritics 2'
 );

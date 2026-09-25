@@ -8,6 +8,42 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.34.0] — 2026-09-25 — "search"
+
+`memory_search` ranks better and no longer misses notes that a project
+filter should have found. Everything stays lexical and deterministic: no
+model, no external service. Pull the image and restart; the search index
+upgrades itself at boot (the startup scan refills it, a few seconds).
+
+### Added
+- **Ranking with explained scores.** The index splits each note into
+  title, frontmatter and body. Hits are ranked by weighted BM25, a title
+  factor (up to ×1.5 by the share of query words found in the title) and
+  small bounded structural factors: backlinks, `importance`, recent
+  edits and the `pinned` tag push up, `status:archived` pushes down. The
+  structural factors stay gentle on purpose, so hub notes such as a log
+  that every template links do not outrank a specific note. Every MCP
+  hit carries `score` (relative to the best hit of the response,
+  1 = best) and `why`, the signals behind it.
+- **`any_of` on `memory_search`** — up to 8 alternative phrasings
+  (synonyms, translations, other forms) searched alongside `query` and
+  fused by reciprocal rank; `why` shows which phrasings matched. The
+  search stays lexical: the agent, which already knows that "secrets"
+  and "credentials" are related, supplies the vocabulary in one call.
+- **`gosidian_search_queries_total{surface, result}`** — a Prometheus
+  counter of searches that returned hits or nothing, for the MCP tool and
+  the web search. Counts only, never the query text.
+
+### Fixed
+- **Filtered searches lost matches that exist.** Project and access
+  filters ran after the index had cut the vault-wide ranking, so a small
+  project's notes vanished whenever larger projects outranked them — a
+  query could return nothing for a word present in the project. The
+  filter now runs inside the index query for `memory_search` (token
+  scope, `projects`, hidden projects), the web search and the wikilink
+  autocomplete. It affected every non-owner account and every
+  project-scoped token.
+
 ## [2.33.0] — 2026-09-25 — "hooks"
 
 The two things an agent forgets most — reading `hot.md` at the start of

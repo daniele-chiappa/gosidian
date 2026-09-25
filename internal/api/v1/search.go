@@ -4,6 +4,9 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/gosidian/gosidian/internal/index"
+	"github.com/gosidian/gosidian/internal/metrics"
 )
 
 type searchHit struct {
@@ -45,31 +48,22 @@ func (r *Router) handleSearch(w http.ResponseWriter, req *http.Request) {
 	project := strings.TrimSpace(req.URL.Query().Get("project"))
 	p := principalFromContext(req)
 
-	// Fetch extra hits when filtering (project scope or guest visibility) so
-	// the response still has up to `limit` entries after rejection.
-	fetchLimit := limit
-	if project != "" || !r.seesAllProjects(p) {
-		fetchLimit = limit * 4
-		if fetchLimit > 800 {
-			fetchLimit = 800
-		}
+	scope, err := r.searchScope(p, project)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
+		return
 	}
-	hits, err := r.deps.Index.Search(q, fetchLimit)
+	hits, err := r.deps.Index.SearchWith(q, index.SearchOptions{Limit: limit, Projects: scope})
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
 		return
 	}
 
+	// canSee repeats the query's filter as defence in depth.
 	out := make([]searchHit, 0, len(hits))
 	for _, h := range hits {
-		if project != "" && !strings.HasPrefix(h.Path, project+"/") && h.Path != project {
-			continue
-		}
 		if !r.canSee(p, h.Path) {
 			continue
-		}
-		if len(out) >= limit {
-			break
 		}
 		out = append(out, searchHit{
 			Path:    h.Path,
@@ -77,6 +71,7 @@ func (r *Router) handleSearch(w http.ResponseWriter, req *http.Request) {
 			Snippet: stripMarkAPI(h.Snippet),
 		})
 	}
+	metrics.CountSearch("web", len(out))
 	WriteJSON(w, http.StatusOK, map[string]any{"hits": out})
 }
 

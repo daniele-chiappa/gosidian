@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -153,5 +154,70 @@ func TestMCP_Search_ScopedToken_SilentlyIntersects(t *testing.T) {
 	}
 	if len(r2.Hits) != 1 || !strings.HasPrefix(r2.Hits[0].Path, "alpha/") {
 		t.Errorf("expected single alpha hit, got %+v", r2.Hits)
+	}
+}
+
+// BUG-058: a filtered search returns the filtered project's matches even when
+// other projects outrank them vault-wide.
+func TestMCP_Search_ProjectsFilter_NotStarvedByOtherProjects(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	ctx := context.Background()
+	for k := 0; k < 50; k++ { // stays under the 60 writes/min limiter
+		content := fmt.Sprintf("---\ntitle: Docker %d\n---\n\ndocker docker\n", k)
+		if res, err := s.handleCreate(ctx, call(map[string]any{"path": fmt.Sprintf("big/n%02d.md", k), "content": content})); err != nil || res.IsError {
+			t.Fatalf("seed big: %v %+v", err, res)
+		}
+	}
+	for k := 0; k < 3; k++ {
+		content := fmt.Sprintf("# Small %d\n\nsome prose that mentions docker once among other words\n", k)
+		if res, err := s.handleCreate(ctx, call(map[string]any{"path": fmt.Sprintf("small/s%d.md", k), "content": content})); err != nil || res.IsError {
+			t.Fatalf("seed small: %v %+v", err, res)
+		}
+	}
+	res, _ := s.handleSearch(ctx, call(map[string]any{"query": "docker", "limit": 5, "projects": []any{"small"}}))
+	var r struct {
+		Hits []searchHit `json:"hits"`
+	}
+	if err := json.Unmarshal([]byte(resultText(t, res)), &r); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Hits) != 3 {
+		t.Fatalf("hits = %+v, want the 3 small notes", r.Hits)
+	}
+}
+
+func TestMCP_Search_AnyOfAndWhy(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	ctx := context.Background()
+	for path, content := range map[string]string{
+		"p/secrets.md": "# Segreti\n\ndove stanno i segreti\n",
+		"p/creds.md":   "# Credenziali\n\nle credenziali del server\n",
+	} {
+		if res, err := s.handleCreate(ctx, call(map[string]any{"path": path, "content": content})); err != nil || res.IsError {
+			t.Fatalf("seed %s: %v %+v", path, err, res)
+		}
+	}
+	res, _ := s.handleSearch(ctx, call(map[string]any{"query": "segreti", "any_of": []any{"credenziali"}}))
+	var r struct {
+		Hits []searchHit `json:"hits"`
+	}
+	if err := json.Unmarshal([]byte(resultText(t, res)), &r); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Hits) != 2 {
+		t.Fatalf("any_of hits = %+v, want both notes", r.Hits)
+	}
+	for _, h := range r.Hits {
+		if h.Score <= 0 || len(h.Why) == 0 || !strings.HasPrefix(h.Why[len(h.Why)-1], "matched: ") {
+			t.Errorf("hit %s lacks score/why: %+v", h.Path, h)
+		}
+	}
+
+	tooMany := make([]any, 9)
+	for k := range tooMany {
+		tooMany[k] = fmt.Sprintf("v%d", k)
+	}
+	if res, _ := s.handleSearch(ctx, call(map[string]any{"query": "x", "any_of": tooMany})); res == nil || !res.IsError {
+		t.Errorf("9 variants must be rejected, got %+v", res)
 	}
 }

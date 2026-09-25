@@ -86,8 +86,9 @@ func (s *Server) writeLimitViolation(tok *auth.Token, contentSize int) string {
 
 func (s *Server) registerTools() {
 	s.impl.AddTool(mcp.NewTool("memory_search",
-		mcp.WithDescription("Search notes in the vault using full-text search. Returns notes whose title or body match the query. Pass include_outline=true or include_frontmatter=true to enrich each hit with the note's heading outline or parsed frontmatter in the same call — avoids N extra memory_get_outline/memory_get_frontmatter round-trips when exploring many results. Pass `projects` (array of top-level folder names) to restrict results to a specific set; empty = vault-wide (subject to the caller's token scope)."),
+		mcp.WithDescription("Search notes in the vault using full-text search. Hits are ranked by text match (title weighs most, then frontmatter such as tags and description, then body) with small boosts for backlinks, importance, recent edits and the pinned tag; each hit carries `score` (relative to the best hit of this response, 1 = best) and `why` (the signals behind it). The search is lexical, not semantic: when hits are few or missing, call again with `any_of` listing synonyms, translations (Italian/English) or other forms of the query — the lists are fused and `why` shows which phrasing matched. Pass include_outline=true or include_frontmatter=true to enrich each hit with the note's heading outline or parsed frontmatter in the same call — avoids N extra memory_get_outline/memory_get_frontmatter round-trips when exploring many results. Pass `projects` (array of top-level folder names) to restrict results to a specific set; empty = vault-wide (subject to the caller's token scope)."),
 		mcp.WithString("query", mcp.Required(), mcp.Description("Free-text query. Multiple words are ANDed; prefix search is automatic.")),
+		mcp.WithArray("any_of", mcp.Description("Optional alternative phrasings searched alongside `query` (max 8), e.g. [\"credenziali\", \"secrets\"] for query \"segreti\". A note matching any of them is returned; notes matched by several phrasings rank higher.")),
 		mcp.WithNumber("limit", mcp.Description("Maximum number of hits (default 20, max 200).")),
 		mcp.WithBoolean("include_outline", mcp.Description("When true, each hit also carries an `outline` array (heading level/text/id). Default false.")),
 		mcp.WithBoolean("include_frontmatter", mcp.Description("When true, each hit also carries a `frontmatter` map with the parsed YAML fields. Default false.")),
@@ -255,6 +256,8 @@ type searchHit struct {
 	Path        string           `json:"path"`
 	Title       string           `json:"title"`
 	Snippet     string           `json:"snippet"`
+	Score       float64          `json:"score"`
+	Why         []string         `json:"why,omitempty"`
 	Outline     []outlineHeading `json:"outline,omitempty"`
 	Frontmatter map[string]any   `json:"frontmatter,omitempty"`
 }
@@ -274,11 +277,14 @@ func (s *Server) handleSearch(ctx context.Context, req mcp.CallToolRequest) (*mc
 	}
 	includeOutline := req.GetBool("include_outline", false)
 	includeFrontmatter := req.GetBool("include_frontmatter", false)
+	variants := req.GetStringSlice("any_of", nil)
+	if len(variants) > index.MaxVariants {
+		return mcp.NewToolResultErrorf("any_of accepts at most %d phrasings", index.MaxVariants), nil
+	}
 
 	// Optional project filter. Scoped tokens silently intersect with their
-	// project (never expand). We fetch a few extra hits when a filter is
-	// active so the final result still has up to `limit` entries after
-	// filtering.
+	// project (never expand). The filter runs inside the index query, so the
+	// limit counts only notes the caller may see (BUG-058).
 	requestedProjects := req.GetStringSlice("projects", nil)
 	// Reject explicit hidden projects with a clear error so the caller knows
 	// why the result is empty. Vault-wide search (no projects[] arg) silently
@@ -289,22 +295,16 @@ func (s *Server) handleSearch(ctx context.Context, req mcp.CallToolRequest) (*mc
 		}
 	}
 	filter := buildProjectsFilter(requestedProjects, tok.ProjectList())
-	fetchLimit := limit
+	opts := index.SearchOptions{Limit: limit, Exclude: s.hiddenProjects(), Variants: variants}
 	if filter.active {
-		fetchLimit = limit * 4
-		if fetchLimit > 500 {
-			fetchLimit = 500
-		}
-	}
-	// Short-circuit: active filter with empty allowed list → zero hits.
-	if filter.active && len(filter.allowed) == 0 {
-		return mcp.NewToolResultJSON(map[string]any{"hits": []searchHit{}})
+		opts.Projects = append([]string{}, filter.allowed...) // non-nil: empty matches nothing
 	}
 
-	hits, err := s.index.Search(q, fetchLimit)
+	hits, err := s.index.SearchWith(q, opts)
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("search failed", err), nil
 	}
+	// The checks below repeat the query's filter as defence in depth.
 	out := make([]searchHit, 0, len(hits))
 	for _, h := range hits {
 		if !tok.AllowsPath(h.Path) {
@@ -323,6 +323,8 @@ func (s *Server) handleSearch(ctx context.Context, req mcp.CallToolRequest) (*mc
 			Path:    h.Path,
 			Title:   h.Title,
 			Snippet: stripMarkTags(h.Snippet),
+			Score:   h.Score,
+			Why:     h.Why,
 		}
 		if includeOutline || includeFrontmatter {
 			// One load per hit, LRU cache absorbs repeats and subsequent calls.
@@ -347,6 +349,7 @@ func (s *Server) handleSearch(ctx context.Context, req mcp.CallToolRequest) (*mc
 		}
 		out = append(out, hit)
 	}
+	metrics.CountSearch("mcp", len(out))
 	return mcp.NewToolResultJSON(map[string]any{"hits": out})
 }
 

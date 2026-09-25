@@ -32,11 +32,49 @@ func Open(path string) (*Index, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := db.Exec(schemaSQL); err != nil {
+	if err := migrate(db); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
 	return &Index{db: db}, nil
+}
+
+// schemaVersion is stored in PRAGMA user_version. v1 (IMP-095) splits the
+// frontmatter out of the FTS body into its own weighted column and adds
+// notes.importance.
+const schemaVersion = 1
+
+// migrate brings an index file to schemaVersion. The index is a cache of the
+// vault — the boot scan re-upserts every note — so a shape change drops and
+// recreates a table instead of converting its rows.
+func migrate(db *sql.DB) error {
+	var v int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
+		return err
+	}
+	if v < 1 {
+		if _, err := db.Exec(`DROP TABLE IF EXISTS notes_fts`); err != nil {
+			return err
+		}
+	}
+	if _, err := db.Exec(schemaSQL); err != nil {
+		return err
+	}
+	if v >= schemaVersion {
+		return nil
+	}
+	// CREATE TABLE IF NOT EXISTS leaves a pre-v1 notes table as it was.
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('notes') WHERE name = 'importance'`).Scan(&n); err != nil {
+		return err
+	}
+	if n == 0 {
+		if _, err := db.Exec(`ALTER TABLE notes ADD COLUMN importance INTEGER NOT NULL DEFAULT 3`); err != nil {
+			return err
+		}
+	}
+	_, err := db.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, schemaVersion))
+	return err
 }
 
 func (i *Index) Close() error { return i.db.Close() }
@@ -59,13 +97,14 @@ func stripNoteExt(p string) string {
 
 // extractForPath dispatches link/tag/title/fts-body extraction by note kind.
 // HTML notes use parser.ExtractHTML and index its plain-text projection (not the
-// raw markup) for FTS; markdown notes index the raw body.
+// raw markup) for FTS; markdown notes index the body after the frontmatter,
+// which goes to its own FTS column (see upsertLocked).
 func extractForPath(path, body string) (links []parser.WikiLinkRef, tags []string, title, ftsBody string) {
 	if strings.HasSuffix(strings.ToLower(path), ".html") {
 		return parser.ExtractHTML([]byte(body))
 	}
 	links, tags, title = parser.Extract([]byte(body))
-	return links, tags, title, body
+	return links, tags, title, parser.BodyAfterFrontmatter([]byte(body))
 }
 
 // Upsert stores the note, extracts links/tags from the body, and refreshes
@@ -136,6 +175,7 @@ func (i *Index) upsertLocked(n NoteDoc) (int64, error) {
 	if frontTitle != "" {
 		title = frontTitle
 	}
+	meta := parser.FrontmatterRawForPath(n.Path, []byte(n.Body))
 
 	var oldID sql.NullInt64
 	_ = tx.QueryRow(`SELECT id FROM notes WHERE path = ?`, n.Path).Scan(&oldID)
@@ -146,9 +186,10 @@ func (i *Index) upsertLocked(n NoteDoc) (int64, error) {
 	}
 
 	if _, err := tx.Exec(`
-        INSERT INTO notes(path, title, mtime, size) VALUES(?, ?, ?, ?)
-        ON CONFLICT(path) DO UPDATE SET title=excluded.title, mtime=excluded.mtime, size=excluded.size
-    `, n.Path, title, n.ModTime, n.Size); err != nil {
+        INSERT INTO notes(path, title, mtime, size, importance) VALUES(?, ?, ?, ?, ?)
+        ON CONFLICT(path) DO UPDATE SET title=excluded.title, mtime=excluded.mtime,
+            size=excluded.size, importance=excluded.importance
+    `, n.Path, title, n.ModTime, n.Size, parser.Importance(meta)); err != nil {
 		return 0, err
 	}
 
@@ -177,8 +218,8 @@ func (i *Index) upsertLocked(n NoteDoc) (int64, error) {
 	}
 
 	if _, err := tx.Exec(
-		`INSERT INTO notes_fts(rowid, title, body) VALUES(?,?,?)`,
-		id, title, ftsBody,
+		`INSERT INTO notes_fts(rowid, title, meta, body) VALUES(?,?,?,?)`,
+		id, title, meta, ftsBody,
 	); err != nil {
 		return 0, err
 	}

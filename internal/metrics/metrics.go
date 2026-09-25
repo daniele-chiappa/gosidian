@@ -86,7 +86,27 @@ var (
 			Help: "Number of notes in the index.",
 		},
 	)
+	// SearchQueries counts full-text searches by surface (mcp = memory_search,
+	// web = the SPA search) and whether they returned anything. Counts only,
+	// never the query text: the zero-hit rate is the evidence ADR-007 asks
+	// for before any semantic search (IMP-095).
+	SearchQueries = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "gosidian_search_queries_total",
+			Help: "Full-text searches by surface (mcp/web) and result (hits/zero).",
+		},
+		[]string{"surface", "result"},
+	)
 )
+
+// CountSearch records one search on surface that returned hits results.
+func CountSearch(surface string, hits int) {
+	result := "hits"
+	if hits == 0 {
+		result = "zero"
+	}
+	SearchQueries.WithLabelValues(surface, result).Inc()
+}
 
 // Register installs all collectors on the default registry. Idempotent for
 // tests via prometheus.Registerer interface guard.
@@ -96,6 +116,7 @@ func Register() {
 		MCPToolCalls, MCPRateLimitHits,
 		MCPToolLatency, MCPToolPayloadBytes,
 		GitSyncCommits, GitSyncStatus, NotesGauge,
+		SearchQueries,
 	} {
 		_ = prometheus.Register(c)
 	}
