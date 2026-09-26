@@ -9,6 +9,8 @@
 #   PreCompact    append a checkpoint digest to <project>/sessions/<date>-<id>.md
 #   SessionEnd    append the session digest to the same note
 #   Stop          no-op unless GOSIDIAN_HOOK_STOP_LOG=1 (one entry per turn)
+#   PostToolUse   with GOSIDIAN_MIRROR=1, refresh the local mirror after a
+#                 gosidian MCP write
 #
 # Digests are built without any LLM: first prompt, turn counts, tools used,
 # files touched, last assistant message. They are a safety net, not curated
@@ -27,6 +29,13 @@
 #   GOSIDIAN_HOOK_FOCUS_BYTES   cap of the injected focus excerpt (6000)
 #   GOSIDIAN_HOOK_LOG_ENTRY     1 = also append a one-line pointer to log.md
 #   GOSIDIAN_HOOK_STOP_LOG      1 = append the last assistant message per turn
+#   GOSIDIAN_MIRROR             1 = keep a local read-only mirror of the project
+#                               (`gosidian mirror sync`, IMP-102): synced in the
+#                               background at SessionStart and after MCP writes,
+#                               announced in the session context. The project
+#                               admin must enable "mirror" on the project.
+#   GOSIDIAN_MIRROR_DIR         mirror root (default <project dir>/.gosidian/mirror)
+#   GOSIDIAN_BIN                gosidian binary for the mirror (default: gosidian on PATH)
 
 set -u
 
@@ -43,6 +52,7 @@ EVENT=$(printf '%s' "$INPUT" | jq -r '.hook_event_name // empty' 2>/dev/null)
 # --- configuration --------------------------------------------------------
 
 PRE_URL=${GOSIDIAN_URL:-}; PRE_TOKEN=${GOSIDIAN_TOKEN:-}; PRE_PROJECT=${GOSIDIAN_PROJECT:-}
+PRE_MIRROR=${GOSIDIAN_MIRROR:-}; PRE_MIRROR_DIR=${GOSIDIAN_MIRROR_DIR:-}; PRE_BIN=${GOSIDIAN_BIN:-}
 for f in "${GOSIDIAN_HOOK_ENV:-}" "${CLAUDE_PROJECT_DIR:-$PWD}/.claude/gosidian.env" "${HOME:-}/.config/gosidian/hook.env"; do
   if [ -n "$f" ] && [ -r "$f" ]; then
     set -a
@@ -55,6 +65,9 @@ done
 GOSIDIAN_URL=${PRE_URL:-${GOSIDIAN_URL:-}}
 GOSIDIAN_TOKEN=${PRE_TOKEN:-${GOSIDIAN_TOKEN:-}}
 GOSIDIAN_PROJECT=${PRE_PROJECT:-${GOSIDIAN_PROJECT:-}}
+GOSIDIAN_MIRROR=${PRE_MIRROR:-${GOSIDIAN_MIRROR:-0}}
+GOSIDIAN_MIRROR_DIR=${PRE_MIRROR_DIR:-${GOSIDIAN_MIRROR_DIR:-}}
+GOSIDIAN_BIN=${PRE_BIN:-${GOSIDIAN_BIN:-gosidian}}
 [ -n "$GOSIDIAN_URL" ] && [ -n "$GOSIDIAN_TOKEN" ] && [ -n "$GOSIDIAN_PROJECT" ] \
   || die0 "GOSIDIAN_URL, GOSIDIAN_TOKEN and GOSIDIAN_PROJECT are required (env or .claude/gosidian.env)"
 
@@ -71,6 +84,8 @@ CWD=$(printf '%s' "$INPUT" | jq -r '.cwd // empty')
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 TODAY=$(date -u +%Y%m%d)
 SESSION_NOTE="$PROJECT/sessions/$TODAY-$SID8.md"
+PROJECT_DIR=${CLAUDE_PROJECT_DIR:-$PWD}
+MIRROR_ROOT=${GOSIDIAN_MIRROR_DIR:-$PROJECT_DIR/.gosidian/mirror}
 
 # --- HTTP helpers ----------------------------------------------------------
 
@@ -166,6 +181,36 @@ append_session() {
   fi
 }
 
+# --- local mirror ----------------------------------------------------------
+
+# mirror_sync_bg starts `gosidian mirror sync` detached, output to
+# <root>/.sync.log, so the hook returns at once; the binary's lock turns a
+# sync already running into a no-op. Fails when the binary is missing.
+mirror_sync_bg() {
+  command -v "$GOSIDIAN_BIN" >/dev/null 2>&1 || { warn "mirror: $GOSIDIAN_BIN not found"; return 1; }
+  mkdir -p "$MIRROR_ROOT" 2>/dev/null || { warn "mirror: cannot create $MIRROR_ROOT"; return 1; }
+  local detach=""
+  command -v setsid >/dev/null 2>&1 && detach=setsid
+  ( GOSIDIAN_TOKEN="$GOSIDIAN_TOKEN" $detach nohup "$GOSIDIAN_BIN" mirror sync \
+      --url "$URL" --project "$PROJECT" --dir "$MIRROR_ROOT" \
+      </dev/null >>"$MIRROR_ROOT/.sync.log" 2>&1 & )
+  return 0
+}
+
+# mirror_context tells the agent where the mirror is and how to use it.
+# shellcheck disable=SC2016 # backticks are markdown, not command substitution
+mirror_context() {
+  local shown=$MIRROR_ROOT last
+  case "$shown" in "$PROJECT_DIR"/*) shown=${shown#"$PROJECT_DIR"/} ;; esac
+  last=$(jq -r '.synced_at // empty' "$MIRROR_ROOT/.$PROJECT.state.json" 2>/dev/null)
+  printf '## Local read-only mirror of `%s`\n\n' "$PROJECT"
+  printf 'A read-only copy of the project is at `%s/%s` (last sync: %s; a sync has just started in the background). ' \
+    "$shown" "$PROJECT" "${last:-none yet — the first one is running, read through MCP until the files appear}"
+  printf 'Read and search it with your file tools. Start from `hot.md`, `README.md` and `_index.md` (every note from the most recent); '
+  printf 'follow tags and [[wikilinks]] (paths from `%s`); try synonyms and the other language before concluding there is no answer; when two notes disagree, prefer the more recent one. ' "$shown"
+  printf 'Never edit these files: write only with the gosidian MCP tools; the mirror refreshes after each write.\n'
+}
+
 # --- events ----------------------------------------------------------------
 
 case "$EVENT" in
@@ -186,6 +231,13 @@ case "$EVENT" in
         fi
         ;;
     esac
+    if [ "$GOSIDIAN_MIRROR" = "1" ]; then
+      if mirror_sync_bg; then
+        ctx+="$(mirror_context)"$'\n\n'
+      else
+        ctx+="_Local mirror enabled (GOSIDIAN_MIRROR=1) but \`$GOSIDIAN_BIN\` was not found: install the gosidian binary or set GOSIDIAN_BIN._"$'\n\n'
+      fi
+    fi
     ctx+="_This excerpt is a preview injected by the gosidian hook. Run \`memory_bootstrap({project: \"$PROJECT\"})\` before touching code: the bootstrap is authoritative and carries the directives._"
     jq -n --arg ctx "$ctx" '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}}'
     ;;
@@ -217,6 +269,19 @@ case "$EVENT" in
     last=$(printf '%s' "$INPUT" | jq -r '.last_assistant_message // empty' | head -c 600)
     [ -n "$last" ] || exit 0
     printf '### Turn %s\n\n%s\n' "$NOW" "$last" | append_session || true
+    ;;
+
+  PostToolUse)
+    [ "$GOSIDIAN_MIRROR" = "1" ] || exit 0
+    tool=$(printf '%s' "$INPUT" | jq -r '.tool_name // empty')
+    case "$tool" in
+      mcp__*osidian*__memory_*) ;;
+      *) exit 0 ;;
+    esac
+    case "${tool##*__memory_}" in
+      create|update|edit|append|delete|move_note|rename_note|ingest|create_table_note|create_media_note)
+        mirror_sync_bg || true ;;
+    esac
     ;;
 
   *)

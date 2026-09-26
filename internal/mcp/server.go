@@ -513,6 +513,8 @@ func (s *Server) Handler(basePath string) http.Handler {
 	// Append-only write endpoint for scripts that hold a bearer but no MCP
 	// session (Claude Code hooks, IMP-094); same pipeline as memory_append.
 	mux.HandleFunc(basePath+"/append", s.handleHTTPAppend)
+	// Note listing for local read-only mirrors, per project, opt-in (IMP-102).
+	mux.HandleFunc(basePath+"/manifest", s.handleHTTPManifest)
 	// Single-use ticket redemption for memory_ingest transfer:http (ADR-018).
 	// No bearer here: the unguessable ticket id, bound to the minting token,
 	// is the credential.

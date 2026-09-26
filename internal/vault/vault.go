@@ -307,6 +307,52 @@ func (v *Vault) List() ([]string, error) {
 	return out, nil
 }
 
+// ProjectNotes lists the notes of a top-level project folder with their size
+// and modification time, without reading them. It applies the filters of
+// List (hidden folders and files are skipped, only note extensions count).
+// A missing project yields fs.ErrNotExist.
+func (v *Vault) ProjectNotes(project string) ([]NoteStat, error) {
+	r, err := v.Rel(project)
+	if err != nil {
+		return nil, err
+	}
+	if r == "" || strings.Contains(r, "/") {
+		return nil, fmt.Errorf("not a project: %q", project)
+	}
+	root := filepath.Join(v.Root, r)
+	if st, err := os.Stat(root); err != nil {
+		return nil, err
+	} else if !st.IsDir() {
+		return nil, fs.ErrNotExist
+	}
+	var out []NoteStat
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if path != root && (strings.HasPrefix(d.Name(), ".") || d.Name() == "node_modules") {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if isHidden(d.Name()) || !v.IsNoteFile(d.Name()) {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(v.Root, path)
+		if err != nil {
+			return err
+		}
+		out = append(out, NoteStat{Path: filepath.ToSlash(rel), Size: info.Size(), ModTime: info.ModTime()})
+		return nil
+	})
+	return out, err
+}
+
 // ScanInto enumerates all markdown notes and upserts them into the index.
 func (v *Vault) ScanInto(idx *index.Index) error {
 	paths, err := v.List()

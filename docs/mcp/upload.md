@@ -139,8 +139,9 @@ curl -sf -F "file=@report.html" "https://host/mcp/ingest/<ticket>"
 ```
 
 - **Auth**: the MCP bearer token with the **read** scope; a scoped token
-  gets `404` outside its projects (it must not learn what exists there).
-  No token → `401`, no read scope → `403`.
+  gets `404` outside its projects (it must not learn what exists there),
+  and so does any token on a project hidden from MCP. No token → `401`,
+  no read scope → `403`.
 - **Notes only** (`.md`, or `.html` when html notes are enabled):
   attachments are already served at `/vault-files/<path>` with the same
   bearer, and the `400` on an attachment path says so. Hidden entries and
@@ -156,6 +157,38 @@ curl -sf -F "file=@report.html" "https://host/mcp/ingest/<ticket>"
 - `memory_bootstrap` advertises it in
   `capabilities.attachments.download_endpoint_hint`, and a truncated
   `memory_get` points here in its `hint`.
+
+## HTTP manifest endpoint (local mirrors)
+
+Lists the notes of one project so a client can keep a **local read-only
+copy** of it and let an agent read and search files instead of going
+through MCP (IMP-102; the benchmark measured about half the cost per
+reading session). **The path is your MCP base URL plus `/manifest`**,
+with the project as `?project=`:
+
+```bash
+curl -sf "$MCP_BASE/manifest?project=Work" -H "Authorization: Bearer $MCP_TOKEN"
+# → {"project":"Work","generated_at":"…","notes":[
+#     {"path":"Work/hot.md","etag":"<stamp>","size":2481,"mtime":"2026-09-26T08:12:40Z","title":"Work Hot State"}, …]}
+```
+
+The client compares the `etag`s with its copy and fetches what changed
+through `/download` — `gosidian mirror sync` does exactly that, see
+[Local read-only mirror](mirror.md).
+
+- **Opt-in per project**: the project flag `allow_local_mirror` (Projects
+  → `mirror`, set by a project admin, off by default). A mirror copies the
+  project's notes onto another machine; with the flag off the endpoint
+  answers `403` and says so.
+- **Access**: the **read** scope, the token's project scope and, for
+  tokens owned by an account, the account's live access (visibility,
+  grants, teams). Outside that reach, on a project hidden from MCP or on
+  a missing project → `404`. Hidden files and folders are never listed.
+- **Audited**: every listing writes a `mirror_sync` entry (project and
+  bytes listed), unlike single reads, because it is a bulk copy.
+- The copy stays on the client after a token is revoked or the flag is
+  turned off: turning the flag off stops new syncs, it does not erase
+  existing copies.
 
 ## HTTP append endpoint (notes)
 

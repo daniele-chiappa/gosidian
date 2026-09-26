@@ -90,6 +90,11 @@ const (
 	ActionOAuthGrant          Action = "oauth_grant"
 	ActionOAuthRefresh        Action = "oauth_refresh"
 	ActionOAuthRevoke         Action = "oauth_revoke"
+
+	// A local read-only mirror listed a project (IMP-102): Path = project,
+	// Size = bytes of the notes listed, the most the caller can then fetch.
+	// Individual reads are not audited; a bulk listing is.
+	ActionMirrorSync Action = "mirror_sync"
 )
 
 // Entry is the on-disk shape. Keep field names short; this file may grow.

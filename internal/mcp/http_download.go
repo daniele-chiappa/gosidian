@@ -57,7 +57,8 @@ func (s *Server) handleHTTPDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	// 404 rather than 403: a scoped token must not learn what exists outside
 	// its projects (same fail-closed shape as /vault-files/ and the notes API).
-	if !tok.AllowsPath(rel) {
+	// A project hidden from MCP is invisible here too, like in the tools.
+	if !tok.AllowsPath(rel) || s.pathInHiddenProject(rel) {
 		writeJSONError(w, http.StatusNotFound, "note not found")
 		return
 	}

@@ -92,6 +92,9 @@ measured on its own:
 | Configuration | Correct | Turns | Time | Cached input | Cache writes | API-price estimate per session | What it gives up |
 |---|---|---|---|---|---|---|---|
 | fs — files only, no gosidian (2026-09-25, 150 sessions) | 97% | 5.0 | 8.9 s | 31k | 2.4k | $0.022 | ranking, orientation, access control, shared memory |
+| fs-oriented — files plus gosidian's orientation (2026-09-26, 100 sessions) | 100% | 5.0 | 10.7 s | 31k | 2.4k | $0.022 | ranking, access control, shared memory, freshness (it reads a copy) |
+| mirror — the local mirror as shipped, files only (2026-09-26, 50 sessions) | 100% | 4.9 | 10.8 s | 31k | 2.8k | $0.024 | as fs-oriented; the copy is kept in sync and the server keeps access control |
+| mirror-mcp — the mirror plus the MCP server, as deployed (2026-09-26, 50 sessions) | 100% | 6.0 | 13.2 s | 58k | 9.6k | $0.058 | — |
 | gosidian, default | 100% | 4.6 | 8.6 s | 93k | 10.0k | $0.063 | — |
 | gosidian, `core` tool profile | 100% | 4.4 | 9.4 s | 54k | 9.3k | $0.052 | admin and advanced tools (lint, compact, scaffold, uploads…) |
 | gosidian, `lean_read_bootstrap` | 100% | 4.4 | 9.0 s | 85k | 6.1k | $0.045 | for read-only tokens: the writing rules and note-format notes of the directives |
@@ -105,9 +108,133 @@ measured on its own:
   lean settings lose — context about how the memory is organized, which
   matters more on a large, real vault than on 87 notes. That is why they
   are opt-in.
+- **Files plus orientation match gosidian on this vault, at a third of
+  the cost.** `fs-oriented` gives the files-only agent what a gosidian
+  project tells its agents — start from `hot.md` and `README.md`, follow
+  tags and wikilinks, try synonyms and the other language before giving
+  up — and answers all 100 sessions correctly (the files-only control of
+  the same day: 98%, the miss being "forgotten password emails" twice).
+  On 87 notes, reading is not where gosidian's value lies: shared
+  memory, access control, audit and the web UI are. Whether it holds on
+  a large vault, where `grep` returns hundreds of files, is measured
+  below; this result is the premise of the local read-only mirror
+  (`gosidian mirror`, opt-in per project), also measured below.
 - Since 2026-09-26 search snippets are twice as long (24 tokens): the
   only wrong gosidian answer of the full run below — taken from a snippet
   that cut the fact in half — does not recur.
+
+### Scale (2026-09-26) — the same questions on a project seven times larger
+
+`bench/scale` adds 420 noise notes to `tidewater` (plans, meetings,
+support articles, research; some in Italian) that never touch what the
+questions depend on: the project grows from 67 to 489 notes, from 57 KB
+to about 490 KB of text. One run of each configuration:
+
+| Configuration | Vault | Correct | Turns | Cached input | Cache writes | API-price estimate per session |
+|---|---|---|---|---|---|---|
+| fs-oriented | 87 notes | 100% | 5.0 | 31k | 2.4k | $0.022 |
+| fs-oriented | 507 notes | 98% | 5.3 | 35k | 3.3k | $0.027 |
+| gosidian, default | 87 notes | 100% | 4.6 | 93k | 10.0k | $0.063 |
+| gosidian, default | 507 notes | 100% | 4.7 | 94k | 10.4k | $0.065 |
+
+Reading files gets dearer as the project grows (+23%), gosidian barely
+moves (+3%): the gap narrows from about 2.9× to 2.4×. The larger vault
+also cost the files-only agent one answer — lost among unrelated notes
+about retries. Level R is unchanged on the larger vault (R@5 0.69 /
+0.71 / 0.93). A caveat: the generated noise shares little vocabulary with
+the questions ("Paylane" never appears in it), so `grep` output grew less
+than it would on a real project, where a common term can match hundreds
+of notes; the +23% is a lower bound.
+
+### A real vault (2026-09-26) — private, aggregate figures only
+
+The same two configurations on a copy of the maintainers' own vault: 678
+notes in 17 projects, mostly in Italian, 13 questions in Italian about one
+project (lexical, typed, multi-hop, temporal, paraphrase, cross-lingual,
+negative), two runs each. Questions, answers and raw data stay private;
+the copy was deleted after the run. Answers checked by hand.
+
+| Configuration | Correct | Turns | Time | API-price estimate per session |
+|---|---|---|---|---|
+| fs-oriented | 96% (25/26) | 5.9 | 14.6 s | $0.067 |
+| gosidian, default | 92% (24/26) | 5.5 | 12.8 s | $0.130 |
+
+- **The gap keeps narrowing as the vault gets real**: 2.9× on the
+  benchmark vault, 2.4× on the scaled one, 1.9× here. Both
+  configurations cost more than on the benchmark: the real project's
+  `hot.md` and bootstrap are large, and so are some notes (an ADR log of
+  85 KB, an activity log of 120 KB) the files-only agent has to read.
+- **Accuracy is comparable.** gosidian picked the wrong one of two
+  similar skills twice; the files-only agent once quoted a figure from an
+  older note that a newer one had superseded — gosidian's ranking, which
+  favours recent notes, returned the current one. A copy of the files
+  does not know which note is newer unless it is told.
+
+### Local mirror (2026-09-26) — the shipped pieces, one run each
+
+The harness syncs the benchmark vault with the real `gosidian mirror sync`
+(read-only files, `_index.md`, `MIRROR.md`) and takes the orientation
+from the real Claude Code hook's SessionStart context. Two setups:
+`mirror`, file tools only on every project's mirror; `mirror-mcp`, as a
+user would run it — the current project mirrored, the MCP server
+configured too (schemas loaded on demand through ToolSearch), the stub's
+"memory_bootstrap first" and the hook's whole context. Sessions now
+record their tool calls.
+
+| Configuration | Correct | Turns | Cached input | Cache writes | API-price estimate per session |
+|---|---|---|---|---|---|
+| fs-oriented (reference) | 100% | 5.0 | 31k | 2.4k | $0.022 |
+| mirror | 100% | 4.9 | 31k | 2.8k | $0.024 |
+| mirror-mcp, all sessions | 100% | 6.0 | 58k | 9.6k | $0.058 |
+| — the 17 that read the mirror without `memory_bootstrap` | | 4.4 | 36k | 3.8k | $0.029 |
+| — the 33 that called `memory_bootstrap` first | | 6.8 | 70k | 12.7k | $0.074 |
+| gosidian, default (reference) | 100% | 4.6 | 93k | 10.0k | $0.063 |
+
+- **The mirror reproduces files plus orientation**: same accuracy, the
+  cost within 10% (the hook's orientation is a little longer). The
+  recency index (`_index.md`) has nothing to show here: `fs-oriented`
+  already answers every temporal question of this vault.
+- **As deployed, the saving depends on the bootstrap, not on the
+  reads.** Two sessions in three still start with `memory_bootstrap`, as
+  the stub asks and the hook reminds; those cost as much as gosidian with
+  deferred tool loading, although 20 of the 33 then read only the mirror
+  (3.1 file-tool calls per session against 0.5 calls to other MCP tools
+  overall). Sessions that go straight to the mirror cost what files only
+  cost. On average the deployed setup is 8% below gosidian's default.
+- One question per session puts the whole bootstrap — about 3,850
+  tokens here, 60% of it the directives an agent needs to write — on a
+  single answer. Sessions with several questions are measured next.
+
+### Several questions per session (2026-09-26)
+
+A working session bootstraps once and looks things up several times.
+`-per-session 5` asks the 50 questions in 10 sessions of five, each
+mixing categories, every answer scored on its own. Three setups with the
+hook's context: `hooks-mcp` (MCP, mirror off), `mirror-mcp` (MCP and the
+mirror) and `mirror` (the mirror alone, no MCP).
+
+| Configuration | Correct | Turns | Tool calls: files / MCP | Cached input | Cache writes | Per session | Per question | Per question, one per session |
+|---|---|---|---|---|---|---|---|---|
+| hooks-mcp | 96% (48/50) | 19.0 | 0.3 / 16.5 | 169k | 20.1k | $0.141 | $0.028 | — |
+| mirror-mcp | 100% | 15.2 | 10.6 / 2.4 | 141k | 20.6k | $0.138 | $0.028 | $0.058 |
+| mirror | 100% | 13.5 | 12.5 / 0 | 67k | 11.9k | $0.085 | $0.017 | $0.024 |
+
+- **Five questions per session halve the cost per question with MCP**
+  ($0.058 → $0.028): most of gosidian's cost is paid once per session.
+- **The mirror does not make reads cheaper.** With the MCP server there,
+  reading the mirror (10.6 file-tool calls per session) costs what
+  reading through MCP costs (16.5 calls): $0.138 against $0.141. `Grep`
+  and `Read` bring about as much text into the conversation as
+  `memory_search` and `memory_get`.
+- **The difference is fixed per session**: $0.053 between `mirror-mcp`
+  and `mirror`, i.e. the bootstrap and the tool schemas loaded through
+  ToolSearch, both carried in every later turn. Only an agent that does
+  not use MCP at all saves it. On two of the maintainers' projects the
+  bootstrap is 5,000 and 7,300 tokens, 43% and 60% of it content a mirror
+  also holds (`hot.md`, README, skills, recent notes, plans).
+- `hooks-mcp` missed two answers the mirror sessions got — a paraphrase
+  ("free tickets for journalists" → comps) and half of a retry window;
+  two questions are too few to call it a difference.
 
 ### Full run (2026-09-25) — 50 questions, three runs each
 

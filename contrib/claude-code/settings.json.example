@@ -45,6 +45,18 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__.*osidian.*__memory_(create|update|edit|append|delete|move_note|rename_note|ingest|create_table_note|create_media_note)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/gosidian-hook.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }

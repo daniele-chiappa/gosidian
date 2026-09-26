@@ -33,6 +33,10 @@ export interface Project {
   /** Trim memory_bootstrap for tokens that cannot write to the project
    *  (reading directives only). Saves tokens, drops context: off by default. */
   lean_read_bootstrap: boolean
+  /** Let readers keep a local read-only copy of the project through
+   *  GET /mcp/manifest (IMP-102). Copies notes onto agents' machines: off by
+   *  default, set by a project admin. */
+  allow_local_mirror: boolean
   /** RFC 3339 UTC string of the directory's mtime — proxy for
    *  "last activity" (fs birth time isn't preserved by rsync /
    *  git checkout / container layer copy). Empty when stat failed. */
@@ -54,6 +58,7 @@ export interface UpdateProjectRequest {
   use_anchors?: boolean
   use_tag_vocabulary?: boolean
   lean_read_bootstrap?: boolean
+  allow_local_mirror?: boolean
 }
 
 export async function listProjects(): Promise<Project[]> {

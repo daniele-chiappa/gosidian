@@ -8,6 +8,63 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.36.0] — 2026-09-26 — "mirror"
+
+A local, read-only copy of one project next to an agent, kept in sync
+by the `gosidian` binary and the Claude Code hooks, and the benchmark
+runs that measured what it saves. The mirror is off until a project
+admin turns it on. Pull the image and restart; nothing to migrate.
+
+### Added
+- **Local read-only mirror, opt-in per project** —
+  [guide](docs/mcp/mirror.md). A project admin turns on the new
+  `allow_local_mirror` flag (Projects → `mirror`, off by default); then
+  `GET /mcp/manifest?project=` lists the notes a token can read in that
+  project (path, ETag, size, modification time, title) under the same
+  rules as the MCP tools — token scope, the owner account's live access,
+  hidden files and projects hidden from MCP left out — and every listing
+  is audited (`mirror_sync`). A copy of the notes lives on another
+  machine: a revoked token cannot delete it.
+- **`gosidian mirror sync | status | purge`** — keeps that copy in
+  `.gosidian/mirror/<project>/` under the working directory: read-only
+  files with the server's modification time, only changed notes
+  downloaded, removed notes deleted, a lock against concurrent syncs,
+  `MIRROR.md` (what the folder is, how to write) and `<project>/_index.md`
+  (every note from the most recent, with title, path and tags).
+  Configuration from flags, the environment or `.claude/gosidian.env`;
+  the token is never written to disk; a warning when the folder is not
+  git-ignored.
+- **The Claude Code hooks keep the mirror** — with `GOSIDIAN_MIRROR=1`,
+  `SessionStart` starts `gosidian mirror sync` in the background (the
+  session does not wait) and tells the agent where the copy is, when it
+  was last synced and how to read it (start from `hot.md`, `README.md`
+  and `_index.md`, prefer the newer of two notes, never edit the files,
+  write through MCP); a new `PostToolUse` hook on the gosidian write
+  tools syncs again so the agent's own writes show up.
+- **What the mirror saves, measured** — reads from the mirror cost about
+  what reads through MCP cost; gosidian's extra cost is fixed per
+  session (the bootstrap and the tool schemas). An agent that reads the
+  mirror without the gosidian MCP server avoids it: $0.085 against $0.141
+  per five-question session in the benchmark, without losing accuracy. An
+  agent that also has the MCP server and bootstraps first, as the
+  CLAUDE.md stub asks, costs about the same with or without the mirror.
+- **Benchmark: larger vaults, other vaults, whole sessions** —
+  `go run ./bench/scale` builds a copy of the benchmark vault seven times
+  larger (files plus orientation cost 23% more there, gosidian 3%: the
+  gap narrows from 2.9× to 2.4×); the level-A harness runs on any vault
+  (`-vault`, `-questions`, `-project`, `-projects`), and the report adds
+  aggregate figures from a private real vault of 678 notes (gap 1.9×,
+  accuracy comparable); `mirror`, `mirror-mcp` and `hooks-mcp` run the
+  mirror and the hooks with the real binary and hook script;
+  `-per-session N` asks several questions per session, as a working
+  session does; sessions record their tool calls. See
+  [docs/benchmark.md](docs/benchmark.md).
+
+### Fixed
+- **`/mcp/download` served notes of projects hidden from MCP** to tokens
+  that could otherwise read them: a project with `hidden_from_mcp` is now
+  `404` there too, as in the MCP tools.
+
 ## [2.35.0] — 2026-09-26 — "benchmark"
 
 A public, reproducible benchmark of how well agents find things in a

@@ -42,6 +42,8 @@ type projectView struct {
 	UseTagVocabulary bool `json:"use_tag_vocabulary"`
 	// LeanReadBootstrap trims memory_bootstrap for read-only tokens.
 	LeanReadBootstrap bool `json:"lean_read_bootstrap"`
+	// AllowLocalMirror lets readers keep a local read-only copy (IMP-102).
+	AllowLocalMirror bool `json:"allow_local_mirror"`
 	// ModTime drives "most recent" sorting in the SPA's project
 	// pickers (graph filter, switcher). RFC 3339 UTC. Empty when
 	// the vault entry hasn't been stat-able.
@@ -68,6 +70,7 @@ type updateProjectRequest struct {
 	UseAnchors        *bool `json:"use_anchors,omitempty"`
 	UseTagVocabulary  *bool `json:"use_tag_vocabulary,omitempty"`
 	LeanReadBootstrap *bool `json:"lean_read_bootstrap,omitempty"`
+	AllowLocalMirror  *bool `json:"allow_local_mirror,omitempty"`
 }
 
 // handleProjects dispatches GET (list) / POST (create) on /projects.
@@ -178,6 +181,7 @@ func (r *Router) projectViewFor(name string, lvl authz.Level, noteCount int) pro
 		UseAnchors:        flags.UseAnchors,
 		UseTagVocabulary:  flags.UseTagVocabulary,
 		LeanReadBootstrap: flags.LeanReadBootstrap,
+		AllowLocalMirror:  flags.AllowLocalMirror,
 	}
 }
 
@@ -322,7 +326,7 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 	// Apply flags first (cheap, no fs movement) so a failing rename
 	// still leaves the flags durable.
 	flagsChanged := false
-	if body.HiddenFromMCP != nil || body.SkipGitSync != nil || newVisibility != "" || body.UseGlobals != nil || body.UseAnchors != nil || body.UseTagVocabulary != nil || body.LeanReadBootstrap != nil {
+	if body.HiddenFromMCP != nil || body.SkipGitSync != nil || newVisibility != "" || body.UseGlobals != nil || body.UseAnchors != nil || body.UseTagVocabulary != nil || body.LeanReadBootstrap != nil || body.AllowLocalMirror != nil {
 		current := r.projectFlag(name)
 		if body.HiddenFromMCP != nil {
 			current.HiddenFromMCP = *body.HiddenFromMCP
@@ -345,6 +349,9 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 		}
 		if body.LeanReadBootstrap != nil {
 			current.LeanReadBootstrap = *body.LeanReadBootstrap
+		}
+		if body.AllowLocalMirror != nil {
+			current.AllowLocalMirror = *body.AllowLocalMirror
 		}
 		if r.deps.Projects != nil {
 			if err := r.deps.Projects.Set(name, current); err != nil {

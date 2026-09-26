@@ -88,6 +88,9 @@ func main() {
 		case "import-vault":
 			runImportCmd(os.Args[2:])
 			return
+		case "mirror":
+			runMirrorCmd(os.Args[2:])
+			return
 		}
 	}
 

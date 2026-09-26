@@ -21,7 +21,21 @@ type Note struct {
 // pass it back as if_match on writes to get optimistic-locking safety
 // (request rejected if the note changed since they last read it).
 func (n *Note) ETag() string {
-	return fmt.Sprintf("%d-%d", n.ModTime.UnixNano(), n.Size)
+	return etagOf(n.ModTime, n.Size)
+}
+
+// NoteStat describes a note file without reading it.
+type NoteStat struct {
+	Path    string
+	Size    int64
+	ModTime time.Time
+}
+
+// ETag is the stamp Note.ETag returns for the same file.
+func (n NoteStat) ETag() string { return etagOf(n.ModTime, n.Size) }
+
+func etagOf(mod time.Time, size int64) string {
+	return fmt.Sprintf("%d-%d", mod.UnixNano(), size)
 }
 
 func titleFromPath(rel string) string {

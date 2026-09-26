@@ -11,6 +11,7 @@ the agent never opens an MCP session — and they never block Claude Code.
 | `PreCompact` (manual, auto) | Appends a **checkpoint digest** to `<project>/sessions/<date>-<session>.md`, so the compacted context finds the thread again at the next `SessionStart`. |
 | `SessionEnd` | Appends the **session digest** to the same note. With `GOSIDIAN_HOOK_LOG_ENTRY=1`, also a one-line pointer in `<project>/log.md`. |
 | `Stop` | Nothing by default. With `GOSIDIAN_HOOK_STOP_LOG=1`, appends the last assistant message at every turn. |
+| `PostToolUse` (gosidian write tools) | With `GOSIDIAN_MIRROR=1`, refreshes the local mirror after the agent writes through MCP. |
 
 Digests are built **without any LLM** from the session transcript: first
 prompt, turn counts, tools used, files touched, last assistant message. They
@@ -50,6 +51,28 @@ grooming digest can sweep them.
    or `memory_recent`).
 
 Requirements: bash, `curl`, `jq`. Server: gosidian ≥ 2.33 (`POST /mcp/append`).
+
+## Local read-only mirror (optional)
+
+With `GOSIDIAN_MIRROR=1` the hooks keep a read-only copy of the project in
+`.gosidian/mirror/<project>/` ([guide](../../docs/mcp/mirror.md)) and tell
+the agent to read and search there. Reads from the copy cost about what
+MCP reads cost; the saving is for an agent that has no gosidian MCP server
+and so skips the bootstrap and the tool schemas
+([benchmark](../../docs/benchmark.md#several-questions-per-session-2026-09-26)):
+
+- `SessionStart` starts `gosidian mirror sync` in the background (the
+  session does not wait) and adds to the context where the mirror is, when
+  it was last synced and how to use it: start from `hot.md`, `README.md`
+  and `_index.md`, prefer the more recent of two notes that disagree,
+  never edit the files, write through MCP.
+- `PostToolUse` on the gosidian write tools syncs again, so the agent's own
+  writes show up in the copy (only changed notes are fetched).
+
+Requirements: the `gosidian` binary on the machine (a release binary, or
+`GOSIDIAN_BIN=/path/to/gosidian`), a project admin who turned on
+**`mirror`** for the project, and `.gosidian/` in `.gitignore`. Sync output
+goes to `.gosidian/mirror/.sync.log`.
 
 ## What goes over the wire
 

@@ -1,6 +1,8 @@
 package vault
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -371,5 +373,42 @@ func TestVault_RelRejectsEscape(t *testing.T) {
 		if _, err := v.Rel(b); err == nil {
 			t.Errorf("Rel(%q) should fail", b)
 		}
+	}
+}
+
+func TestProjectNotes_StatsNotesWithoutReading(t *testing.T) {
+	v := New(t.TempDir())
+	for _, p := range []string{"proj/a.md", "proj/sub/b.md", "other/c.md"} {
+		if err := v.Save(p, []byte("# "+p)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(v.Root, "proj", ".hidden.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(v.Root, "proj", "image.png"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := v.ProjectNotes("proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stats) != 2 {
+		t.Fatalf("stats = %+v, want proj/a.md and proj/sub/b.md", stats)
+	}
+	for _, st := range stats {
+		n, err := v.Load(st.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st.ETag() != n.ETag() {
+			t.Errorf("%s: stat etag %s != note etag %s", st.Path, st.ETag(), n.ETag())
+		}
+	}
+	if _, err := v.ProjectNotes("missing"); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("missing project err = %v, want fs.ErrNotExist", err)
+	}
+	if _, err := v.ProjectNotes("proj/sub"); err == nil {
+		t.Error("a nested folder is not a project")
 	}
 }

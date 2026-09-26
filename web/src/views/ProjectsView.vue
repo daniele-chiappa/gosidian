@@ -174,7 +174,9 @@ onMounted(() => {
       at bootstrap (both need their server master switch on — dimmed when off);
       <em>tag-vocab</em> lets the project extend the lint tag vocabulary from
       memory/conventions.md; <em>lean-read</em> gives tokens that cannot write a
-      shorter bootstrap (reading directives only: fewer tokens, less context).
+      shorter bootstrap (reading directives only: fewer tokens, less context);
+      <em>mirror</em> lets readers keep a local read-only copy of the project
+      (the notes leave the server; every sync is audited).
     </p>
 
     <form
@@ -315,6 +317,15 @@ onMounted(() => {
               : 'Click to give tokens that cannot write here a lean bootstrap: reading directives only. Saves tokens per session, drops the context about writing and note formats.'"
             @click="apply(p, { lean_read_bootstrap: !p.lean_read_bootstrap }, 'lean-read')"
           >lean-read</button>
+          <button
+            type="button"
+            class="text-xs px-2 py-1 rounded"
+            :class="p.allow_local_mirror ? 'bg-accent/20 text-accent' : 'border border-border'"
+            :title="p.allow_local_mirror
+              ? 'Local mirror on: tokens that can read this project may keep a read-only copy of its notes on their machine (gosidian mirror sync). Every sync is audited. Click to disable.'
+              : 'Click to let tokens that can read this project keep a read-only copy of its notes on their machine (gosidian mirror sync): cheaper reading for agents, but the notes leave the server.'"
+            @click="apply(p, { allow_local_mirror: !p.allow_local_mirror }, 'mirror')"
+          >mirror</button>
           <button
             type="button"
             class="text-xs px-2 py-1 rounded hover:bg-surface-hover"

@@ -71,6 +71,11 @@ type Flags struct {
 	// context about how the memory is organized for tokens, so it is off by
 	// default (IMP-096 benchmark).
 	LeanReadBootstrap bool `json:"lean_read_bootstrap,omitempty"`
+	// AllowLocalMirror lets tokens that can read the project list its notes
+	// through GET /mcp/manifest, so an agent's machine can keep a read-only
+	// copy (IMP-102). It moves the project's notes onto other machines, so
+	// a project admin opts in; off by default.
+	AllowLocalMirror bool `json:"allow_local_mirror,omitempty"`
 }
 
 // Entry is a (name, flags) pair returned by All().
@@ -490,6 +495,12 @@ func (s *Store) UsesTagVocabulary(name string) bool {
 // bootstrap for read-only tokens. Unknown projects default to false.
 func (s *Store) UsesLeanReadBootstrap(name string) bool {
 	return s.Get(name).LeanReadBootstrap
+}
+
+// AllowsLocalMirror reports whether the project opted into local read-only
+// mirrors (IMP-102). Unknown projects default to false.
+func (s *Store) AllowsLocalMirror(name string) bool {
+	return s.Get(name).AllowLocalMirror
 }
 
 // MemberLevel returns the grant level a user holds on a project, and whether

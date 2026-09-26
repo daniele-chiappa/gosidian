@@ -117,4 +117,51 @@ printf '{"hook_event_name":"SessionEnd","session_id":"x","transcript_path":"/non
 printf '{"hook_event_name":"SessionStart","session_id":"x"}' | GOSIDIAN_URL=http://127.0.0.1:1/mcp "$HOOK" | jq -e '.hookSpecificOutput.additionalContext | test("not readable")' >/dev/null || fail "unreachable server must still produce context"
 echo "ok  failures never block"
 
+# --- local mirror: a fake gosidian binary records how it is called ---------
+cat > "$WORK/gosidian" <<'SH'
+#!/usr/bin/env bash
+# fake: record the call and the token it saw, write a state file like a sync
+dir=""; prev=""
+for a in "$@"; do [ "$prev" = "--dir" ] && dir=$a; prev=$a; done
+echo "$* token=$GOSIDIAN_TOKEN" >> "$FAKE_LOG"
+[ -n "$dir" ] && mkdir -p "$dir" && printf '{"project":"proj","synced_at":"2026-09-26T10:00:00Z"}\n' > "$dir/.proj.state.json"
+SH
+chmod +x "$WORK/gosidian"
+export FAKE_LOG="$WORK/fake.log"
+wait_log() { for _ in $(seq 1 30); do [ "$(wc -l < "$FAKE_LOG" 2>/dev/null || echo 0)" -ge "$1" ] && return 0; sleep 0.1; done; return 1; }
+MIRROR_ENV=(GOSIDIAN_MIRROR=1 GOSIDIAN_BIN="$WORK/gosidian" CLAUDE_PROJECT_DIR="$WORK/checkout")
+mkdir -p "$WORK/checkout"
+
+out=$(printf '{"hook_event_name":"SessionStart","session_id":"m1","startup_reason":"startup"}' | env "${MIRROR_ENV[@]}" "$HOOK")
+ctx=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext')
+wait_log 1 || fail "mirror sync not started at SessionStart"
+grep -q "mirror sync --url http://127.0.0.1:$PORT/mcp --project proj --dir $WORK/checkout/.gosidian/mirror token=tok-1" "$FAKE_LOG" || fail "unexpected sync call: $(cat "$FAKE_LOG")"
+case "$ctx" in *"Local read-only mirror of \`proj\`"*".gosidian/mirror/proj"*"_index.md"*"write only with the gosidian MCP tools"*) ;; *) fail "mirror context missing: $ctx";; esac
+case "$ctx" in *"memory_bootstrap"*) ;; *) fail "bootstrap reminder lost with the mirror on";; esac
+echo "ok  SessionStart syncs the mirror in the background and announces it"
+
+out=$(printf '{"hook_event_name":"SessionStart","session_id":"m1","startup_reason":"startup"}' | env "${MIRROR_ENV[@]}" "$HOOK")
+case "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext')" in *"last sync: 2026-09-26T10:00:00Z"*) ;; *) fail "last sync time not reported";; esac
+wait_log 2 || true
+echo "ok  SessionStart reports the last sync"
+
+: > "$FAKE_LOG"
+printf '{"hook_event_name":"PostToolUse","session_id":"m1","tool_name":"mcp__gosidian__memory_append","tool_input":{"path":"proj/log.md"}}' | env "${MIRROR_ENV[@]}" "$HOOK"
+wait_log 1 || fail "PostToolUse on a gosidian write must resync"
+printf '{"hook_event_name":"PostToolUse","session_id":"m1","tool_name":"mcp__gosidian__memory_get","tool_input":{"path":"proj/log.md"}}' | env "${MIRROR_ENV[@]}" "$HOOK"
+printf '{"hook_event_name":"PostToolUse","session_id":"m1","tool_name":"Edit","tool_input":{}}' | env "${MIRROR_ENV[@]}" "$HOOK"
+sleep 0.5
+[ "$(wc -l < "$FAKE_LOG")" -eq 1 ] || fail "reads and non-gosidian tools must not resync: $(cat "$FAKE_LOG")"
+echo "ok  PostToolUse resyncs after gosidian writes only"
+
+: > "$FAKE_LOG"
+out=$(printf '{"hook_event_name":"SessionStart","session_id":"m2","startup_reason":"startup"}' | CLAUDE_PROJECT_DIR="$WORK/checkout" GOSIDIAN_BIN="$WORK/gosidian" "$HOOK")
+case "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext')" in *"mirror"*) fail "mirror mentioned while GOSIDIAN_MIRROR is off";; esac
+printf '{"hook_event_name":"PostToolUse","session_id":"m2","tool_name":"mcp__gosidian__memory_append"}' | GOSIDIAN_BIN="$WORK/gosidian" "$HOOK"
+sleep 0.3
+[ ! -s "$FAKE_LOG" ] || fail "mirror off must never call the binary"
+out=$(printf '{"hook_event_name":"SessionStart","session_id":"m3","startup_reason":"startup"}' | GOSIDIAN_MIRROR=1 GOSIDIAN_BIN="$WORK/nope" CLAUDE_PROJECT_DIR="$WORK/checkout" "$HOOK" 2>/dev/null)
+case "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext')" in *"was not found"*) ;; *) fail "missing binary must be reported in the context";; esac
+echo "ok  mirror off stays silent; a missing binary is reported"
+
 echo "all hook tests passed"

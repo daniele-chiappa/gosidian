@@ -29,6 +29,8 @@ trial, read the [root README](../README.md) first.
 - [Upload flow](mcp/upload.md) — REST `/api/upload` + the two MCP
   upload tools, contract and decision tree; the HTTP `/download` twin
   for fetching a note's raw bytes with the MCP token
+- [Local read-only mirror](mcp/mirror.md) — `gosidian mirror sync`: a
+  read-only copy of one project next to an agent, opt-in per project
 
 ## Web UI
 
