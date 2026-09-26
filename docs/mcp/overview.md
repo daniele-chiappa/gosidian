@@ -37,7 +37,7 @@ for the full rationale.
 
 ## Where to go next
 
-- [Tool catalogue](tools.md) — all 57 tools grouped by purpose
+- [Tool catalogue](tools.md) — all 58 tools grouped by purpose
 - [Authentication](authentication.md) — creating and scoping tokens
 - [Client setup](client-setup.md) — wiring Claude Code, Zed, Cursor,
   Continue, or a custom client

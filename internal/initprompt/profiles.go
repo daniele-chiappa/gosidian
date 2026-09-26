@@ -132,7 +132,12 @@ const StubVersion = 2
 // the Current focus stays a few lines (what is in progress, next step) and
 // the chronicle goes to log.md; the folder map says so too. Paired with the
 // hot-oversize default lowered to 8 KiB (maintenance.hot_oversize).
-const DirectivesVersion = 11
+//
+// v12 (2026-09-26, IMP-099 memory_query): the token-economy section tells
+// agents to answer frontmatter questions (status, type, dates, importance,
+// lists) with one memory_query call instead of notes_by_tag + batch_get +
+// filtering by hand; namespaced tags count as fields.
+const DirectivesVersion = 12
 
 // AnchorVersion is the version of the agent-anchor template/format. It is
 // substituted into the `<!-- gosidian:anchor v=N ... -->` marker so the

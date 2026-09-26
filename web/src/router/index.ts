@@ -49,6 +49,7 @@ const routes: RouteRecordRaw[] = [
     redirect: (to) => singleWindow('note:' + encodeURIComponent(pathParam(to))),
   },
   { path: '/search', redirect: () => singleWindow('search') },
+  { path: '/query', redirect: () => singleWindow('query') },
   { path: '/projects', redirect: () => singleWindow('projects') },
   {
     path: '/tags/:tag',

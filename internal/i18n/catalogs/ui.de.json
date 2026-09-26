@@ -59,6 +59,7 @@
     "download_vault_help": "Download a zip archive of the entire vault (excluding .gosidian/). Owner only."
   },
   "nav": {
+    "query": "Abfrage",
     "projects": "Projekte",
     "tags": "Tags",
     "graph": "Graph",

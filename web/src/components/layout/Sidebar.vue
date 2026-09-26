@@ -13,6 +13,7 @@ import {
   RefreshCw,
   ChevronRight,
   Search,
+  ListFilter,
   Network,
   Folder,
   Tags,
@@ -67,6 +68,7 @@ const menuItems = computed<MenuItem[]>(() => {
   })
   const items: MenuItem[] = [
     item('search', t('nav.search', 'Search'), Search),
+    item('query', t('nav.query', 'Query'), ListFilter),
     item('graph', t('nav.graph'), Network),
     item('projects', t('nav.projects'), Folder),
     item('tags', t('nav.tags'), Tags),

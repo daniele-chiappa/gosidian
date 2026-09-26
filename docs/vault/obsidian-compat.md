@@ -37,7 +37,9 @@ backlinks appear — without editing a single file.
   entirely by gosidian.
 - **Plugin content**:
   - **Dataview** queries in code blocks — preserved as static code
-    blocks; gosidian doesn't execute them.
+    blocks; gosidian doesn't execute them. For filters on frontmatter
+    fields (type, status, dates, importance…) use the **Query** window
+    or the MCP `memory_query` tool instead.
   - **Templater** — likewise preserved as template source.
   - **Excalidraw** `.excalidraw.md` — file is valid markdown so it's
     indexed, but the graphical layer isn't rendered.
@@ -51,8 +53,8 @@ backlinks appear — without editing a single file.
 - **Custom frontmatter fields** (`importance`, `type`, `status`,
   `pinned`, `trigger_phrase`) — Obsidian preserves them but doesn't
   interpret them. You can query them with the **Dataview** plugin,
-  which is the closest Obsidian equivalent to gosidian's typed
-  retrieval tools.
+  which is the closest Obsidian equivalent to gosidian's `memory_query`
+  tool and Query window.
 - **Colon-based tag namespaces** (`type:skill`, `topic:mcp`,
   `status:in-progress`) — Obsidian accepts them as tags but its tag
   UX prefers `/` hierarchies (`type/skill`). Cosmetic, not a blocker.

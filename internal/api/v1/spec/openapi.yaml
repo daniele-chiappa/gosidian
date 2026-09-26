@@ -639,6 +639,60 @@ paths:
         "501":
           $ref: "#/components/responses/NotImplemented"
 
+  /api/v1/query:
+    post:
+      tags: [search]
+      summary: Notes selected by their frontmatter (the MCP memory_query tool).
+      description: >-
+        Every condition must hold. A namespaced tag counts as a field when
+        the note has none; ISO dates and numbers compare as such, text
+        ignores case. Scoped to the projects the principal can read.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [where]
+              properties:
+                project: {type: string}
+                where:
+                  type: array
+                  maxItems: 16
+                  items:
+                    type: object
+                    required: [field]
+                    properties:
+                      field: {type: string}
+                      op: {type: string, enum: [eq, ne, in, exists, lt, lte, gt, gte, contains]}
+                      value: {description: "String, number, list (in) or boolean (exists)."}
+                sort: {type: string, description: "A field, or path, title, modified (default)."}
+                order: {type: string, enum: [asc, desc]}
+                fields: {type: array, items: {type: string}}
+                limit: {type: integer, minimum: 1, maximum: 500, default: 50}
+      responses:
+        "200":
+          description: Matching notes, sorted and cut at limit.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  notes:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        path: {type: string}
+                        title: {type: string}
+                        modified: {type: string, format: date-time}
+                        fields: {type: object, additionalProperties: true}
+                  count: {type: integer}
+                  total: {type: integer}
+                  truncated: {type: boolean}
+        "400":
+          description: Invalid query (unknown operator, missing value, bad order…).
+
   /api/v1/graph:
     get:
       tags: [graph]

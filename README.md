@@ -104,9 +104,8 @@ sits and where it doesn't, as of September 2026:
 
 Honest gaps, in the order they come up: semantic / hybrid search
 (deferred, see the [FAQ](docs/faq.md#why-not-rag-or-vector-search)),
-mobile sync beyond git, real-time collaboration, a hosted offering,
-published retrieval benchmarks. The [roadmap](docs/faq.md#whats-the-roadmap)
-says which of these are planned.
+mobile sync beyond git, real-time collaboration, a hosted offering. The
+[roadmap](docs/faq.md#whats-the-roadmap) says which of these are planned.
 
 ## Feature highlights
 

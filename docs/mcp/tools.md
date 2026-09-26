@@ -1,6 +1,6 @@
 # MCP tool catalogue
 
-**57 tools** cover the full retrieval → write → workflow →
+**58 tools** cover the full retrieval → write → workflow →
 orchestration → self-check cycle for agent memory.
 
 Consult each tool's `description` via your client's `tools/list` call
@@ -69,6 +69,18 @@ for precise schemas; the groupings below are the conceptual map.
 - `memory_list_notes(project)`, `memory_list_projects()`,
   `memory_list_tags(project?)`
 - `memory_notes_by_tag(tag, project?)`
+- `memory_query(where, project?, sort?, order?, fields?, limit?)` —
+  notes selected by their frontmatter, like a Dataview filter: every
+  condition `{field, op, value}` must hold, with `eq`, `ne`, `in`,
+  `exists`, `lt`, `lte`, `gt`, `gte`, `contains`. A list field matches
+  element by element; a namespaced tag counts as a field when the note
+  has no field of that name (`status:done` → `status = done`), and
+  `tags` is the tag list. ISO dates and numbers compare as such, text
+  ignores case; `ne` and `exists: false` also match notes without the
+  field. Each note comes back with its path, title, modification time
+  and the fields asked for (default: those used to filter and sort),
+  plus `total` and `truncated`. One call replaces `memory_notes_by_tag`
+  + `memory_batch_get(mode: frontmatter)` + filtering by hand
 - `memory_backlinks(path)`, `memory_outlinks(path,
   include_cross_project?)`
 

@@ -121,6 +121,7 @@
     "download": "Download CSV"
   },
   "nav": {
+    "query": "Query",
     "projects": "Projects",
     "tags": "Tags",
     "graph": "Graph",

@@ -233,6 +233,7 @@ func (s *Server) registerTools() {
 	s.registerBootstrapTool()
 	s.registerDiscoveryTools()
 	s.registerImportanceTool()
+	s.registerQueryTool()
 	s.registerHandoffTools()
 	s.registerCompactTool()
 	s.registerSelfStatsTool()

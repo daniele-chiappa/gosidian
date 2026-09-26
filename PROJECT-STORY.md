@@ -110,7 +110,7 @@ Key invariants:
 ## What makes it different
 
 Compared to Obsidian + community plugins: no plugin system, no Electron, no
-per-user account lock-in, but a real **MCP surface** (57 tools) that
+per-user account lock-in, but a real **MCP surface** (58 tools) that
 treats the vault as a **machine-readable data layer** first, a human-
 readable note-taking app second.
 

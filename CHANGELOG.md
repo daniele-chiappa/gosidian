@@ -8,6 +8,51 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.37.0] — 2026-09-26 — "query"
+
+Notes can be selected by their frontmatter — status, type, dates,
+importance, any field — with one call from an agent or one window in the
+web UI. Everything stays deterministic: no model, no new dependency.
+Pull the image and restart; the search index gains a table at boot and
+the startup scan fills it, nothing to migrate by hand (an older binary
+started on the new index keeps working and ignores the table).
+
+### Added
+- **`memory_query`** (MCP) — a Dataview-like filter for agents: `where`
+  lists conditions `{field, op, value}` (`eq`, `ne`, `in`, `exists`,
+  `lt`, `lte`, `gt`, `gte`, `contains`), all required. ISO dates and
+  numbers compare as such, text ignores case, a list field matches
+  element by element, and a namespaced tag counts as a field when the
+  note has none — `status:draft` answers `status = draft`, which matters
+  on vaults that state status or type only as tags. `sort` by a field or
+  by path, title or modification time, `fields` to return (default: the
+  ones filtered and sorted on), `total` and `truncated`; the same scope
+  and hidden-project rules as the other read tools, and part of the
+  `core` profile. The frontmatter is read with gosidian's forgiving
+  parser, so notes that strict YAML rejects (an unquoted colon in a
+  description) still answer. 58 tools.
+- **Query window** in the web UI — Menu → Query (or `/query`): one row
+  per condition, optional project, sort and fields, results as a table
+  whose titles open the notes. The whole query lives in the URL, so it
+  survives a reload and can be shared as a link. Backed by
+  `POST /api/v1/query`, scoped to the projects the account can read.
+
+### Changed
+- **`memory_plans` and `memory_notes_by_importance` answer from the
+  index** instead of loading every note. `memory_plans` also finds and
+  reports a status stated only as a `status:` tag, and points to
+  `memory_query` for other filters: in a test with a real agent, the
+  full list of 87 closed plans (36 KB) made it miss three of the seven
+  it was asked for, while one `memory_query` call returned exactly
+  those seven.
+- **Directives v12** — frontmatter questions go to one `memory_query`
+  call instead of listing notes by tag, reading their frontmatter and
+  filtering by hand.
+- **Docs** — semantic search stays deferred: the retrieval benchmark
+  found no answer it would fix, since agents recover the paraphrases
+  lexical search misses (FAQ roadmap); the README no longer lists a
+  published benchmark among the gaps.
+
 ## [2.36.1] — 2026-09-26 — "hygiene"
 
 `hot.md` goes back to being a short cache of the current state, and the

@@ -224,3 +224,37 @@ func TestMCP_Discovery_ProjectRequired(t *testing.T) {
 		t.Error("handleStale should reject missing project")
 	}
 }
+
+// A plan that states its status only as a tag (147 notes of a real vault
+// do) is found by the status filter and reports that status; a status field
+// wins over a disagreeing tag.
+func TestMCP_Plans_StatusFromTag(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	seedDiscoveryVault(t, s)
+	ctx := context.Background()
+	for path, content := range map[string]string{
+		"proj/plans/tagonly.md": "---\ntitle: tagonly\ntype: plan\nupdated: 2026-09-26\ntags: [type:plan, status:draft]\n---\n\n# t",
+		"proj/plans/both.md":    "---\ntitle: both\ntype: plan\nstatus: done\ntags: [type:plan, status:draft]\n---\n\n# b",
+	} {
+		if res, _ := s.handleCreate(ctx, call(map[string]any{"path": path, "content": content})); res.IsError {
+			t.Fatalf("seed %s: %s", path, expectError(t, res))
+		}
+	}
+	res, _ := s.handlePlans(ctx, call(map[string]any{"project": "proj", "status": "draft"}))
+	var p struct {
+		Plans []planEntry `json:"plans"`
+	}
+	if err := json.Unmarshal([]byte(resultText(t, res)), &p); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]planEntry{}
+	for _, pl := range p.Plans {
+		got[pl.Path] = pl
+	}
+	if len(p.Plans) != 2 || got["proj/plans/tagonly.md"].Status != "draft" || got["proj/plans/tagonly.md"].Updated != "2026-09-26" {
+		t.Errorf("draft plans: %+v", p.Plans)
+	}
+	if _, ok := got["proj/plans/both.md"]; ok {
+		t.Error("the status field (done) must win over the draft tag")
+	}
+}

@@ -264,6 +264,35 @@ func (i *Index) NotesByTag(tag string) ([]NoteRow, error) {
 	return out, rows.Err()
 }
 
+// ImportanceRow is a note with its frontmatter importance (1..5, 3 when
+// absent or unparseable).
+type ImportanceRow struct {
+	Path       string
+	Title      string
+	Importance int
+}
+
+// NotesByImportance returns a project's notes whose importance is at least
+// minLevel, highest first, then by path.
+func (i *Index) NotesByImportance(project string, minLevel int) ([]ImportanceRow, error) {
+	rows, err := i.db.Query(`SELECT path, title, importance FROM notes
+        WHERE path LIKE ? ESCAPE '\' AND importance >= ?
+        ORDER BY importance DESC, path`, likeUnder(project), minLevel)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ImportanceRow
+	for rows.Next() {
+		var r ImportanceRow
+		if err := rows.Scan(&r.Path, &r.Title, &r.Importance); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // NotesByTagInProject is NotesByTag constrained to notes under the given
 // project prefix. Empty project falls back to NotesByTag.
 func (i *Index) NotesByTagInProject(tag, project string) ([]NoteRow, error) {

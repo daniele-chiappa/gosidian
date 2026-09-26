@@ -43,7 +43,7 @@ introspection: `memory_self_stats`):
   the whole catalogue.
 - **`core`**: the worker subset — session start (`memory_bootstrap`),
   note CRUD, targeted reads (`get_section`/`get_outline`/
-  `get_frontmatter`/`batch_get`), `memory_search`/`list_notes`/
+  `get_frontmatter`/`batch_get`), `memory_search`/`query`/`list_notes`/
   `notes_by_tag`/`list_projects`, **`memory_ingest` as the single file
   door** (it routes to table/media notes and attachments internally, so
   the dedicated upload/creator tools stay full-profile and workers never

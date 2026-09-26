@@ -47,8 +47,9 @@ func Open(path string) (*Index, error) {
 
 // schemaVersion is stored in PRAGMA user_version. v1 (IMP-095) splits the
 // frontmatter out of the FTS body into its own weighted column and adds
-// notes.importance.
-const schemaVersion = 1
+// notes.importance; v2 (IMP-099) adds note_fields, which the boot scan fills
+// like every other table.
+const schemaVersion = 2
 
 // migrate brings an index file to schemaVersion. The index is a cache of the
 // vault — the boot scan re-upserts every note — so a shape change drops and
@@ -213,6 +214,9 @@ func (i *Index) upsertLocked(n NoteDoc) (int64, error) {
 	if _, err := tx.Exec(`DELETE FROM tags WHERE note_id = ?`, id); err != nil {
 		return 0, err
 	}
+	if _, err := tx.Exec(`DELETE FROM note_fields WHERE note_id = ?`, id); err != nil {
+		return 0, err
+	}
 
 	for _, l := range links {
 		if _, err := tx.Exec(`INSERT INTO links(src_id, target, target_path, alias) VALUES(?,?,?,?)`,
@@ -222,6 +226,13 @@ func (i *Index) upsertLocked(n NoteDoc) (int64, error) {
 	}
 	for _, t := range tags {
 		if _, err := tx.Exec(`INSERT INTO tags(note_id, tag) VALUES(?,?)`, id, t); err != nil {
+			return 0, err
+		}
+	}
+
+	for _, f := range extractFields(meta, tags) {
+		if _, err := tx.Exec(`INSERT INTO note_fields(note_id, key, value, num, date, source) VALUES(?,?,?,?,?,?)`,
+			id, f.key, f.value, f.num, f.date, f.source); err != nil {
 			return 0, err
 		}
 	}

@@ -43,9 +43,24 @@ working):
 | `/tags` / `/tags/<tag>` | tag explorer |
 | `/graph` | Cytoscape graph of wiki-link relations |
 | `/search` | full-text search |
+| `/query` | notes by their frontmatter (see below) |
 | `/settings` | theme preset, language, git sync |
 | `/admin/*` | users, tokens, invites, audit (owner only) |
 | `/trash` | soft-deleted notes (if enabled) |
+
+## Query window
+
+**Menu → Query** selects notes by their frontmatter — the same query as
+the MCP `memory_query` tool, for people. Each row is a condition
+`field · operator · value` (`eq`, `ne`, `in` with a comma-separated list,
+`exists`, `lt`/`lte`/`gt`/`gte`, `contains`), and every condition must
+hold. A namespaced tag counts as a field when the note has none
+(`status:done` → `status = done`), `tags` is the tag list, ISO dates and
+numbers compare as such. Optional: a project, a sort field with its
+order, the fields to show (by default those of the conditions). Results
+are a table; a title opens the note. The whole query lives in the URL,
+so it survives a reload and can be shared as a link. The backend is
+`POST /api/v1/query`, scoped to the projects the account can read.
 
 ## Rendering stack
 

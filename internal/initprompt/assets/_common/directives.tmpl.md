@@ -160,6 +160,14 @@ dichiarativi. Non editare a mano il frontmatter di lifecycle.
   `memory_get_section`, o `raw:true` solo se serve davvero tutto. Letture
   bulk con `memory_batch_get` (`mode: outline|frontmatter`,
   `max_bytes_per_note`).
+- **Domande sul frontmatter** (stato, tipo, date, `importance`, liste come
+  `implements_imp`): `memory_query` risponde in una chiamata con i soli
+  campi chiesti, invece di `memory_notes_by_tag` + `memory_batch_get` +
+  filtro a mano. Un tag `ns:valore` vale come campo (`status:done` →
+  `status = done`); date ISO e numeri si confrontano come tali. Esempio:
+  plan in bozza aggiornati da settembre → `where: [{field: type, value:
+  plan}, {field: status, value: draft}, {field: updated, op: gte, value:
+  2026-09-01}]`.
 - Se `memory_lint` segnala `hot-oversize`, compatta hot.md invece di
   lasciarlo crescere.
 

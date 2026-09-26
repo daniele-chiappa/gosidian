@@ -36,3 +36,18 @@ CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
 -- The indexed words, one row per distinct term: query-side stemming picks
 -- the inflections of a search word from here (stem.go).
 CREATE VIRTUAL TABLE IF NOT EXISTS notes_vocab USING fts5vocab(notes_fts, 'row');
+
+-- Frontmatter as queryable fields (v2, memory_query): one row per scalar,
+-- one per list element, plus the namespaced tags (status:done → status) of
+-- a note that has no field of that name. value is the text as written; num
+-- and date are filled when the text reads as a number or an ISO date.
+CREATE TABLE IF NOT EXISTS note_fields (
+    note_id INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+    key     TEXT NOT NULL,
+    value   TEXT NOT NULL,
+    num     REAL,
+    date    TEXT,
+    source  TEXT NOT NULL  -- field | list | tag
+);
+CREATE INDEX IF NOT EXISTS note_fields_key ON note_fields(key, value);
+CREATE INDEX IF NOT EXISTS note_fields_note ON note_fields(note_id);

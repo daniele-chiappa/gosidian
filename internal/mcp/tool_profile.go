@@ -39,6 +39,7 @@ var coreToolSet = map[string]struct{}{
 	"memory_list_notes":       {},
 	"memory_list_projects":    {},
 	"memory_notes_by_tag":     {},
+	"memory_query":            {},
 	"memory_ingest":           {},
 	"memory_create_handoff":   {},
 	"memory_pending_handoffs": {},

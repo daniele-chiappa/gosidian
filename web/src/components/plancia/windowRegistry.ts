@@ -22,6 +22,8 @@ export const windowRegistry: Record<string, Component> = {
   create: lazy(() => import('@/views/NoteCreateView.vue')),
   graph: lazy(() => import('@/views/GraphView.vue')),
   search: lazy(() => import('@/views/SearchView.vue')),
+  // Frontmatter query (IMP-099): the memory_query tool for people.
+  query: lazy(() => import('@/views/QueryView.vue')),
   projects: lazy(() => import('@/views/ProjectsView.vue')),
   'project-members': lazy(() => import('@/views/ProjectMembersView.vue')),
   tags: lazy(() => import('@/views/TagsView.vue')),

@@ -1,22 +1,15 @@
 // Package mcp — memory_notes_by_importance tool (v1.3, IMP-010).
 //
 // Convention: notes may carry `importance: N` in their frontmatter, where N
-// is an integer 1..5 (5 = critical, 3 = default, 1 = archival). This tool
-// enumerates notes in a project, parses the importance from each note's
-// frontmatter (defaulting to 3 when absent / unparseable), filters by
-// min_level, and returns them sorted by importance DESC.
-//
-// Trade-off: reading frontmatter per-note is O(N) vault loads. Adequate for
-// projects under ~1000 notes thanks to the LRU cache. If this becomes a
-// bottleneck, promote `importance` to a column on the notes table (see
-// follow-up in gosidian/plans/20260422-v1.3-importance-search.md).
+// is an integer 1..5 (5 = critical, 3 = default, 1 = archival). The index
+// keeps it in notes.importance (default 3 when absent or unparseable, since
+// schema v1), so the tool filters by min_level and sorts by importance DESC
+// without loading a single note.
 package mcp
 
 import (
 	"context"
-	"sort"
 
-	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -57,46 +50,19 @@ func (s *Server) handleNotesByImportance(ctx context.Context, req mcp.CallToolRe
 		limit = 50
 	}
 
-	notes, err := s.index.NotesByPrefix(project)
+	rows, err := s.index.NotesByImportance(project, minLevel)
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("list failed", err), nil
 	}
-
 	collected := make([]importanceEntry, 0)
-	for _, n := range notes {
+	for _, n := range rows {
 		if !tok.AllowsPath(n.Path) {
 			continue
 		}
-		imp := s.readImportance(n.Path)
-		if imp < minLevel {
-			continue
+		if len(collected) == limit {
+			break
 		}
-		collected = append(collected, importanceEntry{
-			Path:       n.Path,
-			Title:      n.Title,
-			Importance: imp,
-		})
-	}
-	sort.SliceStable(collected, func(i, j int) bool {
-		if collected[i].Importance != collected[j].Importance {
-			return collected[i].Importance > collected[j].Importance
-		}
-		return collected[i].Path < collected[j].Path
-	})
-	if len(collected) > limit {
-		collected = collected[:limit]
+		collected = append(collected, importanceEntry{Path: n.Path, Title: n.Title, Importance: n.Importance})
 	}
 	return mcp.NewToolResultJSON(map[string]any{"notes": collected})
-}
-
-// readImportance loads the note at `path`, parses its frontmatter, and
-// returns the `importance` scalar as an int clamped to [1,5]. Missing or
-// unparseable values return 3 (the convention's default) so unannotated
-// notes remain visible at min_level<=3 and hidden at min_level>=4.
-func (s *Server) readImportance(path string) int {
-	note, err := s.vault.Load(path)
-	if err != nil {
-		return 3
-	}
-	return parser.Importance(parser.FrontmatterRawForPath(path, note.Content))
 }

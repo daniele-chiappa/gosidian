@@ -26,7 +26,7 @@ import (
 // registerTools().
 func (s *Server) registerDiscoveryTools() {
 	s.impl.AddTool(mcp.NewTool("memory_plans",
-		mcp.WithDescription("List plans (notes with frontmatter type:plan) under a project, optionally filtered by status (draft/in-progress/done/archived). Returns path, title, status, updated and description from the frontmatter — saves the agent from combining memory_notes_by_tag results with per-note frontmatter reads."),
+		mcp.WithDescription("List plans (notes with frontmatter type:plan) under a project, optionally filtered by status (draft/in-progress/done/archived). Returns path, title, status, updated and description from the frontmatter; the status comes from the status: field or, when the note has none, its status: tag. For other filters (updated after a date, importance, several statuses, fields to return) use memory_query, which answers with only the fields asked."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder) to scope the listing. Scoped tokens are forced to their project.")),
 		mcp.WithString("status", mcp.Description("Optional status filter. One of: draft, in-progress, done, archived. Empty returns all.")),
 	), s.handlePlans)
@@ -52,6 +52,9 @@ func (s *Server) registerDiscoveryTools() {
 }
 
 // ---- memory_plans ----
+
+// plansMaxResults caps one memory_plans listing (it has no limit parameter).
+const plansMaxResults = 5000
 
 type planEntry struct {
 	Path        string `json:"path"`
@@ -80,34 +83,36 @@ func (s *Server) handlePlans(ctx context.Context, req mcp.CallToolRequest) (*mcp
 		}
 	}
 
-	notes, err := s.index.NotesByTag("type:plan")
+	// The frontmatter comes from the index (note_fields), not from loading
+	// every plan: type and status match a field or, lacking one, a tag.
+	opts := index.QueryOptions{
+		Projects: []string{project},
+		Exclude:  s.hiddenProjects(),
+		Where:    []index.FieldCond{{Field: "type", Op: index.OpEq, Values: []string{"plan"}}},
+		Sort:     "path",
+		Limit:    plansMaxResults,
+		Fields:   []string{"status", "updated", "description"},
+	}
+	if status != "" {
+		opts.Where = append(opts.Where, index.FieldCond{Field: "status", Op: index.OpEq, Values: []string{status}})
+	}
+	hits, _, err := s.index.Query(opts)
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("plans lookup failed", err), nil
 	}
-	out := make([]planEntry, 0)
-	prefix := project + "/"
-	for _, n := range notes {
-		if !strings.HasPrefix(n.Path, prefix) {
+	first := func(h index.QueryHit, k string) string {
+		if vs := h.Fields[k]; len(vs) > 0 {
+			return vs[0]
+		}
+		return ""
+	}
+	out := make([]planEntry, 0, len(hits))
+	for _, h := range hits {
+		if !tok.AllowsPath(h.Path) {
 			continue
 		}
-		if !tok.AllowsPath(n.Path) {
-			continue
-		}
-		entry := planEntry{Path: n.Path, Title: n.Title}
-		fm := s.loadFrontmatter(n.Path)
-		if v, ok := fm["status"].(string); ok {
-			entry.Status = v
-		}
-		if v, ok := fm["updated"].(string); ok {
-			entry.Updated = v
-		}
-		if v, ok := fm["description"].(string); ok {
-			entry.Description = v
-		}
-		if status != "" && entry.Status != status {
-			continue
-		}
-		out = append(out, entry)
+		out = append(out, planEntry{Path: h.Path, Title: h.Title,
+			Status: first(h, "status"), Updated: first(h, "updated"), Description: first(h, "description")})
 	}
 	return mcp.NewToolResultJSON(map[string]any{"plans": out})
 }
@@ -286,17 +291,6 @@ func scopedProject(tok *auth.Token, project string) (string, error) {
 		return "", fmt.Errorf("project %q is outside the token's scope [%s]", project, tok.ScopeLabel())
 	}
 	return project, nil
-}
-
-// loadFrontmatter returns the parsed frontmatter of the note at path, or an
-// empty map if the note can't be read (e.g. on disk but not in index).
-func (s *Server) loadFrontmatter(path string) map[string]any {
-	note, err := s.vault.Load(path)
-	if err != nil {
-		return map[string]any{}
-	}
-	raw := parser.FrontmatterRawForPath(path, note.Content)
-	return parser.ParseFrontmatterFields(raw)
 }
 
 // truncateExcerpt returns s clipped to max runes with an ellipsis appended

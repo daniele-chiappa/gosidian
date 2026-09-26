@@ -17,6 +17,7 @@
  * splits on the FIRST `:` so an encoded path (no raw `:`) round-trips cleanly.
  */
 import { createArgCodec, type ArgTypeSpec, type PlanciaCodec } from 'plancia'
+import { queryArgFromProps, queryPropsFromArg } from './queryArg'
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null)
 
@@ -122,6 +123,13 @@ const baseCodec: PlanciaCodec = createArgCodec({
       props: (a) => (a ? { tag: a } : {}),
       title: (a) => (a ? `#${a}` : 'Tags'),
     },
+    // The query window keeps its whole query in the URL (queryArg.ts); it
+    // stays one window, keyed `query`, whatever the query.
+    query: {
+      arg: queryArgFromProps,
+      props: queryPropsFromArg,
+      title: () => 'Query',
+    },
     admin: {
       arg: (p) => str(p.section),
       props: (a) => (a ? { section: a } : {}),
@@ -152,6 +160,7 @@ export const codec: PlanciaCodec = {
     if (spec.type === 'graph' && spec.props?.global === true) {
       return graphKeyForProps(spec.props)
     }
+    if (spec.type === 'query') return planciaKey('query')
     return baseCodec.key(spec)
   },
   encode: baseCodec.encode,
@@ -169,6 +178,7 @@ export const codec: PlanciaCodec = {
     if (spec?.type === 'graph' && spec.props?.global === true) {
       return { ...spec, key: graphKeyForProps(spec.props) }
     }
+    if (spec?.type === 'query') return { ...spec, key: planciaKey('query') }
     return spec
   },
 }
