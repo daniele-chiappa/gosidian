@@ -126,7 +126,13 @@ const StubVersion = 2
 // frontmatter (tag_vocabulary: exact tags or ns:* wildcards, capped),
 // active only under the project's use_tag_vocabulary flag, surfaced by the
 // bootstrap tag_vocabulary block and honoured by memory_lint.
-const DirectivesVersion = 10
+//
+// v11 (2026-09-26, hot.md hygiene): hot.md is the cache of the current
+// state — end-of-task step 2 rewrites its sections instead of appending,
+// the Current focus stays a few lines (what is in progress, next step) and
+// the chronicle goes to log.md; the folder map says so too. Paired with the
+// hot-oversize default lowered to 8 KiB (maintenance.hot_oversize).
+const DirectivesVersion = 11
 
 // AnchorVersion is the version of the agent-anchor template/format. It is
 // substituted into the `<!-- gosidian:anchor v=N ... -->` marker so the

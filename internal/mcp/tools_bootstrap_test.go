@@ -10,6 +10,7 @@ import (
 
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/initprompt"
+	"github.com/gosidian/gosidian/internal/lint"
 	"github.com/gosidian/gosidian/internal/projects"
 )
 
@@ -191,6 +192,37 @@ func TestMCP_Bootstrap_AutoLite(t *testing.T) {
 	hot = parseHot(resultText(t, res))
 	if hot.AutoLite || hot.Content == "" {
 		t.Errorf("full: want body, got auto_lite=%v len=%d", hot.AutoLite, len(hot.Content))
+	}
+}
+
+// TestMCP_Bootstrap_GroomingBeforeLite: a hot.md between the grooming
+// threshold (8 KiB) and the lite switch (16 KiB) raises maintenance
+// attention but still comes whole in the payload — asking for grooming
+// must not take content out of the bootstrap.
+func TestMCP_Bootstrap_GroomingBeforeLite(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	ctx := context.Background()
+	mid := "---\ntitle: hot\ntype: index\n---\n\n# Hot\n\n## Current focus\n\n" +
+		strings.Repeat("a line of release history that belongs in log.md\n", 240) // ~12 KiB
+	if n := len(mid); n <= lint.DefaultHotOversizeBytes || n >= autoLiteThreshold {
+		t.Fatalf("fixture is %d bytes, want between %d and %d", n, lint.DefaultHotOversizeBytes, autoLiteThreshold)
+	}
+	if res, _ := s.handleCreate(ctx, call(map[string]any{"path": "groom/hot.md", "content": mid})); res.IsError {
+		t.Fatalf("seed: %s", expectError(t, res))
+	}
+	res, _ := s.handleBootstrap(ctx, call(map[string]any{"project": "groom"}))
+	var out struct {
+		HotMD       bootstrapFile         `json:"hot_md"`
+		Maintenance *bootstrapMaintenance `json:"maintenance"`
+	}
+	if err := json.Unmarshal([]byte(resultText(t, res)), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.HotMD.AutoLite || out.HotMD.Content == "" {
+		t.Errorf("hot.md under the lite switch must come whole: auto_lite=%v len=%d", out.HotMD.AutoLite, len(out.HotMD.Content))
+	}
+	if out.Maintenance == nil || !out.Maintenance.HotOversize || !out.Maintenance.Attention {
+		t.Errorf("hot.md over the grooming threshold must raise attention: %+v", out.Maintenance)
 	}
 }
 

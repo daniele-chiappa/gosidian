@@ -23,10 +23,14 @@ var allRules = []ruleSpec{
 }
 
 // DefaultHotOversizeBytes is the hot-oversize threshold when the vault does
-// not configure one. hot.md is inlined into every memory_bootstrap payload,
-// so past ~16 KiB the session cache starts dominating the token cost of
-// every session start.
-const DefaultHotOversizeBytes = 16 * 1024
+// not configure one. hot.md is inlined into every memory_bootstrap payload
+// and meant as a short cache of the current state; one past ~8 KiB has
+// usually turned into a chronicle that belongs in log.md (in 2026-09, 6 of
+// the 11 projects of a real vault were past it, the largest at 20 KiB).
+// The bootstrap's switch to a lite hot.md stays at 16 KiB
+// (autoLiteThreshold in internal/mcp): this threshold asks for grooming, it
+// takes nothing out of the payload.
+const DefaultHotOversizeBytes = 8 * 1024
 
 // checkHotOversize warns when <project>/hot.md outgrows the threshold. The
 // fix is grooming, not truncation: move history to log.md / plan Outcomes

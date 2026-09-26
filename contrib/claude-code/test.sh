@@ -28,6 +28,7 @@ class H(BaseHTTPRequestHandler):
         if p not in NOTES: return self._json(404, {"error": "note not found"})
         body = NOTES[p].encode(); self.send_response(200)
         self.send_header("Content-Type", "text/markdown"); self.send_header("Content-Length", str(len(body)))
+        self.send_header("ETag", '"1790-%d"' % len(body))
         self.end_headers(); self.wfile.write(body)
     def do_POST(self):
         u = urlparse(self.path); q = parse_qs(u.query)
@@ -69,10 +70,17 @@ fail() { echo "FAIL: $*" >&2; [ -f "$WORK/appends.log" ] && { echo "--- appends.
 out=$(printf '{"hook_event_name":"SessionStart","session_id":"abcdef1234567890","transcript_path":"%s","cwd":"/w","startup_reason":"startup"}' "$WORK/transcript.jsonl" | "$HOOK")
 ctx=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext')
 [ "$(printf '%s' "$out" | jq -r '.hookSpecificOutput.hookEventName')" = "SessionStart" ] || fail "SessionStart event name"
+case "$ctx" in *"Working on the login bug."*"## Active plans"*) ;; *) fail "a small hot.md must be injected whole: $ctx";; esac
+case "$ctx" in *'memory_bootstrap({project: "proj", known_etags: {"proj/hot.md": "1790-'*'"}})'*) ;; *) fail "bootstrap reminder must carry the hot.md etag: $ctx";; esac
+echo "ok  SessionStart injects a small hot.md whole, etag in the bootstrap reminder"
+
+out=$(printf '{"hook_event_name":"SessionStart","session_id":"abcdef1234567890","startup_reason":"startup"}' | GOSIDIAN_HOOK_FOCUS_BYTES=60 "$HOOK")
+ctx=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext')
 case "$ctx" in *"Working on the login bug."*) ;; *) fail "focus excerpt missing: $ctx";; esac
 case "$ctx" in *"Active plans"*) fail "excerpt must stop at the next section";; esac
-case "$ctx" in *"memory_bootstrap"*) ;; *) fail "bootstrap reminder missing";; esac
-echo "ok  SessionStart injects the focus excerpt"
+case "$ctx" in *"known_etags"*) fail "an excerpt must not claim the bootstrap can skip hot.md";; esac
+case "$ctx" in *'memory_bootstrap({project: "proj"})'*) ;; *) fail "bootstrap reminder missing";; esac
+echo "ok  SessionStart injects the focus excerpt of a hot.md over the cap"
 
 # --- PreCompact creates the session note with a header ----------------------
 printf '{"hook_event_name":"PreCompact","session_id":"abcdef1234567890","transcript_path":"%s","cwd":"/w","trigger":"auto"}' "$WORK/transcript.jsonl" | "$HOOK"

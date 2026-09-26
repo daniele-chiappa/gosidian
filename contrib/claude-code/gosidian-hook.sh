@@ -3,9 +3,11 @@
 #
 # One script, dispatched on the hook event it receives on stdin:
 #
-#   SessionStart  inject the "Current focus" of <project>/hot.md into the
-#                 context (plus this session's checkpoint note on resume/compact)
-#                 and remind the agent to run memory_bootstrap
+#   SessionStart  inject <project>/hot.md into the context — whole when it
+#                 fits GOSIDIAN_HOOK_FOCUS_BYTES, with its etag in the
+#                 memory_bootstrap reminder so the bootstrap does not repeat
+#                 it; otherwise its "Current focus" section — plus this
+#                 session's checkpoint note on resume/compact
 #   PreCompact    append a checkpoint digest to <project>/sessions/<date>-<id>.md
 #   SessionEnd    append the session digest to the same note
 #   Stop          no-op unless GOSIDIAN_HOOK_STOP_LOG=1 (one entry per turn)
@@ -26,7 +28,8 @@
 #   GOSIDIAN_HOOK_ENV   explicit env file; otherwise the first readable of
 #                       $CLAUDE_PROJECT_DIR/.claude/gosidian.env,
 #                       ~/.config/gosidian/hook.env
-#   GOSIDIAN_HOOK_FOCUS_BYTES   cap of the injected focus excerpt (6000)
+#   GOSIDIAN_HOOK_FOCUS_BYTES   hot.md up to this size is injected whole, a
+#                               larger one as its focus excerpt (6000)
 #   GOSIDIAN_HOOK_LOG_ENTRY     1 = also append a one-line pointer to log.md
 #   GOSIDIAN_HOOK_STOP_LOG      1 = append the last assistant message per turn
 #   GOSIDIAN_MIRROR             1 = keep a local read-only mirror of the project
@@ -92,6 +95,13 @@ MIRROR_ROOT=${GOSIDIAN_MIRROR_DIR:-$PROJECT_DIR/.gosidian/mirror}
 # api_get <vault path>: note body on stdout; returns 1 on any non-200.
 api_get() {
   curl -sS -f --max-time 8 -H "Authorization: Bearer $GOSIDIAN_TOKEN" \
+    "$URL/download?path=$1" 2>/dev/null
+}
+
+# api_get_etag <vault path> <header file>: like api_get, and leaves the
+# response headers in the file for the ETag.
+api_get_etag() {
+  curl -sS -f --max-time 8 -D "$2" -H "Authorization: Bearer $GOSIDIAN_TOKEN" \
     "$URL/download?path=$1" 2>/dev/null
 }
 
@@ -216,12 +226,23 @@ mirror_context() {
 case "$EVENT" in
   SessionStart)
     reason=$(printf '%s' "$INPUT" | jq -r '.startup_reason // .source // "startup"')
-    focus=$(api_get "$PROJECT/hot.md" 2>/dev/null | focus_excerpt || true)
-    ctx="## gosidian — project \`$PROJECT\` (hot.md → Current focus, excerpt)"$'\n\n'
-    if [ -n "$focus" ]; then
-      ctx+="$focus"$'\n\n'
-    else
+    # A hot.md that fits the cap goes in whole and its etag into the
+    # bootstrap reminder (known_etags), so the bootstrap does not bring the
+    # same text a second time; a larger one goes in as its focus excerpt.
+    hdr=$(mktemp 2>/dev/null || echo "/tmp/gosidian-hook.$$")
+    hot=$(api_get_etag "$PROJECT/hot.md" "$hdr" || true)
+    etag=$(tr -d '\r' <"$hdr" 2>/dev/null | sed -n 's/^[Ee][Tt][Aa][Gg]:[[:space:]]*"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' | tail -n 1)
+    rm -f "$hdr"
+    known=""
+    if [ -z "$hot" ]; then
+      ctx="## gosidian — project \`$PROJECT\` (hot.md)"$'\n\n'
       ctx+="_(hot.md not readable from $URL — check GOSIDIAN_URL/TOKEN/PROJECT)_"$'\n\n'
+    elif [ "$(printf '%s' "$hot" | wc -c)" -le "$FOCUS_BYTES" ]; then
+      ctx="## gosidian — project \`$PROJECT\` (hot.md, whole)"$'\n\n'"$hot"$'\n\n'
+      [ -n "$etag" ] && known=", known_etags: {\"$PROJECT/hot.md\": \"$etag\"}"
+    else
+      ctx="## gosidian — project \`$PROJECT\` (hot.md → Current focus, excerpt)"$'\n\n'
+      ctx+="$(printf '%s' "$hot" | focus_excerpt)"$'\n\n'
     fi
     case "$reason" in
       resume|compact)
@@ -238,7 +259,11 @@ case "$EVENT" in
         ctx+="_Local mirror enabled (GOSIDIAN_MIRROR=1) but \`$GOSIDIAN_BIN\` was not found: install the gosidian binary or set GOSIDIAN_BIN._"$'\n\n'
       fi
     fi
-    ctx+="_This excerpt is a preview injected by the gosidian hook. Run \`memory_bootstrap({project: \"$PROJECT\"})\` before touching code: the bootstrap is authoritative and carries the directives._"
+    if [ -n "$known" ]; then
+      ctx+="_Injected by the gosidian hook. Run \`memory_bootstrap({project: \"$PROJECT\"$known})\` before touching code: the bootstrap is authoritative and carries the directives; with that etag it does not repeat the hot.md above (\`unchanged: true\`)._"
+    else
+      ctx+="_This excerpt is a preview injected by the gosidian hook. Run \`memory_bootstrap({project: \"$PROJECT\"})\` before touching code: the bootstrap is authoritative and carries the directives._"
+    fi
     jq -n --arg ctx "$ctx" '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: $ctx}}'
     ;;
 

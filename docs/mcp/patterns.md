@@ -52,9 +52,11 @@ Following these keeps retrieval predictable and write safety tight.
 The opening and closing above depend on the agent remembering to do
 them. Claude Code hooks make the two ends automatic:
 [`contrib/claude-code/`](../../contrib/claude-code/README.md) ships one
-script that, registered in `.claude/settings.json`, injects the
-**Current focus** of `<project>/hot.md` at `SessionStart` (and this
-session's checkpoint after a resume or a compaction), writes a
+script that, registered in `.claude/settings.json`, injects
+`<project>/hot.md` at `SessionStart` — whole when it is small, with its
+etag in the bootstrap reminder so the bootstrap does not repeat it,
+otherwise its **Current focus** — (and this session's checkpoint after a
+resume or a compaction), writes a
 **checkpoint digest** to `<project>/sessions/<date>-<id>.md` at
 `PreCompact` and the **session digest** at `SessionEnd` — first prompt,
 turns, tools, files touched, last assistant message, no LLM involved.

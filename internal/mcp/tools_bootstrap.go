@@ -58,9 +58,10 @@ type bootstrapFile struct {
 }
 
 // autoLiteThreshold: with mode unset (auto), a hot.md larger than this is
-// served in lite shape (frontmatter + outline). Mirrors the lint
-// hot-oversize default — a hot.md past it should be compacted anyway.
-const autoLiteThreshold = lint.DefaultHotOversizeBytes
+// served in lite shape (frontmatter + outline). Twice the lint hot-oversize
+// default on purpose: grooming is asked for at 8 KiB, but only a hot.md
+// past 16 KiB loses its body in the payload (memory first, ADR-027).
+const autoLiteThreshold = 16 * 1024
 
 type bootstrapStats struct {
 	NotesCount int                 `json:"notes_count"`

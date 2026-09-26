@@ -200,8 +200,9 @@ from the caller's token identity and cannot be forged, while
 - `memory_lint(project, rules?, min_severity?)` — structural vault
   hygiene: `broken-wikilink`, `orphan-note`, `frontmatter-missing`,
   `frontmatter-tag-unknown`, `status-incoherent`, `hot-oversize`
-  (a `hot.md` past 16 KiB dominates every bootstrap payload —
-  threshold configurable via `[lint] hot_oversize_bytes`). Zero
+  (a `hot.md` past 8 KiB has usually become a chronicle that belongs in
+  `log.md`, and it is inlined into every bootstrap — threshold
+  configurable via `[lint] hot_oversize_bytes`). Zero
   `severity:error` on a coherent vault.
 - `memory_self_improve(category, title, friction, confidence, …)` —
   *experimental, opt-in, off by default*: record a structured insight

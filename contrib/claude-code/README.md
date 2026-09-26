@@ -7,7 +7,7 @@ the agent never opens an MCP session — and they never block Claude Code.
 
 | Event | What the hook does |
 |---|---|
-| `SessionStart` (startup, resume, clear, compact) | Injects the **Current focus** section of `<project>/hot.md` into the context, plus this session's checkpoint note after a resume or a compaction, and reminds the agent to run `memory_bootstrap` (the bootstrap stays authoritative). |
+| `SessionStart` (startup, resume, clear, compact) | Injects `<project>/hot.md` into the context — whole when it fits `GOSIDIAN_HOOK_FOCUS_BYTES` (6000), and then the `memory_bootstrap` reminder carries its etag in `known_etags` so the bootstrap does not repeat it; otherwise its **Current focus** section — plus this session's checkpoint note after a resume or a compaction. The bootstrap stays authoritative. |
 | `PreCompact` (manual, auto) | Appends a **checkpoint digest** to `<project>/sessions/<date>-<session>.md`, so the compacted context finds the thread again at the next `SessionStart`. |
 | `SessionEnd` | Appends the **session digest** to the same note. With `GOSIDIAN_HOOK_LOG_ENTRY=1`, also a one-line pointer in `<project>/log.md`. |
 | `Stop` | Nothing by default. With `GOSIDIAN_HOOK_STOP_LOG=1`, appends the last assistant message at every turn. |
@@ -46,7 +46,7 @@ grooming digest can sweep them.
    it.
 
 4. Check: start a new Claude Code session in the checkout. The first
-   context carries the focus excerpt; `/clear` or exiting produces
+   context carries `hot.md` (or its focus excerpt); `/clear` or exiting produces
    `<project>/sessions/<date>-<id>.md` in the vault (Projects → the project,
    or `memory_recent`).
 

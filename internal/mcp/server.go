@@ -112,7 +112,7 @@ type Server struct {
 	// startup via SetLintExtraAllowedTags.
 	lintExtraAllowedTags []string
 	// lintHotOversizeBytes overrides the hot-oversize rule threshold;
-	// <= 0 keeps the lint package default (16 KiB). Wired by main from
+	// <= 0 keeps the lint package default (8 KiB). Wired by main from
 	// [lint] hot_oversize_bytes.
 	lintHotOversizeBytes int64
 	// selfImprove* gate, target and tune the self-improvement loop, wired

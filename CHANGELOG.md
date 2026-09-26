@@ -8,6 +8,33 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.36.1] — 2026-09-26 — "hygiene"
+
+`hot.md` goes back to being a short cache of the current state, and the
+Claude Code hook stops sending it twice. Nothing is taken out of the
+memory: the change is about what an agent pays for the same text. Pull
+the image and restart; nothing to migrate. Agents pick up the new
+directives at their next `memory_bootstrap`.
+
+### Changed
+- **Directives v11: `hot.md` is rewritten, not appended to** — at the end
+  of a task an agent rewrites the sections of `<project>/hot.md` (focus,
+  closed plans, recent decisions) as the cache of the current state: a
+  Current focus of a few lines, the chronicle in `log.md`. On a real vault
+  6 of 11 projects had let `hot.md` grow into a release history, up to
+  20 KiB, paid again in every bootstrap.
+- **Earlier grooming signal** — the `hot-oversize` lint rule and the
+  bootstrap's `maintenance.hot_oversize` now fire past 8 KiB instead of
+  16 KiB. The bootstrap still serves `hot.md` whole up to 16 KiB, as
+  before, so the earlier signal asks for grooming without taking content
+  out of the payload. `[lint] hot_oversize_bytes` still overrides it.
+- **The Claude Code hook no longer sends `hot.md` twice** — at
+  `SessionStart` a `hot.md` that fits `GOSIDIAN_HOOK_FOCUS_BYTES` (6000)
+  is injected whole instead of its Current focus alone, and the
+  `memory_bootstrap` reminder carries its etag in `known_etags`, so the
+  bootstrap answers `unchanged: true` instead of repeating it. A larger
+  `hot.md` is injected as its focus excerpt, as before.
+
 ## [2.36.0] — 2026-09-26 — "mirror"
 
 A local, read-only copy of one project next to an agent, kept in sync

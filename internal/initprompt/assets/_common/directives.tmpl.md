@@ -31,7 +31,7 @@ presente → non fare nulla.
 | `{{PROJECT}}/plans/` | Piani di task non banali, `YYYYMMDD-<slug>.md`, con `Outcome` | Prima di task large |
 | `{{PROJECT}}/skills/` | Procedure ripetibili | Prima di operazioni ricorrenti |
 | `{{PROJECT}}/docs/` | Q&A, open questions, improvements, bug tracker | Decisioni passate / side findings |
-| `{{PROJECT}}/hot.md` | Session cache aggiornata fine-task | **Sempre** al bootstrap |
+| `{{PROJECT}}/hot.md` | Session cache: stato attuale, riscritta fine-task (breve, non una cronaca) | **Sempre** al bootstrap |
 | `{{PROJECT}}/log.md` | Log append-only di attività | Append a fine task |
 
 ### Quando scrivere in memoria (ingest rules)
@@ -110,7 +110,11 @@ Status dei plan: `draft` → `in-progress` → `done` | `archived` (tag
    ripara i link segnalati (`memory_lint` per l'elenco). `stale_count` è
    contesto, non un obbligo.
 1. **Skill-check** (procedura ≥2 volte? → crea la skill)
-2. Aggiorna `{{PROJECT}}/hot.md` (focus, plan chiusi, recent decisions)
+2. Aggiorna `{{PROJECT}}/hot.md` **riscrivendo** le sezioni (focus, plan
+   chiusi, recent decisions), non accodando: è la cache dello stato
+   attuale. Il Current focus dice in poche righe cosa è in corso e il
+   prossimo passo; la cronaca va in `log.md` (step 3). Oltre la soglia
+   (8 KB di default) il bootstrap segnala `maintenance.hot_oversize`.
 3. Append a `{{PROJECT}}/log.md` (entry tipizzata con data ISO: `bootstrap`,
    `plan-closed`, `adr`, `pattern`, `fix`, `discovery`, `ops`)
 4. Compila l'`Outcome` del plan se esisteva
