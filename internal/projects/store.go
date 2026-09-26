@@ -65,6 +65,12 @@ type Flags struct {
 	// declaration is inert and memory_lint checks the built-in closed
 	// vocabulary only. Default false. See IMP-075.
 	UseTagVocabulary bool `json:"use_tag_vocabulary,omitempty"`
+	// LeanReadBootstrap trims memory_bootstrap for tokens that cannot write
+	// to the project: directives_block keeps only the sections about
+	// reading and the attachments block only the download path. It trades
+	// context about how the memory is organized for tokens, so it is off by
+	// default (IMP-096 benchmark).
+	LeanReadBootstrap bool `json:"lean_read_bootstrap,omitempty"`
 }
 
 // Entry is a (name, flags) pair returned by All().
@@ -478,6 +484,12 @@ func (s *Store) UsesAnchors(name string) bool {
 // projects default to false.
 func (s *Store) UsesTagVocabulary(name string) bool {
 	return s.Get(name).UseTagVocabulary
+}
+
+// UsesLeanReadBootstrap reports whether the project opted into the trimmed
+// bootstrap for read-only tokens. Unknown projects default to false.
+func (s *Store) UsesLeanReadBootstrap(name string) bool {
+	return s.Get(name).LeanReadBootstrap
 }
 
 // MemberLevel returns the grant level a user holds on a project, and whether

@@ -30,6 +30,9 @@ export interface Project {
    *  <project>/memory/conventions.md frontmatter (tag_vocabulary). No server
    *  master switch — purely per-project. */
   use_tag_vocabulary: boolean
+  /** Trim memory_bootstrap for tokens that cannot write to the project
+   *  (reading directives only). Saves tokens, drops context: off by default. */
+  lean_read_bootstrap: boolean
   /** RFC 3339 UTC string of the directory's mtime — proxy for
    *  "last activity" (fs birth time isn't preserved by rsync /
    *  git checkout / container layer copy). Empty when stat failed. */
@@ -50,6 +53,7 @@ export interface UpdateProjectRequest {
   use_globals?: boolean
   use_anchors?: boolean
   use_tag_vocabulary?: boolean
+  lean_read_bootstrap?: boolean
 }
 
 export async function listProjects(): Promise<Project[]> {

@@ -40,6 +40,11 @@ const (
 	minPool = 50
 	maxPool = 500
 
+	// snippetTokens is the length of the search snippet. 24 tokens usually
+	// hold a whole sentence around the match; at 12 agents answered from a
+	// fragment that stopped halfway through the fact (benchmark, IMP-096).
+	snippetTokens = "24"
+
 	// MaxVariants caps SearchOptions.Variants.
 	MaxVariants = 8
 	// rrfK is the usual Reciprocal Rank Fusion constant: 1/(k+rank).
@@ -67,6 +72,9 @@ type SearchOptions struct {
 	// Variants are alternative phrasings (synonyms, translations) searched
 	// alongside the query; the ranked lists are fused by reciprocal rank.
 	Variants []string
+	// TextOnly ranks by weighted bm25 alone, without the title and
+	// structural factors: the baseline of the retrieval benchmark (bench/).
+	TextOnly bool
 }
 
 // SearchWith runs a scoped, ranked FTS search: the query and each variant
@@ -120,19 +128,6 @@ func distinctQueries(q string, variants []string) []string {
 	return out
 }
 
-// ftsQueryOf turns free text into an FTS5 query: every word quoted (so FTS
-// operators in user input are inert) with prefix matching, words ANDed.
-func ftsQueryOf(q string) string {
-	terms := strings.Fields(q)
-	out := terms[:0]
-	for _, t := range terms {
-		if t = strings.ReplaceAll(t, `"`, ``); t != "" {
-			out = append(out, `"`+t+`"*`)
-		}
-	}
-	return strings.Join(out, " ")
-}
-
 type candidate struct {
 	hit        SearchHit
 	id         int64
@@ -143,7 +138,7 @@ type candidate struct {
 
 // rankedSearch returns up to limit hits for one query, best first.
 func (i *Index) rankedSearch(q string, opts SearchOptions, limit int) ([]SearchHit, error) {
-	match := ftsQueryOf(q)
+	match := i.matchExpr(q)
 	if match == "" {
 		return nil, nil
 	}
@@ -151,7 +146,7 @@ func (i *Index) rankedSearch(q string, opts SearchOptions, limit int) ([]SearchH
 	pool := poolSize(limit)
 	rows, err := i.db.Query(`
         SELECT n.id, n.path, n.title, n.mtime, n.importance, `+bm25Expr+`,
-               snippet(notes_fts, 2, '<mark>', '</mark>', '…', 12)
+               snippet(notes_fts, 2, '<mark>', '</mark>', '…', `+snippetTokens+`)
         FROM notes_fts
         JOIN notes n ON n.id = notes_fts.rowid
         WHERE notes_fts MATCH ?`+scope+`
@@ -176,8 +171,10 @@ func (i *Index) rankedSearch(q string, opts SearchOptions, limit int) ([]SearchH
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	if err := i.applyStructure(cands, q); err != nil {
-		return nil, err
+	if !opts.TextOnly {
+		if err := i.applyStructure(cands, q); err != nil {
+			return nil, err
+		}
 	}
 	sort.SliceStable(cands, func(a, b int) bool {
 		if cands[a].score != cands[b].score {

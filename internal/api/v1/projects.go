@@ -40,6 +40,8 @@ type projectView struct {
 	// UseTagVocabulary opts the project into the per-project lint tag
 	// vocabulary declared in memory/conventions.md (IMP-075).
 	UseTagVocabulary bool `json:"use_tag_vocabulary"`
+	// LeanReadBootstrap trims memory_bootstrap for read-only tokens.
+	LeanReadBootstrap bool `json:"lean_read_bootstrap"`
 	// ModTime drives "most recent" sorting in the SPA's project
 	// pickers (graph filter, switcher). RFC 3339 UTC. Empty when
 	// the vault entry hasn't been stat-able.
@@ -61,10 +63,11 @@ type updateProjectRequest struct {
 	// Visibility sets who may read the project; public is owner-only.
 	Visibility *string `json:"visibility,omitempty"`
 	// Public is the pre-v2.30 alias: true → public, false → internal.
-	Public           *bool `json:"public,omitempty"`
-	UseGlobals       *bool `json:"use_globals,omitempty"`
-	UseAnchors       *bool `json:"use_anchors,omitempty"`
-	UseTagVocabulary *bool `json:"use_tag_vocabulary,omitempty"`
+	Public            *bool `json:"public,omitempty"`
+	UseGlobals        *bool `json:"use_globals,omitempty"`
+	UseAnchors        *bool `json:"use_anchors,omitempty"`
+	UseTagVocabulary  *bool `json:"use_tag_vocabulary,omitempty"`
+	LeanReadBootstrap *bool `json:"lean_read_bootstrap,omitempty"`
 }
 
 // handleProjects dispatches GET (list) / POST (create) on /projects.
@@ -162,18 +165,19 @@ func (r *Router) projectViewFor(name string, lvl authz.Level, noteCount int) pro
 		teams = r.deps.Projects.TeamsCount(name)
 	}
 	return projectView{
-		Name:             name,
-		NoteCount:        noteCount,
-		HiddenFromMCP:    flags.HiddenFromMCP,
-		SkipGitSync:      flags.SkipGitSync,
-		Visibility:       vis,
-		Public:           vis == projects.VisibilityPublic,
-		Access:           lvl.String(),
-		MembersCount:     members,
-		TeamsCount:       teams,
-		UseGlobals:       flags.UseGlobals,
-		UseAnchors:       flags.UseAnchors,
-		UseTagVocabulary: flags.UseTagVocabulary,
+		Name:              name,
+		NoteCount:         noteCount,
+		HiddenFromMCP:     flags.HiddenFromMCP,
+		SkipGitSync:       flags.SkipGitSync,
+		Visibility:        vis,
+		Public:            vis == projects.VisibilityPublic,
+		Access:            lvl.String(),
+		MembersCount:      members,
+		TeamsCount:        teams,
+		UseGlobals:        flags.UseGlobals,
+		UseAnchors:        flags.UseAnchors,
+		UseTagVocabulary:  flags.UseTagVocabulary,
+		LeanReadBootstrap: flags.LeanReadBootstrap,
 	}
 }
 
@@ -318,7 +322,7 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 	// Apply flags first (cheap, no fs movement) so a failing rename
 	// still leaves the flags durable.
 	flagsChanged := false
-	if body.HiddenFromMCP != nil || body.SkipGitSync != nil || newVisibility != "" || body.UseGlobals != nil || body.UseAnchors != nil || body.UseTagVocabulary != nil {
+	if body.HiddenFromMCP != nil || body.SkipGitSync != nil || newVisibility != "" || body.UseGlobals != nil || body.UseAnchors != nil || body.UseTagVocabulary != nil || body.LeanReadBootstrap != nil {
 		current := r.projectFlag(name)
 		if body.HiddenFromMCP != nil {
 			current.HiddenFromMCP = *body.HiddenFromMCP
@@ -338,6 +342,9 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 		}
 		if body.UseTagVocabulary != nil {
 			current.UseTagVocabulary = *body.UseTagVocabulary
+		}
+		if body.LeanReadBootstrap != nil {
+			current.LeanReadBootstrap = *body.LeanReadBootstrap
 		}
 		if r.deps.Projects != nil {
 			if err := r.deps.Projects.Set(name, current); err != nil {

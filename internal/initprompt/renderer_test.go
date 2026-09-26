@@ -299,3 +299,31 @@ func assertPinned(t *testing.T, asset string, gotVersion, wantVersion int, wantH
 			"If cosmetic: just set wantHash.", asset, got, wantHash)
 	}
 }
+
+func TestRenderReadDirectives_KeepsReadingSections(t *testing.T) {
+	full, fv, err := RenderDirectives("proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, rv, err := RenderReadDirectives("proj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rv != fv {
+		t.Errorf("read version %d != full version %d", rv, fv)
+	}
+	if len(read) >= len(full)/2 {
+		t.Errorf("read block is %d bytes of %d: expected well under half", len(read), len(full))
+	}
+	for _, h := range readDirectiveSections {
+		if !strings.Contains(read, h) {
+			t.Errorf("read block misses section %q", h)
+		}
+	}
+	if !strings.HasPrefix(read, "<!-- gosidian:directives v=") || !strings.Contains(read, "<!-- /gosidian:directives -->") {
+		t.Error("read block lost its markers")
+	}
+	if strings.Contains(read, "### Quando scrivere in memoria") {
+		t.Error("read block still carries the ingest rules")
+	}
+}

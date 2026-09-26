@@ -26,7 +26,7 @@ import (
 // registerTools() alongside the other v1.2 tools.
 func (s *Server) registerBootstrapTool() {
 	s.impl.AddTool(mcp.NewTool("memory_bootstrap",
-		mcp.WithDescription("Aggregate session-start payload for a project: hot.md + README + instruction file (when present), active plans, skills, agents, 5 recent notes, stats. Call this FIRST each session instead of separate gets. `directives_block` carries the full operational directives rendered for this project — read and FOLLOW it (served fresh every session; regenerate your stub via memory_init_agent only when stub_version is ahead of your stub marker). `capabilities` reports the enabled content formats (html/media/table notes) plus attachment limits/extensions and the HTTP /upload and /download endpoint hints. `maintenance` carries cheap grooming signals (hot.md size/age, broken wikilinks, stale-note count): when its `attention` flag is true, propose the relevant grooming at end of task. `tag_vocabulary` (only on projects with the use_tag_vocabulary flag) reports the extra lint tag vocabulary declared in memory/conventions.md frontmatter. `missing` lists absent vault scaffold; `agent_md.expected_external` means the instruction file lives in the agent's working dir, not the vault. Repeat calls: pass known_directives_version + known_etags (+ known_anchor_metas on anchor-enabled projects) and use mode lite — see the parameter docs."),
+		mcp.WithDescription("Aggregate session-start payload for a project: hot.md + README + instruction file (when present), active plans, skills, agents, 5 recent notes, stats. Call this FIRST each session instead of separate gets. `directives_block` carries the full operational directives rendered for this project (only their reading sections, with directives_scope \"read\", when the project's lean_read_bootstrap flag is on and the token cannot write) — read and FOLLOW it (served fresh every session; regenerate your stub via memory_init_agent only when stub_version is ahead of your stub marker). `capabilities` reports the enabled content formats (html/media/table notes) plus attachment limits/extensions and the HTTP /upload and /download endpoint hints. `maintenance` carries cheap grooming signals (hot.md size/age, broken wikilinks, stale-note count): when its `attention` flag is true, propose the relevant grooming at end of task. `tag_vocabulary` (only on projects with the use_tag_vocabulary flag) reports the extra lint tag vocabulary declared in memory/conventions.md frontmatter. `missing` lists absent vault scaffold; `agent_md.expected_external` means the instruction file lives in the agent's working dir, not the vault. Repeat calls: pass known_directives_version + known_etags (+ known_anchor_metas on anchor-enabled projects) and use mode lite — see the parameter docs."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder) to bootstrap. Scoped tokens are forced to their project.")),
 		mcp.WithString("profile", mcp.Description("CLI/agent profile for agent-anchor materialisation (default \"claude\"). When the master switch + the project's use_anchors flag are on and the profile supports native subagents, the response carries an `anchors` block: thin agent-anchor files to reconcile in the agent's cwd.")),
 		mcp.WithNumber("known_directives_version", mcp.Description("The directives_version you already hold from a previous bootstrap: on match, directives_block is omitted (directives_version is always present to detect it).")),
@@ -113,10 +113,19 @@ type bootstrapPendingInsights struct {
 // config; static guidance on WHEN to use each format lives in the directives
 // («Formati di nota e allegati»), which cross-reference this block.
 type bootstrapCapabilities struct {
-	HTMLNotes   bool                      `json:"html_notes"`
-	MediaNotes  bool                      `json:"media_notes"`
-	TableNotes  bool                      `json:"table_notes"`
-	Attachments bootstrapAttachCapability `json:"attachments"`
+	HTMLNotes  bool `json:"html_notes"`
+	MediaNotes bool `json:"media_notes"`
+	TableNotes bool `json:"table_notes"`
+	// Attachments is a bootstrapAttachCapability, or for a token that cannot
+	// write to the project a bootstrapReadAttachCapability: upload and append
+	// paths it could never use are left out.
+	Attachments any `json:"attachments"`
+}
+
+// bootstrapReadAttachCapability is the attachments block of a read-only
+// bootstrap: only the way to fetch bytes.
+type bootstrapReadAttachCapability struct {
+	DownloadEndpointHint string `json:"download_endpoint_hint"`
 }
 
 type bootstrapAttachCapability struct {
@@ -145,8 +154,17 @@ type bootstrapAttachCapability struct {
 }
 
 // buildCapabilities assembles the capabilities block from live config and the
-// attach allowlist. Extensions are sorted (dot-less) for stable output.
-func (s *Server) buildCapabilities() bootstrapCapabilities {
+// attach allowlist. Extensions are sorted (dot-less) for stable output. A
+// read-only caller gets the download hint only.
+func (s *Server) buildCapabilities(readOnly bool) bootstrapCapabilities {
+	if readOnly {
+		return bootstrapCapabilities{
+			HTMLNotes:   s.vault.HTMLNotesEnabled(),
+			MediaNotes:  s.vault.MediaNotesEnabled(),
+			TableNotes:  s.vault.TableNotesEnabled(),
+			Attachments: bootstrapReadAttachCapability{DownloadEndpointHint: downloadEndpointHint},
+		}
+	}
 	exts := make([]string, 0, len(attach.AllowedExt))
 	for ext := range attach.AllowedExt {
 		exts = append(exts, strings.TrimPrefix(ext, "."))
@@ -160,7 +178,7 @@ func (s *Server) buildCapabilities() bootstrapCapabilities {
 			MaxMiB:               attach.MaxBytes >> 20,
 			Extensions:           exts,
 			UploadEndpointHint:   "to save a file use memory_ingest (routes by extension; sources: bridge_filename, source_path, url, or transfer:\"http\" for a single-use upload ticket). Raw bytes can also be POSTed multipart (field 'file', bearer token) to your MCP base URL plus /upload (the URL you configured, minus any trailing /sse) — bytes travel over HTTP, not the model context",
-			DownloadEndpointHint: "to get a note's full bytes on your disk without context tokens (edit a large .html report locally, then re-ingest it), GET your MCP base URL plus /download?path=<vault path> (the URL you configured, minus any trailing /sse; bearer token, read scope): raw .md/.html body, ETag reusable as if_match on the next write. Attachments are served at /vault-files/<path> with the same bearer",
+			DownloadEndpointHint: downloadEndpointHint,
 			AppendEndpointHint:   "to append to a note from a script that has a bearer but no MCP session (e.g. a Claude Code hook), POST the markdown body to your MCP base URL plus /append?path=<vault path> (bearer token, write scope; optional If-Match header with the ETag from /download): same locks, limits, audit and events as memory_append; a missing note is created",
 			Tools:                []string{"memory_ingest", "memory_upload_attachment", "memory_upload_resource"},
 			BridgeDir:            s.bridgeDir,
@@ -169,6 +187,10 @@ func (s *Server) buildCapabilities() bootstrapCapabilities {
 		},
 	}
 }
+
+// downloadEndpointHint is the read-side byte path (IMP-081), shared by the
+// full and the read-only capabilities block.
+const downloadEndpointHint = "to get a note's full bytes on your disk without context tokens (edit a large .html report locally, then re-ingest it), GET your MCP base URL plus /download?path=<vault path> (the URL you configured, minus any trailing /sse; bearer token, read scope): raw .md/.html body, ETag reusable as if_match on the next write. Attachments are served at /vault-files/<path> with the same bearer"
 
 // conventionFiles maps the relative-to-project filename to the key we expose
 // in the JSON payload. Order matters: the `missing` list is emitted in this
@@ -220,6 +242,13 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 		return mcp.NewToolResultErrorf("unknown mode %q (expected auto, full or lite)", mode), nil
 	}
 	knownEtags := extractStringMap(req.GetArguments()["known_etags"])
+	// Projects that opt into lean_read_bootstrap give a token that cannot
+	// write the reading half of the directives and capabilities (benchmark
+	// IMP-096: the bootstrap payload is most of a read session's cost). Off
+	// by default: the omitted sections also explain how the memory is
+	// organized. Write tokens always get the full payload.
+	readOnly := tok != nil && !tok.AllowsWrite(project) &&
+		s.projects != nil && s.projects.UsesLeanReadBootstrap(project)
 
 	payload := map[string]any{
 		"project": project,
@@ -234,12 +263,19 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 		// capabilities: per-instance content-format discovery (plan
 		// 20260706-capability-discovery-bootstrap). Always present — an agent
 		// must see html_notes:false, not silence, to know .html is off here.
-		"capabilities": s.buildCapabilities(),
+		"capabilities": s.buildCapabilities(readOnly),
+	}
+	if readOnly {
+		payload["directives_scope"] = "read"
 	}
 	// Version negotiation: a caller that already holds the current directives
 	// skips the whole block — directives_version above is the match signal.
 	if req.GetInt("known_directives_version", 0) != initprompt.DirectivesVersion {
-		if block, _, derr := initprompt.RenderDirectives(project); derr == nil {
+		render := initprompt.RenderDirectives
+		if readOnly {
+			render = initprompt.RenderReadDirectives
+		}
+		if block, _, derr := render(project); derr == nil {
 			payload["directives_block"] = block
 		}
 	}

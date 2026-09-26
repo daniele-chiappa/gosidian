@@ -1,0 +1,45 @@
+{"id": "L1", "query": "staging port", "any_of": ["staging api port", "staging listen", "staging porta"]}
+{"id": "L2", "query": "wal retention", "any_of": ["wal archive", "wal retain", "postgres wal", "wal conserv"]}
+{"id": "L3", "query": "payment provider", "any_of": ["card payment", "psp", "card provider", "pagamenti carta"]}
+{"id": "L4", "query": "seat hold", "any_of": ["hold expir", "hold ttl", "seat reservation", "hold timeout"]}
+{"id": "L5", "query": "migration naming", "any_of": ["migration file", "migration filename", "migration convention"]}
+{"id": "L6", "query": "clickhouse cluster", "any_of": ["atlas clickhouse", "clickhouse"]}
+{"id": "L7", "query": "tickets per order", "any_of": ["ticket limit", "max tickets", "biglietti ordine", "order limit"]}
+{"id": "L8", "query": "cdn", "any_of": ["static assets", "cdn assets", "asset cdn"]}
+{"id": "L9", "query": "paylane webhook retry", "any_of": ["webhook retry", "paylane retry", "webhook delivery"]}
+{"id": "L10", "query": "on-call june", "any_of": ["on-call rotation", "oncall", "rotation june", "reperibilita giugno"]}
+{"id": "T1", "query": "payments v2", "any_of": ["payments v2 plan", "payment v2", "pagamenti v2"]}
+{"id": "T2", "query": "BUG-017", "any_of": ["bug 017", "BUG-17"]}
+{"id": "T3", "query": "redis streams", "any_of": ["job queue", "redis queue", "adr redis"]}
+{"id": "T4", "query": "IMP-009", "any_of": ["imp 009", "improvement 009"]}
+{"id": "T5", "query": "paylane rotate", "any_of": ["rotate keys", "key rotation", "paylane api key", "rotazione chiavi"]}
+{"id": "T7", "query": "staging deploy", "any_of": ["deploy staging", "staging deployment", "deploy skill"]}
+{"id": "T8", "query": "ADR-002 superseded", "any_of": ["supersedes ADR-002", "ADR-002", "sostituisce ADR-002"]}
+{"id": "M1", "query": "INC-2", "any_of": ["INC-2 bug", "INC-2 root cause", "INC-2 fix"]}
+{"id": "M2", "query": "postgres restore", "any_of": ["restore skill", "pg restore", "database restore", "ripristino postgres"]}
+{"id": "M3", "query": "ticket limit", "any_of": ["tickets per order", "order limit meeting", "limite biglietti", "max tickets"]}
+{"id": "M4", "query": "atlas ingestion", "any_of": ["ingestion job", "ingestion database", "ingest host"]}
+{"id": "M5", "query": "INC-3", "any_of": ["INC-3 follow-up", "follow-up INC-3", "INC-3 improvement"]}
+{"id": "M6", "query": "hot focus", "any_of": ["current focus", "tidewater hot", "focus"]}
+{"id": "M7", "query": "postmortem", "any_of": ["postmortem skill", "post-mortem", "incident postmortem", "postmortem template"]}
+{"id": "D1", "query": "2026-03-17", "any_of": ["weekly 2026-03-17", "meeting 2026-03-17", "weekly march 17"]}
+{"id": "D2", "query": "paylane sandbox", "any_of": ["sandbox key", "sandbox rotat", "key rotation"]}
+{"id": "D3", "query": "incident 2026-05", "any_of": ["incident may 2026", "INC 2026-05", "incidente maggio"]}
+{"id": "D4", "query": "release 2026-04-02", "any_of": ["2026-04-02", "release april", "rilascio 2026-04-02"]}
+{"id": "D5", "query": "INC-4", "any_of": ["INC-4 failure", "incident 4"]}
+{"id": "P1", "query": "registry credentials", "any_of": ["docker registry", "docker push", "registry login", "image push"]}
+{"id": "P2", "query": "comp tickets", "any_of": ["complimentary", "press tickets", "free tickets", "biglietti omaggio"]}
+{"id": "P3", "query": "abandoned checkout", "any_of": ["seat hold expir", "hold release", "checkout timeout", "release seats"]}
+{"id": "P4", "query": "waiting room", "any_of": ["virtual queue", "onsale traffic", "rate limit", "load spike"]}
+{"id": "P5", "query": "payout", "any_of": ["settlement", "organizer payout", "payout calculation", "liquidazione"]}
+{"id": "P6", "query": "duplicate charge", "any_of": ["double charge", "idempotency", "refund duplicate", "addebito doppio"]}
+{"id": "P7", "query": "password reset", "any_of": ["reset email", "forgot password", "email sending", "reset password"]}
+{"id": "P8", "query": "nightly job", "any_of": ["atlas nightly", "nightly etl", "batch host", "cron host"]}
+{"id": "P9", "query": "friday deploy", "any_of": ["deploy freeze", "friday", "code freeze", "venerdi"]}
+{"id": "P10", "query": "double scan", "any_of": ["scan ticket", "check-in", "barcode", "ticket validation"]}
+{"id": "P11", "query": "card fee", "any_of": ["processing fee", "service fee", "fee pass", "commissione"]}
+{"id": "P12", "query": "migration rollback", "any_of": ["rollback migration", "down migration", "schema rollback", "revert migration"]}
+{"id": "X1", "query": "tls certificate", "any_of": ["cert renew", "certificate renewal", "letsencrypt", "certificati tls"]}
+{"id": "X2", "query": "retrospective 2026-05-05", "any_of": ["retro 2026-05-05", "2026-05-05", "retrospettiva"]}
+{"id": "X3", "query": "biglietti ordine", "any_of": ["numero massimo biglietti", "tickets per order", "max tickets", "limite biglietti"]}
+{"id": "X4", "query": "printed invoices", "any_of": ["paper invoice", "invoice venue", "fattura cartacea", "venue partner"]}

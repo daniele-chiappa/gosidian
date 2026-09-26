@@ -32,3 +32,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
     body,
     tokenize='unicode61 remove_diacritics 2'
 );
+
+-- The indexed words, one row per distinct term: query-side stemming picks
+-- the inflections of a search word from here (stem.go).
+CREATE VIRTUAL TABLE IF NOT EXISTS notes_vocab USING fts5vocab(notes_fts, 'row');

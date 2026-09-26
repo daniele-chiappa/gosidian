@@ -8,6 +8,49 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.35.0] — 2026-09-26 — "benchmark"
+
+A public, reproducible benchmark of how well agents find things in a
+gosidian vault, and the search changes it led to. The default keeps
+serving the full memory; the one setting that saves tokens by leaving
+context out is an opt-in per project. Pull the image and restart; nothing
+to migrate.
+
+### Added
+- **Retrieval benchmark** — [`bench/`](bench/README.md) and
+  [`docs/benchmark.md`](docs/benchmark.md): a vault of 87 notes of a
+  fictional team (some notes in Italian), 50 questions in seven
+  categories with the notes that hold each answer, and two levels.
+  **Level R** (`go run ./bench/retrieval`, no model, seconds) indexes the
+  vault with the server's own code and reports where `memory_search`
+  ranks the right notes: R@5 0.69 text only, 0.71 ranked, 0.93 with
+  `any_of` phrasings; the queries were written by an agent that saw only
+  the questions. **Level A** (`go run ./bench/agents`) runs isolated
+  headless Claude Code sessions that answer the questions with the files
+  only or with gosidian over MCP: 97% against 100%, the difference being
+  paraphrases the filesystem agent gives up on, at about three times the
+  tokens per session. Results are published by configuration, including
+  the unfavourable ones; consistency tests run with `go test ./...`.
+- **`lean_read_bootstrap` project flag** (off by default; Projects →
+  `lean-read`) — tokens that cannot write to the project get only the
+  reading sections of the directives (`directives_scope: "read"`) and
+  only the download path among the attachment capabilities: about 1,750
+  tokens less per bootstrap, 28% less per session in the benchmark. It
+  leaves out context about how the memory is organized, so it stays off
+  unless a project chooses it; write tokens always get the full payload.
+
+### Changed
+- **Query stemming** — every search word also matches the indexed words
+  that share its English Porter stem ("retry" finds "retries" and
+  "retried", never "retrieval"; "naming" finds "named"), on top of what
+  the word alone matches, so no search loses a result. The stems come
+  from SQLite's own FTS5 porter tokenizer; no new dependency, no reindex.
+- **Longer search snippets** — 24 tokens around the match instead of 12
+  in `memory_search` and the web search, and the tool description asks
+  agents to read the note before reporting a number, a date or a list:
+  the only wrong gosidian answers in the benchmark came from a snippet
+  that stopped halfway through the fact.
+
 ## [2.34.0] — 2026-09-25 — "search"
 
 `memory_search` ranks better and no longer misses notes that a project

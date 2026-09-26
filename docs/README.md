@@ -58,6 +58,7 @@ trial, read the [root README](../README.md) first.
 ## Internals
 
 - [Architecture](architecture.md) — package layout, data flow, ADRs
+- [Benchmark](benchmark.md) — how well agents find notes: retrieval figures on a public test vault, method, how to rerun
 - [Development](development.md) — build, test, release cadence
 
 ## FAQ

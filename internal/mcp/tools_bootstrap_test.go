@@ -48,20 +48,25 @@ func TestMCP_Bootstrap_HappyPath(t *testing.T) {
 	body := resultText(t, res)
 
 	var p struct {
-		Project           string                 `json:"project"`
-		HotMD             bootstrapFile          `json:"hot_md"`
-		Readme            bootstrapFile          `json:"readme"`
-		AgentMD           bootstrapFile          `json:"agent_md"`
-		ActivePlans       []noteRef              `json:"active_plans"`
-		AvailableSkills   []noteRef              `json:"available_skills"`
-		AvailableAgents   []noteRef              `json:"available_agents"`
-		RecentNotes       []recentNoteResponse   `json:"recent_notes"`
-		Stats             bootstrapStats         `json:"stats"`
-		Missing           []string               `json:"missing"`
-		DirectivesVersion int                    `json:"directives_version"`
-		DirectivesBlock   string                 `json:"directives_block"`
-		StubVersion       int                    `json:"stub_version"`
-		Capabilities      *bootstrapCapabilities `json:"capabilities"`
+		Project           string               `json:"project"`
+		HotMD             bootstrapFile        `json:"hot_md"`
+		Readme            bootstrapFile        `json:"readme"`
+		AgentMD           bootstrapFile        `json:"agent_md"`
+		ActivePlans       []noteRef            `json:"active_plans"`
+		AvailableSkills   []noteRef            `json:"available_skills"`
+		AvailableAgents   []noteRef            `json:"available_agents"`
+		RecentNotes       []recentNoteResponse `json:"recent_notes"`
+		Stats             bootstrapStats       `json:"stats"`
+		Missing           []string             `json:"missing"`
+		DirectivesVersion int                  `json:"directives_version"`
+		DirectivesBlock   string               `json:"directives_block"`
+		StubVersion       int                  `json:"stub_version"`
+		Capabilities      *struct {
+			HTMLNotes   bool                      `json:"html_notes"`
+			MediaNotes  bool                      `json:"media_notes"`
+			TableNotes  bool                      `json:"table_notes"`
+			Attachments bootstrapAttachCapability `json:"attachments"`
+		} `json:"capabilities"`
 	}
 	if err := json.Unmarshal([]byte(body), &p); err != nil {
 		t.Fatalf("parse: %v body=%s", err, body)

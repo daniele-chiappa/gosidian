@@ -18,6 +18,10 @@ for precise schemas; the groupings below are the conceptual map.
   `hot.md` body with its frontmatter + heading outline. `mode` defaults
   to **auto**: an oversize `hot.md` is served lite automatically
   (flagged `auto_lite:true`); pass `mode="full"` to force the body.
+  A project with the `lean_read_bootstrap` flag gives tokens that cannot
+  write to it only the reading sections of the directives
+  (`directives_scope: "read"`) — fewer tokens, less context; off by
+  default.
   The payload also carries a `maintenance` digest (hot.md size/age,
   broken wikilinks, stale-note count — indexed queries only): when its
   `attention` flag is true, the directives ask the agent to propose the
@@ -48,7 +52,8 @@ for precise schemas; the groupings below are the conceptual map.
   `any_of` passes up to 8 alternative phrasings (synonyms, IT/EN
   translations) that are searched alongside `query` and fused by
   reciprocal rank — the agent supplies the vocabulary, the server stays
-  deterministic. Project and access filters apply before the limit
+  deterministic. Each word also matches its English inflections ("retry"
+  finds "retries"). Project and access filters apply before the limit
 - `memory_get(path, raw?, max_bytes?)`, `memory_get_section(path, heading)`,
   `memory_get_frontmatter(path)`, `memory_get_outline(path)` — full
   body vs cheap triage variants. `memory_get` has an **oversize

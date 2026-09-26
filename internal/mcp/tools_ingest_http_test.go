@@ -204,27 +204,30 @@ func TestIngestURL_TooLarge(t *testing.T) {
 
 func TestCapabilities_SurfaceBridgeDirAndIngestURL(t *testing.T) {
 	s, _, _ := newTestServer(t)
-	caps := s.buildCapabilities()
-	if caps.Attachments.BridgeDir != "" || caps.Attachments.IngestURLEnabled {
-		t.Errorf("unconfigured server should not advertise bridge/url: %+v", caps.Attachments)
+	attachments := func() bootstrapAttachCapability {
+		return s.buildCapabilities(false).Attachments.(bootstrapAttachCapability)
+	}
+	caps := attachments()
+	if caps.BridgeDir != "" || caps.IngestURLEnabled {
+		t.Errorf("unconfigured server should not advertise bridge/url: %+v", caps)
 	}
 
 	bridge := t.TempDir()
 	s.SetBridgeDir(bridge)
 	s.SetAllowedUploadRoots([]string{"/srv/exports"})
 	s.SetIngestURLAllowlist([]string{"http://127.0.0.1:4001/"})
-	caps = s.buildCapabilities()
-	if caps.Attachments.BridgeDir != bridge {
-		t.Errorf("bridge_dir = %q, want %q", caps.Attachments.BridgeDir, bridge)
+	caps = attachments()
+	if caps.BridgeDir != bridge {
+		t.Errorf("bridge_dir = %q, want %q", caps.BridgeDir, bridge)
 	}
-	if len(caps.Attachments.AllowedUploadRoots) != 1 || caps.Attachments.AllowedUploadRoots[0] != "/srv/exports" {
-		t.Errorf("allowed_upload_roots = %v", caps.Attachments.AllowedUploadRoots)
+	if len(caps.AllowedUploadRoots) != 1 || caps.AllowedUploadRoots[0] != "/srv/exports" {
+		t.Errorf("allowed_upload_roots = %v", caps.AllowedUploadRoots)
 	}
-	if !caps.Attachments.IngestURLEnabled {
+	if !caps.IngestURLEnabled {
 		t.Error("ingest_url_enabled should be true with a non-empty allowlist")
 	}
-	if len(caps.Attachments.Tools) == 0 || caps.Attachments.Tools[0] != "memory_ingest" {
-		t.Errorf("tools should lead with memory_ingest: %v", caps.Attachments.Tools)
+	if len(caps.Tools) == 0 || caps.Tools[0] != "memory_ingest" {
+		t.Errorf("tools should lead with memory_ingest: %v", caps.Tools)
 	}
 }
 

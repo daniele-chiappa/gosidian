@@ -15,8 +15,9 @@ import (
 var schemaSQL string
 
 type Index struct {
-	mu sync.Mutex
-	db *sql.DB
+	mu    sync.Mutex
+	db    *sql.DB
+	stems *stemmer // query-side Porter stems, see stem.go
 }
 
 type NoteDoc struct {
@@ -36,7 +37,12 @@ func Open(path string) (*Index, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
-	return &Index{db: db}, nil
+	stems, err := newStemmer()
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("stemmer: %w", err)
+	}
+	return &Index{db: db, stems: stems}, nil
 }
 
 // schemaVersion is stored in PRAGMA user_version. v1 (IMP-095) splits the
@@ -77,7 +83,10 @@ func migrate(db *sql.DB) error {
 	return err
 }
 
-func (i *Index) Close() error { return i.db.Close() }
+func (i *Index) Close() error {
+	i.stems.close()
+	return i.db.Close()
+}
 
 // noteExts mirrors vault.noteExtensions. Duplicated rather than imported
 // because internal/vault imports internal/index — the reverse would cycle.

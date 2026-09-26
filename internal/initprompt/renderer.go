@@ -150,6 +150,57 @@ func RenderDirectives(project string) (string, int, error) {
 	return applyVars(string(body), vars), DirectivesVersion, nil
 }
 
+// readDirectiveSections are the directive sections a token that cannot
+// write acts on: where things are, which tags exist, how to read cheaply.
+// The rest (stub conversion, ingest rules, note formats, plan placement,
+// end-of-task workflow, handoff) is about writing.
+var readDirectiveSections = []string{
+	"### Mappa delle cartelle del vault",
+	"### Vocabolario tag",
+	"### Economia dei token",
+}
+
+// readDirectivesNote replaces the omitted sections in the read-only block.
+const readDirectivesNote = "_Token di sola lettura: qui sotto solo le regole per orientarsi e leggere. Le regole di scrittura (ingest, formati, workflow di fine task, handoff) arrivano con un token che può scrivere nel progetto._"
+
+// RenderReadDirectives renders the directives block for a token that cannot
+// write to the project: the preamble plus readDirectiveSections, in template
+// order, with the same version as the full block. It saves about two thirds
+// of the block on sessions that could never apply the rest.
+func RenderReadDirectives(project string) (string, int, error) {
+	full, version, err := RenderDirectives(project)
+	if err != nil {
+		return "", 0, err
+	}
+	var out []string
+	keep, inSection, noted := true, false, false
+	for _, line := range strings.Split(full, "\n") {
+		if strings.HasPrefix(line, "<!-- /gosidian:directives") {
+			out = append(out, line)
+			keep = true
+			continue
+		}
+		if strings.HasPrefix(line, "### ") {
+			if !noted {
+				out = append(out, readDirectivesNote, "")
+				noted = true
+			}
+			inSection = true
+			keep = false
+			for _, h := range readDirectiveSections {
+				if strings.HasPrefix(line, h) {
+					keep = true
+					break
+				}
+			}
+		}
+		if keep || !inSection {
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "\n"), version, nil
+}
+
 func applyVars(body string, vars map[string]string) string {
 	for k, v := range vars {
 		body = strings.ReplaceAll(body, "{{"+k+"}}", v)

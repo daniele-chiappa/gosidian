@@ -173,7 +173,8 @@ onMounted(() => {
       at bootstrap; <em>anchors</em> materialises vault agents as local subagent files
       at bootstrap (both need their server master switch on — dimmed when off);
       <em>tag-vocab</em> lets the project extend the lint tag vocabulary from
-      memory/conventions.md.
+      memory/conventions.md; <em>lean-read</em> gives tokens that cannot write a
+      shorter bootstrap (reading directives only: fewer tokens, less context).
     </p>
 
     <form
@@ -305,6 +306,15 @@ onMounted(() => {
               : 'Click to let this project extend the lint tag vocabulary via memory/conventions.md frontmatter (tag_vocabulary: exact tags or ns:* wildcards).'"
             @click="apply(p, { use_tag_vocabulary: !p.use_tag_vocabulary }, 'tag-vocab')"
           >tag-vocab</button>
+          <button
+            type="button"
+            class="text-xs px-2 py-1 rounded"
+            :class="p.lean_read_bootstrap ? 'bg-accent/20 text-accent' : 'border border-border'"
+            :title="p.lean_read_bootstrap
+              ? 'Lean read bootstrap on: tokens that cannot write here get only the reading directives (fewer tokens, less context about how the memory is organized). Click to disable.'
+              : 'Click to give tokens that cannot write here a lean bootstrap: reading directives only. Saves tokens per session, drops the context about writing and note formats.'"
+            @click="apply(p, { lean_read_bootstrap: !p.lean_read_bootstrap }, 'lean-read')"
+          >lean-read</button>
           <button
             type="button"
             class="text-xs px-2 py-1 rounded hover:bg-surface-hover"
