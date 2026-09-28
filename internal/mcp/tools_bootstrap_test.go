@@ -343,6 +343,16 @@ func TestMCP_Bootstrap_MaintenanceDigest(t *testing.T) {
 	if m.BrokenLinks != 0 {
 		t.Errorf("attachment embed inflated broken_links: %+v", m)
 	}
+
+	// Same-note links ([[#heading]]) are unresolved by design as well
+	// (BUG-065).
+	if res, _ := s.handleCreate(ctx, call(map[string]any{"path": proj + "/self.md", "content": "# s\n\n## A\n\n[[#A]] [[#^blk]]\n"})); res.IsError {
+		t.Fatalf("seed self: %s", expectError(t, res))
+	}
+	m = boot()
+	if m.BrokenLinks != 0 {
+		t.Errorf("same-note links inflated broken_links: %+v", m)
+	}
 }
 
 // TestMCP_Bootstrap_TagVocabulary asserts the IMP-075 surfacing: the

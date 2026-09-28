@@ -5,8 +5,10 @@ import {
   createProject,
   updateProject,
   deleteProject,
+  exportProject,
   type Project,
 } from '@/api/projects'
+import { downloadErrorMessage } from '@/api/download'
 import { VISIBILITY_HELP, VISIBILITY_LABEL, type Visibility } from '@/api/access'
 import { getSettings } from '@/api/settings'
 import { useTreeStore } from '@/stores/tree'
@@ -142,6 +144,21 @@ async function rename(p: Project) {
   }
 }
 
+/** Name of the project whose zip is being prepared (the button waits). */
+const exporting = ref<string | null>(null)
+
+async function exportZip(p: Project) {
+  error.value = null
+  exporting.value = p.name
+  try {
+    await exportProject(p.name)
+  } catch (e) {
+    error.value = downloadErrorMessage(e, 'Export')
+  } finally {
+    exporting.value = null
+  }
+}
+
 async function destroy(p: Project) {
   if (!confirm(`Delete project "${p.name}" and ${p.note_count} note(s)?`)) return
   try {
@@ -263,6 +280,15 @@ onMounted(() => {
           <UsersRound class="w-3 h-3" />
           <span>{{ p.teams_count }}</span>
         </button>
+
+        <button
+          v-if="!auth.isAnonymous"
+          type="button"
+          class="text-xs px-2 py-1 rounded border border-border hover:bg-surface-hover disabled:opacity-50"
+          title="Download every file of the project as a zip (opens as a vault in Obsidian)"
+          :disabled="exporting !== null"
+          @click="exportZip(p)"
+        >{{ exporting === p.name ? 'Exporting…' : 'Export' }}</button>
 
         <template v-if="p.access === 'admin'">
           <button

@@ -353,42 +353,71 @@ func (v *Vault) ProjectNotes(project string) ([]NoteStat, error) {
 	return out, err
 }
 
-// ScanInto brings the index in line with the vault: it upserts every note,
-// drops the indexed notes no longer on disk (deleted while the server was
-// down, or a delete whose commit a crash lost), then resolves every link
-// once all of them are in.
+// ScanStats counts what a scan did.
+type ScanStats struct {
+	Notes     int // notes on disk
+	Reindexed int // upserted: new, changed, or with a cleared hash
+	Dropped   int // indexed but gone from disk
+}
+
+// ScanInto brings the index in line with the vault; see Scan.
 func (v *Vault) ScanInto(idx *index.Index) error {
+	_, err := v.Scan(idx)
+	return err
+}
+
+// Scan brings the index in line with the vault: it upserts every note whose
+// content differs from what was indexed (index.ContentHash; a note the index
+// asks to redo has no hash), drops the indexed notes no longer on disk
+// (deleted while the server was down, or a delete whose commit a crash
+// lost), then resolves every link once all of them are in. ResolveAll runs
+// even when nothing changed, so a change to link resolution alone reaches
+// the stored links at the next start.
+func (v *Vault) Scan(idx *index.Index) (ScanStats, error) {
+	var st ScanStats
 	paths, err := v.List()
 	if err != nil {
-		return err
+		return st, err
+	}
+	stamps, err := idx.Stamps()
+	if err != nil {
+		return st, fmt.Errorf("read index stamps: %w", err)
 	}
 	onDisk := make(map[string]bool, len(paths))
 	for _, p := range paths {
 		n, err := loadNote(v.Root, p)
 		if err != nil {
-			return fmt.Errorf("load %s: %w", p, err)
-		}
-		if err := idx.UpsertUnresolved(toIndexNote(n)); err != nil {
-			return fmt.Errorf("index %s: %w", p, err)
+			return st, fmt.Errorf("load %s: %w", p, err)
 		}
 		onDisk[n.Path] = true
-	}
-	indexed, err := idx.AllNotes()
-	if err != nil {
-		return fmt.Errorf("list index: %w", err)
-	}
-	for _, row := range indexed {
-		if onDisk[row.Path] {
+		doc := toIndexNote(n)
+		if old, ok := stamps[n.Path]; ok && old.Hash != "" && old.Hash == index.ContentHash(doc) {
+			if old.ModTime != doc.ModTime || old.Size != doc.Size {
+				if err := idx.Touch(doc.Path, doc.ModTime, doc.Size); err != nil {
+					return st, fmt.Errorf("index %s: %w", p, err)
+				}
+			}
 			continue
 		}
-		if err := idx.Delete(row.Path); err != nil {
-			return fmt.Errorf("drop %s: %w", row.Path, err)
+		if err := idx.UpsertUnresolved(doc); err != nil {
+			return st, fmt.Errorf("index %s: %w", p, err)
 		}
+		st.Reindexed++
+	}
+	st.Notes = len(onDisk)
+	for p := range stamps {
+		if onDisk[p] {
+			continue
+		}
+		if err := idx.Delete(p); err != nil {
+			return st, fmt.Errorf("drop %s: %w", p, err)
+		}
+		st.Dropped++
 	}
 	if err := idx.ResolveAll(); err != nil {
-		return fmt.Errorf("resolve links: %w", err)
+		return st, fmt.Errorf("resolve links: %w", err)
 	}
-	return nil
+	return st, nil
 }
 
 // Project describes a top-level directory inside the vault. Projects are

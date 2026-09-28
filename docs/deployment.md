@@ -149,3 +149,13 @@ curl -sS http://127.0.0.1:8080/healthz    # → "ok" or structured JSON
 
 Suitable for Kubernetes liveness/readiness, Docker healthcheck (already
 baked into the image), or external uptime monitors.
+
+At startup the port opens before the vault scan brings the index up to
+date. Until the scan ends every request gets a `503` with
+`Retry-After: 2`: `/healthz` answers `{"status":"starting"}`, a browser
+gets a page that reloads itself, and API and MCP clients get the usual
+JSON error with code `server.unavailable`. The scan re-indexes only the
+notes whose content changed since the last run, so a restart takes
+under a second on a vault of a few hundred notes. The first start of a
+new release that changes how notes are indexed re-reads every note
+(the log line `scan complete in …` says how many were re-indexed).

@@ -379,14 +379,39 @@ func main() {
 		ensureVisibility(projectsStore, cfg.SelfImprove.TargetProject, projects.VisibilityPrivate)
 	}
 
+	// The listeners open before the boot scan (IMP-104) and answer 503
+	// "starting" until the handlers are mounted (server.Switch), so the
+	// proxy and the clients get a retryable answer instead of a refused
+	// connection while the index is brought up to date.
+	webSwitch := server.NewSwitch()
+	httpSrv := &http.Server{
+		Addr:              *addr,
+		Handler:           webSwitch,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	serveHTTP(httpSrv, "http")
+	log.Printf("%s open, answering 503 until the vault scan completes", *addr)
+	var legacyMCPSrv *http.Server
+	var legacySwitch *server.Switch
+	if *mcpAddr != "" {
+		legacySwitch = server.NewSwitch()
+		legacyMCPSrv = &http.Server{
+			Addr:              *mcpAddr,
+			Handler:           legacySwitch,
+			ReadHeaderTimeout: 5 * time.Second,
+		}
+		serveHTTP(legacyMCPSrv, "mcp legacy")
+	}
+
 	log.Printf("scanning vault %s", absVault)
-	if err := v.ScanInto(idx); err != nil {
+	scanStart := time.Now()
+	scan, err := v.Scan(idx)
+	if err != nil {
 		log.Fatalf("scan: %v", err)
 	}
-	if all, err := idx.AllNotes(); err == nil {
-		metrics.NotesGauge.Set(float64(len(all)))
-	}
-	log.Printf("scan complete")
+	metrics.NotesGauge.Set(float64(scan.Notes))
+	log.Printf("scan complete in %s: %d notes, %d re-indexed, %d dropped",
+		time.Since(scanStart).Round(time.Millisecond), scan.Notes, scan.Reindexed, scan.Dropped)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -582,6 +607,7 @@ func main() {
 		GitSync:    syncer, // nil-safe; History returns "git sync disabled" when cfg off
 		ConfigPath: cfgPath,
 		OAuth:      oauthSrv, // nil when [oauth] is off: /api/v1/oauth/* answers 404
+		StateDir:   sdir,
 	})
 	srv.MountAPIv1(apiRouter)
 	srv.SetVaultFileAuthorizer(apiRouter.VaultFileAuthorizer()) // ADR-022: attachments share the API auth
@@ -593,32 +619,12 @@ func main() {
 	// GOSIDIAN_SPA_MODE flag was retired alongside the HTMX
 	// templates and per-page handlers — see docs/migration-v2.md.
 
-	httpSrv := &http.Server{
-		Addr:              *addr,
-		Handler:           srv,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-	go func() {
-		log.Printf("listening on %s (web + MCP at /mcp, legacy SSE at /mcp/sse)", *addr)
-		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("http: %v", err)
-		}
-	}()
-
-	var legacyMCPSrv *http.Server
-	if *mcpAddr != "" {
+	if legacySwitch != nil {
 		log.Printf("MCP legacy listener on %s (DEPRECATED — clients should use %s/mcp)", *mcpAddr, *addr)
-		legacyMCPSrv = &http.Server{
-			Addr:              *mcpAddr,
-			Handler:           mcpServer.Handler(""),
-			ReadHeaderTimeout: 5 * time.Second,
-		}
-		go func() {
-			if err := legacyMCPSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed && ctx.Err() == nil {
-				log.Fatalf("mcp legacy: %v", err)
-			}
-		}()
+		legacySwitch.Ready(mcpServer.Handler(""))
 	}
+	webSwitch.Ready(srv)
+	log.Printf("listening on %s (web + MCP at /mcp, legacy SSE at /mcp/sse)", *addr)
 
 	<-ctx.Done()
 	log.Printf("shutting down")
@@ -632,4 +638,14 @@ func main() {
 	if legacyMCPSrv != nil {
 		_ = legacyMCPSrv.Shutdown(shutdownCtx)
 	}
+}
+
+// serveHTTP runs srv in the background; any error other than a clean
+// Shutdown (a port already taken, say) is fatal.
+func serveHTTP(srv *http.Server, name string) {
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("%s: %v", name, err)
+		}
+	}()
 }

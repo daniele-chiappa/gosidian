@@ -1,4 +1,5 @@
 import client from './client'
+import { downloadFile } from './download'
 
 import type { AccessLevel, Visibility } from './access'
 
@@ -83,6 +84,12 @@ export async function updateProject(slug: string, body: UpdateProjectRequest): P
 
 export async function deleteProject(slug: string): Promise<void> {
   await client.delete(`/projects/${encodeURIComponent(slug)}`)
+}
+
+/** Saves a zip of every file of the project (IMP-099): notes, attachments,
+ *  canvases… what an Obsidian vault holds, hidden folders excepted. */
+export async function exportProject(slug: string): Promise<void> {
+  await downloadFile(`/projects/${encodeURIComponent(slug)}/export.zip`, `${slug}.zip`)
 }
 
 // --- Per-project grants (owner-only management until phase 2) ---

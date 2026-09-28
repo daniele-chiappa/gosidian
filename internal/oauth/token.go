@@ -59,7 +59,7 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := s.now()
-	if !s.limiter.allow("token:"+s.cfg.ClientIP(r), now) {
+	if !s.limiter.Allow("token:"+s.cfg.ClientIP(r), now) {
 		writeOAuthError(w, http.StatusTooManyRequests, "invalid_request", "too many token requests from this address, retry later")
 		return
 	}
@@ -261,7 +261,7 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := s.now()
-	if !s.limiter.allow("token:"+s.cfg.ClientIP(r), now) {
+	if !s.limiter.Allow("token:"+s.cfg.ClientIP(r), now) {
 		writeOAuthError(w, http.StatusTooManyRequests, "invalid_request", "too many requests from this address, retry later")
 		return
 	}

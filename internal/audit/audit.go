@@ -95,6 +95,10 @@ const (
 	// Size = bytes of the notes listed, the most the caller can then fetch.
 	// Individual reads are not audited; a bulk listing is.
 	ActionMirrorSync Action = "mirror_sync"
+
+	// A zip export was downloaded (IMP-099): Path = the project, "" for the
+	// whole vault; Size = bytes sent.
+	ActionExport Action = "export"
 )
 
 // Entry is the on-disk shape. Keep field names short; this file may grow.

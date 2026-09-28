@@ -516,6 +516,23 @@ func TestLint_HotOversize(t *testing.T) {
 	}
 }
 
+// Same-note links ([[#heading]], [[#^block]]) resolve on the current note in
+// Obsidian; the index leaves them unresolved on purpose, and the rule must
+// not flag them (BUG-065).
+func TestLint_SelfLinkNotBroken(t *testing.T) {
+	l, v, idx := newTestLinter(t)
+
+	seed(t, v, idx, "proj/bugs.md", "---\ntitle: bugs\ntags: [proj, type:doc]\n---\n\n# bugs\n\n## BUG-001\n\nsee [[#BUG-001]], [[#^blk|the block]] and [[ #BUG-001 ]]\n\n[[proj/nowhere]]\n")
+
+	issues, err := l.Run(context.Background(), "proj", []string{"broken-wikilink"}, "")
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(issues) != 1 || !strings.Contains(issues[0].Message, "proj/nowhere") {
+		t.Errorf("only the cross-note link should be flagged, got: %+v", issues)
+	}
+}
+
 func TestLint_AttachmentEmbedNotBroken(t *testing.T) {
 	l, v, idx := newTestLinter(t)
 

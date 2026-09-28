@@ -1,4 +1,5 @@
 import client from './client'
+import { downloadFile } from './download'
 
 export interface MCPToken {
   id: string
@@ -234,4 +235,9 @@ export async function tailAudit(query: AuditQuery = {}): Promise<AuditEntry[]> {
   if (query.limit) params.limit = query.limit
   const { data } = await client.get<ListResp<AuditEntry>>('/admin/audit', { params })
   return data.items
+}
+
+/** Saves a zip of the whole vault (owner only, IMP-099). */
+export async function exportVault(): Promise<void> {
+  await downloadFile('/admin/export.zip', 'vault.zip')
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/gosidian/gosidian/internal/oauth"
 	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/gosidian/gosidian/internal/projects"
+	"github.com/gosidian/gosidian/internal/ratelimit"
 	"github.com/gosidian/gosidian/internal/server/events"
 	"github.com/gosidian/gosidian/internal/trash"
 	"github.com/gosidian/gosidian/internal/vault"
@@ -32,6 +33,9 @@ type Deps struct {
 	GitSync    *gitsync.Sync // optional; nil disables /history
 	ConfigPath string        // path to cfg.toml; "" disables /settings PUT
 	OAuth      *oauth.Server // optional; nil disables the consent API (IMP-092)
+	// StateDir is left out of zip exports when it sits inside the vault
+	// under a visible name (the default .gosidian/ is hidden anyway).
+	StateDir string
 }
 
 // Router owns the http.Handler tree under /api/v1/*. A separate type
@@ -40,18 +44,20 @@ type Deps struct {
 // vault, call ServeHTTP — and gives a single place to attach
 // telemetry hooks.
 type Router struct {
-	deps         *Deps
-	mux          *http.ServeMux
-	loginLimiter *loginLimiter
+	deps          *Deps
+	mux           *http.ServeMux
+	loginLimiter  *loginLimiter
+	exportLimiter *ratelimit.Window // per account, see export.go
 }
 
 // NewRouter wires the v1 routes against the given dependencies. The
 // caller mounts the returned handler under the /api/v1/ prefix.
 func NewRouter(deps *Deps) *Router {
 	r := &Router{
-		deps:         deps,
-		mux:          http.NewServeMux(),
-		loginLimiter: newLoginLimiter(),
+		deps:          deps,
+		mux:           http.NewServeMux(),
+		loginLimiter:  newLoginLimiter(),
+		exportLimiter: ratelimit.New(exportWindow, exportMax),
 	}
 	r.registerPublic()
 	r.registerAuthed()
@@ -154,6 +160,7 @@ func (r *Router) registerAuthed() {
 	r.mux.Handle("/api/v1/admin/invites", owner(r.handleAdminInvites))
 	r.mux.Handle("/api/v1/admin/invites/", owner(r.handleAdminInviteItem))
 	r.mux.Handle("/api/v1/admin/audit", owner(r.handleAdminAudit))
+	r.mux.Handle("/api/v1/admin/export.zip", owner(r.handleVaultExport))
 
 	r.mux.Handle("/api/v1/insights/pending", owner(r.handleInsightsPending))
 }

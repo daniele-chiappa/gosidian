@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/gosidian/gosidian/internal/attach"
+	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/parser"
 )
 
@@ -126,7 +127,7 @@ func checkBrokenWikilink(ctx context.Context, l *Linter, project string) ([]Issu
 			return nil, err
 		}
 		for _, o := range outs {
-			if o.TargetPath != "" {
+			if o.TargetPath != "" || index.IsSelfLink(o.Target) {
 				continue
 			}
 			// The index resolves note targets only; an attachment embed like

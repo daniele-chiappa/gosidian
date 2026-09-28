@@ -8,6 +8,62 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.39.0] — 2026-09-28 — "export"
+
+Zip exports are back, and restarts are fast. A project, or the whole
+vault, downloads as a zip that opens in Obsidian as the vault itself.
+The index now remembers what it has already read, so a restart re-reads
+only the notes that changed, and while the server starts it answers
+with a retryable `503` instead of refusing connections. Pull the image
+and restart: the first start migrates the index and re-reads every note
+once (a few seconds on a vault of hundreds of notes); the next ones take
+under a second.
+
+### Added
+- **Zip export of a project or of the vault** — **Projects → Export**
+  downloads every file of a project (notes, attachments, canvases,
+  bases, PDFs…), **Admin → Export vault** the whole vault (owner only).
+  Hidden files and folders (`.gosidian` with the trash and the default
+  state dir, `.git`, `.obsidian`), `node_modules` and symlinks are left
+  out. Any signed-in account that can read a project may export it; the
+  anonymous guest of open mode may not. The archive is built while it
+  downloads, so the server holds one file at a time whatever the vault
+  size; each account may export 10 times per 10 minutes, and every
+  export is written to the audit log as `export` with the bytes sent.
+  Endpoints: `GET /api/v1/projects/{name}/export.zip` and
+  `GET /api/v1/admin/export.zip`, with the usual Bearer.
+
+### Changed
+- **Fast restarts** — every start re-indexed the whole vault. The index
+  now keeps a hash of each note's content, and the startup scan
+  re-indexes only the notes that changed since the last run: 0.7 s
+  instead of 4.6 s on a 778-note vault in a benchmark, under half a
+  second on a production host. The log line `scan complete in …` says
+  how many notes were re-indexed. A release that changes how notes are
+  indexed makes the first start re-read everything.
+- **An answer while the server starts** — the port used to stay closed
+  until the scan ended, so a reverse proxy answered `502` and MCP
+  clients could give up. It now opens right away and, until the index
+  is ready, answers every request with `503` and `Retry-After: 2`:
+  `/healthz` reports `{"status":"starting"}`, browsers get a page that
+  reloads itself, API and MCP clients the usual JSON error
+  (`server.unavailable`). Health checks that require `"ok"` keep
+  working; the container's start period covers the scan.
+
+### Fixed
+- **Live updates in the web UI survive a restart** — a browser closes
+  its event stream for good on any non-`200` answer, such as a proxy's
+  `502` during a restart, and the web UI stopped receiving live updates
+  until a reload. It now reopens the stream with a growing delay.
+- **Same-note links are no longer reported as broken** — a link to a
+  heading of the note it sits in (`[[#heading]]`, `[[#^block]]`) works
+  in Obsidian and in the web UI, but `memory_lint` flagged it as a
+  broken wikilink and the bootstrap counted it in
+  `maintenance.broken_links`, asking the agent for a cleanup with
+  nothing to fix.
+- **`/api/v1/query` has its own metrics label** instead of being counted
+  under `/api/v1/other`.
+
 ## [2.38.0] — 2026-09-28 — "feedback"
 
 A round of fixes from a real upgrade: an agent moving another instance

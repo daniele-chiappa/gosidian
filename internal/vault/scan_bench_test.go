@@ -33,6 +33,31 @@ func BenchmarkScanInto(b *testing.B) {
 	}
 }
 
+// BenchmarkScanIntoWarm measures a restart on an unchanged vault: the index
+// already holds every note, so the scan only compares hashes and resolves
+// the links (IMP-104).
+func BenchmarkScanIntoWarm(b *testing.B) {
+	root := os.Getenv("GOSIDIAN_BENCH_VAULT")
+	if root == "" {
+		root = syntheticVault(b, 300, 10)
+	}
+	v := New(root)
+	idx, err := index.Open(filepath.Join(b.TempDir(), "index.db"))
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer idx.Close()
+	if err := v.ScanInto(idx); err != nil {
+		b.Fatal(err)
+	}
+	b.ResetTimer()
+	for n := 0; n < b.N; n++ {
+		if err := v.ScanInto(idx); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 // syntheticVault writes notes across a few projects, each linking to
 // `links` others, so link resolution weighs as it does on a real vault.
 func syntheticVault(b *testing.B, notes, links int) string {

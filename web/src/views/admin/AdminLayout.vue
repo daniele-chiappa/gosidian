@@ -5,6 +5,8 @@
  *  `section` window prop selects the initial tab. Owner-only. */
 import { defineAsyncComponent, markRaw, ref, type Component } from 'vue'
 import { useAuthStore } from '@/stores/auth'
+import { exportVault } from '@/api/admin'
+import { downloadErrorMessage } from '@/api/download'
 
 const auth = useAuthStore()
 
@@ -25,11 +27,37 @@ const props = defineProps<{ section?: string }>()
 const active = ref<string>(tabs.some((t) => t.key === props.section) ? props.section! : 'users')
 
 const current = () => tabs.find((t) => t.key === active.value)?.comp
+
+const exporting = ref(false)
+const exportError = ref<string | null>(null)
+
+async function exportZip() {
+  exportError.value = null
+  exporting.value = true
+  try {
+    await exportVault()
+  } catch (e) {
+    exportError.value = downloadErrorMessage(e, 'Vault export')
+  } finally {
+    exporting.value = false
+  }
+}
 </script>
 
 <template>
   <div class="p-6 max-w-6xl mx-auto">
-    <h1 class="text-2xl font-semibold mb-1">Admin</h1>
+    <div class="flex items-center gap-3 mb-1">
+      <h1 class="text-2xl font-semibold flex-1">Admin</h1>
+      <button
+        v-if="auth.isOwner"
+        type="button"
+        class="text-sm px-3 py-1.5 rounded border border-border hover:bg-surface-hover disabled:opacity-50"
+        title="Download every file of the vault as a zip (hidden folders, trash and state excluded)"
+        :disabled="exporting"
+        @click="exportZip"
+      >{{ exporting ? 'Exporting…' : 'Export vault' }}</button>
+    </div>
+    <p v-if="exportError" class="text-danger text-sm mb-3">{{ exportError }}</p>
     <p v-if="!auth.isOwner" class="text-danger text-sm mb-6">
       You need owner role to access these pages.
     </p>

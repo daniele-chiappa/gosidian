@@ -97,7 +97,7 @@ func (r *Router) handleProjectByName(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	// Sub-resource routing: /{name}/members[/{userID}], /{name}/teams[/{teamID}],
-	// /{name}/access.
+	// /{name}/access, /{name}/export.zip.
 	if name, sub, ok := strings.Cut(rest, "/"); ok {
 		seg, tail, _ := strings.Cut(sub, "/")
 		switch seg {
@@ -107,6 +107,12 @@ func (r *Router) handleProjectByName(w http.ResponseWriter, req *http.Request) {
 			r.handleProjectTeams(w, req, name, tail)
 		case "access":
 			r.handleProjectAccess(w, req, name)
+		case "export.zip":
+			if tail != "" {
+				WriteError(w, http.StatusNotFound, CodeNotFound, "sub-resource not implemented")
+				return
+			}
+			r.handleProjectExport(w, req, name)
 		default:
 			WriteError(w, http.StatusNotFound, CodeNotFound, "sub-resource not implemented")
 		}

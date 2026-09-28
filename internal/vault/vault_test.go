@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"testing"
+	"time"
 
 	"github.com/gosidian/gosidian/internal/index"
 )
@@ -410,6 +411,59 @@ func TestProjectNotes_StatsNotesWithoutReading(t *testing.T) {
 	}
 	if _, err := v.ProjectNotes("proj/sub"); err == nil {
 		t.Error("a nested folder is not a project")
+	}
+}
+
+// A rescan re-indexes only what changed (IMP-104): unchanged notes are
+// skipped, a file rewritten with the same bytes only moves its mtime, and a
+// note created while the server was down still gets its links resolved.
+func TestVault_ScanSkipsUnchanged(t *testing.T) {
+	v := newTestVault(t)
+	idx := openIndex(t)
+
+	write(t, v.Root, "p/a.md", "# a\n\nSee [[New]].")
+	write(t, v.Root, "p/b.md", "# b\n")
+	write(t, v.Root, "p/c.md", "# c\n")
+	st, err := v.Scan(idx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st != (ScanStats{Notes: 3, Reindexed: 3}) {
+		t.Fatalf("first scan = %+v, want 3 notes all re-indexed", st)
+	}
+
+	st, err = v.Scan(idx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st != (ScanStats{Notes: 3}) {
+		t.Fatalf("rescan of an unchanged vault = %+v, want nothing re-indexed", st)
+	}
+
+	// b changes, c is only touched, New appears, and a's link to it must
+	// resolve although a itself is skipped.
+	write(t, v.Root, "p/b.md", "# b\n\nchanged #fresh\n")
+	old := time.Now().Add(-48 * time.Hour).Truncate(time.Second)
+	if err := os.Chtimes(filepath.Join(v.Root, "p/c.md"), old, old); err != nil {
+		t.Fatal(err)
+	}
+	write(t, v.Root, "p/New.md", "# New\n")
+	st, err = v.Scan(idx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st != (ScanStats{Notes: 4, Reindexed: 2}) {
+		t.Fatalf("rescan after edits = %+v, want b and New re-indexed", st)
+	}
+	if backs, _ := idx.Backlinks("p/New.md"); len(backs) != 1 || backs[0].Path != "p/a.md" {
+		t.Errorf("link from the skipped note to the new one: backlinks = %+v", backs)
+	}
+	if got, _ := idx.NotesByTag("fresh"); len(got) != 1 {
+		t.Errorf("changed note not re-indexed: notes with #fresh = %+v", got)
+	}
+	stamps, _ := idx.Stamps()
+	if stamps["p/c.md"].ModTime != old.Unix() {
+		t.Errorf("touched note mtime = %d, want %d", stamps["p/c.md"].ModTime, old.Unix())
 	}
 }
 

@@ -60,9 +60,11 @@ This references [[other-note]] or [[other-project/some-note]].
 Aliased: [[target|display text]].
 ```
 
-Unresolved targets render with a `broken` CSS class so authors notice
-typos. The MCP tool `memory_lint` reports them as `broken-wikilink`
-warnings.
+Unresolved targets render with an `unresolved` CSS class so authors
+notice typos. The MCP tool `memory_lint` reports them as
+`broken-wikilink` warnings. A link to a heading of the same note
+(`[[#heading]]`, `[[#^block]]`) is an anchor on the current page and is
+never reported.
 
 ### Frontmatter
 

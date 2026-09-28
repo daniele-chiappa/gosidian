@@ -62,7 +62,7 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		q = r.URL.Query()
 	}
 	now := s.now()
-	if !s.limiter.allow("authorize:"+s.cfg.ClientIP(r), now) {
+	if !s.limiter.Allow("authorize:"+s.cfg.ClientIP(r), now) {
 		writeAuthorizePage(w, http.StatusTooManyRequests, "invalid_request", "too many authorization requests from this address, retry later")
 		return
 	}

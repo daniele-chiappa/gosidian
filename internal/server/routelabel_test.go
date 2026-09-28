@@ -15,6 +15,8 @@ func TestRouteLabel_Bounded(t *testing.T) {
 		"/api/v1/projects/foo":              "/api/v1/projects/*",
 		"/api/v1/admin/users/abc123":        "/api/v1/admin/users/*",
 		"/api/v1/admin/tokens":              "/api/v1/admin/tokens",
+		"/api/v1/admin/export.zip":          "/api/v1/admin/export.zip",
+		"/api/v1/query":                     "/api/v1/query",
 		"/api/v1/admin/whatever/1":          "/api/v1/admin/other",
 		"/api/v1/does-not-exist/1234":       "/api/v1/other",
 		"/api/v1/login":                     "/api/v1/login",

@@ -36,6 +36,7 @@ import (
 
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/auth"
+	"github.com/gosidian/gosidian/internal/ratelimit"
 )
 
 const (
@@ -142,7 +143,10 @@ type Server struct {
 	audit   *audit.Log
 	clients *clientStore
 	cimd    *cimdCache
-	limiter *ipLimiter
+	// limiter counts per client IP. Every request counts, successful or
+	// not: these endpoints are unauthenticated by nature and a burst of
+	// any kind is abuse.
+	limiter *ratelimit.Window
 	now     func() time.Time
 
 	mu       sync.Mutex
@@ -176,7 +180,7 @@ func New(cfg Config, tokens *auth.Store, auditLog *audit.Log) (*Server, error) {
 		audit:    auditLog,
 		clients:  clients,
 		cimd:     newCIMDCache(),
-		limiter:  newIPLimiter(15*time.Minute, 30),
+		limiter:  ratelimit.New(15*time.Minute, 30),
 		now:      time.Now,
 		pending:  map[string]*pendingRequest{},
 		codes:    map[string]*authCode{},

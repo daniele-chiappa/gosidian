@@ -1,9 +1,12 @@
 package index
 
 import (
+	"crypto/sha256"
 	"database/sql"
 	_ "embed"
+	"encoding/hex"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -40,9 +43,14 @@ func Open(path string) (*Index, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := migrate(db); err != nil {
+	migrated, err := migrate(db)
+	if err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
+	}
+	if err := checkContentVersion(db, migrated); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("content version: %w", err)
 	}
 	stems, err := newStemmer()
 	if err != nil {
@@ -55,40 +63,129 @@ func Open(path string) (*Index, error) {
 // schemaVersion is stored in PRAGMA user_version. v1 (IMP-095) splits the
 // frontmatter out of the FTS body into its own weighted column and adds
 // notes.importance; v2 (IMP-099) adds note_fields, which the boot scan fills
-// like every other table.
-const schemaVersion = 2
+// like every other table; v3 (IMP-104) adds notes.hash and the meta table, so
+// the boot scan can skip the notes whose content has not changed.
+const schemaVersion = 3
 
-// migrate brings an index file to schemaVersion. The index is a cache of the
-// vault — the boot scan re-upserts every note — so a shape change drops and
-// recreates a table instead of converting its rows.
-func migrate(db *sql.DB) error {
+// ContentVersion identifies what an upsert extracts from a note: links,
+// tags, title, importance, note_fields and the FTS columns. Bump it whenever
+// a parser or extraction change would store different rows for the same
+// bytes: at the next start every hash is cleared and the boot scan
+// re-indexes the whole vault, instead of skipping the unchanged notes and
+// keeping rows extracted by the old code. TestContentVersion_Golden fails
+// when the extraction output changes without a bump. Link resolution is not
+// covered: the boot scan runs ResolveAll every time.
+const ContentVersion = 1
+
+// migrate brings an index file to schemaVersion and reports whether it had
+// to. The index is a cache of the vault — the boot scan re-upserts every
+// note — so a shape change drops and recreates a table instead of
+// converting its rows.
+func migrate(db *sql.DB) (bool, error) {
 	var v int
 	if err := db.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
-		return err
+		return false, err
 	}
 	if v < 1 {
 		if _, err := db.Exec(`DROP TABLE IF EXISTS notes_fts`); err != nil {
-			return err
+			return false, err
 		}
 	}
 	if _, err := db.Exec(schemaSQL); err != nil {
-		return err
+		return false, err
 	}
-	if v >= schemaVersion {
-		return nil
-	}
-	// CREATE TABLE IF NOT EXISTS leaves a pre-v1 notes table as it was.
-	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('notes') WHERE name = 'importance'`).Scan(&n); err != nil {
-		return err
-	}
-	if n == 0 {
-		if _, err := db.Exec(`ALTER TABLE notes ADD COLUMN importance INTEGER NOT NULL DEFAULT 3`); err != nil {
-			return err
+	migrated := v < schemaVersion
+	if migrated {
+		if err := addMissingColumns(db); err != nil {
+			return false, err
+		}
+		if _, err := db.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, schemaVersion)); err != nil {
+			return false, err
 		}
 	}
-	_, err := db.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, schemaVersion))
-	return err
+	// After the columns exist: the trigger reads notes.hash.
+	if _, err := db.Exec(hashGuardSQL); err != nil {
+		return false, err
+	}
+	return migrated, nil
+}
+
+// hashGuardSQL covers a rollback. A release from before v3 rewrites a
+// note's rows on upsert but never touches notes.hash, so after an upgrade
+// the stale hash would vouch for rows this release did not extract, and
+// the boot scan would skip the note for good. Every upsert sets importance
+// and only a v3 upsert sets hash, so an update of importance that leaves the
+// hash as it was clears it: the next boot scan re-indexes the note. The
+// price is one extra re-index at the next start for a note re-upserted with
+// the same content (the watcher after an API write).
+const hashGuardSQL = `CREATE TRIGGER IF NOT EXISTS notes_hash_guard
+AFTER UPDATE OF importance ON notes
+WHEN NEW.hash IS OLD.hash AND NEW.hash IS NOT NULL
+BEGIN
+    UPDATE notes SET hash = NULL WHERE id = NEW.id;
+END`
+
+// addMissingColumns adds the notes columns that CREATE TABLE IF NOT EXISTS
+// leaves out of a table created by an older schema.
+func addMissingColumns(db *sql.DB) error {
+	for _, col := range []struct{ name, def string }{
+		{"importance", "INTEGER NOT NULL DEFAULT 3"},
+		{"hash", "TEXT"},
+	} {
+		var n int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('notes') WHERE name = ?`, col.name).Scan(&n); err != nil {
+			return err
+		}
+		if n == 0 {
+			if _, err := db.Exec(`ALTER TABLE notes ADD COLUMN ` + col.name + ` ` + col.def); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// checkContentVersion clears every note hash when the rows may have been
+// extracted differently from what this build would store: after a schema
+// migration (a new table is empty for the notes the scan would skip) or when
+// ContentVersion changed. A cleared hash is the only "re-index me" signal the
+// boot scan reads, so a crash halfway through the re-index leaves the rest
+// cleared and the next start picks them up.
+func checkContentVersion(db *sql.DB, migrated bool) error {
+	want := strconv.Itoa(ContentVersion)
+	var got string
+	err := db.QueryRow(`SELECT value FROM meta WHERE key = 'content_version'`).Scan(&got)
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	if !migrated && got == want {
+		return nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`UPDATE notes SET hash = NULL`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO meta(key, value) VALUES('content_version', ?)
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, want); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// ContentHash is the stamp stored with an indexed note: the boot scan
+// re-indexes a note only when the hash of what it would upsert differs.
+// The title is part of it because the vault derives it (from the path), so
+// it can change while the bytes do not.
+func ContentHash(n NoteDoc) string {
+	h := sha256.New()
+	h.Write([]byte(n.Title))
+	h.Write([]byte{0})
+	h.Write([]byte(n.Body))
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 func (i *Index) Close() error {
@@ -145,6 +242,45 @@ func (i *Index) Upsert(n NoteDoc) error {
 // links, while one ResolveAll at the end reaches the same result.
 func (i *Index) UpsertUnresolved(n NoteDoc) error {
 	_, err := i.upsertLocked(n)
+	return err
+}
+
+// Stamp is what the boot scan compares to decide whether a note needs
+// re-indexing. An empty Hash means it does (see checkContentVersion).
+type Stamp struct {
+	Hash    string
+	ModTime int64
+	Size    int64
+}
+
+// Stamps returns the stamp of every indexed note, keyed by path, in one
+// query: the boot scan reads it once instead of querying note by note.
+func (i *Index) Stamps() (map[string]Stamp, error) {
+	rows, err := i.db.Query(`SELECT path, COALESCE(hash, ''), mtime, size FROM notes`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]Stamp)
+	for rows.Next() {
+		var p string
+		var s Stamp
+		if err := rows.Scan(&p, &s.Hash, &s.ModTime, &s.Size); err != nil {
+			return nil, err
+		}
+		out[p] = s
+	}
+	return out, rows.Err()
+}
+
+// Touch updates the mtime and size of a note whose content is unchanged
+// (a file rewritten with the same bytes, a git checkout): recency and
+// memory_stale read mtime, so it must follow the file even when the scan
+// skips the re-index.
+func (i *Index) Touch(path string, modTime, size int64) error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	_, err := i.db.Exec(`UPDATE notes SET mtime = ?, size = ? WHERE path = ?`, modTime, size, path)
 	return err
 }
 
@@ -218,10 +354,10 @@ func (i *Index) upsertLocked(n NoteDoc) (int64, error) {
 	}
 
 	if _, err := tx.Exec(`
-        INSERT INTO notes(path, title, mtime, size, importance) VALUES(?, ?, ?, ?, ?)
+        INSERT INTO notes(path, title, mtime, size, importance, hash) VALUES(?, ?, ?, ?, ?, ?)
         ON CONFLICT(path) DO UPDATE SET title=excluded.title, mtime=excluded.mtime,
-            size=excluded.size, importance=excluded.importance
-    `, n.Path, title, n.ModTime, n.Size, parser.Importance(meta)); err != nil {
+            size=excluded.size, importance=excluded.importance, hash=excluded.hash
+    `, n.Path, title, n.ModTime, n.Size, parser.Importance(meta), ContentHash(n)); err != nil {
 		return 0, err
 	}
 

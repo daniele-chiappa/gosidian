@@ -35,6 +35,15 @@ func (i *Index) Backlinks(path string) ([]Backlink, error) {
 	return out, rows.Err()
 }
 
+// IsSelfLink reports whether a wikilink target points inside the linking
+// note itself ([[#heading]], [[#^block]]). Obsidian resolves it on the
+// current note, but there is no cross-note edge to record, so the index
+// leaves it unresolved (TargetPath "") on purpose: broken-link checks must
+// skip it rather than read the empty TargetPath as "does not resolve".
+func IsSelfLink(target string) bool {
+	return strings.HasPrefix(strings.TrimSpace(target), "#")
+}
+
 // Outlinks returns resolved outgoing link targets from a note path.
 type Outlink struct {
 	Target     string

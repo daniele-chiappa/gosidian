@@ -424,14 +424,6 @@ func TestRedirectRulesAndHelpers(t *testing.T) {
 	if _, err := grantedScopes([]string{"read"}, []string{"write"}); err == nil {
 		t.Error("write not requested must not be granted; read missing must error")
 	}
-	l := newIPLimiter(time.Minute, 2)
-	now := time.Now()
-	if !l.allow("a", now) || !l.allow("a", now) || l.allow("a", now) || !l.allow("b", now) {
-		t.Error("limiter")
-	}
-	if !l.allow("a", now.Add(2*time.Minute)) {
-		t.Error("limiter window did not slide")
-	}
 	if _, err := parseIssuer("notes.example.com"); err == nil {
 		t.Error("issuer without scheme accepted")
 	}

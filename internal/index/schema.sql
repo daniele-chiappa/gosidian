@@ -4,7 +4,15 @@ CREATE TABLE IF NOT EXISTS notes (
     title      TEXT NOT NULL,
     mtime      INTEGER NOT NULL,
     size       INTEGER NOT NULL,
-    importance INTEGER NOT NULL DEFAULT 3  -- frontmatter importance, 1..5 (v1)
+    importance INTEGER NOT NULL DEFAULT 3, -- frontmatter importance, 1..5 (v1)
+    hash       TEXT  -- ContentHash of what was indexed (v3); NULL = re-index at the next scan
+);
+
+-- Index-wide settings (v3): content_version is the ContentVersion the rows
+-- were extracted with.
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS links (

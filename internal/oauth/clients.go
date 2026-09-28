@@ -197,7 +197,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := s.now()
-	if !s.limiter.allow("register:"+s.cfg.ClientIP(r), now) {
+	if !s.limiter.Allow("register:"+s.cfg.ClientIP(r), now) {
 		writeOAuthError(w, http.StatusTooManyRequests, "invalid_request", "too many registrations from this address, retry later")
 		return
 	}

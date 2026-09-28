@@ -62,6 +62,21 @@ are a table; a title opens the note. The whole query lives in the URL,
 so it survives a reload and can be shared as a link. The backend is
 `POST /api/v1/query`, scoped to the projects the account can read.
 
+## Zip export
+
+**Projects → Export** downloads a zip of every file of a project: notes,
+attachments, canvases, bases, PDFs, whatever the folder holds. Opened in
+Obsidian, the archive is the vault. Hidden files and folders (`.obsidian`,
+`.git`, `.gosidian` with the trash and the default state dir),
+`node_modules` and symlinks are left out. Any signed-in account that can
+read the project may export it; the anonymous guest of open mode may not.
+**Admin → Export vault** does the same for the whole vault (owner only).
+The zip is built while it downloads, so there is no size limit on the
+server side; each account may export 10 times per 10 minutes, and every
+export is written to the audit log (`export`, with the bytes sent). The
+endpoints are `GET /api/v1/projects/{name}/export.zip` and
+`GET /api/v1/admin/export.zip`, with the usual Bearer.
+
 ## Rendering stack
 
 - **Vue 3** (composition API) + **vue-router** + **Pinia** state

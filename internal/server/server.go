@@ -245,13 +245,13 @@ var apiRouteFamilies = map[string]bool{
 	"admin": true, "attach": true, "auth-config": true, "command-palette": true,
 	"events": true, "graph": true, "health": true, "i18n": true, "insights": true,
 	"login": true, "logout": true, "me": true, "note-titles": true, "notes": true,
-	"preview": true, "projects": true, "refresh": true, "search": true,
+	"preview": true, "projects": true, "query": true, "refresh": true, "search": true,
 	"settings": true, "signup": true, "tags": true, "totp": true, "trash": true,
 	"tree": true, "upload": true, "version": true,
 }
 
 var apiAdminFamilies = map[string]bool{
-	"audit": true, "invites": true, "spa-tokens": true, "tokens": true, "users": true,
+	"audit": true, "export.zip": true, "invites": true, "spa-tokens": true, "tokens": true, "users": true,
 }
 
 // routeLabel collapses URL paths into bounded label values so metrics

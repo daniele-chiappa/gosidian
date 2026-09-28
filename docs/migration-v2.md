@@ -48,7 +48,7 @@ shell catch-all returns the SPA for any unmatched path.
 | `POST /api/attach` HTMX | `POST /api/v1/attach` JSON |
 | `POST /api/upload` HTMX | `POST /api/v1/upload` JSON |
 | `GET /api/i18n` HTMX | `GET /api/v1/i18n` JSON |
-| `GET /api/download-vault` HTML | *deferred to v2.x — re-add as `/api/v1/admin/download-vault` if needed* |
+| `GET /api/download-vault` HTML | `GET /api/v1/admin/export.zip` (since v2.39) |
 
 ### Auth
 - Cookie-session auth (`gosidian_session`) is gone. The SPA uses
@@ -143,13 +143,11 @@ iteration; it also reloads i18n catalogues on save.
 
 ## What's deferred
 
-- `GET /api/download-vault` (whole-vault zip): not in v2.0 — the
-  legacy handler lived in the cookie-session world. Re-add as
-  `GET /api/v1/admin/download-vault` (owner-only) when the use
-  case lands.
-- Per-project zip download (was the v1.13 sidebar icon): same as
-  above, re-add under `/api/v1/projects/<slug>/download` when
-  needed.
+- `GET /api/download-vault` (whole-vault zip) and the per-project
+  zip (the v1.13 sidebar icon): not in v2.0, back in v2.39 as
+  `GET /api/v1/admin/export.zip` (owner only) and
+  `GET /api/v1/projects/<slug>/export.zip` (see
+  [Web UI → Zip export](web-ui/overview.md#zip-export)).
 - Playwright wider E2E (note CRUD / conflict / SSE / search /
   graph): the Phase 7.x canary (`tests/e2e/canary.spec.ts`)
   guards the BUG-009 class today; the suite grows from there.

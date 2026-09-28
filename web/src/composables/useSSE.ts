@@ -39,6 +39,12 @@ type Listener = (payload: SSEPayload) => void
 
 let sharedSource: EventSource | null = null
 let sharedToken = ''
+// Reopening after the browser gave up (see es.onerror): the delay grows
+// from RETRY_MIN_MS to RETRY_MAX_MS and resets once a connection opens.
+const RETRY_MIN_MS = 2000
+const RETRY_MAX_MS = 30000
+let retryDelay = 0
+let retryTimer: ReturnType<typeof setTimeout> | null = null
 const listeners = new Map<SSETopic, Set<Listener>>()
 const status = ref<'idle' | 'connecting' | 'open' | 'closed' | 'error'>('idle')
 
@@ -82,13 +88,23 @@ function connect(token: string, topics: SSETopic[]) {
 
   es.onopen = () => {
     status.value = 'open'
+    retryDelay = 0
   }
   es.onerror = () => {
     status.value = 'error'
-    // Browser EventSource auto-reconnects with exponential backoff;
-    // we just let it. If the underlying token is revoked the next
-    // reconnect lands on a 401 and the API client interceptor
-    // routes the user back to /login.
+    // After a network error the browser reconnects by itself. Any
+    // non-200 answer instead closes the EventSource for good: the 503
+    // the server sends while it starts, a proxy 502 during a restart.
+    // Reopen it ourselves then, with a growing delay, as long as it is
+    // still the current connection.
+    if (es.readyState !== EventSource.CLOSED || sharedSource !== es) return
+    sharedSource = null
+    retryDelay = Math.min(retryDelay ? retryDelay * 2 : RETRY_MIN_MS, RETRY_MAX_MS)
+    const tok = token
+    retryTimer = setTimeout(() => {
+      retryTimer = null
+      if (!sharedSource && sharedToken === tok) connect(tok, [])
+    }, retryDelay)
   }
   // Wire each topic explicitly. The default `message` handler isn't
   // useful because we always send named events from the server.
@@ -101,6 +117,11 @@ function connect(token: string, topics: SSETopic[]) {
 }
 
 function disconnect() {
+  if (retryTimer) {
+    clearTimeout(retryTimer)
+    retryTimer = null
+  }
+  retryDelay = 0
   if (sharedSource) {
     sharedSource.close()
     sharedSource = null
