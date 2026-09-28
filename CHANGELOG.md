@@ -8,6 +8,107 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.38.0] — 2026-09-28 — "feedback"
+
+A round of fixes from a real upgrade: an agent moving another instance
+to v2.37.0 reported what got in its way, and each report was checked and
+fixed here. Startup is several times faster, refused tokens and ignored
+arguments now say why, and the settings page shows what the server
+actually runs with. Pull the image and restart; nothing to migrate. One
+behaviour change to know about: `gosidian user setup` no longer wipes
+the accounts (see Changed).
+
+### Added
+- **`access` in `memory_self_stats` and `memory_bootstrap`** — every
+  project the token reaches with its live level (`read` or `write`), and
+  the level on the project being bootstrapped. A write-scoped token can
+  still be read-only where its account holds only a read grant; agents
+  now learn that before planning writes, not from the first refusal.
+- **Unknown tool arguments are reported** — an argument a tool does not
+  declare is still ignored, but the result now ends with a note naming
+  it and the likely intended one (`Project` → `project`), and the server
+  logs it. `memory_search` also accepts `project` as shorthand for
+  `projects: [project]`; a misspelled filter no longer passes for an
+  applied one.
+- **`gosidian version`** (also `--version`) prints the build version.
+- **Boot warning for orphaned tokens** — tokens whose owning account is
+  missing or disabled are refused on every request; the log now lists
+  them at startup.
+
+### Changed
+- **`gosidian user setup` resets the owner in place** — run with the
+  owner's username (typically after a forgotten password) it sets a new
+  password, and a new TOTP secret with `--totp`, keeping the account id,
+  every other account and every static MCP token. Before, it replaced
+  the whole accounts file with a new owner: member accounts were deleted
+  and CLI tokens, which belong to the owner, were refused from then on.
+  Any other username on an instance with accounts is refused; the old
+  behaviour needs `--replace`.
+- **Startup several times faster** — the server does not listen until
+  the vault scan ends, and the scan made thousands of small SQLite
+  commits, each synced to disk, plus a link resolution that rescanned
+  the links table for every note. The index now uses
+  `synchronous=NORMAL` (safe in WAL mode for a derived index), batches
+  link updates per note and resolves links once after the scan: 30 s to
+  4 s on a 773-note vault in a benchmark, 32–42 s to 9 s on a production
+  host, and far more on slow disks where it took minutes. MCP clients
+  with an open session now reconnect after a restart instead of giving
+  up. The scan also drops notes whose file is gone.
+- **A refused MCP token says why** — a valid token whose owning account
+  was deleted or disabled gets `401` with `error="invalid_token"`, one
+  whose account can read no project `403` with
+  `error="insufficient_scope"`, each with an `error_description`, on
+  `/mcp`, `/mcp/sse` and the byte endpoints; the server logs the cause.
+  A wrong or revoked token still gets the plain `401`.
+- **`memory_stale` with `exclude_closed`** now defaults to the
+  bootstrap digest's 90-day cutoff, so the flag alone lists exactly what
+  `maintenance.stale_count` counts; the response reports the cutoff used
+  and whether `limit` cut the list.
+
+### Fixed
+- **Settings showed the file, not the running config** —
+  `/api/v1/settings` ignored the `GOSIDIAN_*` environment, so features
+  switched on by env (agent anchors, global projects, the git author…)
+  showed as off, and the Projects page warned that `use_anchors` /
+  `use_globals` had no effect when they did. It now returns the
+  effective values plus `env_overrides`; the settings page shows those
+  fields read-only, and a change to one is refused instead of being
+  undone at the next start. Git push can be enabled when the remote
+  comes from the environment.
+- **Token lists** — `gosidian token list` and Admin → Tokens labelled
+  every token without a project list `(admin)`, including the *inherit*
+  tokens of restricted accounts. `(admin)` is now reserved to CLI and
+  owner tokens, others read `(inherit)`; both lists show the owning
+  account, and Admin → Tokens lists the projects of multi-project tokens
+  (shown as `—` before).
+- **`/.well-known/*`** paths gosidian does not serve returned the web UI
+  page with `200`; with OAuth off that included the OAuth discovery
+  documents, so MCP clients hit a parse error. They now return `404`.
+- **MCP handshake version** — `serverInfo.version` was a fixed `0.1.0`;
+  it is now the build version, as on `/healthz`.
+- **Docs** — the shell example in the client setup page opens a session
+  before calling `tools/list` (it got `404 Invalid session ID`); the
+  bootstrap fields, the grant management rights of project admins and
+  the scoped-token behaviour of 22 tool descriptions (an out-of-scope
+  project is refused, not replaced) now match the server.
+
+### Security
+- **Owner-only projects through the v2.30 access-model upgrade** —
+  upgrading from before v2.30 with member accounts made the private
+  global project and the self-improvement project `internal`, with a
+  write grant for every member. The migration now keeps them private
+  without member grants, and the self-improvement project is made
+  private at boot when it has no visibility yet. **Already on v2.30 or
+  later with member accounts?** Open both projects' settings, set them
+  to private and remove the grants you did not mean to give.
+- **Owner password reset ends sessions** — `user setup` on the owner
+  ends its web sessions and OAuth grants, since the old password may
+  have leaked; static MCP tokens keep working.
+- **Settings for members** — members see the git remote without the
+  credentials a URL may carry.
+- **Two-factor policy** — saving unrelated settings no longer pushes the
+  file's two-factor policy live over one set by the environment.
+
 ## [2.37.0] — 2026-09-26 — "query"
 
 Notes can be selected by their frontmatter — status, type, dates,

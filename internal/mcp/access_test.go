@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -282,5 +283,90 @@ func TestCreateProject_PinsDefaultVisibility(t *testing.T) {
 	}
 	if f.projects.Get("delta").Visibility != projects.VisibilityInternal {
 		t.Error("visibility must be written to the store")
+	}
+}
+
+// A refused token says why: a wrong token is the plain 401, a valid token
+// whose owner is gone a 401 invalid_token, and one whose account can read no
+// project a 403 insufficient_scope — on the transport and the byte endpoints.
+func TestAuthDenial_DistinguishesCauses(t *testing.T) {
+	f := newAccessFixture(t)
+	f.grant(t, "alpha", "m1", projects.LevelWrite)
+	noAccess, _ := f.token(t, "m1", []string{"alpha"}, rw)
+	if err := f.projects.RemoveMember("alpha", "m1"); err != nil {
+		t.Fatal(err)
+	}
+	ownerGone, _ := f.token(t, "ghost", []string{"alpha"}, rw)
+	h := f.s.Handler("/mcp")
+
+	cases := []struct {
+		name, token string
+		status      int
+		errCode     string
+		body        string
+	}{
+		{"wrong token", "not-a-token", http.StatusUnauthorized, "", "unauthorized"},
+		{"owner gone", ownerGone, http.StatusUnauthorized, `error="invalid_token"`, "token owner not found or disabled"},
+		{"no readable project", noAccess, http.StatusForbidden, `error="insufficient_scope"`, "no readable project"},
+	}
+	for _, c := range cases {
+		rec := postMCP(t, h, c.token, "", initializeBody)
+		chal := rec.Header().Get("WWW-Authenticate")
+		if rec.Code != c.status || !strings.HasPrefix(chal, "Bearer ") || !strings.Contains(rec.Body.String(), c.body) {
+			t.Errorf("%s: status=%d challenge=%q body=%q", c.name, rec.Code, chal, rec.Body.String())
+		}
+		if c.errCode == "" && strings.Contains(chal, "error=") {
+			t.Errorf("%s: a wrong token must not get an error code: %q", c.name, chal)
+		}
+		if c.errCode != "" && !strings.Contains(chal, c.errCode) {
+			t.Errorf("%s: challenge %q lacks %s", c.name, chal, c.errCode)
+		}
+
+		req := httptest.NewRequest(http.MethodGet, "/mcp/download?path=alpha/note.md", nil)
+		req.Header.Set("Authorization", "Bearer "+c.token)
+		brec := httptest.NewRecorder()
+		h.ServeHTTP(brec, req)
+		if brec.Code != c.status || !strings.Contains(brec.Header().Get("Content-Type"), "application/json") {
+			t.Errorf("%s /download: status=%d content-type=%q", c.name, brec.Code, brec.Header().Get("Content-Type"))
+		}
+	}
+}
+
+// memory_self_stats and memory_bootstrap tell a token where it may write: a
+// read+write token whose account holds write on alpha and read on beta sees
+// alpha=write, beta=read, and gamma (no grant) not at all.
+func TestTokenAccess_ReportsLiveLevels(t *testing.T) {
+	f := newAccessFixture(t)
+	f.grant(t, "alpha", "m1", projects.LevelWrite)
+	f.grant(t, "beta", "m1", projects.LevelRead)
+	_, tok := f.token(t, "m1", nil, rw)
+	eff := f.s.effectiveToken(tok)
+	if eff == nil {
+		t.Fatal("token refused")
+	}
+
+	got := map[string]string{}
+	for _, a := range f.s.tokenAccess(eff) {
+		got[a.Project] = a.Level
+	}
+	if len(got) != 2 || got["alpha"] != "write" || got["beta"] != "read" {
+		t.Errorf("access = %v, want alpha=write beta=read", got)
+	}
+
+	ctx := context.WithValue(context.Background(), tokenCtxKey, eff)
+	res, _ := f.s.handleBootstrap(ctx, call(map[string]any{"project": "beta"}))
+	if !strings.Contains(resultText(t, res), `"access":"read"`) {
+		t.Errorf("bootstrap on beta should say access read: %.300s", resultText(t, res))
+	}
+
+	// An unscoped CLI token reaches every project with write.
+	cli := auth.AdminToken()
+	for _, a := range f.s.tokenAccess(cli) {
+		if a.Level != "write" {
+			t.Errorf("admin token: %s=%s", a.Project, a.Level)
+		}
+	}
+	if n := len(f.s.tokenAccess(cli)); n != 3 {
+		t.Errorf("admin token should reach the 3 projects, got %d", n)
 	}
 }

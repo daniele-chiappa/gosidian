@@ -52,7 +52,7 @@ const defaultTemplate = "karpathy-wiki"
 func (s *Server) registerScaffoldTool() {
 	s.impl.AddTool(mcp.NewTool("memory_project_scaffold",
 		mcp.WithDescription("Populate a project with a bootstrap template. Templates live under <vault>/.gosidian/templates/<name>/ and can be inspected with memory_list_bootstrap_templates. Idempotent — existing files are skipped, never overwritten. Default template is \"karpathy-wiki\" (full Karpathy-Wiki-Stack layout); pass template=\"minimal\" for a lightweight scaffold or template=\"team\" for the team-oriented preset with pre-populated agents/."),
-		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder) to scaffold. The folder does not need to exist yet. Scoped tokens are forced to their project.")),
+		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder) to scaffold. The folder does not need to exist yet. "+scopedProjectNote)),
 		mcp.WithString("template", mcp.Description("Template name (directory under .gosidian/templates/). Defaults to \"karpathy-wiki\". Use memory_list_bootstrap_templates to discover what's installed.")),
 		mcp.WithObject("variables", mcp.Description("Override map for template placeholders. Only variables declared in the template's _template.toml as `required` (without `auto` or `default`) need to be supplied; PROJECT and TODAY are filled automatically.")),
 	), s.handleProjectScaffold)

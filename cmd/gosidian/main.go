@@ -91,6 +91,9 @@ func main() {
 		case "mirror":
 			runMirrorCmd(os.Args[2:])
 			return
+		case "version", "--version", "-version":
+			os.Stdout.WriteString(version + "\n")
+			return
 		}
 	}
 
@@ -232,6 +235,7 @@ func main() {
 			log.Printf("auth: migrated %d ownerless token(s) to owner %s", updated, owner.Username)
 		}
 	}
+	warnDanglingTokenOwners(tokenStore, webauthStore)
 
 	cfgPath := filepath.Join(hiddenDir, "config.toml")
 	cfg, err := config.Load(cfgPath)
@@ -310,13 +314,16 @@ func main() {
 				seed = append(seed, u.ID)
 			}
 		}
-		rep, err := projectsStore.MigrateAccessModel(names, seed)
+		rep, err := projectsStore.MigrateAccessModel(names, seed, ownerOnlyProjects(cfg))
 		if err != nil {
 			log.Fatalf("projects: access model migration: %v", err)
 		}
 		if rep.Applied {
 			log.Printf("projects: access model migrated (%d projects, %d write grants seeded, legacy members mode=%v, default visibility for new projects=%s)",
 				rep.Projects, rep.GrantsSeeded, rep.LegacyMembersMode, rep.DefaultVisibility)
+			if len(rep.OwnerOnly) > 0 {
+				log.Printf("projects: %v kept private with no member grants (reserved to the owner by configuration)", rep.OwnerOnly)
+			}
 		}
 	}
 	// A new account starts with its personal project (IMP-101 phase 3): a
@@ -365,13 +372,16 @@ func main() {
 			log.Printf("global: seeded templates %v under %s/templates/", seeded, cfg.Global.PublicProject)
 		}
 	}
+	// Raw insights are for the owner's triage. The project is created lazily
+	// by the first insight, so on an upgraded installation (default internal)
+	// it would otherwise be readable by every member.
+	if cfg.SelfImprove.Enabled {
+		ensureVisibility(projectsStore, cfg.SelfImprove.TargetProject, projects.VisibilityPrivate)
+	}
 
 	log.Printf("scanning vault %s", absVault)
 	if err := v.ScanInto(idx); err != nil {
 		log.Fatalf("scan: %v", err)
-	}
-	if err := idx.ResolveAll(); err != nil {
-		log.Fatalf("resolve links: %v", err)
 	}
 	if all, err := idx.AllNotes(); err == nil {
 		metrics.NotesGauge.Set(float64(len(all)))
@@ -456,6 +466,7 @@ func main() {
 	// mode is the recommended deployment shape (one SSH tunnel forwards
 	// :8080 and exposes both web UI and MCP). The legacy standalone listener
 	// is opt-in via --mcp-addr / GOSIDIAN_MCP_ADDR for backward compatibility.
+	mcpsrv.Version = version
 	mcpServer := mcpsrv.New(v, idx, tokenStore)
 	mcpServer.SetAuditLog(auditLog)
 	mcpServer.SetWriteLimits(cfg.MCP.WritePerMinute, cfg.MCP.MaxNoteBytes)

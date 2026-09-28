@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { getSettings, updateSettings, type Settings } from '@/api/settings'
 import { useAuthStore } from '@/stores/auth'
 import { useUIStore, type LocaleCode, type ThemePreset } from '@/stores/ui'
@@ -98,6 +98,23 @@ const saving = ref(false)
 const message = ref<string | null>(null)
 const error = ref<string | null>(null)
 
+// Settings a GOSIDIAN_* environment variable sets: shown with their effective
+// value but read-only, and left out of the save (the env would win anyway).
+const envOverrides = computed(() => data.value?.env_overrides ?? [])
+function fromEnv(key: string): boolean {
+  return envOverrides.value.includes(key)
+}
+function withoutEnvFields<T extends object>(body: T): T {
+  for (const key of envOverrides.value) {
+    const parts = key.split('.')
+    const last = parts.pop()
+    let node = body as Record<string, unknown> | undefined
+    for (const p of parts) node = node?.[p] as Record<string, unknown> | undefined
+    if (node && last) delete node[last]
+  }
+  return body
+}
+
 function hydrate(s: Settings) {
   data.value = s
   draft.git = {
@@ -135,7 +152,7 @@ async function save() {
   error.value = null
   message.value = null
   try {
-    const result = await updateSettings({
+    const result = await updateSettings(withoutEnvFields({
       git: { ...draft.git },
       trash: { ...draft.trash },
       i18n: {
@@ -148,7 +165,7 @@ async function save() {
       totp_mode: draft.totp_mode,
       default_visibility: draft.default_visibility,
       personal_projects: draft.personal_projects,
-    })
+    }))
     hydrate(result)
     message.value = 'Saved.'
   } catch (e) {
@@ -177,6 +194,7 @@ onMounted(load)
         <span class="text-text-muted">Global policy</span>
         <select
           v-model="draft.totp_mode"
+          :disabled="fromEnv('totp_mode')"
           class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
           @change="save"
         >
@@ -322,12 +340,16 @@ onMounted(load)
       class="space-y-8"
       @submit.prevent="save"
     >
+      <p v-if="envOverrides.length" class="text-sm text-text-muted">
+        Set by environment variables, so read-only here:
+        <code class="font-mono text-xs">{{ envOverrides.join(', ') }}</code>.
+      </p>
       <fieldset class="rounded border border-border bg-surface p-4 space-y-3">
         <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">Git sync</legend>
         <label class="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
-            :disabled="!auth.isOwner"
+            :disabled="!auth.isOwner || fromEnv('git.enabled')"
             v-model="draft.git.enabled"
           />
           <span>Enabled</span>
@@ -336,7 +358,7 @@ onMounted(load)
           <span class="text-text-muted">Remote</span>
           <input
             v-model.trim="draft.git.remote"
-            :disabled="!auth.isOwner"
+            :disabled="!auth.isOwner || fromEnv('git.remote')"
             class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2"
           />
         </label>
@@ -345,7 +367,7 @@ onMounted(load)
             <span class="text-text-muted">Branch</span>
             <input
               v-model.trim="draft.git.branch"
-              :disabled="!auth.isOwner"
+              :disabled="!auth.isOwner || fromEnv('git.branch')"
               class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2"
             />
           </label>
@@ -353,7 +375,7 @@ onMounted(load)
             <span class="text-text-muted">Debounce (ms)</span>
             <input
               v-model.number="draft.git.debounce_ms"
-              :disabled="!auth.isOwner"
+              :disabled="!auth.isOwner || fromEnv('git.debounce_ms')"
               type="number"
               min="1000"
               class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2"
@@ -363,7 +385,7 @@ onMounted(load)
         <label class="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
-            :disabled="!auth.isOwner"
+            :disabled="!auth.isOwner || fromEnv('git.push')"
             v-model="draft.git.push"
           />
           <span>Push to remote on commit</span>
@@ -372,7 +394,7 @@ onMounted(load)
           <span class="text-text-muted">Token env var name</span>
           <input
             v-model.trim="draft.git.token_env"
-            :disabled="!auth.isOwner"
+            :disabled="!auth.isOwner || fromEnv('git.token_env')"
             placeholder="GITEA_TOKEN"
             class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 font-mono"
           />
@@ -384,7 +406,7 @@ onMounted(load)
         <label class="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
-            :disabled="!auth.isOwner"
+            :disabled="!auth.isOwner || fromEnv('trash.enabled')"
             v-model="draft.trash.enabled"
           />
           <span>Enabled (soft-delete instead of hard-delete)</span>
@@ -393,7 +415,7 @@ onMounted(load)
           <span class="text-text-muted">Retention (ms, 0 = forever)</span>
           <input
             v-model.number="draft.trash.retention_ms"
-            :disabled="!auth.isOwner"
+            :disabled="!auth.isOwner || fromEnv('trash.retention_ms')"
             type="number"
             min="0"
             class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2"
@@ -408,7 +430,7 @@ onMounted(load)
             <span class="text-text-muted">Default language</span>
             <input
               v-model.trim="draft.i18n.default_lang"
-              :disabled="!auth.isOwner"
+              :disabled="!auth.isOwner || fromEnv('i18n.default_lang')"
               class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2"
             />
           </label>
@@ -416,7 +438,7 @@ onMounted(load)
             <span class="text-text-muted">Enabled (comma-separated)</span>
             <input
               v-model.trim="draft.i18n.enabled_langs"
-              :disabled="!auth.isOwner"
+              :disabled="!auth.isOwner || fromEnv('i18n.enabled_langs')"
               class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2"
             />
           </label>

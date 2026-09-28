@@ -12,6 +12,7 @@ import (
 
 	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/gosidian/gosidian/internal/statedir"
+	"github.com/gosidian/gosidian/internal/webauth"
 )
 
 // runTokenCmd implements the `gosidian token <action>` subcommand. It opens
@@ -162,8 +163,12 @@ func tokenList(args []string) {
 		fmt.Println("(no tokens — auth disabled)")
 		return
 	}
+	users := map[string]webauth.User{}
+	for _, u := range openWebauth(*vaultDir, *stateDirFlag).ListUsers() {
+		users[u.ID] = u
+	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tNAME\tPROJECT\tSCOPES\tCREATED\tEXPIRES\tSELF-IMPROVE\tPROFILE")
+	fmt.Fprintln(w, "ID\tNAME\tOWNER\tPROJECT\tSCOPES\tCREATED\tEXPIRES\tSELF-IMPROVE\tPROFILE")
 	for _, t := range tokens {
 		exp := "-"
 		if !t.ExpiresAt.IsZero() {
@@ -177,13 +182,39 @@ func tokenList(args []string) {
 		if profile == "" {
 			profile = "full"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			t.ID, t.Name, t.ScopeLabel(),
+		u, found := users[t.OwnerUserID]
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			t.ID, t.Name, ownerLabel(t, u, found), storedScopeLabel(t, u, found),
 			strings.Join(t.Scopes, ","),
 			t.CreatedAt.Format("2006-01-02"),
 			exp, si, profile)
 	}
 	_ = w.Flush()
+}
+
+// ownerLabel names the account a token belongs to: "-" for a CLI token,
+// flagged when the account is gone or disabled (the server then refuses it).
+func ownerLabel(t auth.Token, u webauth.User, found bool) string {
+	switch {
+	case t.OwnerUserID == "":
+		return "-"
+	case !found:
+		return t.OwnerUserID + " (missing)"
+	case !u.Enabled():
+		return u.Username + " (disabled)"
+	}
+	return u.Username
+}
+
+// storedScopeLabel is ScopeLabel for a token as stored rather than as the
+// server narrows it per request: an empty project list is admin only for a
+// CLI token or one owned by the owner account; any other account's token
+// inherits that account's live access (BUG-062).
+func storedScopeLabel(t auth.Token, u webauth.User, found bool) string {
+	if len(t.ProjectList()) > 0 || t.OwnerUserID == "" || (found && u.Role == webauth.RoleOwner) {
+		return t.ScopeLabel()
+	}
+	return "(inherit)"
 }
 
 func tokenRevoke(args []string) {
@@ -258,4 +289,29 @@ func splitCSV(csv string) []string {
 		}
 	}
 	return out
+}
+
+// warnDanglingTokenOwners logs, at boot, the tokens whose owning account no
+// longer resolves or is disabled. The server refuses them on every request
+// (fail closed), so without this line a batch of valid-looking tokens would
+// start failing with nothing in the log saying why — typically after the
+// owner account was recreated with a new id.
+func warnDanglingTokenOwners(tokens *auth.Store, accounts *webauth.Store) {
+	users := map[string]webauth.User{}
+	for _, u := range accounts.ListUsers() {
+		users[u.ID] = u
+	}
+	var ids []string
+	for _, t := range tokens.List() {
+		if t.OwnerUserID == "" {
+			continue
+		}
+		if u, ok := users[t.OwnerUserID]; !ok || !u.Enabled() {
+			ids = append(ids, t.ID)
+		}
+	}
+	if len(ids) > 0 {
+		log.Printf("auth: WARNING %d MCP token(s) belong to a missing or disabled account and are refused: %s (see `gosidian token list`, OWNER column)",
+			len(ids), strings.Join(ids, ","))
+	}
 }

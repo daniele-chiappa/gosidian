@@ -537,6 +537,34 @@ func (s *Store) RevokeByOwner(userID string) int {
 	return removed
 }
 
+// RevokeOAuthByOwner deletes the OAuth grants (Kind == KindOAuth) owned by
+// userID and returns how many. Static bearers are left alone: resetting a
+// password must end what a browser consent created, not the integrations
+// minted on purpose.
+func (s *Store) RevokeOAuthByOwner(userID string) int {
+	if userID == "" {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reloadIfStale()
+	kept := s.tokens[:0]
+	removed := 0
+	for _, t := range s.tokens {
+		if t.OwnerUserID == userID && t.Kind == KindOAuth {
+			removed++
+			continue
+		}
+		kept = append(kept, t)
+	}
+	if removed == 0 {
+		return 0
+	}
+	s.tokens = kept
+	_ = s.save()
+	return removed
+}
+
 // AssignOwnerToOrphans fills the OwnerUserID field of every token that
 // doesn't have one with the provided userID. Used on startup after v1.4
 // migration to retro-assign legacy tokens to the owner. Returns the number

@@ -31,6 +31,14 @@ func (s *Server) handleSPA(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	// /.well-known/* is machine discovery, never a router target. With
+	// OAuth off (or any document we don't serve) the shell would answer
+	// 200 text/html, and an MCP client probing discovery after a 401 would
+	// hit a parse error instead of a clean "not supported".
+	if strings.HasPrefix(r.URL.Path, "/.well-known/") {
+		http.NotFound(w, r)
+		return
+	}
 	if looksLikeAsset(r.URL.Path) {
 		http.NotFound(w, r)
 		return

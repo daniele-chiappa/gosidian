@@ -30,9 +30,9 @@ codice, fai il bootstrap della memoria con una singola call:
 mcp__gosidian__memory_bootstrap({project: "{{PROJECT}}"})
 ```
 
-Ritorna in un solo JSON: `hot_md_content`, `readme_content`,
-`active_plans[]`, `available_skills[]`, `available_agents[]`,
-`recent_notes[]`, `project_stats`, `missing[]` e **`directives_block`** —
+Ritorna in un solo JSON: `hot_md` e `readme` (`{present, path, content,
+etag}`), `active_plans[]`, `available_skills[]`, `available_agents[]`,
+`recent_notes[]`, `stats`, `access`, `missing[]` e **`directives_block`** —
 le **direttive operative complete** (mappa cartelle vault, ingest rules,
 regole plan, workflow end-of-task, vocabolario tag). **Leggi e segui
 `directives_block`**: è la fonte autoritativa delle regole di lavoro,

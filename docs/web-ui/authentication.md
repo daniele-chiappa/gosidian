@@ -24,7 +24,7 @@ grants it holds (next section).
 | Create projects (becoming their admin; capability can be withdrawn) | ✅ | ✅ | — |
 | Change a project's settings, rename, delete (with an admin grant) | ✅ | ✅ | — |
 | Make a project **public** | ✅ | — | — |
-| Manage grants (Projects → Members) | ✅ | — | — |
+| Manage grants (Projects → Members; with an admin grant) | ✅ | ✅ | — |
 | Mint own MCP tokens (Settings → My MCP tokens) | ✅ | ✅ | ✅ (read) |
 | Connect MCP clients through OAuth | ✅ | ✅ | ✅ (read) |
 | Manage users, invites, roles | ✅ | — | — |

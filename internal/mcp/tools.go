@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"slices"
 	"strings"
 	"time"
 
@@ -93,6 +94,7 @@ func (s *Server) registerTools() {
 		mcp.WithBoolean("include_outline", mcp.Description("When true, each hit also carries an `outline` array (heading level/text/id). Default false.")),
 		mcp.WithBoolean("include_frontmatter", mcp.Description("When true, each hit also carries a `frontmatter` map with the parsed YAML fields. Default false.")),
 		mcp.WithArray("projects", mcp.Description("Optional list of top-level folder names (e.g. [\"gosidian\",\"dockers\"]) to restrict results to. Empty = vault-wide. Scoped tokens silently intersect this list with their project scope (never expand it).")),
+		mcp.WithString("project", mcp.Description("A single top-level folder name: shorthand for projects: [project], merged with projects when both are given.")),
 	), s.handleSearch)
 
 	s.impl.AddTool(mcp.NewTool("memory_list_notes",
@@ -105,12 +107,12 @@ func (s *Server) registerTools() {
 	), s.handleListProjects)
 
 	s.impl.AddTool(mcp.NewTool("memory_list_tags",
-		mcp.WithDescription("List tags with usage counts. When `project` is given, counts are scoped to notes under that project prefix; otherwise they are vault-wide. Scoped tokens are forced to their project."),
+		mcp.WithDescription("List tags with usage counts. When `project` is given, counts are scoped to notes under that project prefix; otherwise they are vault-wide. "+scopedProjectNote),
 		mcp.WithString("project", mcp.Description("Optional project (top-level folder) to scope the tag counts. Empty = vault-wide.")),
 	), s.handleListTags)
 
 	s.impl.AddTool(mcp.NewTool("memory_notes_by_tag",
-		mcp.WithDescription("List notes that carry a specific tag. Pass `project` to restrict the results to one top-level folder. Scoped tokens are forced to their project."),
+		mcp.WithDescription("List notes that carry a specific tag. Pass `project` to restrict the results to one top-level folder. "+scopedProjectNote),
 		mcp.WithString("tag", mcp.Required(), mcp.Description("Tag name, without the leading '#'.")),
 		mcp.WithString("project", mcp.Description("Optional project (top-level folder) to filter by.")),
 	), s.handleNotesByTag)
@@ -137,7 +139,7 @@ func (s *Server) registerTools() {
 
 	s.impl.AddTool(mcp.NewTool("memory_recent",
 		mcp.WithDescription("List the most recently modified notes. Use to catch up with 'what changed since I was last here'. Returns path, title, and mtime (unix seconds) ordered by descending mtime."),
-		mcp.WithString("project", mcp.Description("Optional project (top-level folder) to scope the query. Scoped tokens are forced to their project.")),
+		mcp.WithString("project", mcp.Description("Optional project (top-level folder) to scope the query. "+scopedProjectNote)),
 		mcp.WithNumber("limit", mcp.Description("Max notes to return (default 20, max 500).")),
 		mcp.WithString("since", mcp.Description("Lower bound on mtime. Accepts a relative duration ('1h', '24h', '7d') or an RFC3339 timestamp. Empty means 'no lower bound'.")),
 	), s.handleRecent)
@@ -287,6 +289,10 @@ func (s *Server) handleSearch(ctx context.Context, req mcp.CallToolRequest) (*mc
 	// project (never expand). The filter runs inside the index query, so the
 	// limit counts only notes the caller may see (BUG-058).
 	requestedProjects := req.GetStringSlice("projects", nil)
+	// `project` (singular, as most tools take it) is shorthand for one entry.
+	if p := strings.TrimSpace(req.GetString("project", "")); p != "" && !slices.Contains(requestedProjects, p) {
+		requestedProjects = append(requestedProjects, p)
+	}
 	// Reject explicit hidden projects with a clear error so the caller knows
 	// why the result is empty. Vault-wide search (no projects[] arg) silently
 	// drops hits from hidden projects further down.
@@ -440,7 +446,7 @@ func (s *Server) handleListTags(ctx context.Context, req mcp.CallToolRequest) (*
 	if errRes != nil {
 		return errRes, nil
 	}
-	// Scoped tokens are forced to their project(s) (parity with memory_list_notes).
+	// The project goes through scopedProject (parity with memory_list_notes).
 	project, err := scopedProject(tok, req.GetString("project", ""))
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil

@@ -187,6 +187,44 @@ func TestMCP_Stale(t *testing.T) {
 	if len(got) != 1 || got[0].Path != "proj/memory/old.md" || got[0].Closed {
 		t.Errorf("exclude_closed should leave only old.md, got %+v", got)
 	}
+
+	// Without older_than, exclude_closed takes the digest's 90d cutoff: the
+	// 60-day-old note is not in maintenance.stale_count, so not listed here.
+	res, _ := s.handleStale(context.Background(), call(map[string]any{"project": proj, "exclude_closed": true}))
+	var p struct {
+		Notes     []staleNoteResponse `json:"notes"`
+		OlderThan string              `json:"older_than"`
+	}
+	if err := json.Unmarshal([]byte(resultText(t, res)), &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.OlderThan != "90d" || len(p.Notes) != 0 {
+		t.Errorf("exclude_closed default cutoff: older_than=%q notes=%+v", p.OlderThan, p.Notes)
+	}
+	// Without the flag the default stays 30d.
+	res, _ = s.handleStale(context.Background(), call(map[string]any{"project": proj}))
+	if err := json.Unmarshal([]byte(resultText(t, res)), &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.OlderThan != "30d" || len(p.Notes) != 2 {
+		t.Errorf("default cutoff: older_than=%q notes=%+v", p.OlderThan, p.Notes)
+	}
+
+	// truncated says whether the limit cut the list: two stale notes fit a
+	// limit of 2 exactly, a limit of 1 cuts one.
+	for limit, want := range map[int]bool{2: false, 1: true} {
+		res, _ = s.handleStale(context.Background(), call(map[string]any{"project": proj, "limit": limit}))
+		var q struct {
+			Notes     []staleNoteResponse `json:"notes"`
+			Truncated bool                `json:"truncated"`
+		}
+		if err := json.Unmarshal([]byte(resultText(t, res)), &q); err != nil {
+			t.Fatal(err)
+		}
+		if q.Truncated != want || len(q.Notes) != limit {
+			t.Errorf("limit %d: truncated=%v notes=%d, want truncated=%v", limit, q.Truncated, len(q.Notes), want)
+		}
+	}
 }
 
 func TestMCP_Stale_RejectInvalidOlderThan(t *testing.T) {

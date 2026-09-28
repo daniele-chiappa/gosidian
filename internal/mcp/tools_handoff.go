@@ -45,7 +45,7 @@ var handoffStatuses = map[string]bool{
 func (s *Server) registerHandoffTools() {
 	s.impl.AddTool(mcp.NewTool("memory_create_handoff",
 		mcp.WithDescription("Create a handoff note that passes context from one agent to another. Stored at <project>/handoffs/YYYYMMDD-HHMMSS-<slug>.md with frontmatter {type: handoff, from_agent, to_agent, status: pending, created_by}. created_by is stamped server-side from the caller's token identity; from_agent/to_agent are declarative role slugs. The destination agent picks it up via memory_pending_handoffs, takes it in charge with memory_claim_handoff and closes it with memory_complete_handoff. Use this instead of an ad-hoc note when control switches between specialized agents during a task."),
-		mcp.WithString("project", mcp.Required(), mcp.Description("Target project (top-level folder). Scoped tokens are forced to their project.")),
+		mcp.WithString("project", mcp.Required(), mcp.Description("Target project (top-level folder). "+scopedProjectNote)),
 		mcp.WithString("from_agent", mcp.Required(), mcp.Description("Slug of the source agent (e.g. 'go-backend').")),
 		mcp.WithString("to_agent", mcp.Required(), mcp.Description("Slug of the destination agent (e.g. 'web-ui-htmx').")),
 		mcp.WithString("summary", mcp.Required(), mcp.Description("One-paragraph summary of what was done and why the handoff is happening.")),
@@ -54,7 +54,7 @@ func (s *Server) registerHandoffTools() {
 
 	s.impl.AddTool(mcp.NewTool("memory_pending_handoffs",
 		mcp.WithDescription("List handoff notes under a project, filtered by lifecycle status (default: pending) and optionally by destination agent. Use at session start when taking over from another agent, or with status=claimed/done to monitor handoffs in flight."),
-		mcp.WithString("project", mcp.Required(), mcp.Description("Project to search in. Scoped tokens are forced to their project.")),
+		mcp.WithString("project", mcp.Required(), mcp.Description("Project to search in. "+scopedProjectNote)),
 		mcp.WithString("for_agent", mcp.Description("Destination agent slug; matches frontmatter to_agent exactly. Omit to list handoffs addressed to any agent.")),
 		mcp.WithString("status", mcp.Description("Lifecycle filter: pending (default), claimed, done, rejected, or all.")),
 	), s.handlePendingHandoffs)

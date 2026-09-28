@@ -107,7 +107,8 @@ func (s *Server) MountMCP(handler http.Handler) {
 // MountOAuth wires the OAuth authorization-server endpoints (IMP-092) at the
 // exact paths the handler serves: the RFC 8414 / RFC 9728 discovery documents
 // under /.well-known/ and the /oauth/* endpoints. Registered individually so
-// the SPA fallback keeps every other /.well-known/* path.
+// the SPA keeps its /oauth/consent route; every other /.well-known/* path
+// falls through to handleSPA, which answers 404.
 func (s *Server) MountOAuth(paths []string, handler http.Handler) {
 	for _, p := range paths {
 		s.mux.Handle(p, handler)

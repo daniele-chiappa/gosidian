@@ -37,10 +37,9 @@ func (s *Server) handleHTTPManifest(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed: GET ?project=<project>")
 		return
 	}
-	tok := s.authenticate(r)
+	tok, why := s.authenticateWhy(r)
 	if tok == nil {
-		w.Header().Set("WWW-Authenticate", s.wwwAuthenticate())
-		writeJSONError(w, http.StatusUnauthorized, "missing or invalid bearer token")
+		s.denyAuth(w, why, true)
 		return
 	}
 	if !tok.HasScope(auth.ScopeRead) {

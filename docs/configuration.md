@@ -77,7 +77,10 @@ Settings come from four sources, in decreasing precedence:
 
 The `config.toml` at `<state-dir>/config.toml` holds the
 persistent form of the same settings and is edited from the web UI at
-`/settings`. Env vars override the file on every start.
+`/settings`. Env vars override the file on every start. The settings
+page and `GET /api/v1/settings` show the effective values (file + env +
+defaults) and list the env-set fields in `env_overrides`: those are
+read-only there, and a `PUT` that changes one is refused.
 
 > **Secrets**: prefer `GOSIDIAN_LDAP_BIND_PASSWORD` (env / Docker secret)
 > over writing `ldap.bind_password` into `config.toml` — the `/settings`
@@ -177,9 +180,10 @@ gosidian [flags]                         # start the server
 gosidian token create --vault <path> --name <s> [flags]
 gosidian token list   --vault <path>
 gosidian token revoke --vault <path> --id <8hex>
-gosidian user setup   --vault <path> --username <s>
+gosidian user setup   --vault <path> --username <s> [--totp] [--replace]
 gosidian healthcheck  [--addr <host:port>]
 gosidian import-vault --vault <path> [flags]
+gosidian version                         # print the build version (also --version)
 ```
 
 Run `gosidian token -h` etc. for per-subcommand options.

@@ -385,3 +385,44 @@ func TestAuthenticate_LDAPCollisionRefusesLocalAccount(t *testing.T) {
 		t.Fatalf("local account must be left untouched: %+v ok=%v", local, ok)
 	}
 }
+
+// Setup on the existing owner's username resets that account in place: new
+// password, same id, other accounts kept. Any other username on a populated
+// store is refused; Replace is the explicit wipe (the old Setup).
+func TestSetup_ResetsOwnerInPlace(t *testing.T) {
+	s := newStore(t)
+	ownerID := setupOwner(t, s, "admin", "firstpassword")
+	if _, err := s.AddUser("alice", "alicepass1", RoleMember); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.Setup("admin", "secondpassword", false, "Gosidian"); err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+	if u := s.FirstOwner(); u == nil || u.ID != ownerID {
+		t.Fatalf("owner id changed on reset: %+v", u)
+	}
+	if _, err := s.Verify("admin", "secondpassword", ""); err != nil {
+		t.Errorf("new password rejected: %v", err)
+	}
+	if _, err := s.Verify("admin", "firstpassword", ""); err == nil {
+		t.Error("old password still accepted")
+	}
+	if _, ok := s.UserByUsername("alice"); !ok {
+		t.Error("reset removed another account")
+	}
+
+	if _, err := s.Setup("root", "rootpassword", false, "Gosidian"); !errors.Is(err, ErrSetupWouldReplace) {
+		t.Errorf("new username on a populated store: err = %v, want ErrSetupWouldReplace", err)
+	}
+	if _, err := s.Setup("alice", "alicepass2", false, "Gosidian"); err == nil {
+		t.Error("setup on a member's username must fail")
+	}
+
+	if _, err := s.Replace("root", "rootpassword", false, "Gosidian"); err != nil {
+		t.Fatal(err)
+	}
+	if users := s.ListUsers(); len(users) != 1 || users[0].Username != "root" || users[0].ID == ownerID {
+		t.Errorf("replace must leave only a new owner: %+v", users)
+	}
+}

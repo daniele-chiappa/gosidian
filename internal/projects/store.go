@@ -650,6 +650,9 @@ type MigrationReport struct {
 	GrantsSeeded int
 	// DefaultVisibility is the default chosen for projects created later.
 	DefaultVisibility string
+	// OwnerOnly lists the projects the configuration reserves to the owner
+	// that the migration made private without seeding member grants.
+	OwnerOnly []string
 }
 
 // MigrateAccessModel converts a pre-v2.30 file (Public flag + global
@@ -670,7 +673,13 @@ type MigrationReport struct {
 // created afterwards is private there and internal on an upgraded one, so
 // upgrading changes nothing for existing accounts except that writing a NEW
 // project now takes a grant.
-func (s *Store) MigrateAccessModel(vaultProjects []string, seedUsers []string) (MigrationReport, error) {
+//
+// ownerOnly are the projects the configuration reserves to the owner (the
+// private global project, the self-improve target). Unless the owner had
+// published one, they become private and get no seeded grants: under the
+// legacy default members could reach them, but that contradicted their
+// declared purpose (BUG-061).
+func (s *Store) MigrateAccessModel(vaultProjects, seedUsers, ownerOnly []string) (MigrationReport, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.reloadIfStale()
@@ -699,6 +708,11 @@ func (s *Store) MigrateAccessModel(vaultProjects []string, seedUsers []string) (
 		sorted = append(sorted, n)
 	}
 	sort.Strings(sorted)
+	reserved := map[string]bool{}
+	for _, n := range ownerOnly {
+		reserved[n] = true
+	}
+	noSeed := map[string]bool{}
 
 	for _, n := range sorted {
 		f := s.data[n]
@@ -706,6 +720,10 @@ func (s *Store) MigrateAccessModel(vaultProjects []string, seedUsers []string) (
 			switch {
 			case f.Public:
 				f.Visibility = VisibilityPublic
+			case reserved[n]:
+				f.Visibility = VisibilityPrivate
+				noSeed[n] = true
+				rep.OwnerOnly = append(rep.OwnerOnly, n)
 			case rep.LegacyMembersMode, fresh:
 				f.Visibility = VisibilityPrivate
 			default:
@@ -722,6 +740,9 @@ func (s *Store) MigrateAccessModel(vaultProjects []string, seedUsers []string) (
 				continue
 			}
 			for _, n := range sorted {
+				if noSeed[n] {
+					continue
+				}
 				if _, ok := s.memberLevelLocked(n, u); ok {
 					continue
 				}

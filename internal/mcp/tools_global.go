@@ -20,7 +20,7 @@ import (
 func (s *Server) registerGlobalCheckTool() {
 	s.impl.AddTool(mcp.NewTool("memory_global_check",
 		mcp.WithDescription("Before publishing a project (private→public), list the global-private notes it references via wikilinks, and for each which OTHER projects also reference it. Promoting any of them to the public global (e.g. with memory_move_note) is a deliberate, human-gated step — this tool only reports, it never moves anything. Returns an empty list when the global feature is off or nothing is referenced."),
-		mcp.WithString("project", mcp.Required(), mcp.Description("Project to check (the one you intend to publish). Scoped tokens are forced to their project.")),
+		mcp.WithString("project", mcp.Required(), mcp.Description("Project to check (the one you intend to publish). "+scopedProjectNote)),
 	), s.handleGlobalCheck)
 }
 

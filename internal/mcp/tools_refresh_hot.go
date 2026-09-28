@@ -33,7 +33,7 @@ var adrHeadingRe = regexp.MustCompile(`(?m)^## (ADR-\d+ .*)$`)
 func (s *Server) registerRefreshHotTool() {
 	s.impl.AddTool(mcp.NewTool("memory_refresh_hot",
 		mcp.WithDescription("Rebuild the `## Recent decisions` section of <project>/hot.md from the latest ADRs in memory/decisions.md and the latest plans with status:done. Opt-in: the target section of hot.md must be wrapped in `<!-- auto:recent-decisions -->` / `<!-- /auto -->` markers; without them the tool is a no-op. Safe to re-run; everything outside the markers is preserved verbatim."),
-		mcp.WithString("project", mcp.Required(), mcp.Description("Project whose hot.md to refresh. Scoped tokens are forced to their project.")),
+		mcp.WithString("project", mcp.Required(), mcp.Description("Project whose hot.md to refresh. "+scopedProjectNote)),
 		mcp.WithNumber("limit", mcp.Description("Max number of entries to list (default 5).")),
 	), s.handleRefreshHot)
 }

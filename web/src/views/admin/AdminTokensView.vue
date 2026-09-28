@@ -5,11 +5,16 @@ import {
   createMCPToken,
   revokeMCPToken,
   setMCPTokenOptIn,
+  listUsers,
+  type AdminUser,
   type MCPToken,
   type MCPTokenCreated,
 } from '@/api/admin'
 
 const tokens = ref<MCPToken[]>([])
+const users = ref<Map<string, AdminUser>>(new Map())
+// false when the user list could not be read: labels then avoid guessing.
+const usersLoaded = ref(false)
 const loading = ref(false)
 const error = ref<string | null>(null)
 const fresh = ref<MCPTokenCreated | null>(null)
@@ -25,7 +30,15 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    tokens.value = await listMCPTokens()
+    // The owner column is a convenience: a failed user list must not hide
+    // the tokens.
+    const [list, accounts] = await Promise.all([
+      listMCPTokens(),
+      listUsers().catch(() => null),
+    ])
+    tokens.value = list
+    usersLoaded.value = accounts !== null
+    users.value = new Map((accounts ?? []).map((u) => [u.id, u]))
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Failed to load'
   } finally {
@@ -67,6 +80,23 @@ async function toggleOptIn(t: MCPToken) {
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Update failed'
   }
+}
+
+// An empty project list is admin only for a CLI token or one owned by the
+// owner account; any other account's token follows that account's live
+// access (BUG-062).
+function scopeLabel(t: MCPToken): string {
+  if (t.projects?.length) return t.projects.join(', ')
+  if (t.project) return t.project
+  if (!t.owner_user_id || users.value.get(t.owner_user_id)?.role === 'owner') return '(admin)'
+  return usersLoaded.value ? '(inherit)' : '—'
+}
+
+function ownerLabel(t: MCPToken): string {
+  if (!t.owner_user_id) return '— (CLI)'
+  const u = users.value.get(t.owner_user_id)
+  if (!u) return usersLoaded.value ? `${t.owner_user_id} (missing)` : t.owner_user_id
+  return u.disabled_at ? `${u.username} (disabled)` : u.username
 }
 
 function dismissFresh() {
@@ -123,6 +153,7 @@ onMounted(load)
     <thead class="text-text-muted text-xs uppercase tracking-wide">
       <tr>
         <th class="text-left py-2 px-3">Name</th>
+        <th class="text-left py-2 px-3">Owner</th>
         <th class="text-left py-2 px-3">Project</th>
         <th class="text-left py-2 px-3">Scopes</th>
         <th class="text-left py-2 px-3">Created</th>
@@ -138,7 +169,11 @@ onMounted(load)
         class="border-t border-border"
       >
         <td class="py-2 px-3 font-medium">{{ t.name }}</td>
-        <td class="py-2 px-3">{{ t.project || '—' }}</td>
+        <td class="py-2 px-3">{{ ownerLabel(t) }}</td>
+        <td
+          class="py-2 px-3"
+          :title="scopeLabel(t) === '(inherit)' ? 'Follows the owning account\'s current project access' : undefined"
+        >{{ scopeLabel(t) }}</td>
         <td class="py-2 px-3">
           <span
             v-for="s in t.scopes"

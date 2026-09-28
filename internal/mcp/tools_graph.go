@@ -22,7 +22,7 @@ import (
 // registerGraphTools wires memory_hubs and memory_path into the MCP surface.
 func (s *Server) registerGraphTools() {
 	s.impl.AddTool(mcp.NewTool("memory_hubs",
-		mcp.WithDescription("List the most-connected notes (\"hubs\"/\"god nodes\") ranked by undirected wikilink degree, descending. The inverse signal of orphan notes: hubs are where the vault graph concentrates. Pass `project` to scope to one top-level folder (degree then counts only intra-project links); empty = vault-wide. Scoped tokens are forced to their project."),
+		mcp.WithDescription("List the most-connected notes (\"hubs\"/\"god nodes\") ranked by undirected wikilink degree, descending. The inverse signal of orphan notes: hubs are where the vault graph concentrates. Pass `project` to scope to one top-level folder (degree then counts only intra-project links); empty = vault-wide. "+scopedProjectNote),
 		mcp.WithString("project", mcp.Description("Optional project (top-level folder) to scope the ranking. Empty = vault-wide.")),
 		mcp.WithNumber("limit", mcp.Description("Max hubs to return (default 20, max 100).")),
 	), s.handleHubs)
@@ -46,7 +46,7 @@ func (s *Server) handleHubs(ctx context.Context, req mcp.CallToolRequest) (*mcp.
 	if errRes != nil {
 		return errRes, nil
 	}
-	// Scoped tokens are forced to their project(s) (parity with memory_list_tags).
+	// The project goes through scopedProject (parity with memory_list_tags).
 	project, err := scopedProject(tok, req.GetString("project", ""))
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil

@@ -221,3 +221,33 @@ func TestMCP_Search_AnyOfAndWhy(t *testing.T) {
 		t.Errorf("9 variants must be rejected, got %+v", res)
 	}
 }
+
+// `project` (singular) is shorthand for projects: [project], and merges with
+// projects when both are given.
+func TestMCP_Search_ProjectAlias(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	seedCrossProjectVault(t, s)
+
+	hits := func(args map[string]any) []string {
+		t.Helper()
+		args["query"] = "release"
+		res, _ := s.handleSearch(context.Background(), call(args))
+		var r struct {
+			Hits []searchHit `json:"hits"`
+		}
+		if err := json.Unmarshal([]byte(resultText(t, res)), &r); err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, h := range r.Hits {
+			out = append(out, h.Path)
+		}
+		return out
+	}
+	if got := hits(map[string]any{"project": "gamma"}); len(got) != 1 || !strings.HasPrefix(got[0], "gamma/") {
+		t.Errorf("project alias: %v", got)
+	}
+	if got := hits(map[string]any{"project": "gamma", "projects": []any{"alpha"}}); len(got) != 2 {
+		t.Errorf("project + projects should merge to 2 hits: %v", got)
+	}
+}

@@ -46,6 +46,9 @@ func rpcToolCall(id int, tool string, args map[string]any) string {
 }
 
 func TestStreamable_InitializeAndToolsList(t *testing.T) {
+	prev := Version
+	Version = "v9.9.9-test"
+	t.Cleanup(func() { Version = prev })
 	s, token := serverWithToken(t, "", []string{auth.ScopeRead})
 	h := s.Handler("/mcp")
 
@@ -65,6 +68,10 @@ func TestStreamable_InitializeAndToolsList(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"serverInfo"`) {
 		t.Errorf("initialize result lacks serverInfo: %s", rec.Body.String())
+	}
+	// serverInfo.version is the build version, not a hardcoded placeholder.
+	if !strings.Contains(rec.Body.String(), `"version":"v9.9.9-test"`) {
+		t.Errorf("serverInfo.version is not the build version: %s", rec.Body.String())
 	}
 
 	rec = postMCP(t, h, token, session, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)

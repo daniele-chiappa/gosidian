@@ -355,3 +355,74 @@ func TestExcerpt_StripsFrontmatter(t *testing.T) {
 		t.Errorf("body line missing: %s", w.body)
 	}
 }
+
+// GET returns the effective settings (config.toml + GOSIDIAN_* env, as the
+// server runs) and lists the env-set fields; PUT accepts the effective value
+// echoed back but refuses a different one for an env-set field.
+func TestSettings_EffectiveWithEnvOverrides(t *testing.T) {
+	f := newAdminFixture(t)
+	t.Setenv("GOSIDIAN_ANCHORS_ENABLED", "true")
+	t.Setenv("GOSIDIAN_GIT_AUTHOR_EMAIL", "bot@example.org")
+
+	w := f.doAuthRecorder(http.MethodGet, "/api/v1/settings", "", nil)
+	if w.code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.code, w.body)
+	}
+	var got struct {
+		Git struct {
+			AuthorEmail string `json:"author_email"`
+		} `json:"git"`
+		AnchorsEnabled bool     `json:"anchors_enabled"`
+		EnvOverrides   []string `json:"env_overrides"`
+	}
+	if err := json.Unmarshal([]byte(w.body), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !got.AnchorsEnabled || got.Git.AuthorEmail != "bot@example.org" {
+		t.Errorf("not the effective values: %s", w.body)
+	}
+	if strings.Join(got.EnvOverrides, ",") != "anchors_enabled,git.author_email" {
+		t.Errorf("env_overrides = %v", got.EnvOverrides)
+	}
+
+	// Echoing the effective value is fine; changing an env-set field is not.
+	echo := `{"git":{"author_email":"bot@example.org","branch":"trunk"}}`
+	if w := f.doAuthRecorder(http.MethodPut, "/api/v1/settings", echo, nil); w.code != http.StatusOK {
+		t.Errorf("echo of the effective value refused: %d %s", w.code, w.body)
+	}
+	change := `{"git":{"author_email":"someone@else.org"}}`
+	w = f.doAuthRecorder(http.MethodPut, "/api/v1/settings", change, nil)
+	if w.code != http.StatusBadRequest || !strings.Contains(w.body, "git.author_email") {
+		t.Errorf("change of an env-set field: %d %s", w.code, w.body)
+	}
+}
+
+// A save that does not set totp_mode leaves the live policy alone (the SPA
+// leaves an env-set policy out of its body), and members read the git
+// remote without the credentials a URL may carry; the owner sees it whole.
+func TestSettings_TOTPUntouchedAndRemoteRedacted(t *testing.T) {
+	f := newAdminFixture(t)
+	wa := f.router.deps.Auth.WebAuth
+	wa.SetTOTPMode("optional")
+	if w := f.doAuthRecorder(http.MethodPut, "/api/v1/settings", `{"trash":{"enabled":true}}`, nil); w.code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.code, w.body)
+	}
+	if got := wa.TOTPMode(); got != "optional" {
+		t.Errorf("unrelated save changed the live TOTP mode to %q", got)
+	}
+
+	cfg, _ := config.Load(f.configPath)
+	cfg.Git.Remote = "https://bot:s3cr3t@git.example.com/r.git"
+	if err := config.Save(f.configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	w := f.request(http.MethodGet, "/api/v1/settings", "", map[string]string{
+		"Authorization": "Bearer " + f.memberToken(t),
+	})
+	if body := w.Body.String(); w.Code != http.StatusOK || strings.Contains(body, "s3cr3t") || !strings.Contains(body, "redacted@git.example.com") {
+		t.Errorf("member view: %d %s", w.Code, body)
+	}
+	if o := f.doAuthRecorder(http.MethodGet, "/api/v1/settings", "", nil); !strings.Contains(o.body, "s3cr3t") {
+		t.Errorf("owner should see the remote whole: %s", o.body)
+	}
+}

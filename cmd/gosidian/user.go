@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/gosidian/gosidian/internal/qrsvg"
 	"github.com/gosidian/gosidian/internal/statedir"
 	"github.com/gosidian/gosidian/internal/webauth"
@@ -45,7 +46,9 @@ func userUsage() {
 	fmt.Fprintln(os.Stderr, `Usage: gosidian user <action> [options]
 
 Actions:
-  setup       Create or replace the web UI account
+  setup       Create the owner account, or reset its password in place
+              (same --username; --totp re-enrolls two-factor). --replace
+              wipes every account and starts over.
   disable     Remove the account (web UI becomes open again)
   status      Show current account state
   totp-reset  Clear a user's two-factor secret and recovery codes
@@ -64,7 +67,9 @@ totp-reset options:
   --username <s>     Account to reset (required)`)
 }
 
-func openWebauth(vaultDir, stateDirFlag string) *webauth.Store {
+// cliStateDir resolves the state dir like `serve` does (ADR-023):
+// --state-dir > GOSIDIAN_STATE_DIR > <vault>/.gosidian.
+func cliStateDir(vaultDir, stateDirFlag string) string {
 	if vaultDir == "" {
 		log.Fatal("--vault is required")
 	}
@@ -72,12 +77,15 @@ func openWebauth(vaultDir, stateDirFlag string) *webauth.Store {
 	if err != nil {
 		log.Fatalf("vault: %v", err)
 	}
-	// Same resolution as `serve` (ADR-023): --state-dir > GOSIDIAN_STATE_DIR > <vault>/.gosidian.
 	sdir, _, err := statedir.Resolve(abs, stateDirFlag, os.Getenv(statedir.EnvVar))
 	if err != nil {
 		log.Fatalf("state dir: %v", err)
 	}
-	path := filepath.Join(sdir, "auth.json")
+	return sdir
+}
+
+func openWebauth(vaultDir, stateDirFlag string) *webauth.Store {
+	path := filepath.Join(cliStateDir(vaultDir, stateDirFlag), "auth.json")
 	store, err := webauth.Open(path)
 	if err != nil {
 		log.Fatalf("open web auth: %v", err)
@@ -92,16 +100,37 @@ func userSetup(args []string) {
 	username := fs.String("username", "admin", "account username")
 	enableTOTP := fs.Bool("totp", false, "enable TOTP")
 	pwStdin := fs.Bool("password-stdin", false, "read password from stdin instead of prompt")
+	replace := fs.Bool("replace", false, "wipe EVERY account and start over with this owner (tokens and grants of the removed accounts stop working)")
 	_ = fs.Parse(args)
 
 	store := openWebauth(*vaultDir, *stateDirFlag)
+	// Refuse before prompting for a password that would be thrown away.
+	if !*replace {
+		if u, ok := store.UserByUsername(*username); ok && u.Role != webauth.RoleOwner {
+			log.Fatalf("setup: account %q exists with role %s, not owner", *username, u.Role)
+		}
+		if _, ok := store.UserByUsername(*username); !ok && len(store.ListUsers()) > 0 {
+			owner := "<owner>"
+			if o := store.FirstOwner(); o != nil {
+				owner = o.Username
+			}
+			log.Fatalf("setup: accounts already exist and %q is not one of them.\n"+
+				"  To reset the owner's password, keeping every account and token: gosidian user setup --username %s\n"+
+				"  To wipe every account and start over: add --replace", *username, owner)
+		}
+	}
 
 	password, err := readPassword(*pwStdin)
 	if err != nil {
 		log.Fatalf("read password: %v", err)
 	}
 
-	uri, err := store.Setup(*username, password, *enableTOTP, "Gosidian")
+	_, existed := store.UserByUsername(*username)
+	setup := store.Setup
+	if *replace {
+		setup = store.Replace
+	}
+	uri, err := setup(*username, password, *enableTOTP, "Gosidian")
 	if err != nil {
 		log.Fatalf("setup: %v", err)
 	}
@@ -131,7 +160,40 @@ func userSetup(args []string) {
 		}
 	}
 
+	if existed && !*replace {
+		what := "new password"
+		if *enableTOTP {
+			what = "new password and TOTP"
+		}
+		sessions, grants := endOwnerSessions(cliStateDir(*vaultDir, *stateDirFlag), store, *username)
+		fmt.Printf("\nOwner %q reset in place: %s; %d web session(s) and %d OAuth grant(s) ended.\n"+
+			"Account id, other accounts and MCP tokens unchanged.\n", *username, what, sessions, grants)
+		return
+	}
 	fmt.Printf("\nAccount %q provisioned. Web UI now requires login at /login.\n", *username)
+}
+
+// endOwnerSessions revokes the web sessions and OAuth grants of the account
+// just reset. The id is kept on purpose (tokens and grants stay valid), so
+// nothing else would end a session opened with the old password — the case a
+// reset after a leak is for. The running server re-reads both files on their
+// next change. Static MCP bearers survive: they are the integrations.
+func endOwnerSessions(stateDir string, store *webauth.Store, username string) (sessions, grants int) {
+	u, ok := store.UserByUsername(username)
+	if !ok {
+		return 0, 0
+	}
+	if spa, err := auth.OpenSpaTokens(filepath.Join(stateDir, "spa_tokens.json")); err != nil {
+		log.Printf("warning: web sessions not revoked: %v", err)
+	} else {
+		sessions = spa.RevokeByUser(u.ID)
+	}
+	if tokens, err := auth.Open(filepath.Join(stateDir, "tokens.json")); err != nil {
+		log.Printf("warning: OAuth grants not revoked: %v", err)
+	} else {
+		grants = tokens.RevokeOAuthByOwner(u.ID)
+	}
+	return sessions, grants
 }
 
 // printRecoveryCodes shows a freshly minted set once; only hashes are stored.

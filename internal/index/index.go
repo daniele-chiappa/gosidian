@@ -29,7 +29,14 @@ type NoteDoc struct {
 }
 
 func Open(path string) (*Index, error) {
-	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)")
+	// synchronous(NORMAL): in WAL mode a commit no longer fsyncs, only a
+	// checkpoint does. A power loss can drop the last commits but never
+	// corrupts the file, and the index is derived — the boot scan
+	// (Vault.ScanInto) re-reads every note and drops the ones gone, so lost
+	// commits heal at the next start. Under the default FULL every commit
+	// fsynced, which made the boot scan (thousands of small commits) take
+	// minutes on slow disks.
+	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(ON)")
 	if err != nil {
 		return nil, err
 	}
@@ -131,6 +138,16 @@ func (i *Index) Upsert(n NoteDoc) error {
 	return i.resolveInbound(id, n.Path, n.Title)
 }
 
+// UpsertUnresolved stores the note like Upsert but leaves link resolution to
+// a ResolveAll once the batch is in. For bulk loads: per-note resolution
+// rescans the links table (resolveInbound matches on lower(target), which no
+// index serves), so a full scan resolving note by note grows with notes ×
+// links, while one ResolveAll at the end reaches the same result.
+func (i *Index) UpsertUnresolved(n NoteDoc) error {
+	_, err := i.upsertLocked(n)
+	return err
+}
+
 // resolveInbound updates previously-unresolved links whose raw target matches
 // the given note's path/title/basename to point at noteID's path.
 func (i *Index) resolveInbound(noteID int64, notePath, title string) error {
@@ -158,8 +175,13 @@ func (i *Index) resolveInbound(noteID int64, notePath, title string) error {
 		seen[strings.ToLower(c)] = struct{}{}
 		dedup = append(dedup, c)
 	}
+	tx, err := i.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	for _, c := range dedup {
-		if _, err := i.db.Exec(
+		if _, err := tx.Exec(
 			`UPDATE links SET target_path = ? WHERE (target_path IS NULL OR target_path = '') AND lower(target) = lower(?)`,
 			notePath, c,
 		); err != nil {
@@ -167,7 +189,7 @@ func (i *Index) resolveInbound(noteID int64, notePath, title string) error {
 		}
 	}
 	_ = noteID
-	return nil
+	return tx.Commit()
 }
 
 func (i *Index) upsertLocked(n NoteDoc) (int64, error) {
@@ -308,14 +330,28 @@ func (i *Index) ResolveLinksFor(noteID int64) error {
 		}{rid, tgt})
 	}
 	rows.Close()
+	if len(pending) == 0 {
+		return nil
+	}
 
-	for _, p := range pending {
-		resolved := i.resolveTargetLocked(p.target)
-		if _, err := i.db.Exec(`UPDATE links SET target_path = ? WHERE rowid = ?`, nullable(resolved), p.rowid); err != nil {
+	// Resolve first (reads), then write every link in one transaction: one
+	// commit per note instead of one per link, which the boot scan and
+	// ResolveAll repeat for the whole vault.
+	resolved := make([]string, len(pending))
+	for k, p := range pending {
+		resolved[k] = i.resolveTargetLocked(p.target)
+	}
+	tx, err := i.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for k, p := range pending {
+		if _, err := tx.Exec(`UPDATE links SET target_path = ? WHERE rowid = ?`, nullable(resolved[k]), p.rowid); err != nil {
 			return err
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 // resolveTargetLocked maps a [[wiki-link]] target to a note path.

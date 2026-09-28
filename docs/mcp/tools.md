@@ -6,6 +6,10 @@ orchestration → self-check cycle for agent memory.
 Consult each tool's `description` via your client's `tools/list` call
 for precise schemas; the groupings below are the conceptual map.
 
+An argument a tool does not declare is ignored, and the result ends with
+a note naming it (and the likely intended argument, e.g. `Project` →
+`project`), so a misspelled filter never passes for an applied one.
+
 ## Triage / bootstrap
 
 - `memory_bootstrap(project, known_directives_version?, known_etags?,
@@ -18,6 +22,8 @@ for precise schemas; the groupings below are the conceptual map.
   `hot.md` body with its frontmatter + heading outline. `mode` defaults
   to **auto**: an oversize `hot.md` is served lite automatically
   (flagged `auto_lite:true`); pass `mode="full"` to force the body.
+  `access` (`read` | `write`) says whether the token may write in the
+  project.
   A project with the `lean_read_bootstrap` flag gives tokens that cannot
   write to it only the reading sections of the directives
   (`directives_scope: "read"`) — fewer tokens, less context; off by
@@ -31,8 +37,11 @@ for precise schemas; the groupings below are the conceptual map.
 - `memory_stale(project, older_than, exclude_closed?)` — unmodified long
   enough to review/archive; each note carries `closed` (tagged
   `status:done` / `status:archived`) and `exclude_closed: true` drops
-  them, which is exactly what the bootstrap `maintenance.stale_count`
-  counts
+  them. `older_than` defaults to `30d`, or to the digest's cutoff (`90d`,
+  `maintenance.stale_cutoff_days`) with `exclude_closed`,
+  so `exclude_closed: true` alone lists exactly what the bootstrap counts;
+  the response echoes the cutoff used and sets `truncated` when `limit`
+  cut the list
 - `memory_plans(project, status)` — typed plan retrieval by status
 - `memory_skills(project, trigger_phrase?)` — reusable procedures
 - `memory_notes_by_importance(project, min_level)` — filter by the
@@ -42,9 +51,10 @@ for precise schemas; the groupings below are the conceptual map.
 
 ## Read
 
-- `memory_search(query, any_of?=[...], projects?=[...], include_outline?,
-  include_frontmatter?)` — FTS5 with optional enrichment and
-  cross-project scope. Ranking weighs the title most, then the
+- `memory_search(query, any_of?=[...], projects?=[...], project?,
+  include_outline?, include_frontmatter?)` — FTS5 with optional
+  enrichment and cross-project scope (`project` is shorthand for
+  `projects: [project]`). Ranking weighs the title most, then the
   frontmatter (tags, description, aliases), then the body, with small
   bounded boosts for backlinks, `importance`, recent edits and the
   `pinned` tag (`status:archived` sinks). Each hit carries `score`
@@ -194,7 +204,10 @@ from the caller's token identity and cannot be forged, while
 - `memory_compact(path, keep_last_n, archive_summary, dry_run?)` —
   shrink log-shaped notes safely
 - `memory_self_stats()` — token identity (including the multi-project
-  scope list) + rate-limit snapshot (for auto-throttling)
+  scope list), `access` (every project the token reaches with its live
+  level, `read` or `write`: a write-scoped token can still be read-only
+  on projects where its account holds only a read grant) + rate-limit
+  snapshot (for auto-throttling)
 - `memory_project_scaffold(project, template?, variables?)` — idempotent
   Karpathy-Wiki-Stack bootstrap
 - `memory_init_agent(project, existing_content?)` — produce the

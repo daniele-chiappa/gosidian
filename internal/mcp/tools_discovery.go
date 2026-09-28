@@ -13,6 +13,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,27 +28,27 @@ import (
 func (s *Server) registerDiscoveryTools() {
 	s.impl.AddTool(mcp.NewTool("memory_plans",
 		mcp.WithDescription("List plans (notes with frontmatter type:plan) under a project, optionally filtered by status (draft/in-progress/done/archived). Returns path, title, status, updated and description from the frontmatter; the status comes from the status: field or, when the note has none, its status: tag. For other filters (updated after a date, importance, several statuses, fields to return) use memory_query, which answers with only the fields asked."),
-		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder) to scope the listing. Scoped tokens are forced to their project.")),
+		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder) to scope the listing. "+scopedProjectNote)),
 		mcp.WithString("status", mcp.Description("Optional status filter. One of: draft, in-progress, done, archived. Empty returns all.")),
 	), s.handlePlans)
 
 	s.impl.AddTool(mcp.NewTool("memory_skills",
 		mcp.WithDescription("List skills (notes with frontmatter type:skill) under a project. Optionally filter by a substring matching the '## Trigger phrase' section of the skill body. Returns path, title, description from frontmatter, and the first ~400 chars of the trigger phrase section as an excerpt."),
-		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder) to scope the listing. Scoped tokens are forced to their project.")),
+		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder) to scope the listing. "+scopedProjectNote)),
 		mcp.WithString("trigger_phrase", mcp.Description("Optional case-insensitive substring to match against the '## Trigger phrase' section of each skill. Empty returns all skills.")),
 	), s.handleSkills)
 
 	s.impl.AddTool(mcp.NewTool("memory_pinned",
 		mcp.WithDescription("List pinned notes in a project. Convention: a note is pinned by adding 'pinned' to its frontmatter tags array. Pinned notes are those the author wants surfaced in every session — keep the list small."),
-		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder). Scoped tokens are forced to their project.")),
+		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder). "+scopedProjectNote)),
 	), s.handlePinned)
 
 	s.impl.AddTool(mcp.NewTool("memory_stale",
 		mcp.WithDescription("List notes in a project that have NOT been modified recently — review/archive candidates. Returns path, title, mtime (unix seconds) and closed (true when tagged status:done or status:archived), in ascending mtime order (oldest first). By default every old note is listed; pass exclude_closed:true to drop closed plans and archived notes — that is exactly what memory_bootstrap's maintenance.stale_count counts (with its fixed 90d cutoff), so the two agree only with the flag on."),
-		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder). Scoped tokens are forced to their project.")),
-		mcp.WithString("older_than", mcp.Description("Cutoff age. Relative duration ('30d', '180d', '1h') or RFC3339 timestamp. Default '30d'.")),
+		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder). "+scopedProjectNote)),
+		mcp.WithString("older_than", mcp.Description("Cutoff age. Relative duration ('30d', '180d', '1h') or RFC3339 timestamp. Default '30d', or the digest's cutoff (maintenance.stale_cutoff_days, 90d) when exclude_closed is true.")),
 		mcp.WithNumber("limit", mcp.Description("Max notes to return (default 20, max 500).")),
-		mcp.WithBoolean("exclude_closed", mcp.Description("Drop notes tagged status:done or status:archived (closed plans age by design). Default false. With true the list matches the bootstrap maintenance digest's stale_count.")),
+		mcp.WithBoolean("exclude_closed", mcp.Description("Drop notes tagged status:done or status:archived (closed plans age by design). Default false. With true and no older_than, the list is the notes behind the bootstrap maintenance digest's stale_count (raise limit when stale_count exceeds it; truncated:true says the list was cut).")),
 	), s.handleStale)
 }
 
@@ -212,6 +213,9 @@ type staleNoteResponse struct {
 	Closed bool `json:"closed"`
 }
 
+// staleMaxLimit is memory_stale's largest page, the index's own cap.
+const staleMaxLimit = 500
+
 func (s *Server) handleStale(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	tok, errRes := s.authorizeRead(ctx)
 	if errRes != nil {
@@ -221,19 +225,42 @@ func (s *Server) handleStale(ctx context.Context, req mcp.CallToolRequest) (*mcp
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	rawOlder := strings.TrimSpace(req.GetString("older_than", "30d"))
+	excludeClosed := req.GetBool("exclude_closed", false)
+	// With exclude_closed the default cutoff is the digest's, so the list is
+	// what maintenance.stale_count counts.
+	defOlder := "30d"
+	if excludeClosed {
+		defOlder = strconv.Itoa(maintenanceStaleCutoffDays) + "d"
+	}
+	rawOlder := strings.TrimSpace(req.GetString("older_than", defOlder))
+	if rawOlder == "" {
+		rawOlder = defOlder
+	}
 	cutoff, err := parseOlderThan(rawOlder)
 	if err != nil {
 		return mcp.NewToolResultErrorf("older_than %q: %v", rawOlder, err), nil
 	}
 	limit := req.GetInt("limit", 20)
-	if limit <= 0 || limit > 500 {
+	switch {
+	case limit <= 0:
 		limit = 20
+	case limit > staleMaxLimit:
+		limit = staleMaxLimit
+	}
+	// One extra row tells a full page from a cut one (the index caps at
+	// staleMaxLimit, so at the cap a full page counts as cut).
+	fetch := limit
+	if limit < staleMaxLimit {
+		fetch = limit + 1
 	}
 
-	notes, err := s.index.StaleNotes(project, cutoff, limit, req.GetBool("exclude_closed", false))
+	notes, err := s.index.StaleNotes(project, cutoff, fetch, excludeClosed)
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("stale lookup failed", err), nil
+	}
+	truncated := len(notes) > limit || len(notes) == staleMaxLimit
+	if len(notes) > limit {
+		notes = notes[:limit]
 	}
 	out := make([]staleNoteResponse, 0, len(notes))
 	for _, n := range notes {
@@ -245,7 +272,11 @@ func (s *Server) handleStale(ctx context.Context, req mcp.CallToolRequest) (*mcp
 			Closed:             n.Closed,
 		})
 	}
-	return mcp.NewToolResultJSON(map[string]any{"notes": out})
+	return mcp.NewToolResultJSON(map[string]any{
+		"notes":      out,
+		"older_than": rawOlder,
+		"truncated":  truncated,
+	})
 }
 
 // ---- helpers ----
@@ -275,6 +306,10 @@ func (s *Server) resolveProject(tok *auth.Token, req mcp.CallToolRequest) (strin
 // supports it), single-project tokens default to their project and may not
 // name another, multi-project tokens must name one of theirs explicitly (an
 // empty argument cannot silently widen a per-project query to vault-wide).
+// scopedProjectNote describes scopedProject to agents, appended to the
+// description of every project argument it resolves.
+const scopedProjectNote = "A token scoped to a single project may omit it (that project is used); a project outside the token's scope is refused with an error."
+
 func scopedProject(tok *auth.Token, project string) (string, error) {
 	project = strings.TrimSpace(project)
 	if tok.IsAdmin() {

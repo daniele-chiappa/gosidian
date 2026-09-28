@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
@@ -438,6 +439,11 @@ func correlationIDFromContext(ctx context.Context) string {
 	return ""
 }
 
+// Version is the release version advertised as serverInfo.version in the
+// initialize handshake. Set by cmd/gosidian/main.go before New, like
+// apiv1.Version, so the handshake matches /healthz.
+var Version = "dev"
+
 // New builds an MCP server exposing the given vault and index. Tools are
 // registered immediately; the server is not yet listening. If tokens is non
 // nil and non empty, Bearer-token auth is enforced on the SSE transport.
@@ -455,10 +461,11 @@ func New(v *vault.Vault, idx *index.Index, tokens *auth.Store) *Server {
 	// is only dereferenced at tool-call time, by which point it is set.
 	s.impl = server.NewMCPServer(
 		"gosidian",
-		"0.1.0",
+		Version,
 		server.WithToolCapabilities(true),
 		server.WithToolHandlerMiddleware(instrumentMiddleware),
 		server.WithToolHandlerMiddleware(s.selfImproveNudgeMiddleware),
+		server.WithToolHandlerMiddleware(s.unknownArgsMiddleware),
 		// Per-token tool profile: applied to tools/list and enforced on
 		// tools/call by mcp-go (access-control boundary, not cosmetic).
 		server.WithToolFilter(s.filterToolsByProfile),
@@ -580,25 +587,74 @@ func (s *Server) ServeSSE(addr string) error {
 	return srv.ListenAndServe()
 }
 
+// authDenial says why a request carried no usable token, so the response can
+// tell a wrong token from a valid one whose account lost its access.
+type authDenial int
+
+const (
+	// denyInvalid: no bearer, or one that is unknown, revoked or expired.
+	denyInvalid authDenial = iota
+	// denyOwnerGone: a valid token whose owning account was deleted or
+	// disabled.
+	denyOwnerGone
+	// denyNoAccess: a valid token whose owning account can read no project.
+	denyNoAccess
+)
+
 // authenticate extracts and validates a Bearer token, returning nil on any
 // failure. Callers decide whether to enforce.
 func (s *Server) authenticate(r *http.Request) *auth.Token {
+	tok, _ := s.authenticateWhy(r)
+	return tok
+}
+
+// authenticateWhy is authenticate plus the reason for a nil token.
+func (s *Server) authenticateWhy(r *http.Request) (*auth.Token, authDenial) {
 	if s.tokens == nil || s.tokens.Empty() {
-		return auth.AdminToken()
+		return auth.AdminToken(), denyInvalid
 	}
 	raw := auth.ExtractBearer(r.Header.Get("Authorization"))
 	if raw == "" {
-		return nil
+		return nil, denyInvalid
 	}
 	if tok, err := s.tokens.Validate(raw); err == nil {
-		return s.effectiveToken(tok)
+		return s.effectiveTokenWhy(tok)
 	}
 	if s.accessResolver != nil {
 		if tok, ok := s.accessResolver(raw); ok {
-			return s.effectiveToken(tok)
+			return s.effectiveTokenWhy(tok)
 		}
 	}
-	return nil
+	return nil, denyInvalid
+}
+
+// denyAuth writes the refusal for a request authenticateWhy turned down. A
+// wrong token keeps the plain 401. A valid token whose owner no longer
+// resolves is a 401 invalid_token, and one whose account can read nothing is
+// a 403 insufficient_scope, both saying why (RFC 6750 §3.1) so a client or
+// an operator can tell them apart. jsonBody selects the byte endpoints'
+// {"error": ...} shape over the transport's text/plain.
+func (s *Server) denyAuth(w http.ResponseWriter, why authDenial, jsonBody bool) {
+	status, code, msg := http.StatusUnauthorized, "", "missing or invalid bearer token"
+	switch why {
+	case denyOwnerGone:
+		code, msg = "invalid_token", "token owner not found or disabled"
+	case denyNoAccess:
+		status, code, msg = http.StatusForbidden, "insufficient_scope", "the account that owns this token has no readable project"
+	}
+	challenge := s.wwwAuthenticate()
+	if code != "" {
+		challenge += fmt.Sprintf(`, error=%q, error_description=%q`, code, msg)
+	}
+	w.Header().Set("WWW-Authenticate", challenge)
+	if jsonBody {
+		writeJSONError(w, status, msg)
+		return
+	}
+	if code == "" {
+		msg = "unauthorized"
+	}
+	http.Error(w, msg, status)
 }
 
 // effectiveToken narrows a validated token to the live access of the account
@@ -620,22 +676,33 @@ func (s *Server) authenticate(r *http.Request) *auth.Token {
 //
 // The result is a copy; the stored record is never modified.
 func (s *Server) effectiveToken(tok *auth.Token) *auth.Token {
-	if tok == nil || tok.OwnerUserID == "" || s.principalResolver == nil {
-		return tok
+	eff, _ := s.effectiveTokenWhy(tok)
+	return eff
+}
+
+// effectiveTokenWhy is effectiveToken plus the reason for a nil result, which
+// is also logged: the client only sees the category, the log has the token.
+func (s *Server) effectiveTokenWhy(tok *auth.Token) (*auth.Token, authDenial) {
+	if tok == nil {
+		return nil, denyInvalid
+	}
+	if tok.OwnerUserID == "" || s.principalResolver == nil {
+		return tok, denyInvalid
 	}
 	princ, ok := s.principalResolver(tok.OwnerUserID)
 	if !ok {
-		return nil
+		slog.Info("mcp.auth refused: token owner not found or disabled", "token", tok.ID, "owner", tok.OwnerUserID)
+		return nil, denyOwnerGone
 	}
 	if princ.Role == webauth.RoleOwner {
-		return tok
+		return tok, denyInvalid
 	}
 	cfg := s.projects.AccessConfig()
 	candidates := tok.ProjectList()
 	if len(candidates) == 0 {
 		projs, err := s.vault.Projects()
 		if err != nil {
-			return nil
+			return nil, denyInvalid
 		}
 		for _, p := range projs {
 			candidates = append(candidates, p.Name)
@@ -653,7 +720,8 @@ func (s *Server) effectiveToken(tok *auth.Token) *auth.Token {
 		}
 	}
 	if len(readable) == 0 {
-		return nil
+		slog.Info("mcp.auth refused: token owner has no readable project", "token", tok.ID, "owner", tok.OwnerUserID)
+		return nil, denyNoAccess
 	}
 	eff := *tok
 	eff.Project = ""
@@ -662,9 +730,9 @@ func (s *Server) effectiveToken(tok *auth.Token) *auth.Token {
 	case len(writable) == 0:
 		eff.Scopes = withoutScope(tok.Scopes, auth.ScopeWrite)
 	case len(writable) < len(readable):
-		return eff.WithWriteFilter(func(project string) bool { return writable[project] })
+		return eff.WithWriteFilter(func(project string) bool { return writable[project] }), denyInvalid
 	}
-	return &eff
+	return &eff, denyInvalid
 }
 
 // withoutScope returns scopes minus the named one, leaving the input as is.
@@ -682,9 +750,8 @@ func withoutScope(scopes []string, drop string) []string {
 // handshake.
 func (s *Server) requireToken(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.authenticate(r) == nil {
-			w.Header().Set("WWW-Authenticate", s.wwwAuthenticate())
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		if tok, why := s.authenticateWhy(r); tok == nil {
+			s.denyAuth(w, why, false)
 			return
 		}
 		next.ServeHTTP(w, r)

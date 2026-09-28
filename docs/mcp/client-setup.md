@@ -137,19 +137,25 @@ good smoke sequence for your first call:
 memory_bootstrap(project="<name-of-a-project>")
 ```
 
-A healthy response contains `hot_md_content`, `readme_content`,
-`active_plans`, `available_skills`, `recent_notes`, and
-`project_stats`. If it comes back with an auth error, the bearer
+A healthy response contains `hot_md` and `readme` (each
+`{present, path, content, etag}`), `active_plans`, `available_skills`,
+`recent_notes`, `stats`, `access` and `directives_block`. If it comes back with an auth error, the bearer
 token is wrong; with an empty project list, your vault has no
 top-level folders yet (see
 [Agent patterns → Bootstrap a project](patterns.md#bootstrap-a-new-project)).
 
-From a shell, without a client:
+From a shell, without a client: Streamable HTTP is session-based, so
+`initialize` first, then send every call with the `Mcp-Session-Id` it
+returned (a call without one gets `404 Invalid session ID`):
 
 ```bash
-curl -s -X POST http://127.0.0.1:8080/mcp \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | head -c 300
+H=(-H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+   -H "Accept: application/json, text/event-stream")
+SID=$(curl -s -D - -o /dev/null "${H[@]}" -X POST http://127.0.0.1:8080/mcp \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}' \
+  | tr -d '\r' | awk -F': ' 'tolower($1)=="mcp-session-id"{print $2}')
+curl -s "${H[@]}" -H "Mcp-Session-Id: $SID" -X POST http://127.0.0.1:8080/mcp \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | head -c 300
 ```
 
 ## From the MCP Registry

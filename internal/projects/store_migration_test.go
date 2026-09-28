@@ -27,7 +27,7 @@ func TestMigrate_LegacyAllSeedsWriteGrants(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rep, err := s.MigrateAccessModel([]string{"pub", "priv", "disk-only"}, []string{"u1", "u2"})
+	rep, err := s.MigrateAccessModel([]string{"pub", "priv", "disk-only"}, []string{"u1", "u2"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,11 +58,11 @@ func TestMigrate_LegacyAllSeedsWriteGrants(t *testing.T) {
 	}
 
 	// Idempotent, also across a reopen.
-	if rep2, _ := s.MigrateAccessModel(nil, []string{"u3"}); rep2.Applied {
+	if rep2, _ := s.MigrateAccessModel(nil, []string{"u3"}, nil); rep2.Applied {
 		t.Error("second migration must be a no-op")
 	}
 	s2, _ := Open(path)
-	if rep3, _ := s2.MigrateAccessModel(nil, []string{"u3"}); rep3.Applied {
+	if rep3, _ := s2.MigrateAccessModel(nil, []string{"u3"}, nil); rep3.Applied {
 		t.Error("migration must persist its marker")
 	}
 	if _, ok := s2.MemberLevel("pub", "u3"); ok {
@@ -79,7 +79,7 @@ func TestMigrate_LegacyMembersModeKeepsGating(t *testing.T) {
 	  "member_scope": "members"
 	}`)
 	s, _ := Open(path)
-	rep, err := s.MigrateAccessModel([]string{"pub", "priv", "other"}, []string{"u1", "u2"})
+	rep, err := s.MigrateAccessModel([]string{"pub", "priv", "other"}, []string{"u1", "u2"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestMigrate_LegacyMembersModeKeepsGating(t *testing.T) {
 // start: existing folders become private and so do new projects.
 func TestMigrate_FreshInstallIsPrivate(t *testing.T) {
 	s, _ := Open(filepath.Join(t.TempDir(), "projects.json"))
-	rep, err := s.MigrateAccessModel([]string{"a", "b"}, nil)
+	rep, err := s.MigrateAccessModel([]string{"a", "b"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,11 +114,54 @@ func TestMigrate_FreshInstallIsPrivate(t *testing.T) {
 // flags): they could read and write everywhere, so it is an upgrade.
 func TestMigrate_NoFileWithMembersIsUpgrade(t *testing.T) {
 	s, _ := Open(filepath.Join(t.TempDir(), "projects.json"))
-	rep, err := s.MigrateAccessModel([]string{"a"}, []string{"u1"})
+	rep, err := s.MigrateAccessModel([]string{"a"}, []string{"u1"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if rep.GrantsSeeded != 1 || rep.DefaultVisibility != VisibilityInternal || s.Visibility("a") != VisibilityInternal {
 		t.Fatalf("report = %+v, a=%s", rep, s.Visibility("a"))
+	}
+}
+
+// Projects the configuration reserves to the owner (private global project,
+// self-improve target) stay out of member reach under the legacy default:
+// private, no seeded grants. A reserved project the owner had published keeps
+// its visibility, and explicit memberships survive (BUG-061).
+func TestMigrate_OwnerOnlyProjectsStayPrivate(t *testing.T) {
+	path := writeLegacyFile(t, `{
+	  "projects": {"global-private": {}, "shared": {"public": true}},
+	  "members": {"insights": [{"user_id": "u1", "level": "read"}]}
+	}`)
+	s, _ := Open(path)
+	rep, err := s.MigrateAccessModel(
+		[]string{"global-private", "insights", "shared", "work"},
+		[]string{"u1", "u2"},
+		[]string{"global-private", "insights", "shared"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rep.OwnerOnly; len(got) != 2 || got[0] != "global-private" || got[1] != "insights" {
+		t.Errorf("OwnerOnly = %v", got)
+	}
+	for _, n := range []string{"global-private", "insights"} {
+		if v := s.Visibility(n); v != VisibilityPrivate {
+			t.Errorf("%s visibility = %s, want private", n, v)
+		}
+		if _, ok := s.MemberLevel(n, "u2"); ok {
+			t.Errorf("%s: seeded grant for u2", n)
+		}
+	}
+	if lvl, _ := s.MemberLevel("insights", "u1"); lvl != LevelRead {
+		t.Errorf("explicit membership on insights lost: %q", lvl)
+	}
+	if s.Visibility("shared") != VisibilityPublic {
+		t.Error("a reserved project the owner published keeps public")
+	}
+	if s.Visibility("work") != VisibilityInternal {
+		t.Error("other projects follow the legacy default")
+	}
+	if lvl, _ := s.MemberLevel("work", "u2"); lvl != LevelWrite {
+		t.Errorf("work: seeded grant missing: %q", lvl)
 	}
 }

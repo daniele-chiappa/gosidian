@@ -20,19 +20,12 @@ func seedGlobalProjects(v *vault.Vault, pstore *projects.Store, cfg config.Globa
 		// "already exists" is fine — CreateProject is idempotent in effect.
 		_, _ = v.CreateProject(name)
 		// The public global project must be readable by every account; the
-		// private one is grants-only. Only fill an unset visibility so an
-		// owner's explicit choice survives restarts.
+		// private one is grants-only.
 		want := projects.VisibilityPrivate
 		if public {
 			want = projects.VisibilityPublic
 		}
-		if f := pstore.Get(name); f.Visibility == "" {
-			f.Visibility = want
-			f.Public = false
-			if err := pstore.Set(name, f); err != nil {
-				log.Printf("global: set visibility on %q: %v", name, err)
-			}
-		}
+		ensureVisibility(pstore, name, want)
 		readme := name + "/README.md"
 		if _, err := v.Load(readme); err != nil {
 			if err := v.Save(readme, []byte(globalReadme(name, public))); err != nil {
@@ -42,6 +35,36 @@ func seedGlobalProjects(v *vault.Vault, pstore *projects.Store, cfg config.Globa
 	}
 	seed(cfg.PublicProject, true)
 	seed(cfg.PrivateProject, false)
+}
+
+// ensureVisibility gives a project the wanted visibility when it has none
+// yet. Only an unset visibility is filled, so an owner's explicit choice
+// survives restarts.
+func ensureVisibility(pstore *projects.Store, name, want string) {
+	if name == "" {
+		return
+	}
+	if f := pstore.Get(name); f.Visibility == "" {
+		f.Visibility = want
+		f.Public = false
+		if err := pstore.Set(name, f); err != nil {
+			log.Printf("projects: set visibility on %q: %v", name, err)
+		}
+	}
+}
+
+// ownerOnlyProjects are the projects the configuration reserves to the
+// owner: the private global project and the self-improve target, when their
+// feature is on. The access model migration keeps them out of member reach.
+func ownerOnlyProjects(cfg *config.Config) []string {
+	var out []string
+	if cfg.Global.Enabled && cfg.Global.PrivateProject != "" {
+		out = append(out, cfg.Global.PrivateProject)
+	}
+	if cfg.SelfImprove.Enabled && cfg.SelfImprove.TargetProject != "" {
+		out = append(out, cfg.SelfImprove.TargetProject)
+	}
+	return out
 }
 
 // globalReadme returns the starter index note for a freshly seeded global

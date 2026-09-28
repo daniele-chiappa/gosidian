@@ -17,7 +17,7 @@ import (
 func (s *Server) registerImportanceTool() {
 	s.impl.AddTool(mcp.NewTool("memory_notes_by_importance",
 		mcp.WithDescription("List notes in a project ranked by their frontmatter `importance` field (integer 1..5, default 3 when missing). Filtered to importance >= min_level and sorted DESC. Use this instead of memory_list_notes when you need the most important notes of a project for triage or pinned views. Convention: 5=critical, 3=default, 1=archival."),
-		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder). Scoped tokens are forced to their project.")),
+		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder). "+scopedProjectNote)),
 		mcp.WithNumber("min_level", mcp.Description("Minimum importance level (1..5). Default 3.")),
 		mcp.WithNumber("limit", mcp.Description("Max notes to return (default 50, max 500).")),
 	), s.handleNotesByImportance)

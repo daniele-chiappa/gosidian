@@ -32,6 +32,9 @@ export interface Settings {
   personal_projects: boolean // new accounts get a private project named after them
   anchors_enabled: boolean // read-only master switch GOSIDIAN_ANCHORS_ENABLED
   globals_enabled: boolean // read-only master switch GOSIDIAN_GLOBAL_ENABLED
+  /** Dotted paths of the settings a GOSIDIAN_* environment variable sets
+   *  (values above are the effective ones); read-only here. */
+  env_overrides?: string[]
 }
 
 export interface UpdateSettings {

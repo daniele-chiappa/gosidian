@@ -353,20 +353,40 @@ func (v *Vault) ProjectNotes(project string) ([]NoteStat, error) {
 	return out, err
 }
 
-// ScanInto enumerates all markdown notes and upserts them into the index.
+// ScanInto brings the index in line with the vault: it upserts every note,
+// drops the indexed notes no longer on disk (deleted while the server was
+// down, or a delete whose commit a crash lost), then resolves every link
+// once all of them are in.
 func (v *Vault) ScanInto(idx *index.Index) error {
 	paths, err := v.List()
 	if err != nil {
 		return err
 	}
+	onDisk := make(map[string]bool, len(paths))
 	for _, p := range paths {
 		n, err := loadNote(v.Root, p)
 		if err != nil {
 			return fmt.Errorf("load %s: %w", p, err)
 		}
-		if err := idx.Upsert(toIndexNote(n)); err != nil {
+		if err := idx.UpsertUnresolved(toIndexNote(n)); err != nil {
 			return fmt.Errorf("index %s: %w", p, err)
 		}
+		onDisk[n.Path] = true
+	}
+	indexed, err := idx.AllNotes()
+	if err != nil {
+		return fmt.Errorf("list index: %w", err)
+	}
+	for _, row := range indexed {
+		if onDisk[row.Path] {
+			continue
+		}
+		if err := idx.Delete(row.Path); err != nil {
+			return fmt.Errorf("drop %s: %w", row.Path, err)
+		}
+	}
+	if err := idx.ResolveAll(); err != nil {
+		return fmt.Errorf("resolve links: %w", err)
 	}
 	return nil
 }

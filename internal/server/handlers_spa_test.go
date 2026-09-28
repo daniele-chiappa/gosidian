@@ -49,3 +49,31 @@ func TestHandleSPA_NonceInjected(t *testing.T) {
 		t.Errorf("nonce did not rotate across requests: %q", csp2)
 	}
 }
+
+// TestHandleSPA_WellKnownNotFound: discovery paths never get the HTML shell.
+// With OAuth off the oauth-* documents are not mounted and must 404, not
+// 200 text/html; SPA routes keep the shell.
+func TestHandleSPA_WellKnownNotFound(t *testing.T) {
+	s := newTestServer(t)
+	cases := []struct {
+		path string
+		want int
+	}{
+		{"/.well-known/oauth-authorization-server", http.StatusNotFound},
+		{"/.well-known/oauth-protected-resource", http.StatusNotFound},
+		{"/.well-known/oauth-protected-resource/mcp", http.StatusNotFound},
+		{"/.well-known/security.txt", http.StatusNotFound},
+		{"/oauth/consent", http.StatusOK},
+		{"/notes/foo", http.StatusOK},
+	}
+	for _, c := range cases {
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, c.path, nil))
+		if rec.Code != c.want {
+			t.Errorf("%s: status=%d, want %d", c.path, rec.Code, c.want)
+		}
+		if c.want == http.StatusNotFound && strings.HasPrefix(rec.Header().Get("Content-Type"), "text/html") {
+			t.Errorf("%s: got HTML shell on a discovery path", c.path)
+		}
+	}
+}

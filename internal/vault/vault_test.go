@@ -412,3 +412,34 @@ func TestProjectNotes_StatsNotesWithoutReading(t *testing.T) {
 		t.Error("a nested folder is not a project")
 	}
 }
+
+// The boot scan drops indexed notes whose file is gone (deleted while the
+// server was down, or a delete commit lost in a crash), and the links that
+// pointed at them go back to unresolved.
+func TestVault_ScanIntoDropsVanishedNotes(t *testing.T) {
+	v := newTestVault(t)
+	idx := openIndex(t)
+
+	write(t, v.Root, "Keep.md", "# Keep\n\nSee [[Gone]].")
+	write(t, v.Root, "Gone.md", "# Gone\n")
+	if err := v.ScanInto(idx); err != nil {
+		t.Fatal(err)
+	}
+	if backs, _ := idx.Backlinks("Gone.md"); len(backs) != 1 {
+		t.Fatalf("setup: Gone.md backlinks = %v", backs)
+	}
+
+	if err := os.Remove(filepath.Join(v.Root, "Gone.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := v.ScanInto(idx); err != nil {
+		t.Fatal(err)
+	}
+	all, _ := idx.AllNotes()
+	if len(all) != 1 || all[0].Path != "Keep.md" {
+		t.Errorf("index after rescan = %+v, want only Keep.md", all)
+	}
+	if backs, _ := idx.Backlinks("Gone.md"); len(backs) != 0 {
+		t.Errorf("link to a vanished note still resolved: %v", backs)
+	}
+}

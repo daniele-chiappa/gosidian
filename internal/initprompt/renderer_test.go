@@ -274,7 +274,7 @@ func TestRenderDirectives(t *testing.T) {
 // pin, or just update the pin for a cosmetic edit.
 func TestStubVersion_PinnedToContent(t *testing.T) {
 	assertPinned(t, sharedStubTemplate, StubVersion, 2,
-		"78a4e8c3cd21d1eba604b675492b2462e11a9ae54785be2be61927d4160bbdb0")
+		"7b0e4546a84b8a46b0f9a20dd2e3ad55e7ced7c34e1cf550c6da287fa7b934a9")
 }
 
 func TestDirectivesVersion_PinnedToContent(t *testing.T) {

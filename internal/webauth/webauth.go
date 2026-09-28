@@ -392,19 +392,78 @@ func (s *Store) FirstOwner() *User {
 	return nil
 }
 
-// Setup provisions the owner account, replacing any existing accounts file.
-// This is the v1-compatible entry point used by the CLI `gosidian user setup`.
-// Returns the TOTP provisioning URI when withTOTP is true.
+// ErrSetupWouldReplace is returned by Setup when accounts exist and none of
+// them is the named owner: provisioning would have to wipe them (Replace).
+var ErrSetupWouldReplace = errors.New("accounts already exist")
+
+// Setup provisions the owner account for the CLI `gosidian user setup`. On an
+// empty store it creates the owner. When the owner with this username exists
+// it resets that account in place — new password, and a new TOTP secret only
+// when withTOTP — keeping its id, so the MCP tokens and grants that reference
+// it keep working, and leaving every other account alone. Otherwise it fails
+// with ErrSetupWouldReplace (or a role error when the username is a
+// non-owner): replacing existing accounts takes Replace. Returns the TOTP
+// provisioning URI when withTOTP is true.
 func (s *Store) Setup(username, password string, withTOTP bool, issuer string) (otpURI string, err error) {
+	u, otpURI, err := newOwner(username, password, withTOTP, issuer)
+	if err != nil {
+		return "", err
+	}
+	s.reloadIfStale()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.file.Users {
+		cur := &s.file.Users[i]
+		if cur.Username != username {
+			continue
+		}
+		if cur.Role != RoleOwner {
+			return "", fmt.Errorf("account %q exists with role %s, not owner", username, cur.Role)
+		}
+		cur.Hash = u.Hash
+		cur.DisabledAt = nil // a reset owner must be able to sign in
+		if withTOTP {
+			cur.TOTPSec = u.TOTPSec
+			cur.RecoveryCodes = nil
+		}
+		s.sessions = make(map[string]session)
+		return otpURI, s.saveLocked()
+	}
+	if len(s.file.Users) > 0 {
+		return "", ErrSetupWouldReplace
+	}
+	s.file = AccountsFile{Version: accountsVersion, Users: []User{u}}
+	s.sessions = make(map[string]session)
+	return otpURI, s.saveLocked()
+}
+
+// Replace wipes every account and invite and provisions username as the only
+// owner, with a fresh id: tokens and grants of the removed accounts no longer
+// resolve. It is what Setup did unconditionally before, kept behind the
+// explicit `user setup --replace`.
+func (s *Store) Replace(username, password string, withTOTP bool, issuer string) (otpURI string, err error) {
+	u, otpURI, err := newOwner(username, password, withTOTP, issuer)
+	if err != nil {
+		return "", err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.file = AccountsFile{Version: accountsVersion, Users: []User{u}}
+	s.sessions = make(map[string]session)
+	return otpURI, s.saveLocked()
+}
+
+// newOwner builds a fresh owner record, validating the credentials.
+func newOwner(username, password string, withTOTP bool, issuer string) (User, string, error) {
 	if username == "" {
-		return "", errors.New("username required")
+		return User{}, "", errors.New("username required")
 	}
 	if len(password) < 8 {
-		return "", errors.New("password must be at least 8 characters")
+		return User{}, "", errors.New("password must be at least 8 characters")
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		return "", err
+		return User{}, "", err
 	}
 	now := time.Now().UTC()
 	u := User{
@@ -414,24 +473,19 @@ func (s *Store) Setup(username, password string, withTOTP bool, issuer string) (
 		Role:      RoleOwner,
 		CreatedAt: now,
 	}
+	var otpURI string
 	if withTOTP {
 		key, err := totp.Generate(totp.GenerateOpts{
 			Issuer:      issuer,
 			AccountName: username,
 		})
 		if err != nil {
-			return "", err
+			return User{}, "", err
 		}
 		u.TOTPSec = key.Secret()
 		otpURI = key.URL()
 	}
-
-	s.mu.Lock()
-	s.file = AccountsFile{Version: accountsVersion, Users: []User{u}}
-	s.sessions = make(map[string]session)
-	err = s.saveLocked()
-	s.mu.Unlock()
-	return otpURI, err
+	return u, otpURI, nil
 }
 
 // Disable removes all accounts + invites and invalidates all sessions. Used

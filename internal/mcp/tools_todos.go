@@ -6,7 +6,7 @@
 // grep lines by hand to know "what's still pending".
 //
 // Scoping rules mirror memory_plans / memory_skills: project is required,
-// scoped tokens are forced to their project.
+// resolved through scopedProject.
 package mcp
 
 import (
@@ -31,8 +31,8 @@ type todoEntry struct {
 // registerTools().
 func (s *Server) registerTodosTool() {
 	s.impl.AddTool(mcp.NewTool("memory_todos",
-		mcp.WithDescription("Extract GitHub-flavored markdown checkboxes (`- [ ]` / `- [x]`) from all notes under a project. Returns path, line, text, checked state, parent heading context, and plan_status from the frontmatter when the note has type:plan. Use instead of memory_get + manual regex when you need granular pending-work awareness. Scoped tokens are forced to their project."),
-		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder) to scan. Scoped tokens are forced to their project.")),
+		mcp.WithDescription("Extract GitHub-flavored markdown checkboxes (`- [ ]` / `- [x]`) from all notes under a project. Returns path, line, text, checked state, parent heading context, and plan_status from the frontmatter when the note has type:plan. Use instead of memory_get + manual regex when you need granular pending-work awareness. "+scopedProjectNote),
+		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder) to scan. "+scopedProjectNote)),
 		mcp.WithBoolean("only_open", mcp.Description("When true, return only unchecked (`- [ ]`) todos. Default false (return all).")),
 		mcp.WithString("plan_status", mcp.Description("If set, keep only todos inside notes with frontmatter `type:plan` AND matching status (draft|in-progress|done|archived). Notes without type:plan are excluded when this filter is used.")),
 		mcp.WithString("path_prefix", mcp.Description("Optional vault-relative path prefix (e.g. 'gosidian/plans') to further restrict the scan within the project. Must start with the project name or be a sub-path of it.")),

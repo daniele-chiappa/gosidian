@@ -96,6 +96,23 @@ token. Semantics to know:
 - **Backward compatible**: single-project tokens behave exactly as
   before, and `tokens.json` files from older versions load unchanged.
 
+### Refused tokens
+
+A token owned by a web account follows that account's live access, so
+a valid token can stop working without being revoked. The response
+says which case applies:
+
+| Case | Status | `WWW-Authenticate` |
+|---|---|---|
+| No token, or one that is unknown, revoked or expired | `401` | `Bearer …` with no error |
+| The owning account was deleted or disabled | `401` | `Bearer …, error="invalid_token", error_description="token owner not found or disabled"` |
+| The owning account can no longer read any of the token's projects | `403` | `Bearer …, error="insufficient_scope", error_description="the account that owns this token has no readable project"` |
+
+The same applies to `/mcp`, `/mcp/sse` and the byte endpoints
+(`/upload`, `/download`, `/append`, `/manifest`; these answer with
+`{"error": …}`). The server logs the last two cases with the token id
+and the owning account.
+
 ## Token rotation
 
 From the web UI at `/admin/tokens`:
@@ -111,6 +128,9 @@ From the web UI at `/admin/tokens`:
   removing a grant, downgrading it to read or making a project private
   takes effect immediately without touching the token. Tokens owned by
   the owner account, or minted from the CLI, keep their declared scope.
+  CLI tokens are assigned to the owner account at the next boot, so they
+  follow that account: if it is removed (for instance by
+  `user setup --replace`) they are refused, and the boot log lists them.
 
 Revocation is immediate: the SSE connection using a revoked token
 gets disconnected at the next request.
@@ -185,6 +205,15 @@ on top of the bearer-token surface.
 ```bash
 gosidian user setup --vault ./vault --username admin
 ```
+
+Forgot the owner's password? Run the same command with the owner's
+username: it resets the password in place (add `--totp` to re-enroll
+two-factor too), keeping the account id, every other account and every
+static MCP token; the owner's web sessions and OAuth grants end, since
+the old password may have leaked. On a vault that already has accounts, `user setup` with any
+other username is refused; `--replace` wipes every account and starts
+over with the new owner, and the tokens of the removed accounts stop
+working.
 
 With web login enabled, unauthenticated browser requests are
 redirected to `/login`. Failed attempts trigger a rate limiter

@@ -25,7 +25,7 @@ func (s *Server) registerQueryTool() {
 			"Use it for any question about status, type, dates, importance or other frontmatter instead of memory_notes_by_tag + memory_batch_get. "+
 			"Example — draft plans with importance ≥ 3 updated since September: where "+
 			`[{"field":"type","op":"eq","value":"plan"},{"field":"status","op":"eq","value":"draft"},{"field":"importance","op":"gte","value":3},{"field":"updated","op":"gte","value":"2026-09-01"}].`),
-		mcp.WithString("project", mcp.Description("Project (top-level folder) to query; empty = every project the token can read. Scoped tokens are forced to their projects.")),
+		mcp.WithString("project", mcp.Description("Project (top-level folder) to query; empty = every project the token can read. A project outside the token's scope matches nothing.")),
 		mcp.WithArray("where", mcp.Required(), mcp.Description(fmt.Sprintf("Conditions, all required (max %d). Each: {field, op (default eq), value} — value is a string or number, a list for in, true/false for exists.", index.MaxQueryConds)),
 			mcp.Items(map[string]any{
 				"type": "object",

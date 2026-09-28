@@ -29,7 +29,7 @@ import (
 func (s *Server) registerAskTool() {
 	s.impl.AddTool(mcp.NewTool("memory_ask",
 		mcp.WithDescription("Record a structured open question for human review. Appends a new `### OQ-NNN — <summary>` block to <project>/docs/open-questions.md in the 'Aperte' section, creating the file from a minimal template on first use. The id is auto-incremented based on the highest existing OQ-NNN in the file. Returns the final path, the assigned OQ id, and the new note etag."),
-		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder). Scoped tokens are forced to their project.")),
+		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder). "+scopedProjectNote)),
 		mcp.WithString("question", mcp.Required(), mcp.Description("The question to record, as a full sentence. The first ~80 chars are used as the block heading summary.")),
 		mcp.WithString("urgency", mcp.Description("Urgency hint (low|medium|high). Default medium.")),
 		mcp.WithString("context", mcp.Description("Optional context/background: why you're asking, what you've already ruled out, impact. Free text.")),

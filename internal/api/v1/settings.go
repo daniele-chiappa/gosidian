@@ -1,13 +1,18 @@
 package v1
 
 import (
-	"github.com/gosidian/gosidian/internal/projects"
+	"encoding/json"
 	"net/http"
+	"net/url"
+	"os"
+	"reflect"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/config"
+	"github.com/gosidian/gosidian/internal/projects"
 )
 
 // settingsView is the JSON shape the SPA reads. Sensitive fields
@@ -38,6 +43,12 @@ type settingsView struct {
 	// Never settable via PUT — they live in config/env, not the SPA.
 	AnchorsEnabled bool `json:"anchors_enabled"`
 	GlobalsEnabled bool `json:"globals_enabled"`
+	// EnvOverrides lists the settings (dotted paths of this view, e.g.
+	// "git.author_email") that a GOSIDIAN_* environment variable sets. The
+	// values above are the effective ones — file, then env, then defaults —
+	// and these cannot be changed from here: a PUT would save them to
+	// config.toml only to lose to the env again.
+	EnvOverrides []string `json:"env_overrides"`
 }
 
 type gitSettings struct {
@@ -117,15 +128,97 @@ func (r *Router) getSettings(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusForbidden, CodeAuthForbidden, "insufficient role")
 		return
 	}
-	cfg, err := r.loadConfig()
+	view, err := r.effectiveSettings()
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
 		return
 	}
-	view := toSettingsView(cfg)
+	// Members read the settings but cannot change them: a remote URL with
+	// credentials in it (file or env) is for the owner only.
+	if !principalFromContext(req).CanAdmin() {
+		view.Git.Remote = redactUserinfo(view.Git.Remote)
+	}
+	WriteJSON(w, http.StatusOK, view)
+}
+
+// redactUserinfo hides the user:password@ part of a URL remote, which may
+// carry a token; other remote forms (scp-like git@host:repo) are unchanged.
+func redactUserinfo(remote string) string {
+	u, err := url.Parse(remote)
+	if err != nil || u.User == nil || u.Host == "" {
+		return remote
+	}
+	u.User = url.User("redacted")
+	return u.String()
+}
+
+// effectiveSettings is the settings view the server actually runs with:
+// config.toml with the GOSIDIAN_* environment applied on top, as main does at
+// boot, plus the list of fields the environment sets.
+func (r *Router) effectiveSettings() (settingsView, error) {
+	eff, err := r.loadConfig()
+	if err != nil {
+		return settingsView{}, err
+	}
+	if err := eff.ApplyEnv(); err != nil {
+		return settingsView{}, err
+	}
+	view := toSettingsView(eff)
 	view.DefaultVisibility = r.defaultVisibilitySetting()
 	view.PersonalProjects = r.personalProjectsSetting()
-	WriteJSON(w, http.StatusOK, view)
+	view.EnvOverrides = envOverridden(r.loadConfig)
+	return view, nil
+}
+
+// envOverridden lists the settings the environment sets: the fields ApplyEnv
+// changes on the file's config and on the defaults. Checking both catches an
+// env var that repeats the file's value (it still wins over any edit), and
+// only misses one equal to both the file and the default.
+func envOverridden(loadFile func() (*config.Config, error)) []string {
+	defaults := func() (*config.Config, error) { return config.Default(), nil }
+	keys := map[string]bool{}
+	for _, load := range []func() (*config.Config, error){loadFile, defaults} {
+		base, err := load()
+		if err != nil {
+			continue
+		}
+		withEnv, err := load()
+		if err != nil || withEnv.ApplyEnv() != nil {
+			continue
+		}
+		before := flattenView(toSettingsView(base))
+		for k, v := range flattenView(toSettingsView(withEnv)) {
+			if !reflect.DeepEqual(before[k], v) {
+				keys[k] = true
+			}
+		}
+	}
+	out := make([]string, 0, len(keys))
+	for k := range keys {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// flattenView maps a settings view to dotted JSON paths → leaf values.
+func flattenView(v settingsView) map[string]any {
+	var tree map[string]any
+	b, _ := json.Marshal(v)
+	_ = json.Unmarshal(b, &tree)
+	out := map[string]any{}
+	var walk func(prefix string, node map[string]any)
+	walk = func(prefix string, node map[string]any) {
+		for k, val := range node {
+			if sub, ok := val.(map[string]any); ok {
+				walk(prefix+k+".", sub)
+				continue
+			}
+			out[prefix+k] = val
+		}
+	}
+	walk("", tree)
+	return out
 }
 
 // personalProjectsSetting reports whether new accounts get a personal project.
@@ -170,6 +263,11 @@ func (r *Router) putSettings(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	orig, err := r.loadConfig()
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
+		return
+	}
 	cfg, err := r.loadConfig()
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
@@ -179,14 +277,21 @@ func (r *Router) putSettings(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, errMsg)
 		return
 	}
+	if key := r.envConflict(orig, cfg); key != "" {
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat,
+			key+" is set by a GOSIDIAN_* environment variable; change it there (a value saved here would be overridden at every start)")
+		return
+	}
 
 	if err := config.Save(r.deps.ConfigPath, cfg); err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, "save: "+err.Error())
 		return
 	}
 	// Apply the TOTP mode to the live webauth store so it takes effect without
-	// a restart.
-	if r.deps.Auth != nil && r.deps.Auth.WebAuth != nil {
+	// a restart — only when this save sets it: otherwise any save would push
+	// the file's value live over a policy the environment sets (the SPA
+	// leaves env-set fields out of the body).
+	if body.TOTPMode != nil && r.deps.Auth != nil && r.deps.Auth.WebAuth != nil {
 		r.deps.Auth.WebAuth.SetTOTPMode(cfg.Webauth.TOTPMode)
 	}
 	// default_visibility lives in the projects store (not config.toml); apply
@@ -214,10 +319,34 @@ func (r *Router) putSettings(w http.ResponseWriter, req *http.Request) {
 		})
 	}
 
-	view := toSettingsView(cfg)
-	view.DefaultVisibility = r.defaultVisibilitySetting()
-	view.PersonalProjects = r.personalProjectsSetting()
+	view, err := r.effectiveSettings()
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
+		return
+	}
 	WriteJSON(w, http.StatusOK, view)
+}
+
+// envConflict returns the first env-set setting the patch changes to a value
+// other than the effective one, or "". Sending back the effective value (what
+// GET returned) is not a conflict, so a client that echoes the whole form is
+// fine.
+func (r *Router) envConflict(orig, patched *config.Config) string {
+	overridden := envOverridden(r.loadConfig)
+	if len(overridden) == 0 {
+		return ""
+	}
+	eff, err := r.loadConfig()
+	if err != nil || eff.ApplyEnv() != nil {
+		return ""
+	}
+	before, after, effective := flattenView(toSettingsView(orig)), flattenView(toSettingsView(patched)), flattenView(toSettingsView(eff))
+	for _, k := range overridden {
+		if !reflect.DeepEqual(after[k], before[k]) && !reflect.DeepEqual(after[k], effective[k]) {
+			return k
+		}
+	}
+	return ""
 }
 
 func (r *Router) loadConfig() (*config.Config, error) {
@@ -294,7 +423,13 @@ func applySettingsPatch(cfg *config.Config, body *updateSettingsRequest) string 
 		if g.TokenEnv != nil {
 			cfg.Git.TokenEnv = strings.TrimSpace(*g.TokenEnv)
 		}
-		if cfg.Git.Enabled && cfg.Git.Push && cfg.Git.Remote == "" {
+		// The remote may come from GOSIDIAN_GIT_REMOTE rather than the file:
+		// check what the server will run with.
+		remote := cfg.Git.Remote
+		if env := os.Getenv("GOSIDIAN_GIT_REMOTE"); env != "" {
+			remote = env
+		}
+		if cfg.Git.Enabled && cfg.Git.Push && remote == "" {
 			return "git push enabled but remote is empty"
 		}
 	}
