@@ -176,6 +176,17 @@ the current transport, change the URL to `/mcp` and the transport to
 `http` (Claude Code: `claude mcp remove gosidian` then the `claude mcp
 add … --transport http` command above). Nothing changes server-side.
 
+Streamable HTTP also copes better with server restarts. An HTTP+SSE
+client keeps one long-lived stream open and, like any EventSource,
+stops reconnecting at the first answer that is not a 200. While
+gosidian starts it holds such a stream until it is ready (up to 30 s)
+instead of answering 503, but a reverse proxy in front of it answers
+502 while the container is down, and a start longer than the hold still
+ends in a 503. After that some clients (Claude Code among them) keep
+showing the server as connected while every call fails with `Invalid
+session ID`: reconnect the server (`/mcp` in Claude Code), or move to
+Streamable HTTP, which keeps no stream open.
+
 ## Migrating from the legacy standalone port
 
 Versions before the single-port change exposed MCP on its own port

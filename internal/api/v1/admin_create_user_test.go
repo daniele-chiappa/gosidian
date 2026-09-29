@@ -3,6 +3,8 @@ package v1
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -67,5 +69,43 @@ func TestAdminCreateUser(t *testing.T) {
 		if u.Username == "erin" {
 			t.Error("invalid totp_policy must not create an account")
 		}
+	}
+}
+
+// The username of a disabled account can be given to a new one: the old
+// account is renamed and kept, the answer and the audit log say so.
+func TestAdminCreateUser_ReusesDisabledUsername(t *testing.T) {
+	f := newNotesFixture(t)
+	body := `{"username":"alice","password":"alice-pass-123","role":"member"}`
+	create := func() (int, map[string]any) {
+		t.Helper()
+		rec := f.doAuthRecorder(http.MethodPost, "/api/v1/admin/users", body, nil)
+		var v map[string]any
+		_ = json.Unmarshal([]byte(rec.body), &v)
+		return rec.code, v
+	}
+	code, first := create()
+	if code != http.StatusCreated || first["archived_username"] != nil {
+		t.Fatalf("first create: %d %v", code, first)
+	}
+	oldID := first["id"].(string)
+	if rec := f.doAuthRecorder(http.MethodDelete, "/api/v1/admin/users/"+oldID, "", nil); rec.code != http.StatusNoContent {
+		t.Fatalf("disable: %d %s", rec.code, rec.body)
+	}
+
+	code, second := create()
+	archived, _ := second["archived_username"].(string)
+	if code != http.StatusCreated || second["id"] == oldID || !strings.HasPrefix(archived, "alice~disabled-") {
+		t.Fatalf("re-create: %d %v, want 201, a new id and archived_username alice~disabled-…", code, second)
+	}
+	if u, ok := f.webauth.UserByID(oldID); !ok || u.Username != archived || u.Enabled() {
+		t.Errorf("old account = %+v, want kept disabled as %s", u, archived)
+	}
+	raw, err := os.ReadFile(filepath.Join(filepath.Dir(f.vaultRoot), "audit.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"action":"user_archive","path":"`+oldID+`","to":"`+archived+`"`) {
+		t.Errorf("no user_archive audit entry for %s: %s", oldID, raw)
 	}
 }

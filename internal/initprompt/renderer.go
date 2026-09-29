@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -90,6 +92,10 @@ func Render(project string, profile Profile, mode Mode, hints Hints, projectExis
 	if err != nil {
 		return Result{}, fmt.Errorf("read stub template: %w", err)
 	}
+	placement, err := assetsFS.ReadFile(sharedPlacementText)
+	if err != nil {
+		return Result{}, fmt.Errorf("read stub placement: %w", err)
+	}
 
 	vars := map[string]string{
 		"PROJECT":       project,
@@ -98,33 +104,38 @@ func Render(project string, profile Profile, mode Mode, hints Hints, projectExis
 		"AGENT_NAME":    coalesce(hints.AgentName, prof.DisplayName),
 		"STUB_VERSION":  strconv.Itoa(StubVersion),
 	}
-	if hints.Language != "" {
-		vars["LANGUAGE"] = hints.Language
-	}
-	if hints.CodeLanguage != "" {
-		vars["CODE_LANGUAGE"] = hints.CodeLanguage
-	}
-	if hints.ProjectType != "" {
-		vars["PROJECT_TYPE"] = hints.ProjectType
-	}
-	if hints.Stack != "" {
-		vars["STACK"] = hints.Stack
-	}
-	if hints.HotFiles != "" {
-		vars["HOT_FILES"] = hints.HotFiles
-	}
 	if hints.FilenameHint != "" {
 		vars["FILENAME_HINT"] = hints.FilenameHint
 	}
 	if hints.CwdHint != "" {
 		vars["CWD_HINT"] = hints.CwdHint
 	}
+	// The hint placeholders take their value in the block only: the prompts
+	// name them, to tell the agent which ones it still has to fill.
+	blockVars := maps.Clone(vars)
+	hinted := map[string]string{
+		"LANGUAGE":      hints.Language,
+		"CODE_LANGUAGE": hints.CodeLanguage,
+		"PROJECT_TYPE":  hints.ProjectType,
+		"STACK":         hints.Stack,
+		"HOT_FILES":     hints.HotFiles,
+	}
+	var open []string
+	for _, name := range hintPlaceholders {
+		if v := strings.TrimSpace(hinted[name]); v != "" {
+			blockVars[name] = v
+		} else {
+			open = append(open, "`{{"+name+"}}`")
+		}
+	}
+	vars["PLACEHOLDER_STATUS"] = placeholderStatus(open)
+	vars["STUB_PLACEMENT"] = strings.TrimSpace(string(placement))
 
 	return Result{
 		Mode:               mode,
 		NeedsScaffold:      !projectExists,
 		Prompt:             applyVars(string(promptBytes), vars),
-		GosidianBlock:      applyVars(string(stubBytes), vars),
+		GosidianBlock:      applyVars(string(stubBytes), blockVars),
 		StubVersion:        StubVersion,
 		SuggestedQuestions: defaultSuggestedQuestions(),
 	}, nil
@@ -201,11 +212,31 @@ func RenderReadDirectives(project string) (string, int, error) {
 	return strings.Join(out, "\n"), version, nil
 }
 
-func applyVars(body string, vars map[string]string) string {
-	for k, v := range vars {
-		body = strings.ReplaceAll(body, "{{"+k+"}}", v)
+// hintPlaceholders are the stub placeholders filled from user_hints, in the
+// order the prompts list the ones still open.
+var hintPlaceholders = []string{"LANGUAGE", "CODE_LANGUAGE", "PROJECT_TYPE", "STACK", "HOT_FILES"}
+
+// placeholderStatus is the prompt's sentence on the block's placeholders:
+// the ones no hint filled, which the agent resolves before writing.
+func placeholderStatus(open []string) string {
+	if len(open) == 0 {
+		return "Tutti i placeholder del blocco sono già risolti da `user_hints`."
 	}
-	return body
+	return "Placeholder ancora da risolvere nel blocco: " + strings.Join(open, ", ") + "."
+}
+
+var placeholderRE = regexp.MustCompile(`\{\{([A-Z_]+)\}\}`)
+
+// applyVars fills the {{NAME}} placeholders vars defines and leaves the rest
+// as they are. One pass: a value is never scanned again, so a hint holding
+// {{…}}, or the placeholder status naming the open ones, stays verbatim.
+func applyVars(body string, vars map[string]string) string {
+	return placeholderRE.ReplaceAllStringFunc(body, func(m string) string {
+		if v, ok := vars[m[2:len(m)-2]]; ok {
+			return v
+		}
+		return m
+	})
 }
 
 func coalesce(a, b string) string {

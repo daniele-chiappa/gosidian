@@ -2,15 +2,12 @@
 <!--
   stub.tmpl.md — stub sottile da innestare nel file di istruzioni
   agent-native del progetto "{{PROJECT}}". Emesso da memory_init_agent.
-  Placeholder: {{PROJECT}} {{TODAY}} {{LANGUAGE}} {{CODE_LANGUAGE}}
-  {{PROJECT_TYPE}} {{STACK}} {{HOT_FILES}} {{AGENT_NAME}}
-  {{AGENT_PROFILE}} {{STUB_VERSION}}.
 
   Le DIRETTIVE operative complete (mappa cartelle, ingest rules, plan,
   workflow end-of-task, tag) NON stanno qui: le serve memory_bootstrap
-  nel campo `directives_block`. La porzione fra `<!-- gosidian:stub v=N -->`
-  e `<!-- /gosidian:stub -->` è gestita dal tool: rigenerabile in blocco,
-  da NON editare a mano.
+  nel campo `directives_block`. Tutto fino al marker di chiusura
+  (/gosidian:stub) è gestito dal tool: rigenerabile in blocco, da NON
+  editare a mano.
 -->
 
 ## Memory & workflow (gosidian)
@@ -48,9 +45,13 @@ Se `memory_bootstrap` non è disponibile, fallback manuale:
 
 ### Auto-allineamento dello stub
 
-Questo stub è marcato `<!-- gosidian:stub v=N -->` in testa.
-`memory_bootstrap` ritorna `stub_version`: se è **maggiore** della `N` del
-marker (o il marker manca), rigenera lo stub con
+Questo stub si apre con il marker `gosidian:stub v=N` e si chiude con
+`/gosidian:stub`, ciascuno in un commento HTML su una riga a sé. Alcuni
+agent (Claude Code fra questi) tolgono i commenti HTML dal testo che
+caricano: se non vedi il marker, cercalo nel file su disco, oppure leggi
+la versione nella sezione Meta qui sotto. `memory_bootstrap` ritorna
+`stub_version`: se è **maggiore** della `N` del marker (o il marker manca
+dal file), rigenera lo stub con
 
 ```
 mcp__gosidian__memory_init_agent({
@@ -59,11 +60,12 @@ mcp__gosidian__memory_init_agent({
 })
 ```
 
-e riscrivi **solo** la porzione fra `<!-- gosidian:stub v=... -->` e
-`<!-- /gosidian:stub -->`, lasciando intatte le sezioni locali. Lo stub
-cambia di rado (solo se cambia il *contratto*); le **direttive operative**
-si aggiornano invece da sole via `directives_block`, senza toccare questo
-file. Nessun broadcast necessario.
+e riscrivi **solo** le righe dal marker di apertura a quello di chiusura,
+compresi, lasciando intatte le sezioni locali. Lo stub cambia di rado, e
+la versione sale a ogni modifica che cambia ciò che un agent ne ricava;
+le **direttive operative** si aggiornano invece da sole via
+`directives_block`, senza toccare questo file. Nessun broadcast
+necessario.
 
 ### Hot files
 
@@ -80,8 +82,9 @@ file. Nessun broadcast necessario.
 > ⚠️ **Non scrivere le tue note qui.** Questa sezione è **dentro** i marker
 > `gosidian:stub`, quindi viene **rigenerata** (e azzerata) a ogni bump di
 > `stub_version`. Metti le specifiche di questo repo (comandi build/test,
-> deploy, gotcha, vincoli) **sotto** il marker `<!-- /gosidian:stub -->`,
-> come sezione locale: lì sopravvivono alla rigenerazione. Le **direttive
+> deploy, gotcha, vincoli) **sotto** il marker di chiusura
+> (`/gosidian:stub`), come sezione locale: lì sopravvivono alla
+> rigenerazione. Le **direttive
 > operative** non vanno invece duplicate da nessuna parte — le serve
 > `directives_block` dal bootstrap.
 
@@ -89,7 +92,7 @@ file. Nessun broadcast necessario.
 
 - Stub generato da `memory_init_agent` ({{TODAY}}) per il profilo agent
   **{{AGENT_NAME}}** (`agent_profile={{AGENT_PROFILE}}`), versione
-  **v{{STUB_VERSION}}**. Mantieni il blocco fra i marker `gosidian:stub`
-  come unità riconoscibile.
+  **v{{STUB_VERSION}}** (la `N` del marker). Mantieni il blocco fra i
+  marker `gosidian:stub` come unità riconoscibile.
 
 <!-- /gosidian:stub -->

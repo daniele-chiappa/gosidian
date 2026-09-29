@@ -36,6 +36,9 @@ type adminUserView struct {
 	// is GET /admin/users/{id}/access. Omitted for the owner (everything).
 	ProjectsReadable *int `json:"projects_readable,omitempty"`
 	ProjectsWritable *int `json:"projects_writable,omitempty"`
+	// ArchivedUsername, only in the answer to a creation, is the new name of
+	// the disabled account that held the username.
+	ArchivedUsername string `json:"archived_username,omitempty"`
 }
 
 func toAdminUserView(u webauth.User) adminUserView {
@@ -122,10 +125,12 @@ type createUserRequest struct {
 
 // createUser provisions a new account directly (owner-only, POST /admin/users)
 // — the admin-driven counterpart to the invite + /signup self-service flow. The
-// owner is a singleton, so only member/guest can be created here; webauth.AddUser
+// owner is a singleton, so only member/guest can be created here; webauth
 // carries the validation (>= 8 char password, unique username) and a duplicate
-// maps to 409 exactly as /signup does. An optional totp_policy sets the per-user
-// override at creation instead of a follow-up PATCH.
+// maps to 409 exactly as /signup does. Unlike /signup, the username of a
+// disabled account can be reused: that account is renamed and kept
+// (AddUserReclaiming). An optional totp_policy sets the per-user override at
+// creation instead of a follow-up PATCH.
 func (r *Router) createUser(w http.ResponseWriter, req *http.Request) {
 	actor := UserFromContext(req.Context())
 	var body createUserRequest
@@ -154,7 +159,7 @@ func (r *Router) createUser(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "totp_policy must be '', 'enabled' or 'disabled'")
 		return
 	}
-	user, err := r.deps.Auth.WebAuth.AddUser(body.Username, body.Password, role)
+	user, archived, err := r.deps.Auth.WebAuth.AddUserReclaiming(body.Username, body.Password, role)
 	if err != nil {
 		// AddUser carries the precise reason; duplicate username → 409 (like /signup).
 		if isDuplicateUsername(err.Error()) {
@@ -163,6 +168,27 @@ func (r *Router) createUser(w http.ResponseWriter, req *http.Request) {
 		}
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
 		return
+	}
+	// Audited as soon as the account exists: a follow-up step below may still
+	// fail with a 500, and the rename and the account would stay unrecorded.
+	if actor != nil && r.deps.Audit != nil {
+		if archived != nil {
+			_ = r.deps.Audit.Write(audit.Entry{
+				Source: audit.SourceHTTP,
+				Actor:  actor.Username,
+				UserID: actor.ID,
+				Action: audit.ActionUserArchive,
+				Path:   archived.ID,
+				To:     archived.Username,
+			})
+		}
+		_ = r.deps.Audit.Write(audit.Entry{
+			Source: audit.SourceHTTP,
+			Actor:  actor.Username,
+			UserID: actor.ID,
+			Action: audit.ActionUserCreate,
+			Path:   user.ID,
+		})
 	}
 	if policy != webauth.TOTPInherit {
 		if err := r.deps.Auth.WebAuth.SetTOTPPolicy(user.ID, policy); err != nil {
@@ -182,26 +208,21 @@ func (r *Router) createUser(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 	}
-	if actor != nil && r.deps.Audit != nil {
-		_ = r.deps.Audit.Write(audit.Entry{
-			Source: audit.SourceHTTP,
-			Actor:  actor.Username,
-			UserID: actor.ID,
-			Action: audit.ActionUserCreate,
-			Path:   user.ID,
-		})
-	}
+	view := toAdminUserView(*user)
 	if u, ok := r.deps.Auth.WebAuth.UserByID(user.ID); ok {
-		WriteJSON(w, http.StatusCreated, toAdminUserView(*u))
-		return
+		view = toAdminUserView(*u)
 	}
-	WriteJSON(w, http.StatusCreated, toAdminUserView(*user))
+	if archived != nil {
+		view.ArchivedUsername = archived.Username
+	}
+	WriteJSON(w, http.StatusCreated, view)
 }
 
 // handleAdminUserItem covers DELETE → DisableUser. The webauth API
-// has no symmetric Enable, so re-activating a disabled user requires
-// editing accounts.json directly. That's intentional — disabling is a
-// safety action and the explicit lockout is a feature, not a gap.
+// has no symmetric Enable, and that's intentional — disabling is a
+// safety action and the explicit lockout is a feature, not a gap: the
+// account's password and TOTP never sign in again. Its username can go
+// to a new account (createUser), which renames the disabled one.
 func (r *Router) handleAdminUserItem(w http.ResponseWriter, req *http.Request) {
 	if r.deps.Auth == nil || r.deps.Auth.WebAuth == nil {
 		WriteError(w, http.StatusServiceUnavailable, CodeServerUnavailable, "web auth not configured")

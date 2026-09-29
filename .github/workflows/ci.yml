@@ -33,7 +33,9 @@ jobs:
         run: go vet ./...
 
       - name: go test
-        run: go test -race -count=1 ./...
+        # -race makes the bcrypt-heavy api/v1 and webauth suites take several
+        # minutes; the default 10m per package leaves too little headroom.
+        run: go test -race -count=1 -timeout 30m ./...
 
       - name: go build
         run: |

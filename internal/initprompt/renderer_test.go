@@ -138,6 +138,75 @@ func TestRender_HintsResolveBlockPlaceholders(t *testing.T) {
 	}
 }
 
+// The prompts name the hint placeholders to say which ones the agent still
+// has to fill: they are never replaced by values there, and the sentence on
+// the open ones follows the hints actually given.
+func TestRender_PromptNamesOpenPlaceholders(t *testing.T) {
+	hints := Hints{Language: "italiano", Stack: "Go", HotFiles: "src/a.go\nsrc/b.go"}
+	for _, p := range Profiles() {
+		for _, m := range []Mode{ModeAugment, ModeFromScratch} {
+			res, err := Render("p", p, m, hints, true)
+			if err != nil {
+				t.Fatalf("%s/%s: %v", p, m, err)
+			}
+			if strings.Contains(res.Prompt, "`italiano`") || strings.Contains(res.Prompt, "src/a.go") {
+				t.Errorf("%s/%s: prompt holds a hint value where it names a placeholder", p, m)
+			}
+			if !strings.Contains(res.Prompt, "Placeholder ancora da risolvere nel blocco:") {
+				t.Errorf("%s/%s: prompt does not say which placeholders are still open", p, m)
+			}
+			// Replacing an existing stub must reach the real end marker:
+			// up to v2 the stub quoted it in its own text.
+			if m == ModeAugment && !strings.Contains(res.Prompt, "riga che contiene **soltanto**") {
+				t.Errorf("%s/%s: prompt lacks the stub placement rule", p, m)
+			}
+			if strings.Contains(res.Prompt, "## Memory & workflow (gosidian)`") {
+				t.Errorf("%s/%s: prompt still says the block starts at its heading", p, m)
+			}
+		}
+	}
+	res, _ := Render("p", ProfileClaude, ModeAugment, hints, true)
+	if want := "Placeholder ancora da risolvere nel blocco: `{{CODE_LANGUAGE}}`, `{{PROJECT_TYPE}}`."; !strings.Contains(res.Prompt, want) {
+		t.Errorf("prompt lacks %q", want)
+	}
+	all := Hints{Language: "it", CodeLanguage: "en", ProjectType: "cli", Stack: "Go", HotFiles: "main.go"}
+	if res, _ := Render("p", ProfileClaude, ModeAugment, all, true); !strings.Contains(res.Prompt, "Tutti i placeholder del blocco sono già risolti") {
+		t.Error("prompt should say every placeholder is filled")
+	}
+	// The block's own comment lists no placeholders: filled in, a multi-line
+	// value used to split inside it.
+	if strings.Contains(res.GosidianBlock, "Placeholder:") {
+		t.Error("stub comment still lists the placeholders")
+	}
+}
+
+// One pass: a value is never scanned for placeholders again.
+func TestApplyVars_SinglePass(t *testing.T) {
+	got := applyVars("{{A}} {{B}} {{C}} {{...}}", map[string]string{"A": "{{B}}", "B": "b"})
+	if want := "{{B}} b {{C}} {{...}}"; got != want {
+		t.Errorf("applyVars = %q, want %q", got, want)
+	}
+}
+
+func TestProfileForFilename(t *testing.T) {
+	for in, want := range map[string]Profile{
+		"CLAUDE.md":                  ProfileClaude,
+		"/home/u/repo/claude.md":     ProfileClaude,
+		".cursorrules":               ProfileCursor,
+		".cursor/rules/gosidian.mdc": ProfileCursor,
+		`repo\.cursor\rules.mdc`:     ProfileCursor,
+		"CONVENTIONS.md":             ProfileAider,
+		".aider.conf.yml":            ProfileAider,
+		"AGENTS.md":                  "",
+		"":                           "",
+	} {
+		got, ok := ProfileForFilename(in)
+		if got != want || ok != (want != "") {
+			t.Errorf("ProfileForFilename(%q) = %q, %v; want %q", in, got, ok, want)
+		}
+	}
+}
+
 func TestRender_NoHintsKeepsPlaceholdersIntact(t *testing.T) {
 	res, err := Render("p", ProfileClaude, ModeAugment, Hints{}, true)
 	if err != nil {
@@ -229,6 +298,28 @@ func TestRender_StubHasVersionMarker(t *testing.T) {
 	if !strings.Contains(res.GosidianBlock, "<!-- /gosidian:stub -->") {
 		t.Error("stub missing end marker <!-- /gosidian:stub -->")
 	}
+	// The markers are the only place they appear, and no comment holds
+	// another: a quoted marker inside the leading comment closed it early
+	// (BUG-067), and a search for the end marker found a quote first.
+	for _, m := range []string{start, "<!-- /gosidian:stub -->"} {
+		if n := strings.Count(res.GosidianBlock, m); n != 1 {
+			t.Errorf("stub has %d occurrences of %q, want 1", n, m)
+		}
+	}
+	for rest := res.GosidianBlock; ; {
+		open := strings.Index(rest, "<!--")
+		if open < 0 {
+			break
+		}
+		end := strings.Index(rest[open+4:], "-->")
+		if end < 0 {
+			t.Fatal("stub has an unterminated HTML comment")
+		}
+		if inner := rest[open+4 : open+4+end]; strings.Contains(inner, "<!--") {
+			t.Errorf("HTML comment opens another inside it: %q", inner)
+		}
+		rest = rest[open+4+end+3:]
+	}
 	if strings.Contains(res.GosidianBlock, "{{STUB_VERSION}}") {
 		t.Error("stub contains unresolved {{STUB_VERSION}}")
 	}
@@ -273,13 +364,13 @@ func TestRenderDirectives(t *testing.T) {
 // version in profiles.go (if agents should pick the change up) AND update the
 // pin, or just update the pin for a cosmetic edit.
 func TestStubVersion_PinnedToContent(t *testing.T) {
-	assertPinned(t, sharedStubTemplate, StubVersion, 2,
-		"7b0e4546a84b8a46b0f9a20dd2e3ad55e7ced7c34e1cf550c6da287fa7b934a9")
+	assertPinned(t, sharedStubTemplate, StubVersion, 3,
+		"044e7ab69778b17760ef3f40d959cc3c876955279601124d529114fcdb732fb9")
 }
 
 func TestDirectivesVersion_PinnedToContent(t *testing.T) {
-	assertPinned(t, sharedDirectivesTemplate, DirectivesVersion, 12,
-		"a99a2673c547d49a37d9c99d5e81e1a72340d3c32f1ffd3a6873d4ce182dbe42")
+	assertPinned(t, sharedDirectivesTemplate, DirectivesVersion, 13,
+		"d6ad97c2b33203c680133e762a2bfe4a89dbbe87637905f7fcfebb8f1b11a9ba")
 }
 
 func assertPinned(t *testing.T, asset string, gotVersion, wantVersion int, wantHash string) {
@@ -295,8 +386,8 @@ func assertPinned(t *testing.T, asset string, gotVersion, wantVersion int, wantH
 	}
 	if got != wantHash {
 		t.Fatalf("%s content changed (sha256 %s, pin %s).\n"+
-			"If agents should pick this up: bump the version in profiles.go, then set wantVersion+wantHash.\n"+
-			"If cosmetic: just set wantHash.", asset, got, wantHash)
+			"If an agent would act differently on the new text (names, steps, rules): bump the version in profiles.go, then set wantVersion+wantHash.\n"+
+			"Only if it would act the same (whitespace, a typo in prose): just set wantHash.", asset, got, wantHash)
 	}
 }
 

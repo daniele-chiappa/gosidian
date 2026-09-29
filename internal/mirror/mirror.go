@@ -293,8 +293,14 @@ func lock(dir, project string) (func(), error) {
 	for attempt := 0; attempt < 2; attempt++ {
 		f, err := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err == nil {
-			fmt.Fprintf(f, "%d\n", os.Getpid())
-			f.Close()
+			_, werr := fmt.Fprintf(f, "%d\n", os.Getpid())
+			if cerr := f.Close(); werr == nil {
+				werr = cerr
+			}
+			if werr != nil {
+				os.Remove(p)
+				return nil, fmt.Errorf("write lock %s: %w", p, werr)
+			}
 			return func() { os.Remove(p) }, nil
 		}
 		if !errors.Is(err, os.ErrExist) {

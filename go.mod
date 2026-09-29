@@ -7,14 +7,14 @@ require (
 	github.com/boombuler/barcode v1.1.0
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/go-ldap/ldap/v3 v3.4.14
-	github.com/mark3labs/mcp-go v1.0.0
+	github.com/mark3labs/mcp-go v1.1.1
 	github.com/pquerna/otp v1.5.0
 	github.com/prometheus/client_golang v1.24.1
 	github.com/yuin/goldmark v1.8.6
 	github.com/yuin/goldmark-highlighting/v2 v2.0.0-20230729083705-37449abec8cc
 	golang.org/x/crypto v0.57.0
 	golang.org/x/term v0.46.0
-	modernc.org/sqlite v1.58.0
+	modernc.org/sqlite v1.59.0
 )
 
 require (
@@ -41,7 +41,7 @@ require (
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
-	modernc.org/libc v1.75.6 // indirect
+	modernc.org/libc v1.75.7 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )

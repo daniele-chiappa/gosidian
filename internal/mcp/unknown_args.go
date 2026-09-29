@@ -80,15 +80,17 @@ func unknownArgsNote(tool string, unknown, known []string) string {
 }
 
 // closestArg guesses the declared argument a misnamed one was meant to be:
-// same name up to case, '-' vs '_', or a trailing plural 's'.
+// same name up to case and '-' vs '_', else up to a trailing plural 's'.
+// The closer match wins, so "Projects" points to projects, not project.
 func closestArg(name string, known []string) string {
-	norm := func(v string) string {
-		return strings.TrimSuffix(strings.ReplaceAll(strings.ToLower(v), "-", "_"), "s")
-	}
-	n := norm(name)
-	for _, k := range known {
-		if norm(k) == n {
-			return k
+	fold := func(v string) string { return strings.ReplaceAll(strings.ToLower(v), "-", "_") }
+	singular := func(v string) string { return strings.TrimSuffix(fold(v), "s") }
+	for _, norm := range []func(string) string{fold, singular} {
+		n := norm(name)
+		for _, k := range known {
+			if norm(k) == n {
+				return k
+			}
 		}
 	}
 	return ""

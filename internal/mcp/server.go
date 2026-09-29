@@ -90,6 +90,11 @@ func correlationIDFor(ctx context.Context) string {
 
 // Server wraps a mark3labs MCPServer wired against a gosidian vault + index.
 type Server struct {
+	// sseServers are the HTTP+SSE transports Handler built, kept so
+	// CloseStreams can end their sessions at shutdown.
+	sseMu      sync.Mutex
+	sseServers []*server.SSEServer
+
 	vault              *vault.Vault
 	index              *index.Index
 	tokens             *auth.Store
@@ -507,6 +512,9 @@ func (s *Server) Handler(basePath string) http.Handler {
 		opts = append(opts, server.WithStaticBasePath(basePath))
 	}
 	sse := server.NewSSEServer(s.impl, opts...)
+	s.sseMu.Lock()
+	s.sseServers = append(s.sseServers, sse)
+	s.sseMu.Unlock()
 
 	mux := http.NewServeMux()
 	// Sibling HTTP upload endpoint at <basePath>/upload, sharing the MCP
@@ -537,6 +545,18 @@ func (s *Server) Handler(basePath string) http.Handler {
 	}
 	mux.Handle("/", s.transport(sse))
 	return mux
+}
+
+// CloseStreams ends every HTTP+SSE session of the handlers built so far. An
+// SSE stream never goes idle, so without this a graceful shutdown waits its
+// whole timeout with the port already closed (BUG-069).
+func (s *Server) CloseStreams() {
+	s.sseMu.Lock()
+	servers := append([]*server.SSEServer(nil), s.sseServers...)
+	s.sseMu.Unlock()
+	for _, sse := range servers {
+		sse.CloseSessions()
+	}
 }
 
 // httpContext returns the per-message context decorator shared by both HTTP

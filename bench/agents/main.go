@@ -174,7 +174,6 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
-	defer f.Close()
 
 	// The mirror configurations share one synced copy per configuration,
 	// prepared before the first session and copied into each working
@@ -231,7 +230,9 @@ func main() {
 					failures = 0
 				}
 				line, _ := json.Marshal(s)
-				f.Write(append(line, '\n'))
+				if _, err := f.Write(append(line, '\n')); err != nil {
+					fail(err)
+				}
 				mark := "✗"
 				if s.Correct {
 					mark = "✓"
@@ -249,6 +250,9 @@ func main() {
 				}
 			}
 		}
+	}
+	if err := f.Close(); err != nil {
+		fail(err)
 	}
 }
 

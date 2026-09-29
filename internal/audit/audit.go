@@ -73,6 +73,9 @@ const (
 	ActionUserCreate  Action = "user_create"
 	ActionUserDisable Action = "user_disable"
 	ActionUserUpdate  Action = "user_update"
+	// ActionUserArchive: a disabled account renamed so its username could be
+	// reused (Path = its id, To = its new name).
+	ActionUserArchive Action = "user_archive"
 
 	// Two-factor lifecycle (totp handlers, admin reset, IMP-062). Path = id of
 	// the account whose second factor changed; Actor = who did it, which for

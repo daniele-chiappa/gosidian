@@ -93,8 +93,9 @@ function connect(token: string, topics: SSETopic[]) {
   es.onerror = () => {
     status.value = 'error'
     // After a network error the browser reconnects by itself. Any
-    // non-200 answer instead closes the EventSource for good: the 503
-    // the server sends while it starts, a proxy 502 during a restart.
+    // non-200 answer instead closes the EventSource for good: a proxy
+    // 502 during a restart, the server's 503 when a start outlasts the
+    // time it holds event streams.
     // Reopen it ourselves then, with a growing delay, as long as it is
     // still the current connection.
     if (es.readyState !== EventSource.CLOSED || sharedSource !== es) return

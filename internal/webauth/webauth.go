@@ -617,7 +617,8 @@ func (s *Store) AddLDAPUser(username string) (*User, error) {
 		Restricted: true, // new accounts start with their grants only (IMP-101 phase 3)
 		CreatedAt:  now,
 	}
-	return s.addUser(u)
+	created, _, err := s.addUser(u, false)
+	return created, err
 }
 
 // AuthResult is what Authenticate returns on success: the user, plus whether
@@ -790,46 +791,86 @@ func (s *Store) UserByID(id string) (*User, bool) {
 // AddUser creates a new member user. Fails if username is already taken.
 // Password must be >= 8 chars. Used by signup via invite.
 func (s *Store) AddUser(username, password string, role Role) (*User, error) {
-	if username == "" {
-		return nil, errors.New("username required")
-	}
-	if len(password) < 8 {
-		return nil, errors.New("password must be at least 8 characters")
-	}
-	if !role.Valid() {
-		return nil, fmt.Errorf("unknown role %q", role)
-	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	u, err := newLocalUser(username, password, role)
 	if err != nil {
 		return nil, err
 	}
+	created, _, err := s.addUser(u, false)
+	return created, err
+}
+
+// AddUserReclaiming is AddUser for the admin, who may reuse the username of a
+// disabled account. That account is renamed first (archivedUsernameLocked)
+// and keeps its ID, so the audit trail still leads to it; the new account
+// starts from nothing, and the old password and TOTP never come back. A
+// username held by an enabled account is refused as in AddUser. archived is
+// the renamed account, nil when none was.
+func (s *Store) AddUserReclaiming(username, password string, role Role) (created, archived *User, err error) {
+	u, err := newLocalUser(username, password, role)
+	if err != nil {
+		return nil, nil, err
+	}
+	return s.addUser(u, true)
+}
+
+// newLocalUser validates and builds a password account, not yet stored.
+func newLocalUser(username, password string, role Role) (User, error) {
+	if username == "" {
+		return User{}, errors.New("username required")
+	}
+	if len(password) < 8 {
+		return User{}, errors.New("password must be at least 8 characters")
+	}
+	if !role.Valid() {
+		return User{}, fmt.Errorf("unknown role %q", role)
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return User{}, err
+	}
 	now := time.Now().UTC()
-	u := User{
+	return User{
 		ID:         deriveUserID(username, now),
 		Username:   username,
 		Hash:       string(hash),
 		Role:       role,
 		Restricted: true, // new accounts start with their grants only (IMP-101 phase 3)
 		CreatedAt:  now,
-	}
-	return s.addUser(u)
+	}, nil
 }
 
 // addUser appends a new account, persists it and fires the creation hook
-// outside the lock.
-func (s *Store) addUser(u User) (*User, error) {
+// outside the lock. With reclaim, a disabled account holding the username is
+// renamed out of the way in the same save.
+func (s *Store) addUser(u User, reclaim bool) (*User, *User, error) {
 	s.mu.Lock()
-	for _, existing := range s.file.Users {
-		if existing.Username == u.Username {
-			s.mu.Unlock()
-			return nil, fmt.Errorf("username %q already exists", u.Username)
+	held := -1
+	for i, existing := range s.file.Users {
+		if existing.Username != u.Username {
+			continue
 		}
+		if !reclaim || existing.Enabled() {
+			s.mu.Unlock()
+			return nil, nil, fmt.Errorf("username %q already exists", u.Username)
+		}
+		held = i
+	}
+	if held >= 0 {
+		s.file.Users[held].Username = s.archivedUsernameLocked(s.file.Users[held])
 	}
 	s.file.Users = append(s.file.Users, u)
 	if err := s.saveLocked(); err != nil {
 		s.file.Users = s.file.Users[:len(s.file.Users)-1]
+		if held >= 0 {
+			s.file.Users[held].Username = u.Username
+		}
 		s.mu.Unlock()
-		return nil, err
+		return nil, nil, err
+	}
+	var archived *User
+	if held >= 0 {
+		cp := s.file.Users[held]
+		archived = &cp
 	}
 	fn := s.onUserCreated
 	s.mu.Unlock()
@@ -837,7 +878,28 @@ func (s *Store) addUser(u User) (*User, error) {
 		fn(u)
 	}
 	cp := u
-	return &cp, nil
+	return &cp, archived, nil
+}
+
+// archivedUsernameLocked is the name a disabled account takes when its
+// username is reused: "<username>~disabled-<day it was disabled>", with a
+// counter when another account already holds that name.
+func (s *Store) archivedUsernameLocked(old User) string {
+	base := old.Username + "~disabled-" + old.DisabledAt.UTC().Format("2006-01-02")
+	name := base
+	for n := 2; s.usernameTakenLocked(name); n++ {
+		name = fmt.Sprintf("%s-%d", base, n)
+	}
+	return name
+}
+
+func (s *Store) usernameTakenLocked(name string) bool {
+	for _, u := range s.file.Users {
+		if u.Username == name {
+			return true
+		}
+	}
+	return false
 }
 
 // SetRestricted toggles whether the account ignores project visibility and

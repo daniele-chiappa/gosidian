@@ -16,11 +16,13 @@ file di istruzioni — si aggiornano da sole al bump di versione.
 ### Auto-conversione del file di istruzioni (one-time)
 
 Se il file di istruzioni del progetto (CLAUDE.md/AGENTS.md/…) **non**
-contiene il marker `<!-- gosidian:stub -->`, è pre-stub: convertilo una
-tantum con `memory_init_agent({project: "{{PROJECT}}", existing_content:
-"<contenuto del file>"})` — innesta lo stub, preserva le sezioni locali,
-rimuovi le direttive duplicate (ora le servo io). Idempotente: marker già
-presente → non fare nulla.
+contiene la riga del marker `gosidian:stub v=N` (un commento HTML), è
+pre-stub: convertilo una tantum con `memory_init_agent({project:
+"{{PROJECT}}", existing_content: "<contenuto del file>"})` — innesta lo
+stub, preserva le sezioni locali, rimuovi le direttive duplicate (ora le
+servo io). Idempotente: marker già presente → non fare nulla. Cercalo nel
+file su disco: alcuni agent (Claude Code fra questi) tolgono i commenti
+HTML dal testo che caricano, e lì il marker non si vede.
 
 ### Mappa delle cartelle del vault
 

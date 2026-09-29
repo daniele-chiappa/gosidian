@@ -34,11 +34,11 @@ func (s *Server) registerInitAgentTool() {
 	s.impl.AddTool(mcp.NewTool("memory_init_agent",
 		mcp.WithDescription("Produce an init-prompt payload for adopting gosidian as the memory layer in a project. Returns a `prompt` instructing the caller to create/update its agent-native instruction file plus a thin parametric `gosidian_block` stub to innest (Regola Zero pointing at memory_bootstrap; the operational directives are served by bootstrap, NOT embedded — ADR-010). Mode is picked by `existing_content`: augment (merge preserving existing sections) or from-scratch. All filesystem scanning/writing happens agent-side; `needs_scaffold=true` means call memory_project_scaffold first."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder) to initialise. May not exist yet; check `needs_scaffold` in the response to know whether to call `memory_project_scaffold` first. "+scopedProjectNote)),
-		mcp.WithString("agent_profile", mcp.Description("Target agent identifier. Known values: \"claude\", \"cursor\", \"codex\", \"aider\", \"generic\". Default \"generic\". Influences only the prompt tone and tool references — the gosidian_block is identical across profiles.")),
+		mcp.WithString("agent_profile", mcp.Description("Target agent identifier. Known values: \"claude\", \"cursor\", \"codex\", \"aider\", \"generic\". When omitted it is inferred from filename_hint (CLAUDE.md → claude, .cursorrules or .cursor/… → cursor, CONVENTIONS.md or .aider* → aider), else \"generic\"; the response says which one was used. Influences the prompt tone and tool references, the agent name in the stub and the agent anchors (claude only).")),
 		mcp.WithString("existing_content", mcp.Description("Content of the agent's native instruction file when it already exists (the output of /init). If non-empty the tool switches to augment mode and the prompt will instruct a merge that preserves every existing section.")),
-		mcp.WithString("filename_hint", mcp.Description("Optional filename the agent plans to use, e.g. \"CLAUDE.md\", \"AGENTS.md\", \".cursor/rules.mdc\". Surfaced in the prompt but never validated server-side.")),
+		mcp.WithString("filename_hint", mcp.Description("Optional filename the agent plans to use, e.g. \"CLAUDE.md\", \"AGENTS.md\", \".cursor/rules.mdc\". Picks agent_profile when that is omitted; not otherwise used or validated server-side.")),
 		mcp.WithString("cwd_hint", mcp.Description("Absolute path of the agent's cwd. Used informatively in the prompt; the server does not read it.")),
-		mcp.WithObject("user_hints", mcp.Description("Optional map with keys {language, code_language, project_type, stack, hot_files, agent_name}. Non-empty values are substituted into the gosidian_block placeholders server-side so the agent doesn't need to ask the user for them later.")),
+		mcp.WithObject("user_hints", mcp.Description("Optional map with keys {language, code_language, project_type, stack, hot_files, agent_name}. Non-empty values are substituted into the gosidian_block placeholders server-side so the agent doesn't need to ask the user for them later. A placeholder without a value stays as {{NAME}} in gosidian_block, and the prompt lists it for the agent to fill before writing.")),
 	), s.handleInitAgent)
 }
 
@@ -48,6 +48,7 @@ type initAgentResponse struct {
 	Prompt             string   `json:"prompt"`
 	GosidianBlock      string   `json:"gosidian_block"`
 	StubVersion        int      `json:"stub_version"`
+	AgentProfile       string   `json:"agent_profile"`
 	SuggestedQuestions []string `json:"suggested_questions"`
 	// Anchors lists the local agent-anchor files to materialise for the active
 	// profile (empty for profiles without spawnable-subagent support). Read-only
@@ -89,9 +90,13 @@ func (s *Server) handleInitAgent(ctx context.Context, req mcp.CallToolRequest) (
 		return res, nil
 	}
 
-	profileStr := strings.TrimSpace(req.GetString("agent_profile", "generic"))
+	profileStr := strings.TrimSpace(req.GetString("agent_profile", ""))
 	if profileStr == "" {
-		profileStr = "generic"
+		// The instruction file usually says which agent it is for.
+		profileStr = string(initprompt.ProfileGeneric)
+		if p, ok := initprompt.ProfileForFilename(req.GetString("filename_hint", "")); ok {
+			profileStr = string(p)
+		}
 	}
 	profile := initprompt.Profile(profileStr)
 	if !initprompt.IsKnownProfile(profile) {
@@ -144,6 +149,7 @@ func (s *Server) handleInitAgent(ctx context.Context, req mcp.CallToolRequest) (
 		Prompt:             res.Prompt,
 		GosidianBlock:      res.GosidianBlock,
 		StubVersion:        res.StubVersion,
+		AgentProfile:       string(profile),
 		SuggestedQuestions: res.SuggestedQuestions,
 		Anchors:            anchors,
 	})

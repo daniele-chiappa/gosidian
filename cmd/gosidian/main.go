@@ -382,7 +382,8 @@ func main() {
 	// The listeners open before the boot scan (IMP-104) and answer 503
 	// "starting" until the handlers are mounted (server.Switch), so the
 	// proxy and the clients get a retryable answer instead of a refused
-	// connection while the index is brought up to date.
+	// connection while the index is brought up to date; event streams wait
+	// for the handlers instead (BUG-066).
 	webSwitch := server.NewSwitch()
 	httpSrv := &http.Server{
 		Addr:              *addr,
@@ -390,7 +391,7 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	serveHTTP(httpSrv, "http")
-	log.Printf("%s open, answering 503 until the vault scan completes", *addr)
+	log.Printf("%s open, answering 503 (event streams wait) until the vault scan completes", *addr)
 	var legacyMCPSrv *http.Server
 	var legacySwitch *server.Switch
 	if *mcpAddr != "" {
@@ -634,6 +635,10 @@ func main() {
 	}
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	// Event streams never go idle: end them first, or Shutdown waits its
+	// whole timeout with the port already closed (BUG-069).
+	eventsHub.Close(shutdownCtx)
+	mcpServer.CloseStreams()
 	_ = httpSrv.Shutdown(shutdownCtx)
 	if legacyMCPSrv != nil {
 		_ = legacyMCPSrv.Shutdown(shutdownCtx)

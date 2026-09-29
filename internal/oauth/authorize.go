@@ -94,6 +94,9 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// From here on the redirect is trusted: errors go back to the client.
+	// redirectURI is the presented value, not the registered one, because a
+	// loopback URI may differ in port (RFC 8252 §7.3); matchRedirect has
+	// checked it against the registration (CodeQL #29 is a false positive).
 	if q.Get("response_type") != "code" {
 		s.redirectError(w, r, redirectURI, state, "unsupported_response_type", "response_type must be code")
 		return

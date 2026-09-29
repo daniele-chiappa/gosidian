@@ -10,8 +10,7 @@ Il server ti ha passato:
   punta a `memory_bootstrap` per le direttive) + specifiche locali. Le
   direttive operative complete (mappa cartelle, ingest rules, workflow,
   tag) **non** sono qui: le serve `memory_bootstrap` nel campo
-  `directives_block`. Placeholder non risolti: `{{LANGUAGE}}`,
-  `{{CODE_LANGUAGE}}`, `{{PROJECT_TYPE}}`, `{{STACK}}`, `{{HOT_FILES}}`.
+  `directives_block`. {{PLACEHOLDER_STATUS}}
 - `needs_scaffold` — se `true`, crea il progetto vault prima.
 - `mode: "augment"` — `existing_content` presente.
 
@@ -33,17 +32,15 @@ Deduci da `existing_content` o chiedi all'utente in chat (Codex non ha
 un tool dedicato `AskUserQuestion` come Claude — usa una lista numerata
 nel messaggio).
 
-Placeholder da risolvere prima del merge:
-`{{LANGUAGE}}`, `{{CODE_LANGUAGE}}`, `{{PROJECT_TYPE}}`, `{{STACK}}`,
-`{{HOT_FILES}}`.
+Da risolvere prima del merge: solo i placeholder ancora aperti (vedi
+sopra).
 
 ## Step 4 — Merge
 
 **Regole**:
 
 1. Non sovrascrivere sezioni esistenti di `AGENTS.md`.
-2. Appendi `gosidian_block` come nuova sezione top-level di livello `##`
-   (parte da `## Memory & workflow (gosidian)`).
+2. Inserisci `gosidian_block` come blocco unitario. {{STUB_PLACEMENT}}
 3. Risolvi i placeholder nel blocco prima di scrivere.
 4. Conflitti strutturali → fermati e chiedi all'utente.
 

@@ -8,6 +8,88 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.40.0] — 2026-09-29 — "reconnect"
+
+MCP clients on HTTP+SSE and the web UI's live updates now come through a
+server restart. The instruction-file stub that `memory_init_agent`
+writes moves to version 3, so each project's agent regenerates it once,
+on its next `memory_bootstrap`, and the prompts now say how to replace a
+stub already in the file. The owner can give the username of a disabled
+account to a new one. Pull the image and restart: nothing to migrate.
+
+### Added
+- **The username of a disabled account can be reused** — disabling an
+  account is final, and it used to keep its username for good: the owner
+  could not give the name to a new account short of editing the accounts
+  file with the server stopped. Creating an account in **Admin → Users**
+  with that username now renames the disabled one to
+  `<name>~disabled-<date>` and keeps it for the audit trail (new
+  `user_archive` audit entry). The new account starts from nothing: it
+  inherits no grant, team, token or personal project, and its
+  predecessor's password and second factor still never sign in. The
+  invite signup still refuses the name.
+- **`memory_init_agent` picks the agent profile from the file name** —
+  without `agent_profile`, `filename_hint` decides (`CLAUDE.md` →
+  claude, `.cursorrules` or `.cursor/…` → cursor, `CONVENTIONS.md` or
+  `.aider*` → aider) instead of always `generic`, and the response says
+  which profile it used (`agent_profile`).
+
+### Changed
+- **Instruction-file stub v3** — `stub_version` goes from 2 to 3. The
+  stub now names the `memory_bootstrap` fields as they are served
+  (`hot_md` and `readme` objects, `stats`, `access`): 2.38.0 fixed that
+  text without raising the version, so no existing stub picked it up. It
+  also no longer quotes its own markers: the quotes inside its leading
+  HTML comment closed the comment early, so agents that drop HTML
+  comments from the instructions they load (Claude Code does) saw a
+  fragment of it and no version marker, and a search for the end marker
+  hit a quote first. The directives (v13) say to look for the marker in
+  the file on disk. From now on the version rises with any change an
+  agent would act on.
+- **Tool-argument hints** — the "did you mean" hint for a misnamed
+  argument prefers the declared name that differs only in case or
+  `-`/`_`, so `Projects` points to `projects` rather than `project`.
+  When `memory_search` gets both `project` and `projects`, which it
+  merges into one wider filter, the result says so and lists the
+  projects it searched.
+- **Dependencies** — `github.com/mark3labs/mcp-go` 1.1.1 and
+  `modernc.org/sqlite` 1.59.0 with `modernc.org/libc` 1.75.7 (same
+  SQLite 3.53.4, faster memory routines on Linux).
+
+### Fixed
+- **HTTP+SSE clients survive a restart** — while the server starts it
+  answered every request with `503`, the SSE stream too. An EventSource
+  stops reconnecting at any answer but a `200`, so an MCP client on
+  `/mcp/sse` whose reconnect landed in that window lost its stream for
+  good: Claude Code kept showing the server as connected while every
+  call failed with `Invalid session ID`, until a manual reconnect.
+  During the startup scan a `GET` asking for `text/event-stream` now
+  waits, up to 30 s, and gets its stream as soon as the server is
+  ready; everything else still gets the `503`. Streamable HTTP clients
+  were not affected, and remain the recommended transport.
+- **Event streams are ended at shutdown** — the live-update and MCP
+  HTTP+SSE streams stayed open until the process exited, and a graceful
+  shutdown waited on them for its whole 5-second timeout with the web
+  port already closed. They are now closed first. Other open
+  connections can still hold the shutdown for up to 5 s.
+- **`memory_init_agent` placeholders** — the stub's leading comment
+  listed its placeholders by name, so they were filled in there too: a
+  line repeating every value, with a multi-line hot-files list split
+  inside the comment. The prompts named the same placeholders to say
+  which ones the agent still had to fill, and given hints turned those
+  names into values. The comment no longer lists them, the prompts keep
+  the names and list the ones still open, and placeholders are filled
+  in one pass.
+
+### Security
+- **Code-scanning findings** — search caps its limit at 500, the size of
+  its candidate pool, so no allocation is sized by the caller's value;
+  the export log strips newlines from the project name taken from the
+  URL; the mirror's lock file and the benchmark's results file report
+  their write and close errors. The OAuth error redirect was checked and
+  left as is: it only ever goes to a redirect URI registered for the
+  client (a loopback one may differ in port, RFC 8252).
+
 ## [2.39.0] — 2026-09-28 — "export"
 
 Zip exports are back, and restarts are fast. A project, or the whole

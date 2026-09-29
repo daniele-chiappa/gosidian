@@ -76,6 +76,7 @@ const showCreate = ref(false)
 const creating = ref(false)
 const createError = ref<string | null>(null)
 const created = ref<string | null>(null)
+const createdArchived = ref<string | null>(null)
 const showPassword = ref(false)
 const copied = ref(false)
 const newUser = reactive<CreateUserRequest>({
@@ -142,6 +143,7 @@ async function submitCreate() {
       can_create_projects: newUser.can_create_projects,
     })
     created.value = u.username
+    createdArchived.value = u.archived_username ?? null
     resetCreate()
     showCreate.value = false
     await load()
@@ -258,6 +260,9 @@ onMounted(load)
 
       <p v-if="created && !showCreate" class="mt-2 text-xs text-success">
         User “{{ created }}” created. Share the password securely — it can't be recovered later.
+        <template v-if="createdArchived">
+          The disabled account that had this username is kept as “{{ createdArchived }}”.
+        </template>
       </p>
 
       <form v-if="showCreate" class="mt-3 grid gap-3 sm:grid-cols-2" @submit.prevent="submitCreate">

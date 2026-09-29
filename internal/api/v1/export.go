@@ -119,9 +119,12 @@ func (r *Router) streamExport(w http.ResponseWriter, req *http.Request, user *Re
 	// Individual reads are not audited; a bulk copy is, like mirror_sync:
 	// Path = the project ("" for the vault), Size = bytes sent.
 	r.auditNote(req, audit.ActionExport, user, dir, "", cw.n)
-	slog.Default().Info("api/v1: export", "dir", dir, "user", user.Username, "files", files, "skipped", skipped, "bytes", cw.n, "ok", err == nil)
+	// dir comes from the URL. It names an existing project, but the newline
+	// strip is the sanitizer CodeQL's go/log-injection model recognizes.
+	logDir := strings.ReplaceAll(strings.ReplaceAll(dir, "\n", ""), "\r", "")
+	slog.Default().Info("api/v1: export", "dir", logDir, "user", user.Username, "files", files, "skipped", skipped, "bytes", cw.n, "ok", err == nil)
 	if err != nil {
-		slog.Default().Warn("api/v1: export failed", "dir", dir, "user", user.Username, "err", err)
+		slog.Default().Warn("api/v1: export failed", "dir", logDir, "user", user.Username, "err", err)
 		// The 200 is already out. Returning would end the chunked body
 		// cleanly and the client would save a truncated zip as if it were
 		// complete; aborting the connection makes the download fail.

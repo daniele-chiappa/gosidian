@@ -58,6 +58,9 @@ export interface AdminUser {
   /** Effective access summary; absent for the owner (everything). */
   projects_readable?: number
   projects_writable?: number
+  /** Only in the answer to a creation: the new name of the disabled account
+   *  that held the username, kept for the audit trail. */
+  archived_username?: string
 }
 
 export interface Invite {

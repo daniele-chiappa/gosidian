@@ -79,7 +79,14 @@ Where to manage it in the web UI:
   shows the "new note" button only where you may write.
 - **Admin → Users** shows each account's access at a glance (how many
   projects it can read and write) and a **View** button listing exactly
-  which projects it sees, at which level and why.
+  which projects it sees, at which level and why. **Disable** signs the
+  account out, revokes its MCP tokens and drops its grants and team
+  memberships. It cannot be undone: its password and second factor
+  never sign in again. Its username can be reused, though: creating an
+  account with it renames the disabled one to
+  `<name>~disabled-<date>`, kept for the audit trail. The new account
+  starts from nothing and does not inherit the old personal project
+  (the owner can grant it).
 - **Settings → Project access** sets the **default visibility** for
   projects created from now on (and for folders that appear on disk
   without settings). Fresh installations default to private; upgraded

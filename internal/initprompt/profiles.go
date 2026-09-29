@@ -16,6 +16,11 @@
 //     cwd-scan instructions so the agent can synthesize a new file.
 package initprompt
 
+import (
+	"path"
+	"strings"
+)
+
 // Profile identifies the target AI agent. It only influences prompt tone /
 // tool references (Claude's AskUserQuestion vs. a generic "ask the user"
 // fallback, for example); the gosidian_block is identical across profiles.
@@ -54,18 +59,35 @@ const sharedStubTemplate = "assets/_common/stub.tmpl.md"
 // {{PROJECT}} and {{DIRECTIVES_VERSION}}.
 const sharedDirectivesTemplate = "assets/_common/directives.tmpl.md"
 
+// sharedPlacementText is where the augment prompts tell the agent to put the
+// stub ({{STUB_PLACEMENT}}): one text for every profile, since replacing an
+// existing stub has to find the real end marker whatever the agent.
+const sharedPlacementText = "assets/_common/stub_placement.md"
+
 // StubVersion is the version of the instruction-file stub (stub.tmpl.md). It is
 // substituted into the `<!-- gosidian:stub v=N -->` marker and surfaced by
 // memory_bootstrap as `stub_version`, so an agent knows when its (rarely
-// changing) stub must be regenerated via memory_init_agent. Bump when the stub
-// contract changes. Guarded by TestStubVersion_PinnedToContent.
+// changing) stub must be regenerated via memory_init_agent. A stub already
+// written keeps what it says until a bump, so bump on any change an agent
+// would act on (field or tool names, steps, marker rules); only a change it
+// would act the same on (whitespace, a typo in prose) goes without. Guarded
+// by TestStubVersion_PinnedToContent.
 //
 // v2 (2026-06-09, IMP-048): the in-stub "Specifiche locali" section is now an
 // explicit signpost ("write local specifics BELOW the closing marker") instead
 // of an editable placeholder — content inside the markers is regenerated on
 // every bump, so inviting edits there was a footgun. Already-converted projects
 // self-heal on their next bootstrap (stub_version advances → regeneration).
-const StubVersion = 2
+//
+// v3 (2026-09-29, BUG-067/IMP-110): the bootstrap fields are named as served
+// (hot_md/readme objects, stats, access; fixed in v2.38.0 without a bump, so
+// no stub picked it up), and the stub no longer quotes its own markers. The
+// quotes inside the leading HTML comment closed it early, and agents that
+// drop HTML comments from what they load (Claude Code) got a fragment of it
+// but no marker; a search for the end marker also hit a quote first. The
+// comment no longer lists the placeholders either (BUG-068): filled in, it
+// repeated every value and split a multi-line hot-files list inside it.
+const StubVersion = 3
 
 // DirectivesVersion is the version of the operational directives
 // (directives.tmpl.md). It is substituted into the
@@ -137,7 +159,11 @@ const StubVersion = 2
 // agents to answer frontmatter questions (status, type, dates, importance,
 // lists) with one memory_query call instead of notes_by_tag + batch_get +
 // filtering by hand; namespaced tags count as fields.
-const DirectivesVersion = 12
+//
+// v13 (2026-09-29, BUG-067): the pre-stub check names the real marker
+// (gosidian:stub v=N) and says to look for it in the file on disk, since
+// agents that drop HTML comments from what they load never see it there.
+const DirectivesVersion = 13
 
 // AnchorVersion is the version of the agent-anchor template/format. It is
 // substituted into the `<!-- gosidian:anchor v=N ... -->` marker so the
@@ -201,6 +227,24 @@ func Profiles() []Profile {
 	return []Profile{
 		ProfileClaude, ProfileCursor, ProfileCodex, ProfileAider, ProfileGeneric,
 	}
+}
+
+// ProfileForFilename guesses the profile from the instruction file the agent
+// plans to write: CLAUDE.md → claude, .cursorrules or a file under .cursor/ →
+// cursor, CONVENTIONS.md or .aider* → aider. AGENTS.md is shared by codex and
+// generic, so it gives no guess.
+func ProfileForFilename(name string) (Profile, bool) {
+	n := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(name), `\`, "/"))
+	base := path.Base(n)
+	switch {
+	case base == "claude.md":
+		return ProfileClaude, true
+	case base == ".cursorrules" || strings.HasPrefix(n, ".cursor/") || strings.Contains(n, "/.cursor/"):
+		return ProfileCursor, true
+	case base == "conventions.md" || strings.HasPrefix(base, ".aider"):
+		return ProfileAider, true
+	}
+	return "", false
 }
 
 // IsKnownProfile reports whether p is registered.

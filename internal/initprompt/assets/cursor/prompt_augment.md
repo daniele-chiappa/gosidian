@@ -10,8 +10,7 @@ Il server ti ha passato:
   punta a `memory_bootstrap` per le direttive) + specifiche locali. Le
   direttive operative complete (mappa cartelle, ingest rules, workflow,
   tag) **non** sono qui: le serve `memory_bootstrap` nel campo
-  `directives_block`. Placeholder non risolti: `{{LANGUAGE}}`,
-  `{{CODE_LANGUAGE}}`, `{{PROJECT_TYPE}}`, `{{STACK}}`, `{{HOT_FILES}}`.
+  `directives_block`. {{PLACEHOLDER_STATUS}}
 - `needs_scaffold` — se `true`, crea il progetto vault prima del merge.
 - `mode: "augment"` — è presente `existing_content`.
 
@@ -39,8 +38,8 @@ con `project="{{PROJECT}}"` e `template="karpathy-wiki"`.
 
 ## Step 3 — Raccogli placeholder
 
-Raccogli `{{LANGUAGE}}`, `{{CODE_LANGUAGE}}`, `{{PROJECT_TYPE}}`,
-`{{STACK}}`, `{{HOT_FILES}}` da `existing_content` o chiedili
+Raccogli i placeholder ancora aperti (vedi sopra) da `existing_content`
+o chiedili
 all'utente (Cursor non ha `AskUserQuestion`: usa una normale domanda
 in chat, con opzioni numerate chiare).
 
@@ -61,10 +60,12 @@ alwaysApply: true
 Seguito dal `gosidian_block` con placeholder risolti. Gli altri file di
 regole Cursor esistenti non vengono toccati.
 
-**Formato legacy `.cursorrules`**: apre il file esistente, appendi
-`gosidian_block` (con placeholder risolti) in coda, preceduto da una
-riga separatrice. Non toccare regole esistenti. Conflitti strutturali
-→ fermati e chiedi (stesso protocollo del profilo Claude).
+**Formato legacy `.cursorrules`**: apri il file esistente e inserisci
+`gosidian_block` (con placeholder risolti). Non toccare regole esistenti.
+Conflitti strutturali → fermati e chiedi (stesso protocollo del profilo
+Claude).
+
+In tutti e due i formati: {{STUB_PLACEMENT}}
 
 ## Step 5 — Materializza
 

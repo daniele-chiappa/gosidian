@@ -154,7 +154,11 @@ At startup the port opens before the vault scan brings the index up to
 date. Until the scan ends every request gets a `503` with
 `Retry-After: 2`: `/healthz` answers `{"status":"starting"}`, a browser
 gets a page that reloads itself, and API and MCP clients get the usual
-JSON error with code `server.unavailable`. The scan re-indexes only the
+JSON error with code `server.unavailable`. Event streams are the
+exception: a `GET` asking for `text/event-stream` (MCP over HTTP+SSE,
+the web UI's live updates) waits, up to 30 s, and gets its stream as
+soon as the server is ready, because an EventSource stops reconnecting
+at any answer but a 200. The scan re-indexes only the
 notes whose content changed since the last run, so a restart takes
 under a second on a vault of a few hundred notes. The first start of a
 new release that changes how notes are indexed re-reads every note

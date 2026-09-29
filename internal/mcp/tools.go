@@ -87,7 +87,7 @@ func (s *Server) writeLimitViolation(tok *auth.Token, contentSize int) string {
 
 func (s *Server) registerTools() {
 	s.impl.AddTool(mcp.NewTool("memory_search",
-		mcp.WithDescription("Search notes in the vault using full-text search. Hits are ranked by text match (title weighs most, then frontmatter such as tags and description, then body) with small boosts for backlinks, importance, recent edits and the pinned tag; each hit carries `score` (relative to the best hit of this response, 1 = best) and `why` (the signals behind it). Snippets are short excerpts around the match: before reporting a detail (a number, a date, a list), read the note with memory_get or memory_get_section. The search is lexical, not semantic (each word also matches its English inflections, so \"retry\" finds \"retries\"): when hits are few or missing, call again with `any_of` listing synonyms, translations (Italian/English) or other forms of the query — the lists are fused and `why` shows which phrasing matched. Pass include_outline=true or include_frontmatter=true to enrich each hit with the note's heading outline or parsed frontmatter in the same call — avoids N extra memory_get_outline/memory_get_frontmatter round-trips when exploring many results. Pass `projects` (array of top-level folder names) to restrict results to a specific set; empty = vault-wide (subject to the caller's token scope)."),
+		mcp.WithDescription("Search notes in the vault using full-text search. Hits are ranked by text match (title weighs most, then frontmatter such as tags and description, then body) with small boosts for backlinks, importance, recent edits and the pinned tag; each hit carries `score` (relative to the best hit of this response, 1 = best) and `why` (the signals behind it). Snippets are short excerpts around the match: before reporting a detail (a number, a date, a list), read the note with memory_get or memory_get_section. The search is lexical, not semantic (each word also matches its English inflections, so \"retry\" finds \"retries\"): when hits are few or missing, call again with `any_of` listing synonyms, translations (Italian/English) or other forms of the query — the lists are fused and `why` shows which phrasing matched. Pass include_outline=true or include_frontmatter=true to enrich each hit with the note's heading outline or parsed frontmatter in the same call — avoids N extra memory_get_outline/memory_get_frontmatter round-trips when exploring many results. Pass `projects` (array of top-level folder names) to restrict results to a specific set; empty = vault-wide (subject to the caller's token scope). `project` is shorthand for a single name; given together with `projects`, the two are merged (the result notes it)."),
 		mcp.WithString("query", mcp.Required(), mcp.Description("Free-text query. Multiple words are ANDed; prefix search is automatic.")),
 		mcp.WithArray("any_of", mcp.Description("Optional alternative phrasings searched alongside `query` (max 8), e.g. [\"credenziali\", \"secrets\"] for query \"segreti\". A note matching any of them is returned; notes matched by several phrasings rank higher.")),
 		mcp.WithNumber("limit", mcp.Description("Maximum number of hits (default 20, max 200).")),
@@ -290,7 +290,13 @@ func (s *Server) handleSearch(ctx context.Context, req mcp.CallToolRequest) (*mc
 	// limit counts only notes the caller may see (BUG-058).
 	requestedProjects := req.GetStringSlice("projects", nil)
 	// `project` (singular, as most tools take it) is shorthand for one entry.
+	// Next to a non-empty `projects` it widens the filter, which a caller
+	// that passed both by mistake would not expect: the result says so.
+	merged := ""
 	if p := strings.TrimSpace(req.GetString("project", "")); p != "" && !slices.Contains(requestedProjects, p) {
+		if len(requestedProjects) > 0 {
+			merged = p
+		}
 		requestedProjects = append(requestedProjects, p)
 	}
 	// Reject explicit hidden projects with a clear error so the caller knows
@@ -302,6 +308,15 @@ func (s *Server) handleSearch(ctx context.Context, req mcp.CallToolRequest) (*mc
 		}
 	}
 	filter := buildProjectsFilter(requestedProjects, tok.ProjectList())
+	mergedNote := ""
+	if merged != "" {
+		// The effective list: a scoped token may have dropped some.
+		searched := "none of them (outside the token's scope)"
+		if len(filter.allowed) > 0 {
+			searched = strings.Join(filter.allowed, ", ")
+		}
+		mergedNote = fmt.Sprintf("Note: memory_search merged project %q into projects: it searched %s.", merged, searched)
+	}
 	opts := index.SearchOptions{Limit: limit, Exclude: s.hiddenProjects(), Variants: variants}
 	if filter.active {
 		opts.Projects = append([]string{}, filter.allowed...) // non-nil: empty matches nothing
@@ -357,7 +372,11 @@ func (s *Server) handleSearch(ctx context.Context, req mcp.CallToolRequest) (*mc
 		out = append(out, hit)
 	}
 	metrics.CountSearch("mcp", len(out))
-	return mcp.NewToolResultJSON(map[string]any{"hits": out})
+	res, err := mcp.NewToolResultJSON(map[string]any{"hits": out})
+	if err == nil && mergedNote != "" {
+		res.Content = append(res.Content, mcp.NewTextContent(mergedNote))
+	}
+	return res, err
 }
 
 type noteRef struct {

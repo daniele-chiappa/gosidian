@@ -54,7 +54,8 @@ a note naming it (and the likely intended argument, e.g. `Project` →
 - `memory_search(query, any_of?=[...], projects?=[...], project?,
   include_outline?, include_frontmatter?)` — FTS5 with optional
   enrichment and cross-project scope (`project` is shorthand for
-  `projects: [project]`). Ranking weighs the title most, then the
+  `projects: [project]`; given together, the two are merged and the
+  result says so). Ranking weighs the title most, then the
   frontmatter (tags, description, aliases), then the body, with small
   bounded boosts for backlinks, `importance`, recent edits and the
   `pinned` tag (`status:archived` sinks). Each hit carries `score`
@@ -214,7 +215,12 @@ from the caller's token identity and cannot be forged, while
   init-prompt payload to (re)generate the thin agent `gosidian_block`
   stub in the instruction file (CLAUDE.md / AGENTS.md / …). Augment mode
   when `existing_content` is supplied (merge preserving sections),
-  from-scratch otherwise. Read-only: the agent materialises the file.
+  from-scratch otherwise. Without `agent_profile` the profile comes from
+  `filename_hint` (`CLAUDE.md` → claude, `.cursorrules` or `.cursor/…` →
+  cursor, `CONVENTIONS.md` or `.aider*` → aider), else `generic`; the
+  response's `agent_profile` says which. `user_hints` fill the stub's
+  placeholders; those left as `{{NAME}}` are listed in the prompt for the
+  agent to fill. Read-only: the agent materialises the file.
 - `memory_refresh_hot(project)` — regenerate the "Recent decisions"
   section of `hot.md` between opt-in markers
 - `memory_list_bootstrap_templates()` — discover available templates

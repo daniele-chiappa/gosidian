@@ -84,6 +84,12 @@ func (i *Index) SearchWith(q string, opts SearchOptions) ([]SearchHit, error) {
 	if limit <= 0 {
 		limit = 50
 	}
+	// The SQL stage never returns more than maxPool candidates, so a larger
+	// limit only sizes allocations from the caller's value (callers cap at
+	// 200 today).
+	if limit > maxPool {
+		limit = maxPool
+	}
 	if opts.Projects != nil && len(opts.Projects) == 0 {
 		return nil, nil
 	}

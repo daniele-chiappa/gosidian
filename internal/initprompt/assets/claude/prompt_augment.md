@@ -10,9 +10,7 @@ Il server ti ha passato:
   a `memory_bootstrap` per le direttive) + specifiche locali. **Payload
   principale.** Le direttive operative complete (mappa cartelle, ingest
   rules, workflow end-of-task, tag) **non** sono qui: le serve
-  `memory_bootstrap` nel campo `directives_block`. Placeholder non risolti:
-  `{{LANGUAGE}}`, `{{CODE_LANGUAGE}}`, `{{PROJECT_TYPE}}`, `{{STACK}}`,
-  `{{HOT_FILES}}`. `{{PROJECT}}` e `{{TODAY}}` sono già risolti.
+  `memory_bootstrap` nel campo `directives_block`. {{PLACEHOLDER_STATUS}} Progetto e data sono già compilati.
 - `needs_scaffold` — bool. Se `true`, il progetto vault **non esiste** e
   deve essere creato prima di materializzare il file di istruzioni.
 - `mode: "augment"` — stai lavorando su un file di istruzioni che esiste
@@ -44,7 +42,9 @@ struttura esiste.
 
 ## Step 3 — Raccogli placeholder
 
-Prima di fare il merge, risolvi questi placeholder del `gosidian_block`:
+Prima di fare il merge, risolvi i placeholder del `gosidian_block`
+ancora aperti (vedi sopra; quelli già compilati da `user_hints` non si
+toccano):
 
 - `{{LANGUAGE}}` — lingua delle note del vault (es. "italiano",
   "inglese"). Se `existing_content` è in una lingua evidente,
@@ -70,12 +70,11 @@ Build, Test, Style, Security, Commit, Deploy, Architecture, ecc.).
 **Regole di merge**:
 
 1. **Mai sovrascrivere regole esistenti.** Se l'utente ha scritto
-   "commit in inglese" e gosidian dice `{{CODE_LANGUAGE}}`, propaghi il
-   suo valore nel placeholder: l'utente ha già deciso.
-2. **Aggiungi `gosidian_block` come blocco unitario** in coda al file,
-   preceduto da una riga separatrice. Il blocco parte da
-   `## Memory & workflow (gosidian)` e contiene le proprie sotto-sezioni
-   `###` — non espanderle a top-level.
+   "commit in inglese", nella sezione Lingua del blocco va quel valore,
+   anche al posto di uno arrivato da `user_hints`: l'utente ha già
+   deciso.
+2. **Inserisci `gosidian_block` come blocco unitario**, senza espandere
+   le sue sotto-sezioni `###` a top-level. {{STUB_PLACEMENT}}
 3. **Sostituisci i placeholder** (`{{LANGUAGE}}` ecc.) con i valori
    raccolti al Step 3 **prima** del merge. Il file finale non deve
    contenere `{{...}}` pendenti — eccetto `{{HOT_FILES}}` se l'utente
@@ -103,8 +102,8 @@ Se da `existing_content` emerge struttura utile (es. una sezione
 - `mcp__gosidian__memory_edit` su `{{PROJECT}}/memory/architecture.md`
   sezione "Overview" con 3-5 righe.
 - `mcp__gosidian__memory_edit` su `{{PROJECT}}/hot.md` impostando
-  `current focus = "prima sessione su {{PROJECT}}"` e listando i
-  `{{HOT_FILES}}`.
+  `current focus = "prima sessione su {{PROJECT}}"` e listando gli hot
+  file del blocco.
 
 Salta questo step se la raccolta è vuota — meglio memoria vuota che
 memoria con dati inventati.

@@ -9,9 +9,7 @@ Il server ti ha passato:
 
 - `gosidian_block` — **stub sottile** parametrico (Regola Zero → bootstrap
   + specifiche locali): le direttive operative complete arrivano dal
-  `directives_block` di `memory_bootstrap`, non da questo file. Placeholder
-  non risolti: `{{LANGUAGE}}`, `{{CODE_LANGUAGE}}`, `{{PROJECT_TYPE}}`,
-  `{{STACK}}`, `{{HOT_FILES}}`.
+  `directives_block` di `memory_bootstrap`, non da questo file. {{PLACEHOLDER_STATUS}}
 - `needs_scaffold` — se `true`, il progetto vault non esiste ancora.
 - `mode: "from-scratch"` — non c'è `existing_content`; stai creando
   il file di istruzioni da zero.

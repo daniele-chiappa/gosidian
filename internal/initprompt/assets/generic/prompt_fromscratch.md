@@ -28,8 +28,7 @@ Se `needs_scaffold=true`, chiama `memory_project_scaffold` con
 
 ## Step 4 — Raccogli placeholder
 
-Deduci + chiedi. `{{LANGUAGE}}`, `{{CODE_LANGUAGE}}`, `{{PROJECT_TYPE}}`,
-`{{STACK}}`, `{{HOT_FILES}}`.
+{{PLACEHOLDER_STATUS}} Per quelli aperti: deduci + chiedi.
 
 ## Step 5 — Compila file
 

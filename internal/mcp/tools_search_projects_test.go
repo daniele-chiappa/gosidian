@@ -223,31 +223,44 @@ func TestMCP_Search_AnyOfAndWhy(t *testing.T) {
 }
 
 // `project` (singular) is shorthand for projects: [project], and merges with
-// projects when both are given.
+// projects when both are given; the merge widens the filter, so the result
+// says so in a second text block after the JSON.
 func TestMCP_Search_ProjectAlias(t *testing.T) {
 	s, _, _ := newTestServer(t)
 	seedCrossProjectVault(t, s)
 
-	hits := func(args map[string]any) []string {
+	search := func(args map[string]any) (paths []string, note string) {
 		t.Helper()
 		args["query"] = "release"
 		res, _ := s.handleSearch(context.Background(), call(args))
+		if res == nil || res.IsError || len(res.Content) == 0 {
+			t.Fatalf("search failed: %+v", res)
+		}
 		var r struct {
 			Hits []searchHit `json:"hits"`
 		}
-		if err := json.Unmarshal([]byte(resultText(t, res)), &r); err != nil {
+		if err := json.Unmarshal([]byte(res.Content[0].(mcplib.TextContent).Text), &r); err != nil {
 			t.Fatal(err)
 		}
-		var out []string
 		for _, h := range r.Hits {
-			out = append(out, h.Path)
+			paths = append(paths, h.Path)
 		}
-		return out
+		for _, c := range res.Content[1:] {
+			note += c.(mcplib.TextContent).Text
+		}
+		return paths, note
 	}
-	if got := hits(map[string]any{"project": "gamma"}); len(got) != 1 || !strings.HasPrefix(got[0], "gamma/") {
-		t.Errorf("project alias: %v", got)
+	if got, note := search(map[string]any{"project": "gamma"}); len(got) != 1 || !strings.HasPrefix(got[0], "gamma/") || note != "" {
+		t.Errorf("project alias: %v, note %q", got, note)
 	}
-	if got := hits(map[string]any{"project": "gamma", "projects": []any{"alpha"}}); len(got) != 2 {
+	got, note := search(map[string]any{"project": "gamma", "projects": []any{"alpha"}})
+	if len(got) != 2 {
 		t.Errorf("project + projects should merge to 2 hits: %v", got)
+	}
+	if !strings.Contains(note, `merged project "gamma" into projects: it searched alpha, gamma`) {
+		t.Errorf("merge not noted: %q", note)
+	}
+	if _, note := search(map[string]any{"project": "alpha", "projects": []any{"alpha"}}); note != "" {
+		t.Errorf("a project already in projects widens nothing, yet noted: %q", note)
 	}
 }

@@ -34,6 +34,8 @@ func TestClosestArg(t *testing.T) {
 	known := []string{"exclude_closed", "older_than", "project", "projects"}
 	for in, want := range map[string]string{
 		"Project":         "project",
+		"Projects":        "projects",
+		"PROJECTS":        "projects",
 		"older-than":      "older_than",
 		"exclude_closeds": "exclude_closed",
 		"limit":           "",
