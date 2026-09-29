@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
@@ -91,9 +92,11 @@ func correlationIDFor(ctx context.Context) string {
 // Server wraps a mark3labs MCPServer wired against a gosidian vault + index.
 type Server struct {
 	// sseServers are the HTTP+SSE transports Handler built, kept so
-	// CloseStreams can end their sessions at shutdown.
-	sseMu      sync.Mutex
-	sseServers []*server.SSEServer
+	// CloseStreams can end their sessions at shutdown; streamsClosed then
+	// refuses new ones.
+	sseMu         sync.Mutex
+	sseServers    []*server.SSEServer
+	streamsClosed atomic.Bool
 
 	vault              *vault.Vault
 	index              *index.Index
@@ -543,14 +546,30 @@ func (s *Server) Handler(basePath string) http.Handler {
 		// Exact path only: the subtree below stays with the SSE server.
 		mux.Handle(basePath, s.transport(streamable))
 	}
-	mux.Handle("/", s.transport(sse))
+	mux.Handle("/", s.transport(s.refuseStreamsWhenClosed(sse)))
 	return mux
 }
 
-// CloseStreams ends every HTTP+SSE session of the handlers built so far. An
-// SSE stream never goes idle, so without this a graceful shutdown waits its
-// whole timeout with the port already closed (BUG-069).
+// refuseStreamsWhenClosed answers 503 to a new HTTP+SSE stream once
+// CloseStreams ran: a request already in flight at shutdown would otherwise
+// open a session the shutdown then waits on (BUG-069).
+func (s *Server) refuseStreamsWhenClosed(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && s.streamsClosed.Load() {
+			w.Header().Set("Retry-After", "1")
+			http.Error(w, "gosidian is shutting down", http.StatusServiceUnavailable)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// CloseStreams ends every HTTP+SSE session of the handlers built so far and
+// refuses new ones. An SSE stream never goes idle, so without this a graceful
+// shutdown waits its whole timeout with the port already closed (BUG-069).
+// Idempotent.
 func (s *Server) CloseStreams() {
+	s.streamsClosed.Store(true)
 	s.sseMu.Lock()
 	servers := append([]*server.SSEServer(nil), s.sseServers...)
 	s.sseMu.Unlock()

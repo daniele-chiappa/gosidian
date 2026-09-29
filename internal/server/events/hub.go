@@ -86,6 +86,7 @@ func (s *Subscription) Unsubscribe() {
 type Hub struct {
 	mu     sync.RWMutex
 	subs   map[*Subscription]struct{}
+	closed bool // set by Close: later subscriptions start already ended
 	bufLen int
 	seq    atomic.Uint64
 	logger *slog.Logger
@@ -139,8 +140,15 @@ func (h *Hub) Subscribe(topics ...Topic) *Subscription {
 		hub:    h,
 	}
 	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed {
+		// A request still being served at shutdown must not start a wait
+		// the shutdown would then sit out (BUG-069).
+		close(sub.Ch)
+		sub.hub = nil
+		return sub
+	}
 	h.subs[sub] = struct{}{}
-	h.mu.Unlock()
 	return sub
 }
 
@@ -272,9 +280,11 @@ func (h *Hub) SubCount() int {
 	return len(h.subs)
 }
 
-// Close terminates every subscription. Safe to call once at shutdown.
+// Close terminates every subscription, and every later one starts ended.
+// Idempotent; called at shutdown.
 func (h *Hub) Close(ctx context.Context) {
 	h.mu.Lock()
+	h.closed = true
 	subs := make([]*Subscription, 0, len(h.subs))
 	for s := range h.subs {
 		subs = append(subs, s)

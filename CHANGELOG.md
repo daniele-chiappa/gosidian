@@ -8,6 +8,31 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.40.1] — 2026-09-29 — "shutdown"
+
+A restart now keeps the port closed for about two seconds, down from
+about six when clients were connected. Pull the image and restart:
+nothing to migrate. The first restart after the upgrade is still
+stopped by the old version, so it is slow one last time.
+
+### Fixed
+- **Restarts no longer wait on clients that reconnect at once** — 2.40.0
+  ended the live-update and MCP HTTP+SSE streams before shutting down,
+  while the port was still open. Their clients came straight back to
+  the process that was stopping, over a kept-alive connection, and
+  opened a new stream or `memory_wait_changes` call; the shutdown then
+  waited out its whole 5-second timeout with the port already closed.
+  Now both listeners close first, keep-alives stop, and only then are
+  the streams, the HTTP+SSE sessions and the `memory_wait_changes` calls
+  ended, so their clients reconnect to the new process. A request that
+  still holds the shutdown when its timeout ends is cut, and the log
+  names it (`shutdown: still busy`).
+
+### Changed
+- **Image build retries module downloads** — `go mod download` in the
+  Dockerfile tries up to four times, since the Go module proxy
+  occasionally drops a download halfway.
+
 ## [2.40.0] — 2026-09-29 — "reconnect"
 
 MCP clients on HTTP+SSE and the web UI's live updates now come through a

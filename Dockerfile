@@ -43,7 +43,10 @@ RUN apk add --no-cache git ca-certificates
 WORKDIR /src
 
 COPY go.mod go.sum ./
-RUN go mod download
+# Retried: proxy.golang.org sometimes drops a stream mid-download.
+RUN for i in 1 2 3 4; do go mod download && exit 0; \
+      echo "go mod download failed (attempt $i), retrying in $((i * 10))s"; sleep $((i * 10)); \
+    done; exit 1
 
 # Bring in the Go source after deps so Go-only edits don't bust npm.
 COPY . .

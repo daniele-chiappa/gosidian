@@ -385,9 +385,11 @@ func main() {
 	// connection while the index is brought up to date; event streams wait
 	// for the handlers instead (BUG-066).
 	webSwitch := server.NewSwitch()
+	// inflight lets a shutdown that runs out of time say what it waited on.
+	inflight := server.NewInflight()
 	httpSrv := &http.Server{
 		Addr:              *addr,
-		Handler:           webSwitch,
+		Handler:           inflight.Wrap(webSwitch),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	serveHTTP(httpSrv, "http")
@@ -398,7 +400,7 @@ func main() {
 		legacySwitch = server.NewSwitch()
 		legacyMCPSrv = &http.Server{
 			Addr:              *mcpAddr,
-			Handler:           legacySwitch,
+			Handler:           inflight.Wrap(legacySwitch),
 			ReadHeaderTimeout: 5 * time.Second,
 		}
 		serveHTTP(legacyMCPSrv, "mcp legacy")
@@ -635,14 +637,12 @@ func main() {
 	}
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	// Event streams never go idle: end them first, or Shutdown waits its
-	// whole timeout with the port already closed (BUG-069).
-	eventsHub.Close(shutdownCtx)
-	mcpServer.CloseStreams()
-	_ = httpSrv.Shutdown(shutdownCtx)
-	if legacyMCPSrv != nil {
-		_ = legacyMCPSrv.Shutdown(shutdownCtx)
-	}
+	// Both listeners close first; the event streams and long polls end only
+	// then, so their clients reconnect to the next process (BUG-069).
+	server.Shutdown(shutdownCtx, func() {
+		eventsHub.Close(shutdownCtx)
+		mcpServer.CloseStreams()
+	}, inflight, httpSrv, legacyMCPSrv)
 }
 
 // serveHTTP runs srv in the background; any error other than a clean

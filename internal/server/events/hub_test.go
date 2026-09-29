@@ -127,6 +127,23 @@ func TestHub_CloseTerminatesAllSubscribers(t *testing.T) {
 	}
 }
 
+// A subscription taken after Close starts ended, so a request still being
+// served at shutdown does not begin a wait (BUG-069).
+func TestHub_SubscribeAfterCloseIsEnded(t *testing.T) {
+	h := New(HubOptions{BufLen: 4})
+	h.Close(context.Background())
+	s := h.Subscribe()
+	if _, open := <-s.Ch; open {
+		t.Error("subscription after Close is open")
+	}
+	s.Unsubscribe() // must not panic on the already-closed channel
+	h.Publish(TopicNote, map[string]string{"path": "a.md"})
+	if h.SubCount() != 0 {
+		t.Errorf("SubCount=%d after Close", h.SubCount())
+	}
+	h.Close(context.Background()) // idempotent
+}
+
 func TestHub_SubCount(t *testing.T) {
 	h := New(HubOptions{})
 	if h.SubCount() != 0 {

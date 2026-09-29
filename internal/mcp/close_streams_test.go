@@ -55,4 +55,14 @@ func TestCloseStreams_EndsSSESessions(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("SSE stream still open after CloseStreams")
 	}
+
+	// A client reconnecting at once gets no new stream to hold the shutdown.
+	again, err := http.DefaultClient.Do(req.Clone(req.Context()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	again.Body.Close()
+	if again.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("reconnect after CloseStreams: status %d, want 503", again.StatusCode)
+	}
 }
