@@ -245,10 +245,7 @@ func TestMCP_Search_ProjectAlias(t *testing.T) {
 		for _, h := range r.Hits {
 			paths = append(paths, h.Path)
 		}
-		for _, c := range res.Content[1:] {
-			note += c.(mcplib.TextContent).Text
-		}
-		return paths, note
+		return paths, strings.Join(resultNotices(t, res), " ")
 	}
 	if got, note := search(map[string]any{"project": "gamma"}); len(got) != 1 || !strings.HasPrefix(got[0], "gamma/") || note != "" {
 		t.Errorf("project alias: %v, note %q", got, note)

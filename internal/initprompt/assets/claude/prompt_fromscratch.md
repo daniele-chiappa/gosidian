@@ -53,15 +53,11 @@ mcp__gosidian__memory_project_scaffold({
 
 ## Step 4 — Raccogli placeholder
 
-Dallo scan allo Step 2 deduci quanto puoi di:
+Dallo scan allo Step 2 deduci quanto puoi dei placeholder ancora
+aperti. Quelli già compilati da `user_hints` non si toccano e non si
+chiedono. Aperti:
 
-- `{{LANGUAGE}}` — chiedi all'utente (default italiano se vault gosidian
-  ha progetti esistenti in italiano, altrimenti inglese)
-- `{{CODE_LANGUAGE}}` — chiedi (default inglese)
-- `{{PROJECT_TYPE}}` — deduci dallo scan
-- `{{STACK}}` — deduci dallo scan
-- `{{HOT_FILES}}` — seleziona 2-3 percorsi dal risultato di `ls`; se
-  non ovvi, metti `_(da popolare al primo giro di lavoro reale)_`
+{{OPEN_PLACEHOLDERS}}
 
 Batch le domande mancanti in **una** `AskUserQuestion` con 2-4 scelte
 ciascuna.

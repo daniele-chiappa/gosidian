@@ -55,7 +55,7 @@ func (s *Server) handleAuditTail(ctx context.Context, req mcp.CallToolRequest) (
 	opts := audit.TailOpts{
 		Actor:      strings.TrimSpace(req.GetString("actor", "")),
 		PathPrefix: strings.TrimSpace(req.GetString("path_prefix", "")),
-		Limit:      req.GetInt("limit", 50),
+		Limit:      limitArg(ctx, req, 50, 500),
 	}
 
 	if raw := strings.TrimSpace(req.GetString("action", "")); raw != "" {

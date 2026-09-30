@@ -8,6 +8,68 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.41.1] — 2026-09-30 — "notices"
+
+A restart no longer waits five seconds for MCP clients on protocol
+2026-07-28, the notes gosidian adds to tool results now reach Claude
+Code, and a `limit` above the maximum gets the maximum. Pull the image
+and restart: nothing to migrate. The first restart after the upgrade is
+still stopped by the old version, so it can be slow one last time.
+
+### Fixed
+- **Restarts no longer wait on a Streamable HTTP listen** — a client on
+  protocol 2026-07-28 (Claude Code among them) keeps a
+  `subscriptions/listen` request open on `/mcp` to receive
+  notifications, and the shutdown of 2.40.1 did not end it: every
+  restart waited its whole 5-second timeout with the port closed, and
+  the log said `shutdown: still busy` on a `POST /mcp`. The listen now
+  ends with the other streams, once the listeners are closed, and one
+  that arrives after that ends at once; the client opens it again on the
+  next process.
+- **Notes on tool results reach Claude Code** — the notes gosidian adds
+  to a tool result (an unknown argument, `project` merged into
+  `projects`, a lowered limit) and the self-improve invitation were sent
+  as a separate text block. A client that reads the structured content
+  of a JSON result, as Claude Code does, never saw them. They now go
+  into a `notices` list in the structured content and in its JSON text;
+  a plain-text result still gets a text block.
+- **A `limit` above the maximum gets the maximum** — asking
+  `memory_search` for 500 results returned 20: a `limit` above the
+  maximum fell back to the default, with nothing in the result to say
+  so. The same happened in `memory_recent`,
+  `memory_notes_by_importance`, `memory_refresh_hot`, `memory_todos`,
+  `memory_hubs`, `memory_audit_tail` and `memory_query` (and `max_depth`
+  of `memory_path`), and in `GET /api/v1/search`, `/notes`,
+  `/note-titles` and `POST /api/v1/query`. Such a value is now lowered
+  to the maximum, and the MCP result adds a note saying so.
+- **Reusing a username gives the new account its personal project** —
+  the new account got none, because the disabled account's personal
+  project still held the name, and the old project was left private with
+  no members. Now that project moves to the archived account's name
+  (`<name>~disabled-<date>`), notes included, and the new account gets a
+  fresh one; the audit records the rename as the admin's. The project
+  moves only when the audit log shows it was provisioned as that
+  account's personal project, with no project of that name renamed or
+  deleted since, and nobody else can reach it: no member or team grant
+  and no MCP token scoped to it. Otherwise it stays, and the answer to
+  the creation says why the new account has none
+  (`personal_project_warning`). The answer also names the personal
+  project and where the old one went (`personal_project`,
+  `archived_personal_project`), and **Admin → Users** shows both.
+- **`memory_init_agent` no longer asks for what `user_hints` gave** —
+  with every hint passed, the stub came back filled in, but the Claude
+  Code prompts still listed all five placeholders with how to ask the
+  user for them, and `suggested_questions` still asked for the language,
+  the project type and the hot files. The prompts now list only the
+  placeholders still open, and say to skip the step when none are; the
+  suggested questions leave out those the hints answered.
+- **The directives block no longer opens with a garbled comment** — the
+  comment at the top of the directives template named its own
+  placeholders, which were filled in there too, so every
+  `directives_block` began with "parametrico solo su <project> e 13".
+  The comment now describes them without naming them. Cosmetic: the
+  directives themselves are unchanged, and so is their version.
+
 ## [2.41.0] — 2026-09-30 — "wiki"
 
 `memory_lint` now warns about skills too large for `memory_get` to

@@ -2,7 +2,6 @@ package v1
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -37,13 +36,7 @@ func (r *Router) readHistory(w http.ResponseWriter, req *http.Request, notePath 
 		writeLoadError(w, err)
 		return
 	}
-	limit, _ := strconv.Atoi(strings.TrimSpace(req.URL.Query().Get("limit")))
-	if limit <= 0 {
-		limit = 50
-	}
-	if limit > 500 {
-		limit = 500
-	}
+	limit := limitParam(req, 50, 500)
 	commits, err := r.deps.GitSync.History(notePath, limit)
 	if err != nil {
 		// Disabled gitsync surfaces "git sync disabled" — translate

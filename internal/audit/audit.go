@@ -174,7 +174,7 @@ type TailOpts struct {
 	Action     Action    // exact match on entry.Action.
 	PathPrefix string    // entry.Path must start with this string (vault-relative); "<p>/" also matches the bare project row "<p>".
 	Source     Source    // exact match on entry.Source ("http" or "mcp").
-	Limit      int       // max entries to return. <=0 or >500 is clamped to 50.
+	Limit      int       // max entries to return: 50 when <=0, at most 500.
 }
 
 // TailFiltered reads the log and returns entries matching the filters. The
@@ -186,9 +186,10 @@ func (l *Log) TailFiltered(opts TailOpts) ([]Entry, error) {
 		return nil, nil
 	}
 	limit := opts.Limit
-	if limit <= 0 || limit > 500 {
+	if limit <= 0 {
 		limit = 50
 	}
+	limit = min(limit, 500)
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	data, err := os.ReadFile(l.path)

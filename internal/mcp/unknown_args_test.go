@@ -1,6 +1,8 @@
 package mcp
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -22,6 +24,19 @@ func TestUnknownArgs_NotedInResult(t *testing.T) {
 	}
 	if !strings.Contains(body, `\"Project\" (did you mean \"project\"?)`) {
 		t.Errorf("no guess for a case-mismatched name: %s", body)
+	}
+	// Claude Code shows only the structured content of a JSON result: the
+	// note must be there (BUG-077).
+	var rpc struct {
+		Result struct {
+			StructuredContent map[string]any `json:"structuredContent"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &rpc); err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := rpc.Result.StructuredContent[noticesField].([]any); len(n) != 1 || !strings.Contains(fmt.Sprint(n[0]), "projetcs") {
+		t.Errorf("note missing from the structured content: %s", body)
 	}
 
 	rec = postMCP(t, h, token, session, rpcToolCall(3, "memory_list_notes", map[string]any{"project": "x"}))

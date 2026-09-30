@@ -43,22 +43,11 @@ struttura esiste.
 ## Step 3 — Raccogli placeholder
 
 Prima di fare il merge, risolvi i placeholder del `gosidian_block`
-ancora aperti (vedi sopra; quelli già compilati da `user_hints` non si
-toccano):
+ancora aperti, deducendo da `existing_content` e dalla cwd quanto puoi.
+Quelli già compilati da `user_hints` non si toccano e non si chiedono.
+Aperti:
 
-- `{{LANGUAGE}}` — lingua delle note del vault (es. "italiano",
-  "inglese"). Se `existing_content` è in una lingua evidente,
-  presumila; altrimenti chiedi.
-- `{{CODE_LANGUAGE}}` — lingua di commit/commenti (spesso "inglese"
-  anche se le note sono in italiano). Chiedi se non deducibile.
-- `{{PROJECT_TYPE}}` — "applicazione web", "CLI", "libreria",
-  "infra self-hosted", "docs-only", ecc. Deduci da `existing_content`
-  o dalla cwd.
-- `{{STACK}}` — framework/runtime principale (es. "Go 1.22 + HTMX",
-  "Next.js + Prisma", "Python 3.12 FastAPI"). Deduci o chiedi.
-- `{{HOT_FILES}}` — 2-3 percorsi critici del progetto che cambiano
-  spesso. Deduci dallo scan se possibile, altrimenti una lista
-  placeholder tipo `_(da popolare al primo giro di lavoro reale)_`.
+{{OPEN_PLACEHOLDERS}}
 
 Batch le domande mancanti in un'unica `AskUserQuestion` con massimo
 3-4 choice questions — non bombardare l'utente.

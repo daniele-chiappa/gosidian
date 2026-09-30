@@ -2,7 +2,10 @@ package v1
 
 import (
 	"fmt"
+	"log"
 	"net/http"
+	"slices"
+	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/projects"
@@ -47,6 +50,165 @@ func ProvisionPersonalProject(v *vault.Vault, ps *projects.Store, al *audit.Log,
 		_ = al.Write(audit.Entry{Source: audit.SourceHTTP, Actor: u.Username, UserID: u.ID, Action: ActionPersonalProjectCreate, Path: name})
 	}
 	return name, nil
+}
+
+// PersonalProjectHook returns the account-creation hook main installs: a new
+// account gets its personal project. It does nothing when the username
+// belonged to a disabled account (replaced): createUser, the only caller
+// that reuses a username, moves that account's personal project out of the
+// way first and then provisions this one, as the admin who asked
+// (reclaimPersonalProject). Failures are only logged: the account exists
+// either way.
+func PersonalProjectHook(v *vault.Vault, ps *projects.Store, al *audit.Log) func(webauth.User, *webauth.User) {
+	return func(u webauth.User, replaced *webauth.User) {
+		if replaced != nil {
+			return
+		}
+		name, err := ProvisionPersonalProject(v, ps, al, u, false)
+		switch {
+		case err != nil:
+			log.Printf("webauth: user %s created, personal project not provisioned: %v", u.Username, err)
+		case name != "":
+			log.Printf("webauth: user %s created, personal project %q provisioned", u.Username, name)
+		}
+	}
+}
+
+// reclaimPersonalProject gives u, created with the username of the disabled
+// account archived, its personal project. The disabled account's personal
+// project holds that name: it is renamed after the archived account first,
+// notes included, unless personalProjectKept says it must stay (BUG-076,
+// ADR-032). Returns the new personal project, the name the old one moved to,
+// and why u has no personal project when it should have one.
+func (r *Router) reclaimPersonalProject(req *http.Request, actor *RequestUser, archived, u webauth.User) (personal, moved, warning string) {
+	ps := r.deps.Projects
+	if ps == nil || u.Role != webauth.RoleMember || !ps.PersonalProjectsEnabled() {
+		return "", "", ""
+	}
+	name := u.Username
+	if r.projectExists(name) {
+		why := r.personalProjectKept(archived, name)
+		if why == "" {
+			if err := r.archiveProject(name, archived.Username); err != nil {
+				why = err.Error()
+			}
+		}
+		if why != "" {
+			log.Printf("webauth: username %s reused, project %q left in place: %s", name, name, why)
+			return "", "", fmt.Sprintf("no personal project: the project %q stays as it is (%s)", name, why)
+		}
+		moved = archived.Username
+		if actor != nil {
+			r.auditNote(req, audit.ActionRenameProject, actor, name, moved, 0)
+		}
+		r.publishSidebarEvent("update", moved)
+	}
+	personal, err := ProvisionPersonalProject(r.deps.Vault, ps, r.deps.Audit, u, false)
+	if err != nil {
+		return "", moved, "no personal project: " + err.Error()
+	}
+	if personal != "" {
+		r.publishSidebarEvent("create", personal)
+	}
+	return personal, moved, ""
+}
+
+// personalProjectKept says why the project name must not move with the
+// disabled account archived, "" when it may. It must be the personal project
+// provisioned for that account, with no project of that name renamed or
+// deleted since, and nobody else may reach it: no member or team grant
+// (disabling the account removed its own) and no MCP token scoped to it,
+// which would otherwise reach the new account's project.
+func (r *Router) personalProjectKept(archived webauth.User, name string) string {
+	if !stillProvisionedFor(r.deps.Audit, archived.ID, name) {
+		return "it is not the personal project of " + archived.Username
+	}
+	ps := r.deps.Projects
+	if n := ps.MembersCount(name) + ps.TeamsCount(name); n > 0 {
+		return fmt.Sprintf("%d members or teams hold a grant on it", n)
+	}
+	if n := r.tokensScopedTo(name); n > 0 {
+		return fmt.Sprintf("%d MCP tokens are scoped to it", n)
+	}
+	return ""
+}
+
+// archiveProject renames project from to to: its flags and grants first, so
+// a failed folder rename can put them back.
+func (r *Router) archiveProject(from, to string) error {
+	if r.deps.Index == nil {
+		return fmt.Errorf("index not configured")
+	}
+	if r.projectExists(to) {
+		return fmt.Errorf("a project named %q already exists", to)
+	}
+	if err := r.deps.Projects.Rename(from, to); err != nil {
+		return err
+	}
+	if err := r.deps.Vault.RenameProject(r.deps.Index, from, to); err != nil {
+		_ = r.deps.Projects.Rename(to, from)
+		return err
+	}
+	return nil
+}
+
+// stillProvisionedFor reports whether the audit log records project as the
+// personal project provisioned for the account userID, with no project of
+// that name renamed away or deleted since.
+func stillProvisionedFor(al *audit.Log, userID, project string) bool {
+	created, err := al.TailFiltered(audit.TailOpts{UserID: userID, Action: ActionPersonalProjectCreate, Limit: 500})
+	if err != nil {
+		return false
+	}
+	var since time.Time
+	for _, e := range created {
+		if e.Path == project {
+			since = e.TS
+		}
+	}
+	if since.IsZero() {
+		return false
+	}
+	for _, action := range []audit.Action{audit.ActionRenameProject, audit.ActionDeleteProject} {
+		later, err := al.TailFiltered(audit.TailOpts{Action: action, PathPrefix: project + "/", Since: since, Limit: 500})
+		if err != nil {
+			return false
+		}
+		for _, e := range later {
+			if e.Path == project {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// tokensScopedTo counts the unexpired MCP tokens whose scope names project.
+func (r *Router) tokensScopedTo(project string) int {
+	if r.deps.Auth == nil || r.deps.Auth.MCPTokens == nil {
+		return 0
+	}
+	n := 0
+	for _, t := range r.deps.Auth.MCPTokens.List() {
+		if !t.Expired() && slices.Contains(t.ProjectList(), project) {
+			n++
+		}
+	}
+	return n
+}
+
+// vaultHasProject reports whether the vault has a top-level project name.
+func vaultHasProject(v *vault.Vault, name string) bool {
+	projs, err := v.Projects()
+	if err != nil {
+		return false
+	}
+	for _, p := range projs {
+		if p.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // personalProjectOf returns the account's personal project when it exists:

@@ -180,6 +180,48 @@ func TestRender_PromptNamesOpenPlaceholders(t *testing.T) {
 	}
 }
 
+// The Claude prompts list only the placeholders still open, and the
+// suggested questions leave out what user_hints answered: an agent following
+// them to the letter asked again for values it was given (BUG-074).
+func TestRender_AsksOnlyForOpenPlaceholders(t *testing.T) {
+	bullet := func(name string) string { return "- `{{" + name + "}}` — " }
+	some := Hints{Language: "italiano", Stack: "Go", HotFiles: "main.go"}
+	all := Hints{Language: "it", CodeLanguage: "en", ProjectType: "cli", Stack: "Go", HotFiles: "main.go"}
+	for _, m := range []Mode{ModeAugment, ModeFromScratch} {
+		res, _ := Render("p", ProfileClaude, m, some, true)
+		for _, name := range []string{"LANGUAGE", "STACK", "HOT_FILES"} {
+			if strings.Contains(res.Prompt, bullet(name)) {
+				t.Errorf("%s: prompt still asks for {{%s}}, given in user_hints", m, name)
+			}
+		}
+		for _, name := range []string{"CODE_LANGUAGE", "PROJECT_TYPE"} {
+			if !strings.Contains(res.Prompt, bullet(name)) {
+				t.Errorf("%s: prompt does not ask for the open {{%s}}", m, name)
+			}
+		}
+		if got := len(res.SuggestedQuestions); got != 2 {
+			t.Errorf("%s: %d suggested questions with language and hot files given, want 2 (type, conventions): %q",
+				m, got, res.SuggestedQuestions)
+		}
+
+		res, _ = Render("p", ProfileClaude, m, all, true)
+		for _, name := range hintPlaceholders {
+			if strings.Contains(res.Prompt, bullet(name)) {
+				t.Errorf("%s: every hint given, prompt still asks for {{%s}}", m, name)
+			}
+		}
+		if !strings.Contains(res.Prompt, "Salta questo step") {
+			t.Errorf("%s: every hint given, the placeholder step is not skipped", m)
+		}
+		if len(res.SuggestedQuestions) != 1 || !strings.Contains(res.SuggestedQuestions[0], "convenzioni") {
+			t.Errorf("%s: every hint given, suggested questions = %q", m, res.SuggestedQuestions)
+		}
+	}
+	if res, _ := Render("p", ProfileClaude, ModeAugment, Hints{}, true); len(res.SuggestedQuestions) != 4 {
+		t.Errorf("no hints: %d suggested questions, want 4", len(res.SuggestedQuestions))
+	}
+}
+
 // One pass: a value is never scanned for placeholders again.
 func TestApplyVars_SinglePass(t *testing.T) {
 	got := applyVars("{{A}} {{B}} {{C}} {{...}}", map[string]string{"A": "{{B}}", "B": "b"})
@@ -358,6 +400,24 @@ func TestRenderDirectives(t *testing.T) {
 	}
 }
 
+// The template's own comment describes it without naming its placeholders:
+// they were filled in there too, into "parametrico solo su myproj e 13"
+// (BUG-073).
+func TestRenderDirectives_CommentNamesNoPlaceholder(t *testing.T) {
+	raw, err := assetsFS.ReadFile(sharedDirectivesTemplate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, afterMarker, _ := strings.Cut(string(raw), "-->")
+	comment, _, ok := strings.Cut(afterMarker, "-->")
+	if !ok || !strings.HasPrefix(strings.TrimSpace(comment), "<!--") {
+		t.Fatal("directives template lost its leading comment")
+	}
+	if ph := placeholderRE.FindString(comment); ph != "" {
+		t.Errorf("leading comment names %s, which is filled in when the block renders", ph)
+	}
+}
+
 // TestStubVersion_PinnedToContent and TestDirectivesVersion_PinnedToContent are
 // discipline guards: each fails whenever the embedded template changes without
 // the maintainer revisiting the matching version. When one fires: bump the
@@ -370,7 +430,7 @@ func TestStubVersion_PinnedToContent(t *testing.T) {
 
 func TestDirectivesVersion_PinnedToContent(t *testing.T) {
 	assertPinned(t, sharedDirectivesTemplate, DirectivesVersion, 13,
-		"d6ad97c2b33203c680133e762a2bfe4a89dbbe87637905f7fcfebb8f1b11a9ba")
+		"09a6045b633d9ce04880fc2986347b2f5862e01ec0cb42121ceb5db908723ebc")
 }
 
 func assertPinned(t *testing.T, asset string, gotVersion, wantVersion int, wantHash string) {

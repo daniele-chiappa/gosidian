@@ -34,7 +34,7 @@ func (s *Server) registerRefreshHotTool() {
 	s.impl.AddTool(mcp.NewTool("memory_refresh_hot",
 		mcp.WithDescription("Rebuild the `## Recent decisions` section of <project>/hot.md from the latest ADRs in memory/decisions.md and the latest plans with status:done. Opt-in: the target section of hot.md must be wrapped in `<!-- auto:recent-decisions -->` / `<!-- /auto -->` markers; without them the tool is a no-op. Safe to re-run; everything outside the markers is preserved verbatim."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Project whose hot.md to refresh. "+scopedProjectNote)),
-		mcp.WithNumber("limit", mcp.Description("Max number of entries to list (default 5).")),
+		mcp.WithNumber("limit", mcp.Description("Max number of entries to list (default 5, max 50).")),
 	), s.handleRefreshHot)
 }
 
@@ -61,10 +61,7 @@ func (s *Server) handleRefreshHot(ctx context.Context, req mcp.CallToolRequest) 
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	limit := req.GetInt("limit", 5)
-	if limit <= 0 || limit > 50 {
-		limit = 5
-	}
+	limit := limitArg(ctx, req, 5, 50)
 
 	hotPath := project + "/hot.md"
 	if _, errRes := s.authorizeWrite(ctx, hotPath); errRes != nil {

@@ -1,10 +1,16 @@
 package v1
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/gosidian/gosidian/internal/projects"
 	"github.com/gosidian/gosidian/internal/webauth"
 )
@@ -12,9 +18,7 @@ import (
 // wirePersonalProjects installs the creation hook the way main does, so
 // accounts created through the API get their personal project.
 func (f *notesFixture) wirePersonalProjects() {
-	f.webauth.SetOnUserCreated(func(u webauth.User) {
-		_, _ = ProvisionPersonalProject(f.router.deps.Vault, f.projects, f.router.deps.Audit, u, false)
-	})
+	f.webauth.SetOnUserCreated(PersonalProjectHook(f.router.deps.Vault, f.projects, f.router.deps.Audit))
 }
 
 // A restricted account ignores visibility: internal and public projects stay
@@ -229,4 +233,121 @@ func TestMeTokens(t *testing.T) {
 	if rec := f.request(http.MethodPost, "/api/v1/me/tokens", `{"name":"g"}`, ghdr); rec.Code != http.StatusCreated {
 		t.Errorf("guest read token = %d (%s)", rec.Code, rec.Body.String())
 	}
+}
+
+// Reusing the username of a disabled account moves its personal project,
+// notes included, under the account's archived name, and the new account gets
+// a fresh one. The old project stays where it is when it was not provisioned
+// for that account (or was replaced since), or when someone else can reach
+// it through a member grant, a team grant or an MCP token; the answer then
+// says why the new account has none (BUG-076).
+func TestAdminCreateUser_ReuseMovesPersonalProject(t *testing.T) {
+	f := newNotesFixture(t)
+	f.wirePersonalProjects()
+	tokens, err := auth.Open(filepath.Join(t.TempDir(), "tokens.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.router.deps.Auth.MCPTokens = tokens
+	create := func(name string) map[string]any {
+		t.Helper()
+		rec := f.doAuthRecorder(http.MethodPost, "/api/v1/admin/users", `{"username":"`+name+`","password":"pass-1234-5678"}`, nil)
+		if rec.code != http.StatusCreated {
+			t.Fatalf("create %s = %d (%s)", name, rec.code, rec.body)
+		}
+		var v map[string]any
+		if err := json.Unmarshal([]byte(rec.body), &v); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	disable := func(v map[string]any) {
+		t.Helper()
+		if rec := f.doAuthRecorder(http.MethodDelete, "/api/v1/admin/users/"+v["id"].(string), "", nil); rec.code != http.StatusNoContent {
+			t.Fatalf("disable = %d (%s)", rec.code, rec.body)
+		}
+	}
+	// reuse disables the account holding name and creates a new one with it.
+	reuse := func(name string, old map[string]any) map[string]any {
+		t.Helper()
+		disable(old)
+		return create(name)
+	}
+	kept := func(name string, v map[string]any) {
+		t.Helper()
+		if v["personal_project"] != nil || v["archived_personal_project"] != nil ||
+			!strings.Contains(fmt.Sprint(v["personal_project_warning"]), `"`+name+`" stays`) || !f.router.projectExists(name) {
+			t.Errorf("%s: want the old project kept and a warning, got %v", name, v)
+		}
+	}
+
+	first := create("alma")
+	if first["personal_project"] != "alma" {
+		t.Fatalf("first alma: %v", first)
+	}
+	f.seedNote(t, "alma/diary.md", "old notes")
+	second := reuse("alma", first)
+	archived, _ := second["archived_username"].(string)
+	if second["personal_project"] != "alma" || archived == "" || second["archived_personal_project"] != archived || second["personal_project_warning"] != nil {
+		t.Fatalf("second alma: %v", second)
+	}
+	if _, err := f.router.deps.Vault.Load(archived + "/diary.md"); err != nil {
+		t.Errorf("the old notes did not move to %s: %v", archived, err)
+	}
+	if rows, _ := f.router.deps.Index.NotesByPrefix(archived); len(rows) != 1 {
+		t.Errorf("index under %s: %d notes, want 1", archived, len(rows))
+	}
+	if f.projects.Visibility(archived) != projects.VisibilityPrivate || f.projects.MembersCount(archived) != 0 {
+		t.Errorf("%s: visibility %s, %d members; want private, none", archived, f.projects.Visibility(archived), f.projects.MembersCount(archived))
+	}
+	if _, err := f.router.deps.Vault.Load("alma/diary.md"); err == nil {
+		t.Error("the new personal project must start empty")
+	}
+	if lvl, _ := f.projects.MemberLevel("alma", second["id"].(string)); lvl != projects.LevelAdmin {
+		t.Errorf("new alma grant = %q, want admin", lvl)
+	}
+	raw, _ := os.ReadFile(filepath.Join(filepath.Dir(f.vaultRoot), "audit.jsonl"))
+	if !regexp.MustCompile(`"actor":"owner"[^\n]*"action":"rename_project","path":"alma","to":"` + regexp.QuoteMeta(archived) + `"`).Match(raw) {
+		t.Errorf("the rename is not audited as the admin's: %s", raw)
+	}
+
+	// Someone else can reach the old project: a member grant, a team grant
+	// or an MCP token scoped to it.
+	bea, cleo := create("bea"), create("cleo")
+	if err := f.projects.SetMember("bea", cleo["id"].(string), projects.LevelWrite); err != nil {
+		t.Fatal(err)
+	}
+	kept("bea", reuse("bea", bea))
+	if lvl, _ := f.projects.MemberLevel("bea", cleo["id"].(string)); lvl != projects.LevelWrite {
+		t.Errorf("cleo lost the grant on bea: %q", lvl)
+	}
+	gia := create("gia")
+	team, err := f.projects.CreateTeam("crew", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.projects.SetTeamGrant(team.ID, "gia", projects.LevelRead); err != nil {
+		t.Fatal(err)
+	}
+	kept("gia", reuse("gia", gia))
+	ivo := create("ivo")
+	if _, _, err := tokens.Create("ivo-agent", []string{"ivo"}, []string{auth.ScopeRead}, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	kept("ivo", reuse("ivo", ivo))
+
+	// Not the old account's personal project: one of the owner's that only
+	// shares the name, or one created after the personal project moved away.
+	f.seedNote(t, "dino/plan.md", "owner's")
+	dino := create("dino")
+	if dino["personal_project"] != nil || dino["personal_project_warning"] == nil {
+		t.Errorf("dino with the name taken: %v", dino)
+	}
+	kept("dino", reuse("dino", dino))
+	eva := create("eva")
+	if rec := f.doAuthRecorder(http.MethodPut, "/api/v1/projects/eva", `{"new_name":"eva-old"}`, nil); rec.code != http.StatusOK {
+		t.Fatalf("rename eva = %d (%s)", rec.code, rec.body)
+	}
+	f.seedNote(t, "eva/plan.md", "owner's")
+	kept("eva", reuse("eva", eva))
 }

@@ -29,7 +29,7 @@ func (s *Server) unknownArgsMiddleware(next server.ToolHandlerFunc) server.ToolH
 			return result, err
 		}
 		slog.Info("mcp.call unknown arguments", "tool", req.Params.Name, "args", strings.Join(unknown, ","))
-		result.Content = append(result.Content, mcp.NewTextContent(unknownArgsNote(req.Params.Name, unknown, known)))
+		appendNotice(result, unknownArgsNote(req.Params.Name, unknown, known))
 		return result, err
 	}
 }

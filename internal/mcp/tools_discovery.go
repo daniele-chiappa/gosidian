@@ -240,13 +240,7 @@ func (s *Server) handleStale(ctx context.Context, req mcp.CallToolRequest) (*mcp
 	if err != nil {
 		return mcp.NewToolResultErrorf("older_than %q: %v", rawOlder, err), nil
 	}
-	limit := req.GetInt("limit", 20)
-	switch {
-	case limit <= 0:
-		limit = 20
-	case limit > staleMaxLimit:
-		limit = staleMaxLimit
-	}
+	limit := limitArg(ctx, req, 20, staleMaxLimit)
 	// One extra row tells a full page from a cut one (the index caps at
 	// staleMaxLimit, so at the cap a full page counts as cut).
 	fetch := limit

@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -36,9 +37,13 @@ type adminUserView struct {
 	// is GET /admin/users/{id}/access. Omitted for the owner (everything).
 	ProjectsReadable *int `json:"projects_readable,omitempty"`
 	ProjectsWritable *int `json:"projects_writable,omitempty"`
-	// ArchivedUsername, only in the answer to a creation, is the new name of
-	// the disabled account that held the username.
-	ArchivedUsername string `json:"archived_username,omitempty"`
+	// Only in the answer to a creation: ArchivedUsername is the new name of
+	// the disabled account that held the username, ArchivedPersonalProject
+	// the name its personal project moved to, and PersonalProjectWarning
+	// says why a member account got no personal project.
+	ArchivedUsername        string `json:"archived_username,omitempty"`
+	ArchivedPersonalProject string `json:"archived_personal_project,omitempty"`
+	PersonalProjectWarning  string `json:"personal_project_warning,omitempty"`
 }
 
 func toAdminUserView(u webauth.User) adminUserView {
@@ -190,6 +195,12 @@ func (r *Router) createUser(w http.ResponseWriter, req *http.Request) {
 			Path:   user.ID,
 		})
 	}
+	// The creation hook left the personal project to us: the disabled
+	// account's one holds the name (BUG-076).
+	var personal, movedProject, projectWarning string
+	if archived != nil {
+		personal, movedProject, projectWarning = r.reclaimPersonalProject(req, actor, *archived, *user)
+	}
 	if policy != webauth.TOTPInherit {
 		if err := r.deps.Auth.WebAuth.SetTOTPPolicy(user.ID, policy); err != nil {
 			WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
@@ -212,8 +223,17 @@ func (r *Router) createUser(w http.ResponseWriter, req *http.Request) {
 	if u, ok := r.deps.Auth.WebAuth.UserByID(user.ID); ok {
 		view = toAdminUserView(*u)
 	}
-	if archived != nil {
+	view.PersonalProject = r.personalProjectOf(*user)
+	switch {
+	case archived != nil:
 		view.ArchivedUsername = archived.Username
+		view.PersonalProject, view.ArchivedPersonalProject, view.PersonalProjectWarning = personal, movedProject, projectWarning
+	case view.PersonalProject == "" && role == webauth.RoleMember && r.deps.Projects != nil && r.deps.Projects.PersonalProjectsEnabled():
+		// The creation hook only logs why it provisioned nothing.
+		view.PersonalProjectWarning = "no personal project: see the server log"
+		if r.projectExists(user.Username) {
+			view.PersonalProjectWarning = fmt.Sprintf("no personal project: a project named %q already exists", user.Username)
+		}
 	}
 	WriteJSON(w, http.StatusCreated, view)
 }

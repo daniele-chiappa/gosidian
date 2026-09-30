@@ -2,7 +2,6 @@ package v1
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/gosidian/gosidian/internal/index"
@@ -41,10 +40,7 @@ func (r *Router) handleSearch(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusBadRequest, CodeValidationRequired, "q is required")
 		return
 	}
-	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 200 {
-		limit = 20
-	}
+	limit := limitParam(req, 20, 200)
 	project := strings.TrimSpace(req.URL.Query().Get("project"))
 	p := principalFromContext(req)
 

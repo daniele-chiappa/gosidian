@@ -328,15 +328,7 @@ func main() {
 	}
 	// A new account starts with its personal project (IMP-101 phase 3): a
 	// private project named after it where it is admin. Off via Settings.
-	webauthStore.SetOnUserCreated(func(u webauth.User) {
-		name, err := apiv1.ProvisionPersonalProject(v, projectsStore, auditLog, u, false)
-		switch {
-		case err != nil:
-			log.Printf("webauth: user %s created, personal project not provisioned: %v", u.Username, err)
-		case name != "":
-			log.Printf("webauth: user %s created, personal project %q provisioned", u.Username, name)
-		}
-	})
+	webauthStore.SetOnUserCreated(apiv1.PersonalProjectHook(v, projectsStore, auditLog))
 	if cfg.Vault.CacheSize != 128 {
 		v.SetCacheSize(cfg.Vault.CacheSize)
 		log.Printf("vault cache size set to %d", cfg.Vault.CacheSize)

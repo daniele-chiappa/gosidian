@@ -101,7 +101,7 @@ func (s *Server) selfImproveNudgeMiddleware(next server.ToolHandlerFunc) server.
 			key = tok.ID
 		}
 		if s.nudges.tick(key, s.selfImproveEveryN, s.selfImproveMaxPerSession, s.selfImproveCooldown, time.Now()) {
-			result.Content = append(result.Content, mcp.NewTextContent(selfImproveNudgeText))
+			appendNotice(result, selfImproveNudgeText)
 		}
 		return result, err
 	}

@@ -27,7 +27,7 @@ func TestRestrictedAndCapabilities(t *testing.T) {
 	}
 
 	var created []User
-	s.SetOnUserCreated(func(u User) { created = append(created, u) })
+	s.SetOnUserCreated(func(u User, _ *User) { created = append(created, u) })
 
 	m, err := s.AddUser("mia", "mia-pass-1234", RoleMember)
 	if err != nil {

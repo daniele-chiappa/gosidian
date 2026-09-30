@@ -14,11 +14,12 @@ import (
 // Shutdown stops srvs together (nil entries are skipped). Each one closes
 // its listeners and stops keeping connections alive first; only then does
 // endStreams run, once, to end the long-lived requests (live updates, MCP
-// HTTP+SSE sessions, memory_wait_changes). Ending them earlier let their
-// clients come straight back to this process, on a connection kept alive or
-// through a listener still open, and the shutdown waited its whole timeout
-// on the new request with the port already closed (BUG-069). A server still
-// busy when ctx ends is closed, and the log says what it was serving.
+// HTTP+SSE sessions and subscriptions/listen, memory_wait_changes). Ending
+// them earlier let their clients come straight back to this process, on a
+// connection kept alive or through a listener still open, and the shutdown
+// waited its whole timeout on the new request with the port already closed
+// (BUG-069). A server still busy when ctx ends is closed, and the log says
+// what it was serving.
 func Shutdown(ctx context.Context, endStreams func(), inflight *Inflight, srvs ...*http.Server) {
 	var once sync.Once
 	end := func() { once.Do(endStreams) }

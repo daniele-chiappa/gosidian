@@ -1,8 +1,8 @@
 <!-- gosidian:directives v={{DIRECTIVES_VERSION}} -->
 <!--
   directives.tmpl.md — direttive operative gosidian, servite da
-  memory_bootstrap nel campo `directives_block` (parametrico solo su
-  {{PROJECT}} e {{DIRECTIVES_VERSION}}). NON è un file da scrivere su
+  memory_bootstrap nel campo `directives_block` (parametriche solo sul
+  nome del progetto e sulla versione). NON è un file da scrivere su
   disco: l'agente le legge fresche a ogni bootstrap. La personalizzazione
   per-progetto (stack, hot files, lingua) vive nello stub locale, non qui.
 -->

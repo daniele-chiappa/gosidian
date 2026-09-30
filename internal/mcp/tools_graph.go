@@ -57,10 +57,7 @@ func (s *Server) handleHubs(ctx context.Context, req mcp.CallToolRequest) (*mcp.
 		}
 	}
 
-	limit := req.GetInt("limit", 20)
-	if limit <= 0 || limit > 100 {
-		limit = 20
-	}
+	limit := limitArg(ctx, req, 20, 100)
 
 	hubs, err := s.index.Hubs(project, limit)
 	if err != nil {
@@ -97,10 +94,7 @@ func (s *Server) handlePath(ctx context.Context, req mcp.CallToolRequest) (*mcp.
 		return mcp.NewToolResultErrorf("path %q is outside the token's scope", to), nil
 	}
 
-	maxDepth := req.GetInt("max_depth", 6)
-	if maxDepth <= 0 || maxDepth > 20 {
-		maxDepth = 6
-	}
+	maxDepth := clampedArg(ctx, req, "max_depth", 6, 20)
 
 	path, err := s.index.BFSPath(from, to, maxDepth)
 	if err != nil {

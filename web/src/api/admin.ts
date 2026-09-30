@@ -61,6 +61,11 @@ export interface AdminUser {
   /** Only in the answer to a creation: the new name of the disabled account
    *  that held the username, kept for the audit trail. */
   archived_username?: string
+  /** Only in the answer to a creation: the name the disabled account's
+   *  personal project moved to, freeing the username for the new one. */
+  archived_personal_project?: string
+  /** Only in the answer to a creation: why a member got no personal project. */
+  personal_project_warning?: string
 }
 
 export interface Invite {

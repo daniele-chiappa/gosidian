@@ -175,8 +175,10 @@ type Store struct {
 	// onUserCreated, if set, is called after AddUser/AddLDAPUser persisted a
 	// new account (never for Setup: the owner has no personal space), so
 	// callers can provision what a new account starts with, e.g. its
-	// personal project. Called without holding Store.mu.
-	onUserCreated func(u User)
+	// personal project. replaced is the disabled account AddUserReclaiming
+	// renamed to free the username, nil otherwise. Called without holding
+	// Store.mu.
+	onUserCreated func(u User, replaced *User)
 }
 
 type session struct {
@@ -186,7 +188,7 @@ type session struct {
 
 // SetOnUserCreated installs the provisioning hook for new accounts. Safe to
 // call at startup; not expected to change after that.
-func (s *Store) SetOnUserCreated(fn func(u User)) {
+func (s *Store) SetOnUserCreated(fn func(u User, replaced *User)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onUserCreated = fn
@@ -875,7 +877,7 @@ func (s *Store) addUser(u User, reclaim bool) (*User, *User, error) {
 	fn := s.onUserCreated
 	s.mu.Unlock()
 	if fn != nil {
-		fn(u)
+		fn(u, archived)
 	}
 	cp := u
 	return &cp, archived, nil

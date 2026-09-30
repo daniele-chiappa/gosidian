@@ -65,7 +65,7 @@ func (s *Server) handleQuery(ctx context.Context, req mcp.CallToolRequest) (*mcp
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	limit := index.ClampQueryLimit(req.GetInt("limit", index.QueryDefaultLimit))
+	limit := limitArg(ctx, req, index.QueryDefaultLimit, index.QueryMaxLimit)
 	fields := req.GetStringSlice("fields", nil)
 	if len(fields) == 0 {
 		fields = index.DefaultQueryFields(where, sort)

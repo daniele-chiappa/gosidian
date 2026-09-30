@@ -2,7 +2,6 @@ package v1
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -48,13 +47,7 @@ func (r *Router) handleAdminAudit(w http.ResponseWriter, req *http.Request) {
 	}
 
 	q := req.URL.Query()
-	limit, _ := strconv.Atoi(q.Get("limit"))
-	if limit <= 0 {
-		limit = 50
-	}
-	if limit > 500 {
-		limit = 500
-	}
+	limit := limitParam(req, 50, 500)
 
 	opts := audit.TailOpts{
 		Actor:      strings.TrimSpace(q.Get("actor")),

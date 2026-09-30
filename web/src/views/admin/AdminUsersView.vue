@@ -77,6 +77,8 @@ const creating = ref(false)
 const createError = ref<string | null>(null)
 const created = ref<string | null>(null)
 const createdArchived = ref<string | null>(null)
+const createdArchivedProject = ref<string | null>(null)
+const createdProjectWarning = ref<string | null>(null)
 const showPassword = ref(false)
 const copied = ref(false)
 const newUser = reactive<CreateUserRequest>({
@@ -144,6 +146,8 @@ async function submitCreate() {
     })
     created.value = u.username
     createdArchived.value = u.archived_username ?? null
+    createdArchivedProject.value = u.archived_personal_project ?? null
+    createdProjectWarning.value = u.personal_project_warning ?? null
     resetCreate()
     showCreate.value = false
     await load()
@@ -263,6 +267,12 @@ onMounted(load)
         <template v-if="createdArchived">
           The disabled account that had this username is kept as “{{ createdArchived }}”.
         </template>
+        <template v-if="createdArchivedProject">
+          Its personal project is now “{{ createdArchivedProject }}”.
+        </template>
+      </p>
+      <p v-if="created && !showCreate && createdProjectWarning" class="mt-1 text-xs text-warning">
+        {{ createdProjectWarning }}
       </p>
 
       <form v-if="showCreate" class="mt-3 grid gap-3 sm:grid-cols-2" @submit.prevent="submitCreate">

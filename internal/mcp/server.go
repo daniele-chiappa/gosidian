@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
@@ -23,6 +22,7 @@ import (
 	"github.com/gosidian/gosidian/internal/server/events"
 	"github.com/gosidian/gosidian/internal/vault"
 	"github.com/gosidian/gosidian/internal/webauth"
+	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
 
@@ -92,11 +92,13 @@ func correlationIDFor(ctx context.Context) string {
 // Server wraps a mark3labs MCPServer wired against a gosidian vault + index.
 type Server struct {
 	// sseServers are the HTTP+SSE transports Handler built, kept so
-	// CloseStreams can end their sessions at shutdown; streamsClosed then
-	// refuses new ones.
-	sseMu         sync.Mutex
-	sseServers    []*server.SSEServer
-	streamsClosed atomic.Bool
+	// CloseStreams can end their sessions at shutdown. streams ends there
+	// too: new HTTP+SSE sessions are refused from then on, and the
+	// subscriptions/listen requests tied to it end.
+	sseMu      sync.Mutex
+	sseServers []*server.SSEServer
+	streams    context.Context
+	endStreams context.CancelFunc
 
 	vault              *vault.Vault
 	index              *index.Index
@@ -464,6 +466,7 @@ func New(v *vault.Vault, idx *index.Index, tokens *auth.Store) *Server {
 		maxNoteBytes: 1 << 20,
 		nudges:       newNudgeTracker(),
 	}
+	s.streams, s.endStreams = context.WithCancel(context.Background())
 	// The self-improve nudge middleware is bound to s, so s must exist
 	// before NewMCPServer captures it. s.impl is assigned right after and
 	// is only dereferenced at tool-call time, by which point it is set.
@@ -474,6 +477,7 @@ func New(v *vault.Vault, idx *index.Index, tokens *auth.Store) *Server {
 		server.WithToolHandlerMiddleware(instrumentMiddleware),
 		server.WithToolHandlerMiddleware(s.selfImproveNudgeMiddleware),
 		server.WithToolHandlerMiddleware(s.unknownArgsMiddleware),
+		server.WithToolHandlerMiddleware(callNotesMiddleware),
 		// Per-token tool profile: applied to tools/list and enforced on
 		// tools/call by mcp-go (access-control boundary, not cosmetic).
 		server.WithToolFilter(s.filterToolsByProfile),
@@ -487,8 +491,9 @@ func New(v *vault.Vault, idx *index.Index, tokens *auth.Store) *Server {
 // sibling byte endpoints, ready to be mounted on any mux under basePath:
 //
 //   - <basePath>          Streamable HTTP (POST JSON-RPC). GET answers 405:
-//     gosidian sends nothing server→client — change events travel inside
-//     memory_wait_changes — so no long-lived stream sits behind a proxy.
+//     gosidian sends nothing server→client on its own — change events travel
+//     inside memory_wait_changes. The one long-lived request is the
+//     subscriptions/listen of protocol 2026-07-28 (endListensOnClose).
 //   - <basePath>/sse      HTTP+SSE, the legacy transport, kept for older
 //     clients; <basePath>/message carries its client→server messages.
 //   - <basePath>/upload, /download, /append, /ingest/<ticket>  byte endpoints.
@@ -544,7 +549,7 @@ func (s *Server) Handler(basePath string) http.Handler {
 			server.WithDisableLocalhostProtection(s.dnsRebindingOff),
 		)
 		// Exact path only: the subtree below stays with the SSE server.
-		mux.Handle(basePath, s.transport(streamable))
+		mux.Handle(basePath, s.transport(s.endListensOnClose(streamable)))
 	}
 	mux.Handle("/", s.transport(s.refuseStreamsWhenClosed(sse)))
 	return mux
@@ -555,7 +560,7 @@ func (s *Server) Handler(basePath string) http.Handler {
 // open a session the shutdown then waits on (BUG-069).
 func (s *Server) refuseStreamsWhenClosed(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet && s.streamsClosed.Load() {
+		if r.Method == http.MethodGet && s.streams.Err() != nil {
 			w.Header().Set("Retry-After", "1")
 			http.Error(w, "gosidian is shutting down", http.StatusServiceUnavailable)
 			return
@@ -564,12 +569,33 @@ func (s *Server) refuseStreamsWhenClosed(next http.Handler) http.Handler {
 	})
 }
 
-// CloseStreams ends every HTTP+SSE session of the handlers built so far and
-// refuses new ones. An SSE stream never goes idle, so without this a graceful
-// shutdown waits its whole timeout with the port already closed (BUG-069).
-// Idempotent.
+// endListensOnClose ends a subscriptions/listen request when CloseStreams
+// runs, or at once if it arrives afterwards. From protocol 2026-07-28 the
+// listen is a POST that mcp-go holds open until its request context ends, so
+// a graceful shutdown would wait its whole timeout on it (BUG-072). Either
+// way the client sees the stream end after the acknowledgement, as when the
+// shutdown timeout cut it, and opens it again on the next process. The
+// Mcp-Method header is enough to spot it: mcp-go refuses a modern request
+// whose header and body disagree.
+func (s *Server) endListensOnClose(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.Header.Get(mcp.HeaderMethod) != string(mcp.MethodSubscriptionsListen) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		defer context.AfterFunc(s.streams, cancel)()
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// CloseStreams ends every HTTP+SSE session and subscriptions/listen request
+// of the handlers built so far and refuses new ones. Neither kind of stream
+// goes idle, so without this a graceful shutdown waits its whole timeout with
+// the port already closed (BUG-069, BUG-072). Idempotent.
 func (s *Server) CloseStreams() {
-	s.streamsClosed.Store(true)
+	s.endStreams()
 	s.sseMu.Lock()
 	servers := append([]*server.SSEServer(nil), s.sseServers...)
 	s.sseMu.Unlock()

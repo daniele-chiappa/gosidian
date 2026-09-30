@@ -45,10 +45,7 @@ func (s *Server) handleNotesByImportance(ctx context.Context, req mcp.CallToolRe
 	if minLevel > 5 {
 		minLevel = 5
 	}
-	limit := req.GetInt("limit", 50)
-	if limit <= 0 || limit > 500 {
-		limit = 50
-	}
+	limit := limitArg(ctx, req, 50, 500)
 
 	rows, err := s.index.NotesByImportance(project, minLevel)
 	if err != nil {

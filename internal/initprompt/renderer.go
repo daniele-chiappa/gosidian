@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"maps"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -125,10 +126,11 @@ func Render(project string, profile Profile, mode Mode, hints Hints, projectExis
 		if v := strings.TrimSpace(hinted[name]); v != "" {
 			blockVars[name] = v
 		} else {
-			open = append(open, "`{{"+name+"}}`")
+			open = append(open, name)
 		}
 	}
 	vars["PLACEHOLDER_STATUS"] = placeholderStatus(open)
+	vars["OPEN_PLACEHOLDERS"] = openPlaceholderGuide(open)
 	vars["STUB_PLACEMENT"] = strings.TrimSpace(string(placement))
 
 	return Result{
@@ -137,7 +139,7 @@ func Render(project string, profile Profile, mode Mode, hints Hints, projectExis
 		Prompt:             applyVars(string(promptBytes), vars),
 		GosidianBlock:      applyVars(string(stubBytes), blockVars),
 		StubVersion:        StubVersion,
-		SuggestedQuestions: defaultSuggestedQuestions(),
+		SuggestedQuestions: suggestedQuestions(open),
 	}, nil
 }
 
@@ -220,9 +222,43 @@ var hintPlaceholders = []string{"LANGUAGE", "CODE_LANGUAGE", "PROJECT_TYPE", "ST
 // the ones no hint filled, which the agent resolves before writing.
 func placeholderStatus(open []string) string {
 	if len(open) == 0 {
-		return "Tutti i placeholder del blocco sono già risolti da `user_hints`."
+		return "Tutti i placeholder del blocco sono già risolti da `user_hints`: " +
+			"salta la raccolta dei placeholder e non chiedere all'utente i valori che ha già dato."
 	}
-	return "Placeholder ancora da risolvere nel blocco: " + strings.Join(open, ", ") + "."
+	quoted := make([]string, len(open))
+	for i, name := range open {
+		quoted[i] = "`{{" + name + "}}`"
+	}
+	return "Placeholder ancora da risolvere nel blocco: " + strings.Join(quoted, ", ") + "."
+}
+
+// placeholderGuide says what each hint placeholder holds and how to find
+// its value, for the prompts that list the open ones.
+var placeholderGuide = map[string]string{
+	"LANGUAGE": "lingua delle note del vault (es. \"italiano\", \"inglese\"). " +
+		"Presumila se è evidente (dal file di istruzioni esistente, o dai progetti già nel vault: " +
+		"di solito la loro lingua), altrimenti chiedi.",
+	"CODE_LANGUAGE": "lingua di commit e commenti (di solito \"inglese\", anche con le note in italiano). " +
+		"Chiedi se non è deducibile.",
+	"PROJECT_TYPE": "\"applicazione web\", \"CLI\", \"libreria\", \"infra self-hosted\", \"docs-only\", ecc. " +
+		"Deducilo dal progetto.",
+	"STACK": "framework e runtime principali (es. \"Go 1.22 + HTMX\", \"Next.js + Prisma\", " +
+		"\"Python 3.12 FastAPI\"). Deducili o chiedi.",
+	"HOT_FILES": "2-3 percorsi del progetto che cambiano spesso (dal file esistente o dallo scan della cwd). Se non sono ovvi, " +
+		"`_(da popolare al primo giro di lavoro reale)_`.",
+}
+
+// openPlaceholderGuide lists the open placeholders with their guide, one
+// bullet each, so a prompt never asks for a value user_hints already gave.
+func openPlaceholderGuide(open []string) string {
+	if len(open) == 0 {
+		return "Nessuno: `user_hints` li ha compilati tutti. Salta questo step."
+	}
+	lines := make([]string, len(open))
+	for i, name := range open {
+		lines[i] = "- `{{" + name + "}}` — " + placeholderGuide[name]
+	}
+	return strings.Join(lines, "\n")
 }
 
 var placeholderRE = regexp.MustCompile(`\{\{([A-Z_]+)\}\}`)
@@ -246,13 +282,21 @@ func coalesce(a, b string) string {
 	return b
 }
 
-func defaultSuggestedQuestions() []string {
-	return []string{
-		"In quale lingua preferisci le note del vault (italiano / inglese / …)?",
-		"Che tipo di progetto è (applicazione web / CLI / libreria / infra / docs-only)?",
-		"Quali sono i 2-3 file o cartelle più hot (che cambiano spesso)?",
-		"Ci sono convenzioni di build / test / code style già stabilite da rispettare?",
+// suggestedQuestions leaves out the questions user_hints already answered:
+// each one asks for a hint placeholder, except the last.
+func suggestedQuestions(open []string) []string {
+	var out []string
+	for _, q := range []struct{ placeholder, text string }{
+		{"LANGUAGE", "In quale lingua preferisci le note del vault (italiano / inglese / …)?"},
+		{"PROJECT_TYPE", "Che tipo di progetto è (applicazione web / CLI / libreria / infra / docs-only)?"},
+		{"HOT_FILES", "Quali sono i 2-3 file o cartelle più hot (che cambiano spesso)?"},
+		{"", "Ci sono convenzioni di build / test / code style già stabilite da rispettare?"},
+	} {
+		if q.placeholder == "" || slices.Contains(open, q.placeholder) {
+			out = append(out, q.text)
+		}
 	}
+	return out
 }
 
 // AnchorInput carries the canonical metadata needed to render a local agent

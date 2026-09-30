@@ -139,10 +139,7 @@ func (r *Router) listNotes(w http.ResponseWriter, req *http.Request) {
 	project := strings.TrimSpace(q.Get("project"))
 	prefix := strings.TrimSpace(q.Get("prefix"))
 	tag := strings.TrimSpace(q.Get("tag"))
-	limit, _ := strconv.Atoi(q.Get("limit"))
-	if limit <= 0 || limit > 500 {
-		limit = 100
-	}
+	limit := limitParam(req, 100, 500)
 	offset, _ := strconv.Atoi(q.Get("offset"))
 	if offset < 0 {
 		offset = 0

@@ -64,10 +64,7 @@ func (s *Server) handleTodos(ctx context.Context, req mcp.CallToolRequest) (*mcp
 	if pathPrefix != "" && !strings.HasPrefix(pathPrefix, project+"/") && pathPrefix != project {
 		return mcp.NewToolResultErrorf("path_prefix %q must be inside project %q", pathPrefix, project), nil
 	}
-	limit := req.GetInt("limit", 200)
-	if limit <= 0 || limit > 2000 {
-		limit = 200
-	}
+	limit := limitArg(ctx, req, 200, 2000)
 
 	notes, err := s.index.NotesByPrefix(project)
 	if err != nil {

@@ -153,9 +153,10 @@ type RecentNote struct {
 // a project (top-level folder) and to mtime >= since. An empty project
 // matches all notes; a since of 0 means "no lower bound".
 func (i *Index) RecentNotes(project string, since int64, limit int) ([]RecentNote, error) {
-	if limit <= 0 || limit > 500 {
+	if limit <= 0 {
 		limit = 50
 	}
+	limit = min(limit, 500)
 	var (
 		rows *sql.Rows
 		err  error
@@ -209,9 +210,10 @@ type StaleNote struct {
 // MaintenanceCounts counts as stale; without it every old note is returned,
 // flagged Closed where applicable.
 func (i *Index) StaleNotes(project string, before int64, limit int, excludeClosed bool) ([]StaleNote, error) {
-	if limit <= 0 || limit > 500 {
+	if limit <= 0 {
 		limit = 50
 	}
+	limit = min(limit, 500)
 	q := `SELECT n.path, n.title, n.mtime, ` + closedNoteExpr + ` FROM notes n WHERE n.mtime < ?`
 	args := []any{before}
 	if project != "" {

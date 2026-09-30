@@ -274,10 +274,7 @@ func (s *Server) handleSearch(ctx context.Context, req mcp.CallToolRequest) (*mc
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	limit := req.GetInt("limit", 20)
-	if limit <= 0 || limit > 200 {
-		limit = 20
-	}
+	limit := limitArg(ctx, req, 20, 200)
 	includeOutline := req.GetBool("include_outline", false)
 	includeFrontmatter := req.GetBool("include_frontmatter", false)
 	variants := req.GetStringSlice("any_of", nil)
@@ -374,7 +371,7 @@ func (s *Server) handleSearch(ctx context.Context, req mcp.CallToolRequest) (*mc
 	metrics.CountSearch("mcp", len(out))
 	res, err := mcp.NewToolResultJSON(map[string]any{"hits": out})
 	if err == nil && mergedNote != "" {
-		res.Content = append(res.Content, mcp.NewTextContent(mergedNote))
+		appendNotice(res, mergedNote)
 	}
 	return res, err
 }
@@ -1375,10 +1372,7 @@ func (s *Server) handleRecent(ctx context.Context, req mcp.CallToolRequest) (*mc
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	limit := req.GetInt("limit", 20)
-	if limit <= 0 || limit > 500 {
-		limit = 20
-	}
+	limit := limitArg(ctx, req, 20, 500)
 
 	var since int64
 	if raw := strings.TrimSpace(req.GetString("since", "")); raw != "" {

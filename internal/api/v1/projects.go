@@ -472,16 +472,7 @@ func (r *Router) projectFlag(name string) projects.Flags {
 // projectExists reuses vault.Projects() — cheap and always
 // authoritative against the on-disk state. Avoids a second Stat call.
 func (r *Router) projectExists(name string) bool {
-	projs, err := r.deps.Vault.Projects()
-	if err != nil {
-		return false
-	}
-	for _, p := range projs {
-		if p.Name == name {
-			return true
-		}
-	}
-	return false
+	return vaultHasProject(r.deps.Vault, name)
 }
 
 // publishSidebarEvent emits an SSE notification on the `sidebar`

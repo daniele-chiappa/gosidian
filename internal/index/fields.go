@@ -421,12 +421,13 @@ func SortDesc(sort, order string) (bool, error) {
 	return false, fmt.Errorf("%w: order is asc or desc", ErrBadQuery)
 }
 
-// ClampQueryLimit applies the default and the maximum.
+// ClampQueryLimit applies the default to a limit that is not positive and
+// the maximum to a larger one.
 func ClampQueryLimit(n int) int {
-	if n <= 0 || n > QueryMaxLimit {
+	if n <= 0 {
 		return QueryDefaultLimit
 	}
-	return n
+	return min(n, QueryMaxLimit)
 }
 
 // DefaultQueryFields returns the fields named by the conditions and the

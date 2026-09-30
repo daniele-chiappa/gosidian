@@ -2,7 +2,6 @@ package v1
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/gosidian/gosidian/internal/index"
@@ -43,10 +42,7 @@ func (r *Router) handleNoteTitles(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	q := strings.TrimSpace(req.URL.Query().Get("q"))
-	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
-	if limit <= 0 || limit > noteTitlesMaxLimit {
-		limit = noteTitlesDefaultLimit
-	}
+	limit := limitParam(req, noteTitlesDefaultLimit, noteTitlesMaxLimit)
 
 	// Empty query returns the most recently modified notes — useful as
 	// the editor's "show me anything" fallback when the user opens the
