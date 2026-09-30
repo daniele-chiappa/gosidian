@@ -94,6 +94,9 @@ type Linter struct {
 	// DefaultHotOversizeBytes. Populated via WithHotOversizeLimit from
 	// [lint] hot_oversize_bytes.
 	hotOversizeBytes int64
+	// skillOversizeBytes is the skill-oversize threshold; <= 0 means
+	// DefaultSkillOversizeBytes. The MCP server passes memory_get's cap.
+	skillOversizeBytes int
 }
 
 // New wires a Linter against a live vault + index.
@@ -105,6 +108,14 @@ func New(v *vault.Vault, idx *index.Index) *Linter {
 // <= 0 keep DefaultHotOversizeBytes. Returns the receiver for chaining.
 func (l *Linter) WithHotOversizeLimit(bytes int64) *Linter {
 	l.hotOversizeBytes = bytes
+	return l
+}
+
+// WithSkillOversizeLimit sets the skill-oversize threshold in bytes, the size
+// above which memory_get truncates a note. Values <= 0 keep
+// DefaultSkillOversizeBytes. Returns the receiver for chaining.
+func (l *Linter) WithSkillOversizeLimit(bytes int) *Linter {
+	l.skillOversizeBytes = bytes
 	return l
 }
 

@@ -18,9 +18,9 @@ import (
 // registerLintTool wires memory_lint into the MCP surface.
 func (s *Server) registerLintTool() {
 	s.impl.AddTool(mcp.NewTool("memory_lint",
-		mcp.WithDescription("Run structural health checks on a project's notes. Returns issues grouped by severity (error/warning/info). Rules check: broken wikilinks, orphan notes, missing frontmatter, unknown tags (closed vocabulary violation; projects with the use_tag_vocabulary flag extend it via `tag_vocabulary:` in memory/conventions.md frontmatter — exact tags or ns:* wildcards), plan status incoherent with hot.md Active plans, oversized hot.md (it is inlined into every bootstrap payload). Zero issues of severity:error indicates a coherent vault. "+scopedProjectNote),
+		mcp.WithDescription("Run structural health checks on a project's notes. Returns issues grouped by severity (error/warning/info). Rules check: broken wikilinks, orphan notes, missing frontmatter, unknown tags (closed vocabulary violation; projects with the use_tag_vocabulary flag extend it via `tag_vocabulary:` in memory/conventions.md frontmatter — exact tags or ns:* wildcards), plan status incoherent with hot.md Active plans, oversized hot.md (it is inlined into every bootstrap payload), type:skill notes larger than memory_get serves whole (skill-oversize). Zero issues of severity:error indicates a coherent vault. "+scopedProjectNote),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder) to lint. "+scopedProjectNote)),
-		mcp.WithArray("rules", mcp.Description("Optional explicit list of rule names to run. Empty = run all default rules. Default rules: broken-wikilink, orphan-note, frontmatter-missing, frontmatter-tag-unknown, status-incoherent, hot-oversize. Optional (opt-in, name it explicitly to run): unlinked-mentions — flags prose that names another note's title/basename without a wikilink (advisory, higher-noise).")),
+		mcp.WithArray("rules", mcp.Description("Optional explicit list of rule names to run. Empty = run all default rules. Default rules: broken-wikilink, orphan-note, frontmatter-missing, frontmatter-tag-unknown, status-incoherent, hot-oversize, skill-oversize. Optional (opt-in, name it explicitly to run): unlinked-mentions — flags prose that names another note's title/basename without a wikilink (advisory, higher-noise).")),
 		mcp.WithString("min_severity", mcp.Description("Filter issues returned by minimum severity (error|warning|info). Empty returns all. Use 'warning' to skip informational issues, 'error' for CI gating.")),
 	), s.handleLint)
 }
@@ -53,6 +53,7 @@ func (s *Server) handleLint(ctx context.Context, req mcp.CallToolRequest) (*mcp.
 	linter := lint.New(s.vault, s.index).
 		WithExtraAllowedTags(s.lintExtraAllowedTags).
 		WithHotOversizeLimit(s.lintHotOversizeBytes).
+		WithSkillOversizeLimit(getBodySoftCap).
 		WithProjectTagVocabulary(s.projects != nil && s.projects.UsesTagVocabulary(project))
 	issues, err := linter.Run(ctx, project, rules, minSeverity)
 	if err != nil {

@@ -8,6 +8,35 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.41.0] — 2026-09-30 — "wiki"
+
+`memory_lint` now warns about skills too large for `memory_get` to
+serve whole, and no longer reports template placeholders as broken
+links. The agent patterns gain a section on compiling sources into a
+project wiki. Pull the image and restart: nothing to migrate.
+
+### Added
+- **`skill-oversize` lint rule** — `memory_lint` warns about a
+  `type:skill` note larger than `memory_get` serves whole (24 KiB): an
+  agent reading it gets the outline and the first chunk only, and can
+  miss the steps that follow. Split such a skill into an entry note plus
+  reference notes under `skills/<slug>/`. On by default.
+- **Compiled ingestion in the agent patterns** —
+  [Agent patterns](docs/mcp/patterns.md#compiled-ingestion-llm-wiki-pattern)
+  describes how an agent turns a PDF, a web page, a transcript or a repo
+  into a source note with provenance and deduplicated concept pages with
+  the existing tools (`memory_query` on `sha256` and `aliases`,
+  content-addressed attachments, backlinks and lint to close the loop),
+  after Karpathy's LLM-Wiki pattern. Documentation only.
+
+### Fixed
+- **Template placeholders are not reported as problems** —
+  `memory_lint` flagged every `{{PROJECT}}` in the scaffold templates as
+  a broken wikilink or an unknown tag, burying the real issues, and the
+  bootstrap counted those links in `maintenance.broken_links`. Targets
+  and tags holding a `{{…}}` placeholder are now skipped; a real broken
+  link inside a template is still reported.
+
 ## [2.40.1] — 2026-09-29 — "shutdown"
 
 A restart now keeps the port closed for about two seconds, down from

@@ -44,6 +44,15 @@ func IsSelfLink(target string) bool {
 	return strings.HasPrefix(strings.TrimSpace(target), "#")
 }
 
+// IsPlaceholder reports a scaffold placeholder such as {{PROJECT}} in a
+// wikilink target or a tag: template notes (global/templates/...) carry them
+// on purpose until memory_project_scaffold fills them in, so health checks
+// must not count them as broken links or unknown tags.
+func IsPlaceholder(s string) bool {
+	open := strings.Index(s, "{{")
+	return open >= 0 && strings.Contains(s[open:], "}}")
+}
+
 // Outlinks returns resolved outgoing link targets from a note path.
 type Outlink struct {
 	Target     string

@@ -21,6 +21,62 @@ var allRules = []ruleSpec{
 	{name: "frontmatter-tag-unknown", defaultSeverity: SeverityWarning, fn: checkFrontmatterTagUnknown},
 	{name: "status-incoherent", defaultSeverity: SeverityWarning, fn: checkStatusIncoherent},
 	{name: "hot-oversize", defaultSeverity: SeverityWarning, fn: checkHotOversize},
+	{name: "skill-oversize", defaultSeverity: SeverityWarning, fn: checkSkillOversize},
+}
+
+// DefaultSkillOversizeBytes is the skill-oversize threshold when the caller
+// passes none: memory_get's truncation cap (getBodySoftCap in internal/mcp,
+// which passes its own value), above which a note comes back as its outline
+// and first chunk.
+const DefaultSkillOversizeBytes = 24 << 10
+
+// checkSkillOversize warns about a type:skill note that memory_get would
+// truncate: an agent following the procedure gets its outline and first
+// chunk only, and can miss the steps that follow (IMP-115).
+func checkSkillOversize(_ context.Context, l *Linter, project string) ([]Issue, error) {
+	notes, err := l.notesInProject(project)
+	if err != nil {
+		return nil, err
+	}
+	limit := l.skillOversizeBytes
+	if limit <= 0 {
+		limit = DefaultSkillOversizeBytes
+	}
+	var issues []Issue
+	for _, n := range notes {
+		if len(n.Content) <= limit {
+			continue
+		}
+		if !noteHasType(parser.ParseFrontmatterFields(rawFrontmatter(n)), "skill") {
+			continue
+		}
+		issues = append(issues, Issue{
+			Severity: SeverityWarning,
+			File:     n.Path,
+			Rule:     "skill-oversize",
+			Message: fmt.Sprintf(
+				"skill is %d bytes and memory_get truncates notes above %d: an agent reading it gets the outline and the first chunk only",
+				len(n.Content), limit),
+			FixHint: "split it into an entry note plus reference notes (type:doc) under skills/<slug>/, each linked from the step that needs it",
+		})
+	}
+	return issues, nil
+}
+
+// noteHasType reports whether a note's frontmatter declares type t, as the
+// type field or as a type:<t> tag.
+func noteHasType(fm map[string]any, t string) bool {
+	if v, ok := fm["type"].(string); ok && v == t {
+		return true
+	}
+	if tags, ok := fm["tags"].([]string); ok {
+		for _, tg := range tags {
+			if tg == "type:"+t {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // DefaultHotOversizeBytes is the hot-oversize threshold when the vault does
@@ -127,7 +183,7 @@ func checkBrokenWikilink(ctx context.Context, l *Linter, project string) ([]Issu
 			return nil, err
 		}
 		for _, o := range outs {
-			if o.TargetPath != "" || index.IsSelfLink(o.Target) {
+			if o.TargetPath != "" || index.IsSelfLink(o.Target) || index.IsPlaceholder(o.Target) {
 				continue
 			}
 			// The index resolves note targets only; an attachment embed like
@@ -483,7 +539,7 @@ func checkFrontmatterTagUnknown(ctx context.Context, l *Linter, project string) 
 			continue
 		}
 		for _, tag := range tags {
-			if l.isKnownTag(tag, project, extra) {
+			if l.isKnownTag(tag, project, extra) || index.IsPlaceholder(tag) {
 				continue
 			}
 			issues = append(issues, Issue{
@@ -525,21 +581,7 @@ func checkStatusIncoherent(ctx context.Context, l *Linter, project string) ([]Is
 			continue
 		}
 		fm := parser.ParseFrontmatterFields(raw)
-		isPlan := false
-		if v, ok := fm["type"].(string); ok && v == "plan" {
-			isPlan = true
-		}
-		if !isPlan {
-			if tags, ok := fm["tags"].([]string); ok {
-				for _, tg := range tags {
-					if tg == "type:plan" {
-						isPlan = true
-						break
-					}
-				}
-			}
-		}
-		if !isPlan {
+		if !noteHasType(fm, "plan") {
 			continue
 		}
 		status, _ := fm["status"].(string)

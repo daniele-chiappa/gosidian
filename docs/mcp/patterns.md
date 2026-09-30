@@ -97,6 +97,54 @@ the template's `_template.toml`.
 The three built-in templates are described in
 [Vault format](../vault/format.md#bootstrap-templates).
 
+## Compiled ingestion (LLM-Wiki pattern)
+
+`memory_ingest` stores a file; it does not read it — there is no LLM
+inside gosidian. Turning a source (a PDF, a web page, a transcript, a
+repo) into knowledge an agent finds later is the agent's job, along the
+lines of Karpathy's
+[LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f):
+sources stay immutable, the agent compiles pages once and keeps them
+current. A layout that works with the existing tools:
+
+| Path | Frontmatter | Holds |
+|---|---|---|
+| `<project>/sources/<slug>.md` | `type: doc`, `source_url` or `source_path`, `sha256`, `ingested_on`, `license` | provenance, summary, key claims with locators, verbatim quotes |
+| `<project>/wiki/<slug>.md` | `type: memory`, `kind: concept\|entity\|comparison\|synthesis`, `aliases` | definition, what the sources say (one bullet per source, with a wikilink), contradictions |
+| `<project>/wiki/README.md` | `type: index` | the catalogue and the project's fixed heading names |
+
+It sits next to the template's `memory/`: `memory/` holds what the
+agent learns working on the project, `wiki/` what outside sources say.
+
+```text
+# 1. already here? same bytes → stop; same URL with new bytes → a new version
+memory_query(project="p", where=[{field: "sha256", value: "<hash>"}])
+memory_query(project="p", where=[{field: "source_url", value: "<url>"}])
+
+# 2. keep the original, content-addressed: p/attachments/<sha256[:16]>.<ext>
+memory_ingest(project="p", bridge_filename="paper.pdf")   # or transfer="http"
+
+# 3. existing pages for every candidate term at once (lists match element by element)
+memory_query(project="p", where=[{field: "aliases", op: "in", value: ["RAG", "..."]}])
+memory_search("retrieval", project="p", any_of=["RAG", "recupero"])
+
+# 4. add a bullet to the pages found, section by section; create the others
+memory_edit(...) / memory_create(...)
+
+# 5. close: every touched page links the source note, the lint is clean
+memory_backlinks("p/sources/<slug>.md")
+memory_lint(project="p", rules=["broken-wikilink", "orphan-note", "unlinked-mentions"])
+```
+
+What keeps such a wiki trustworthy: quote only from bytes you
+downloaded yourself and check each quote against the extracted text;
+every fact on a page traces to a bullet that cites a source; when two
+sources disagree, record both under Contradictions instead of
+overwriting; a public project stores the original only when its licence
+allows redistribution. A periodic refresh pass folds new sources into
+the older pages and runs the same lint to find missing
+cross-references.
+
 ## Agent-to-agent handoff
 
 When passing the baton between specialised agents, the handoff is a

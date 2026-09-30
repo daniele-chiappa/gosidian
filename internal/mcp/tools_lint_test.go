@@ -3,7 +3,9 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gosidian/gosidian/internal/projects"
@@ -64,6 +66,29 @@ func TestMCP_Lint_RulesEchoReflectsRequest(t *testing.T) {
 		if r == "unlinked-mentions" {
 			t.Fatalf("default echo must not include opt-in unlinked-mentions: %v", got.Rules)
 		}
+	}
+}
+
+// The MCP lint flags a skill that memory_get would truncate, with the same
+// threshold memory_get uses.
+func TestMCP_Lint_SkillOversizeUsesGetCap(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	ctx := context.Background()
+	body := "---\ntitle: huge\ntype: skill\ntags: [proj, type:skill]\n---\n\n# huge\n\n"
+	for _, size := range []int{getBodySoftCap - len(body) - 10, getBodySoftCap} {
+		content := body + strings.Repeat("x", size)
+		path := fmt.Sprintf("proj/skills/s%d.md", size)
+		if res, err := s.handleCreate(ctx, call(map[string]any{"path": path, "content": content})); err != nil || res.IsError {
+			t.Fatalf("create %s: %v %+v", path, err, res)
+		}
+	}
+	res, err := s.handleLint(ctx, call(map[string]any{"project": "proj", "rules": []any{"skill-oversize"}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := resultText(t, res)
+	if strings.Count(text, `"rule":"skill-oversize"`) != 1 || !strings.Contains(text, fmt.Sprintf("proj/skills/s%d.md", getBodySoftCap)) {
+		t.Errorf("want only the note over %d bytes flagged: %s", getBodySoftCap, text)
 	}
 }
 

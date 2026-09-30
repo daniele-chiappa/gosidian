@@ -533,6 +533,56 @@ func TestLint_SelfLinkNotBroken(t *testing.T) {
 	}
 }
 
+// Template notes carry scaffold placeholders on purpose: a link to
+// {{PROJECT}}/... and a {{PROJECT}} tag are not problems, a real broken link
+// in the same note still is.
+func TestLint_TemplatePlaceholdersNotFlagged(t *testing.T) {
+	l, v, idx := newTestLinter(t)
+	seed(t, v, idx, "proj/templates/team/agents/devops.md", "---\ntitle: devops\ntags: [{{PROJECT}}, type:agent]\n---\n\n# devops\n\nsee [[{{PROJECT}}/memory/environments]] and [[proj/nowhere]]\n")
+
+	issues, err := l.Run(context.Background(), "proj", []string{"broken-wikilink", "frontmatter-tag-unknown"}, "")
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(issues) != 1 || !strings.Contains(issues[0].Message, "proj/nowhere") {
+		t.Errorf("only the real broken link should be flagged, got: %+v", issues)
+	}
+	if broken, _, err := idx.MaintenanceCounts("proj", 0, nil); err != nil || broken != 1 {
+		t.Errorf("MaintenanceCounts broken = %d (err %v), want 1: placeholders do not count", broken, err)
+	}
+}
+
+// A type:skill note larger than memory_get serves whole is flagged; a large
+// note of another type, or a small skill, is not (IMP-115).
+func TestLint_SkillOversize(t *testing.T) {
+	l, v, idx := newTestLinter(t)
+	big := strings.Repeat("step text. ", 20)
+	seed(t, v, idx, "p/skills/big.md", "---\ntitle: big\ntype: skill\ntags: [p, type:skill]\n---\n\n# big\n\n"+big+"\n")
+	seed(t, v, idx, "p/skills/tagged.md", "---\ntitle: tagged\ntags: [p, type:skill]\n---\n\n# tagged\n\n"+big+"\n")
+	seed(t, v, idx, "p/docs/big-doc.md", "---\ntitle: big doc\ntype: doc\ntags: [p, type:doc]\n---\n\n# doc\n\n"+big+"\n")
+	seed(t, v, idx, "p/skills/small.md", "---\ntitle: small\ntype: skill\ntags: [p, type:skill]\n---\n\n# small\n")
+
+	issues, err := l.WithSkillOversizeLimit(150).Run(context.Background(), "p", []string{"skill-oversize"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, is := range issues {
+		if is.Rule != "skill-oversize" || is.Severity != SeverityWarning {
+			t.Errorf("unexpected issue %+v", is)
+		}
+		got[is.File] = true
+	}
+	if len(issues) != 2 || !got["p/skills/big.md"] || !got["p/skills/tagged.md"] {
+		t.Errorf("want the two big skills flagged, got %+v", issues)
+	}
+
+	// The default threshold is memory_get's 24 KiB: none of these reach it.
+	if issues, _ := New(v, idx).Run(context.Background(), "p", []string{"skill-oversize"}, ""); len(issues) != 0 {
+		t.Errorf("default threshold flagged small notes: %+v", issues)
+	}
+}
+
 func TestLint_AttachmentEmbedNotBroken(t *testing.T) {
 	l, v, idx := newTestLinter(t)
 

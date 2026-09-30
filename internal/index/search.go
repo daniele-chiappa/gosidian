@@ -336,15 +336,17 @@ func (i *Index) NotesByTagInProject(tag, project string) ([]NoteRow, error) {
 // even when the file exists and renders — counting them inflated a real
 // vault's digest by ~138 phantom broken links. Genuinely missing embeds are
 // the (fs-aware, on-demand) broken-wikilink lint rule's job. Same-note links
-// ([[#heading]], see IsSelfLink) are unresolved by design too and never
-// count.
+// ([[#heading]], see IsSelfLink) and scaffold placeholders in templates
+// ([[{{PROJECT}}/...]], see IsPlaceholder) are unresolved by design too and
+// never count.
 func (i *Index) MaintenanceCounts(project string, staleBefore int64, excludeSuffixes []string) (brokenLinks, staleCount int, err error) {
 	like := strings.ReplaceAll(project, "%", `\%`)
 	like = strings.ReplaceAll(like, "_", `\_`) + "/%"
 
 	brokenQ := `SELECT COUNT(*) FROM links JOIN notes ON links.src_id = notes.id
 		 WHERE links.target_path IS NULL AND notes.path LIKE ? ESCAPE '\'
-		 AND ltrim(links.target) NOT LIKE '#%'`
+		 AND ltrim(links.target) NOT LIKE '#%'
+		 AND links.target NOT LIKE '%{{%}}%'`
 	args := []any{like}
 	for _, suf := range excludeSuffixes {
 		brokenQ += ` AND lower(links.target) NOT LIKE ?`

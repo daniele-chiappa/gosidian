@@ -233,7 +233,10 @@ from the caller's token identity and cannot be forged, while
   `frontmatter-tag-unknown`, `status-incoherent`, `hot-oversize`
   (a `hot.md` past 8 KiB has usually become a chronicle that belongs in
   `log.md`, and it is inlined into every bootstrap — threshold
-  configurable via `[lint] hot_oversize_bytes`). Zero
+  configurable via `[lint] hot_oversize_bytes`), `skill-oversize` (a
+  `type:skill` note over 24 KiB, which `memory_get` hands back truncated
+  to its outline and first chunk: split it into an entry note plus
+  reference notes under `skills/<slug>/`). Zero
   `severity:error` on a coherent vault.
 - `memory_self_improve(category, title, friction, confidence, …)` —
   *experimental, opt-in, off by default*: record a structured insight
