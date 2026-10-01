@@ -44,7 +44,7 @@ func TestSearch_LimitAboveMaximum(t *testing.T) {
 	for i := range 25 {
 		_, _ = s.handleCreate(ctx, call(map[string]any{"path": fmt.Sprintf("n%02d.md", i), "content": "gopher note"}))
 	}
-	search := func(limit int) (hits int, notes string) {
+	search := func(limit int) (hits int, notes string, truncated bool) {
 		t.Helper()
 		req := call(map[string]any{"query": "gopher", "limit": limit})
 		req.Params.Name = "memory_search"
@@ -53,17 +53,26 @@ func TestSearch_LimitAboveMaximum(t *testing.T) {
 			t.Fatalf("limit %d: %v %+v", limit, err, res)
 		}
 		var out struct {
-			Hits []json.RawMessage `json:"hits"`
+			Hits      []json.RawMessage `json:"hits"`
+			Truncated bool              `json:"truncated"`
 		}
 		if err := json.Unmarshal([]byte(res.Content[0].(mcplib.TextContent).Text), &out); err != nil {
 			t.Fatal(err)
 		}
-		return len(out.Hits), strings.Join(resultNotices(t, res), " ")
+		var list []string
+		if _, ok := res.StructuredContent.(map[string]any)[noticesField]; ok {
+			list = resultNotices(t, res)
+		}
+		return len(out.Hits), strings.Join(list, " "), out.Truncated
 	}
-	if hits, notes := search(1000); hits != 25 || !strings.Contains(notes, "limit up to 200: 1000 was lowered to 200") {
-		t.Errorf("limit 1000: %d hits, notes %q; want 25 hits and a note", hits, notes)
+	if hits, notes, cut := search(1000); hits != 25 || cut || !strings.Contains(notes, "limit up to 200: 1000 was lowered to 200") {
+		t.Errorf("limit 1000: %d hits, truncated %v, notes %q; want 25 hits and a note", hits, cut, notes)
 	}
-	if hits, notes := search(5); hits != 5 || notes != "" {
-		t.Errorf("limit 5: %d hits, notes %q", hits, notes)
+	// truncated says more notes match than came back (IMP-122).
+	if hits, notes, cut := search(5); hits != 5 || !cut || notes != "" {
+		t.Errorf("limit 5: %d hits, truncated %v, notes %q", hits, cut, notes)
+	}
+	if hits, _, cut := search(25); hits != 25 || cut {
+		t.Errorf("limit 25 of 25: %d hits, truncated %v", hits, cut)
 	}
 }

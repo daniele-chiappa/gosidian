@@ -8,6 +8,61 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.41.2] — 2026-10-01 — "renames"
+
+Renaming a project from an agent now keeps its visibility and grants,
+and the MCP tokens scoped to a project follow it when it is renamed.
+Also: `gosidian token revoke <id>` works, `memory_search` says when
+there are more hits, and notes created by `memory_append` get a
+frontmatter. Pull the image and restart: nothing to migrate.
+
+### Added
+- **`memory_search` says when there are more hits** — when more notes
+  match than `limit`, the result carries `truncated: true`, so an agent
+  knows the list is not complete.
+
+### Changed
+- **`memory_append` creates notes with a frontmatter** — a markdown
+  note created by an append (or by `POST /mcp/append`) had no
+  frontmatter and failed lint with `frontmatter-missing`. It now starts
+  with its title and its project as tag, unless the appended text
+  begins with its own frontmatter.
+- **Faster tests for contributors** — the accounts created by the
+  `webauth` and `api/v1` tests hash at bcrypt's minimum cost; with the
+  race detector those suites drop from 3-9 minutes to under one. Real
+  password hashes are unchanged: the lower cost applies only inside a
+  test binary.
+
+### Fixed
+- **`memory_rename_project` keeps the project's access** — the MCP
+  rename moved the folder but not the project's settings, member grants
+  and team grants: a private project renamed from an agent took the
+  default visibility for projects without settings, and its members
+  lost it. The MCP and the web UI rename now share one path: every check
+  comes first (valid names, the source exists, the target is free), the
+  settings move before the folder and back if the folder does not move,
+  and settings left under the target name by a project that is gone are
+  replaced rather than merged into the renamed one.
+- **`gosidian token revoke <id>` and `GOSIDIAN_VAULT`** — the token id
+  given as an argument was ignored (`token "" not found`); it is now
+  accepted, anywhere among the flags, as are `--id` and, for `opt-in`,
+  `--all`. The `token` and `user` subcommands also read the vault from
+  `GOSIDIAN_VAULT` when `--vault` is not given, as the server does:
+  inside the container they demanded the flag anyway.
+
+### Security
+- **MCP token scopes follow a project rename** — a token scoped to a
+  project names it, and renaming the project left the token on the old
+  name: it lost its project, and a later project taking that name, maybe
+  someone else's, fell into its scope. A rename now rewrites the scope
+  of the tokens that name the project, from the web UI and from
+  `memory_rename_project` alike, and a rename onto a name that MCP
+  tokens are still scoped to is refused. For the same reason, reusing a
+  username now moves the old personal project even when MCP tokens are
+  scoped to it: they follow it to the archived name.
+- **Code scanning** — ranked search sizes its result buffers from the
+  candidate pool instead of the requested limit. No change in behaviour.
+
 ## [2.41.1] — 2026-09-30 — "notices"
 
 A restart no longer waits five seconds for MCP clients on protocol

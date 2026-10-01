@@ -85,8 +85,8 @@ func (i *Index) SearchWith(q string, opts SearchOptions) ([]SearchHit, error) {
 		limit = 50
 	}
 	// The SQL stage never returns more than maxPool candidates, so a larger
-	// limit only sizes allocations from the caller's value (callers cap at
-	// 200 today).
+	// limit only sizes allocations from the caller's value (memory_search
+	// asks for at most 201).
 	if limit > maxPool {
 		limit = maxPool
 	}
@@ -188,8 +188,13 @@ func (i *Index) rankedSearch(q string, opts SearchOptions, limit int) ([]SearchH
 		}
 		return cands[a].hit.Path < cands[b].hit.Path
 	})
-	out := make([]SearchHit, 0, min(limit, len(cands)))
-	for _, c := range cands[:min(limit, len(cands))] {
+	// Sized by the candidates, which the SQL pool bounds, not by limit:
+	// CodeQL does not see the cap SearchWith puts on limit (IMP-114).
+	out := make([]SearchHit, 0, len(cands))
+	for _, c := range cands {
+		if len(out) == limit {
+			break
+		}
 		c.hit.Score = relativeScore(c.score, cands[0].score)
 		out = append(out, c.hit)
 	}
@@ -351,8 +356,13 @@ func fuse(queries []string, lists [][]SearchHit, limit int) []SearchHit {
 		}
 		return order[a].hit.Path < order[b].hit.Path
 	})
-	out := make([]SearchHit, 0, min(limit, len(order)))
-	for _, f := range order[:min(limit, len(order))] {
+	// order unions up to nine lists of maxPool each; no response holds more
+	// than maxPool hits.
+	out := make([]SearchHit, 0, min(len(order), maxPool))
+	for _, f := range order {
+		if len(out) == limit {
+			break
+		}
 		h := f.hit
 		h.Score = relativeScore(f.score, order[0].score)
 		h.Why = append(append([]string(nil), h.Why...), "matched: "+strings.Join(f.matched, " | "))

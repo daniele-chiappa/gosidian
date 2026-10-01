@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -322,8 +323,11 @@ func (s *Store) Delete(name string) error {
 	return s.save()
 }
 
-// Rename atomically moves an entry from oldName to newName. No-op if oldName
-// has no entry. If newName already has an entry it's overwritten.
+// Rename moves oldName's entry (flags, member grants, team grants) to
+// newName, replacing whatever newName had: an entry left behind by a project
+// that is gone from the vault must not graft its grants onto the renamed
+// one. No-op when neither name has an entry. If the save fails the maps are
+// put back, so memory never runs ahead of the file (BUG-078).
 func (s *Store) Rename(oldName, newName string) error {
 	if newName == "" || strings.ContainsAny(newName, "/\\") {
 		return fmt.Errorf("invalid project name")
@@ -331,9 +335,14 @@ func (s *Store) Rename(oldName, newName string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.reloadIfStale()
+	restore := s.snapshotLocked(oldName, newName)
 	f, hadFlags := s.data[oldName]
 	m, hadMembers := s.members[oldName]
-	changed := hadFlags || hadMembers
+	_, staleFlags := s.data[newName]
+	_, staleMembers := s.members[newName]
+	changed := hadFlags || hadMembers || staleFlags || staleMembers
+	delete(s.data, newName)
+	delete(s.members, newName)
 	if hadFlags {
 		delete(s.data, oldName)
 		s.data[newName] = f
@@ -346,17 +355,68 @@ func (s *Store) Rename(oldName, newName string) error {
 		s.members[newName] = m
 	}
 	for id, t := range s.teams {
-		if lvl, ok := t.Grants[oldName]; ok {
+		lvl, hadOld := t.Grants[oldName]
+		_, hadNew := t.Grants[newName]
+		if !hadOld && !hadNew {
+			continue
+		}
+		delete(t.Grants, newName)
+		if hadOld {
 			delete(t.Grants, oldName)
 			t.Grants[newName] = lvl
-			s.teams[id] = t
-			changed = true
 		}
+		s.teams[id] = t
+		changed = true
 	}
 	if !changed {
 		return nil
 	}
-	return s.save()
+	if err := s.save(); err != nil {
+		restore()
+		return err
+	}
+	return nil
+}
+
+// snapshotLocked records the entries of the named projects and every team's
+// grants, and returns a func that puts them back. Caller holds s.mu.
+func (s *Store) snapshotLocked(names ...string) func() {
+	type entry struct {
+		flags      Flags
+		hasFlags   bool
+		members    []ProjectMember
+		hasMembers bool
+	}
+	entries := make(map[string]entry, len(names))
+	for _, n := range names {
+		f, hf := s.data[n]
+		m, hm := s.members[n]
+		entries[n] = entry{f, hf, append([]ProjectMember(nil), m...), hm}
+	}
+	grants := make(map[string]map[string]string, len(s.teams))
+	for id, t := range s.teams {
+		grants[id] = maps.Clone(t.Grants)
+	}
+	return func() {
+		for n, e := range entries {
+			if e.hasFlags {
+				s.data[n] = e.flags
+			} else {
+				delete(s.data, n)
+			}
+			if e.hasMembers {
+				s.members[n] = e.members
+			} else {
+				delete(s.members, n)
+			}
+		}
+		for id, g := range grants {
+			if t, ok := s.teams[id]; ok {
+				t.Grants = g
+				s.teams[id] = t
+			}
+		}
+	}
 }
 
 // All returns every entry, sorted by Name. Stable ordering is convenient for

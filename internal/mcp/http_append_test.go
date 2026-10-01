@@ -47,8 +47,9 @@ func TestHTTPAppend_CreatesThenAppends(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Same separator rule as memory_append: one blank line between entries.
-	if got := string(note.Content); got != "## entry one\n\n## entry two\n" {
+	// Created with a minimal frontmatter (IMP-119); same separator rule as
+	// memory_append: one blank line between entries.
+	if got := string(note.Content); got != "---\ntitle: \"log\"\ntags:\n  - \"proj\"\n---\n\n## entry one\n\n## entry two\n" {
 		t.Errorf("content = %q", got)
 	}
 	// A stale precondition is refused.
@@ -97,11 +98,12 @@ func TestHTTPAppend_Guards(t *testing.T) {
 // The size cap applies to the merged note, like memory_append.
 func TestHTTPAppend_SizeLimit(t *testing.T) {
 	s, token := serverWithToken(t, "proj", []string{auth.ScopeRead, auth.ScopeWrite})
-	s.SetWriteLimits(60, 64)
-	if rec := appendReq(t, s, token, "proj/log.md", strings.Repeat("a", 40)+"\n", ""); rec.Code != http.StatusOK {
+	// The created note's frontmatter (IMP-119) counts toward the cap too.
+	s.SetWriteLimits(60, 128)
+	if rec := appendReq(t, s, token, "proj/log.md", strings.Repeat("a", 60)+"\n", ""); rec.Code != http.StatusOK {
 		t.Fatalf("first = %d (%s)", rec.Code, rec.Body.String())
 	}
-	if rec := appendReq(t, s, token, "proj/log.md", strings.Repeat("b", 40)+"\n", ""); rec.Code != http.StatusRequestEntityTooLarge {
+	if rec := appendReq(t, s, token, "proj/log.md", strings.Repeat("b", 60)+"\n", ""); rec.Code != http.StatusRequestEntityTooLarge {
 		t.Errorf("over the cap = %d want 413 (%s)", rec.Code, rec.Body.String())
 	}
 }

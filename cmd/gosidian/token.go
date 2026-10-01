@@ -48,11 +48,11 @@ func tokenUsage() {
 Actions:
   create   Create a new bearer token
   list     List provisioned tokens (no plaintext)
-  revoke   Delete a token by id
+  revoke   Delete a token by id: token revoke <id>, or --id <id>
   opt-in   Toggle self-improve opt-in on existing token(s)
 
 Common options:
-  --vault <dir>   Vault directory (required)
+  --vault <dir>   Vault directory (default: $GOSIDIAN_VAULT)
 
 Create options:
   --name <s>              Human label (required)
@@ -68,16 +68,14 @@ Create options:
                           cuts the per-session schema cost for sub-agents)
 
 Opt-in options:
-  --id <s>                Token id from 'token list' (mutually exclusive with --all)
+  --id <s>                Token id from 'token list', also accepted as the
+                          argument (mutually exclusive with --all)
   --all                   Apply to every token
   --off                   Withdraw the opt-in instead of granting it`)
 }
 
 func openStore(vaultDir, stateDirFlag string) *auth.Store {
-	if vaultDir == "" {
-		log.Fatal("--vault is required")
-	}
-	abs, err := filepath.Abs(vaultDir)
+	abs, err := filepath.Abs(cliVaultDir(vaultDir))
 	if err != nil {
 		log.Fatalf("vault: %v", err)
 	}
@@ -222,13 +220,35 @@ func tokenRevoke(args []string) {
 	vaultDir := fs.String("vault", "", "vault directory")
 	stateDirFlag := fs.String("state-dir", "", "state dir (default <vault>/.gosidian; env GOSIDIAN_STATE_DIR)")
 	id := fs.String("id", "", "token id (from `token list`)")
-	_ = fs.Parse(args)
+	tokenID(fs, args, id)
+	if *id == "" {
+		log.Fatal("a token id is required: token revoke <id>, or --id <id>")
+	}
 
 	store := openStore(*vaultDir, *stateDirFlag)
 	if err := store.Revoke(*id); err != nil {
 		log.Fatalf("revoke: %v", err)
 	}
 	fmt.Printf("revoked token %s\n", *id)
+}
+
+// tokenID parses fs from args and takes a single positional argument as the
+// token id when --id is not given, wherever it sits among the flags (the
+// flag package stops at the first positional one). revoke used to ignore a
+// positional id and answer token "" not found (IMP-112).
+func tokenID(fs *flag.FlagSet, args []string, id *string) {
+	_ = fs.Parse(args)
+	var positional []string
+	for fs.NArg() > 0 {
+		positional = append(positional, fs.Arg(0))
+		_ = fs.Parse(fs.Args()[1:])
+	}
+	switch {
+	case len(positional) > 1 || (len(positional) == 1 && *id != ""):
+		log.Fatalf("unexpected arguments %q: pass one token id, as <id> or --id <id>", positional)
+	case len(positional) == 1:
+		*id = positional[0]
+	}
 }
 
 // tokenOptIn enrols or withdraws an existing token (or all of them) from the
@@ -242,7 +262,7 @@ func tokenOptIn(args []string) {
 	id := fs.String("id", "", "token id (from `token list`)")
 	all := fs.Bool("all", false, "apply to every token")
 	off := fs.Bool("off", false, "withdraw the opt-in instead of granting it")
-	_ = fs.Parse(args)
+	tokenID(fs, args, id)
 
 	if (*id == "" && !*all) || (*id != "" && *all) {
 		log.Fatal("exactly one of --id or --all is required")

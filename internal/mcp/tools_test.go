@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gosidian/gosidian/internal/index"
+	"github.com/gosidian/gosidian/internal/projects"
 	"github.com/gosidian/gosidian/internal/vault"
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 )
@@ -587,6 +588,36 @@ func TestMCP_RenameProject(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "Old")); err == nil {
 		t.Errorf("old dir should be gone")
+	}
+}
+
+// memory_rename_project carries the project's access with it: a private
+// project stayed behind as default-visibility and lost its grants (BUG-078).
+func TestMCP_RenameProjectKeepsAccess(t *testing.T) {
+	s, v, _ := newTestServer(t)
+	ps, err := projects.Open(filepath.Join(t.TempDir(), "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.SetProjects(ps)
+	ctx := context.Background()
+	_, _ = v.CreateProject("Old")
+	_, _ = s.handleCreate(ctx, call(map[string]any{"path": "Old/note.md", "content": "# note"}))
+	fl := ps.Get("Old")
+	fl.Visibility = projects.VisibilityPrivate
+	if err := ps.Set("Old", fl); err != nil {
+		t.Fatal(err)
+	}
+	if err := ps.SetMember("Old", "u1", projects.LevelWrite); err != nil {
+		t.Fatal(err)
+	}
+	res, _ := s.handleRenameProject(ctx, call(map[string]any{"from": "Old", "to": "New"}))
+	resultText(t, res)
+	if ps.Visibility("New") != projects.VisibilityPrivate {
+		t.Errorf("New visibility %q, want private", ps.Visibility("New"))
+	}
+	if lvl, _ := ps.MemberLevel("New", "u1"); lvl != projects.LevelWrite {
+		t.Errorf("member grant did not follow: %q", lvl)
 	}
 }
 

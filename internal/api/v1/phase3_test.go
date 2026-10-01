@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -237,10 +238,10 @@ func TestMeTokens(t *testing.T) {
 
 // Reusing the username of a disabled account moves its personal project,
 // notes included, under the account's archived name, and the new account gets
-// a fresh one. The old project stays where it is when it was not provisioned
-// for that account (or was replaced since), or when someone else can reach
-// it through a member grant, a team grant or an MCP token; the answer then
-// says why the new account has none (BUG-076).
+// a fresh one, and MCP tokens scoped to the old project follow it. The old
+// project stays where it is when it was not provisioned for that account (or
+// was replaced since), or when another account holds a member or team grant
+// on it; the answer then says why the new account has none (BUG-076).
 func TestAdminCreateUser_ReuseMovesPersonalProject(t *testing.T) {
 	f := newNotesFixture(t)
 	f.wirePersonalProjects()
@@ -330,11 +331,21 @@ func TestAdminCreateUser_ReuseMovesPersonalProject(t *testing.T) {
 		t.Fatal(err)
 	}
 	kept("gia", reuse("gia", gia))
+	// An MCP token scoped to the old project follows it to the archived name,
+	// so it never reaches the new account's project (IMP-123).
 	ivo := create("ivo")
 	if _, _, err := tokens.Create("ivo-agent", []string{"ivo"}, []string{auth.ScopeRead}, 0, ""); err != nil {
 		t.Fatal(err)
 	}
-	kept("ivo", reuse("ivo", ivo))
+	ivo2 := reuse("ivo", ivo)
+	if ivo2["personal_project"] != "ivo" || ivo2["archived_personal_project"] == nil {
+		t.Errorf("ivo with a scoped token: %v", ivo2)
+	}
+	for _, tok := range tokens.List() {
+		if tok.Name == "ivo-agent" && !slices.Equal(tok.ProjectList(), []string{ivo2["archived_personal_project"].(string)}) {
+			t.Errorf("ivo-agent scope %v, want the archived project", tok.ProjectList())
+		}
+	}
 
 	// Not the old account's personal project: one of the owner's that only
 	// shares the name, or one created after the personal project moved away.

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"flag"
 	"log"
 	"os"
 	"path/filepath"
@@ -106,5 +107,42 @@ func TestEndOwnerSessions(t *testing.T) {
 	left, _ := auth.Open(filepath.Join(dir, "tokens.json"))
 	if l := left.List(); len(l) != 1 || l[0].Name != "integration" {
 		t.Errorf("static token must survive: %+v", l)
+	}
+}
+
+// The token id is taken from --id or from the one positional argument,
+// wherever it sits among the flags (IMP-112).
+func TestTokenID(t *testing.T) {
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--id", "abc"}, "abc"},
+		{[]string{"abc"}, "abc"},
+		{[]string{"abc", "--vault", "/v"}, "abc"},
+		{[]string{"--vault", "/v", "abc"}, "abc"},
+		{[]string{"--vault", "/v"}, ""},
+	} {
+		fs := flag.NewFlagSet("token revoke", flag.ContinueOnError)
+		vault := fs.String("vault", "", "")
+		id := fs.String("id", "", "")
+		tokenID(fs, c.args, id)
+		if *id != c.want {
+			t.Errorf("%q: id %q, want %q", c.args, *id, c.want)
+		}
+		if len(c.args) > 1 && c.args[0] != "--id" && *vault != "/v" {
+			t.Errorf("%q: --vault lost after the positional id: %q", c.args, *vault)
+		}
+	}
+}
+
+// Without --vault the CLI takes GOSIDIAN_VAULT, as serve does (IMP-112).
+func TestCLIVaultDirFromEnv(t *testing.T) {
+	t.Setenv("GOSIDIAN_VAULT", "/from/env")
+	if got := cliVaultDir(""); got != "/from/env" {
+		t.Errorf("cliVaultDir(\"\") = %q", got)
+	}
+	if got := cliVaultDir("/flag"); got != "/flag" {
+		t.Errorf("the flag must win over the env: %q", got)
 	}
 }

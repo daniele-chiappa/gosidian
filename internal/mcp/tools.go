@@ -17,6 +17,7 @@ import (
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/metrics"
 	"github.com/gosidian/gosidian/internal/parser"
+	"github.com/gosidian/gosidian/internal/projectops"
 	"github.com/gosidian/gosidian/internal/vault"
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -90,7 +91,7 @@ func (s *Server) registerTools() {
 		mcp.WithDescription("Search notes in the vault using full-text search. Hits are ranked by text match (title weighs most, then frontmatter such as tags and description, then body) with small boosts for backlinks, importance, recent edits and the pinned tag; each hit carries `score` (relative to the best hit of this response, 1 = best) and `why` (the signals behind it). Snippets are short excerpts around the match: before reporting a detail (a number, a date, a list), read the note with memory_get or memory_get_section. The search is lexical, not semantic (each word also matches its English inflections, so \"retry\" finds \"retries\"): when hits are few or missing, call again with `any_of` listing synonyms, translations (Italian/English) or other forms of the query — the lists are fused and `why` shows which phrasing matched. Pass include_outline=true or include_frontmatter=true to enrich each hit with the note's heading outline or parsed frontmatter in the same call — avoids N extra memory_get_outline/memory_get_frontmatter round-trips when exploring many results. Pass `projects` (array of top-level folder names) to restrict results to a specific set; empty = vault-wide (subject to the caller's token scope). `project` is shorthand for a single name; given together with `projects`, the two are merged (the result notes it)."),
 		mcp.WithString("query", mcp.Required(), mcp.Description("Free-text query. Multiple words are ANDed; prefix search is automatic.")),
 		mcp.WithArray("any_of", mcp.Description("Optional alternative phrasings searched alongside `query` (max 8), e.g. [\"credenziali\", \"secrets\"] for query \"segreti\". A note matching any of them is returned; notes matched by several phrasings rank higher.")),
-		mcp.WithNumber("limit", mcp.Description("Maximum number of hits (default 20, max 200).")),
+		mcp.WithNumber("limit", mcp.Description("Maximum number of hits (default 20, max 200). When more notes match, the result carries `truncated: true`.")),
 		mcp.WithBoolean("include_outline", mcp.Description("When true, each hit also carries an `outline` array (heading level/text/id). Default false.")),
 		mcp.WithBoolean("include_frontmatter", mcp.Description("When true, each hit also carries a `frontmatter` map with the parsed YAML fields. Default false.")),
 		mcp.WithArray("projects", mcp.Description("Optional list of top-level folder names (e.g. [\"gosidian\",\"dockers\"]) to restrict results to. Empty = vault-wide. Scoped tokens silently intersect this list with their project scope (never expand it).")),
@@ -168,7 +169,7 @@ func (s *Server) registerTools() {
 	), s.handleUpdate)
 
 	s.impl.AddTool(mcp.NewTool("memory_append",
-		mcp.WithDescription("Append content to a note. Creates the note if it does not exist. Use this to log observations incrementally. Pass if_match for optimistic locking against concurrent writes (only checked when the note already exists). Size guard: the merged note is capped (default 1 MiB)."),
+		mcp.WithDescription("Append content to a note. Creates the note if it does not exist, with a minimal frontmatter (title, project tag) unless the content starts with its own. Use this to log observations incrementally. Pass if_match for optimistic locking against concurrent writes (only checked when the note already exists). Size guard: the merged note is capped (default 1 MiB)."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative path of the note.")),
 		mcp.WithString("content", mcp.Required(), mcp.Description("Markdown to append. A blank line is inserted before the new content if the file is non-empty.")),
 		mcp.WithString("if_match", mcp.Description("Optional etag from a previous memory_get. When provided and the note exists, the call fails if the note's current etag differs.")),
@@ -314,7 +315,8 @@ func (s *Server) handleSearch(ctx context.Context, req mcp.CallToolRequest) (*mc
 		}
 		mergedNote = fmt.Sprintf("Note: memory_search merged project %q into projects: it searched %s.", merged, searched)
 	}
-	opts := index.SearchOptions{Limit: limit, Exclude: s.hiddenProjects(), Variants: variants}
+	// One hit more than asked tells a full page from a cut one (IMP-122).
+	opts := index.SearchOptions{Limit: limit + 1, Exclude: s.hiddenProjects(), Variants: variants}
 	if filter.active {
 		opts.Projects = append([]string{}, filter.allowed...) // non-nil: empty matches nothing
 	}
@@ -325,6 +327,7 @@ func (s *Server) handleSearch(ctx context.Context, req mcp.CallToolRequest) (*mc
 	}
 	// The checks below repeat the query's filter as defence in depth.
 	out := make([]searchHit, 0, len(hits))
+	truncated := false
 	for _, h := range hits {
 		if !tok.AllowsPath(h.Path) {
 			continue
@@ -336,6 +339,7 @@ func (s *Server) handleSearch(ctx context.Context, req mcp.CallToolRequest) (*mc
 			continue
 		}
 		if len(out) >= limit {
+			truncated = true
 			break
 		}
 		hit := searchHit{
@@ -369,7 +373,11 @@ func (s *Server) handleSearch(ctx context.Context, req mcp.CallToolRequest) (*mc
 		out = append(out, hit)
 	}
 	metrics.CountSearch("mcp", len(out))
-	res, err := mcp.NewToolResultJSON(map[string]any{"hits": out})
+	body := map[string]any{"hits": out}
+	if truncated {
+		body["truncated"] = true
+	}
+	res, err := mcp.NewToolResultJSON(body)
 	if err == nil && mergedNote != "" {
 		appendNotice(res, mergedNote)
 	}
@@ -852,7 +860,7 @@ func (s *Server) appendNote(ctx context.Context, tok *auth.Token, rel, addition,
 	}
 	var merged []byte
 	if len(existing) == 0 {
-		merged = []byte(addition)
+		merged = []byte(withMinimalFrontmatter(rel, addition))
 	} else {
 		sep := "\n"
 		if !strings.HasSuffix(string(existing), "\n") {
@@ -887,6 +895,33 @@ func (s *Server) appendNote(ctx context.Context, tok *auth.Token, rel, addition,
 	}
 	s.publishNoteChange(action, rel, res.ETag, res.Created)
 	return res, nil
+}
+
+// withMinimalFrontmatter gives a markdown note that an append creates the
+// frontmatter every note is expected to have (its title, and its project as
+// tag) unless the text brings its own: such a note used to fail lint with
+// frontmatter-missing (IMP-119).
+func withMinimalFrontmatter(rel, text string) string {
+	if !strings.EqualFold(path.Ext(rel), ".md") {
+		return text
+	}
+	// Text that brings its own frontmatter keeps it, moved to the top where
+	// the parser looks for it; a leading "---" that is a horizontal rule
+	// does not count.
+	if lead := strings.TrimLeft(strings.TrimPrefix(text, "\ufeff"), "\r\n"); parser.ExtractFrontmatterRaw([]byte(lead)) != "" {
+		return lead
+	}
+	var b strings.Builder
+	b.WriteString("---\n")
+	fmt.Fprintf(&b, "title: %s\n", yamlQuote(strings.TrimSuffix(path.Base(rel), path.Ext(rel))))
+	if project, _, nested := strings.Cut(rel, "/"); nested {
+		// A quoted block item: a project name may hold "," "#" or brackets,
+		// which an inline list would split or cut.
+		fmt.Fprintf(&b, "tags:\n  - %s\n", yamlQuote(project))
+	}
+	b.WriteString("---\n\n")
+	b.WriteString(text)
+	return b.String()
 }
 
 // toolErrorText flattens a tool error result to its message.
@@ -1166,12 +1201,23 @@ func (s *Server) handleRenameProject(ctx context.Context, req mcp.CallToolReques
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	if err := s.vault.RenameProject(s.index, from, to); err != nil {
+	from, to = strings.TrimSpace(from), strings.TrimSpace(to)
+	if from == to {
+		return mcp.NewToolResultError("from and to name the same project"), nil
+	}
+	moved, err := projectops.Rename(s.vault, s.index, s.projects, s.tokens, from, to)
+	if err != nil && !errors.Is(err, projectops.ErrIncomplete) {
 		return mcp.NewToolResultErrorFromErr("rename project failed", err), nil
 	}
+	// An incomplete rename still stands: audited and announced, with a note
+	// on what did not follow.
 	s.auditWrite(ctx, audit.ActionRenameProject, from, to, 0)
 	s.publishTreeChange("rename_project", from, map[string]any{"to": to})
-	return mcp.NewToolResultJSON(map[string]any{"from": from, "to": to})
+	res, jerr := mcp.NewToolResultJSON(map[string]any{"from": from, "to": to, "tokens_moved": moved})
+	if err != nil && jerr == nil {
+		appendNotice(res, "Note: "+err.Error())
+	}
+	return res, jerr
 }
 
 func (s *Server) handleDeleteProject(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

@@ -211,7 +211,9 @@ project (404 outside the token's projects, 403 with read-only access);
 an `If-Match` that no longer matches answers **412**; the merged note
 must stay under the size limit (**413**) and the per-token mutation
 rate (**429**); the write is indexed, audited (`append`) and announced
-on the live event stream; a blank body is refused (400).
+on the live event stream; a blank body is refused (400). A markdown
+note that does not exist yet is created with a minimal frontmatter
+(its title and its project as tag) unless the body starts with its own.
 
 ## REST `/api/upload`
 

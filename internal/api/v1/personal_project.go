@@ -1,13 +1,14 @@
 package v1
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
-	"slices"
 	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
+	"github.com/gosidian/gosidian/internal/projectops"
 	"github.com/gosidian/gosidian/internal/projects"
 	"github.com/gosidian/gosidian/internal/vault"
 	"github.com/gosidian/gosidian/internal/webauth"
@@ -88,8 +89,10 @@ func (r *Router) reclaimPersonalProject(req *http.Request, actor *RequestUser, a
 	name := u.Username
 	if r.projectExists(name) {
 		why := r.personalProjectKept(archived, name)
+		var err error
 		if why == "" {
-			if err := r.archiveProject(name, archived.Username); err != nil {
+			err = r.archiveProject(name, archived.Username)
+			if err != nil && !errors.Is(err, projectops.ErrIncomplete) {
 				why = err.Error()
 			}
 		}
@@ -102,6 +105,12 @@ func (r *Router) reclaimPersonalProject(req *http.Request, actor *RequestUser, a
 			r.auditNote(req, audit.ActionRenameProject, actor, name, moved, 0)
 		}
 		r.publishSidebarEvent("update", moved)
+		if err != nil {
+			// The old project moved, but tokens may still name the reused
+			// name: a fresh project under it would fall to them.
+			log.Printf("webauth: username %s reused, project moved to %q incompletely: %v", name, moved, err)
+			return "", moved, "no personal project: " + err.Error()
+		}
 	}
 	personal, err := ProvisionPersonalProject(r.deps.Vault, ps, r.deps.Audit, u, false)
 	if err != nil {
@@ -116,9 +125,10 @@ func (r *Router) reclaimPersonalProject(req *http.Request, actor *RequestUser, a
 // personalProjectKept says why the project name must not move with the
 // disabled account archived, "" when it may. It must be the personal project
 // provisioned for that account, with no project of that name renamed or
-// deleted since, and nobody else may reach it: no member or team grant
-// (disabling the account removed its own) and no MCP token scoped to it,
-// which would otherwise reach the new account's project.
+// deleted since, and no other account may hold a member or team grant on it
+// (disabling the account removed its own). MCP tokens scoped to it follow
+// the rename (projectops.Rename), so they never reach the new account's
+// project.
 func (r *Router) personalProjectKept(archived webauth.User, name string) string {
 	if !stillProvisionedFor(r.deps.Audit, archived.ID, name) {
 		return "it is not the personal project of " + archived.Username
@@ -127,29 +137,14 @@ func (r *Router) personalProjectKept(archived webauth.User, name string) string 
 	if n := ps.MembersCount(name) + ps.TeamsCount(name); n > 0 {
 		return fmt.Sprintf("%d members or teams hold a grant on it", n)
 	}
-	if n := r.tokensScopedTo(name); n > 0 {
-		return fmt.Sprintf("%d MCP tokens are scoped to it", n)
-	}
 	return ""
 }
 
-// archiveProject renames project from to to: its flags and grants first, so
-// a failed folder rename can put them back.
+// archiveProject renames project from to to, with its grants and the MCP
+// tokens scoped to it.
 func (r *Router) archiveProject(from, to string) error {
-	if r.deps.Index == nil {
-		return fmt.Errorf("index not configured")
-	}
-	if r.projectExists(to) {
-		return fmt.Errorf("a project named %q already exists", to)
-	}
-	if err := r.deps.Projects.Rename(from, to); err != nil {
-		return err
-	}
-	if err := r.deps.Vault.RenameProject(r.deps.Index, from, to); err != nil {
-		_ = r.deps.Projects.Rename(to, from)
-		return err
-	}
-	return nil
+	_, err := projectops.Rename(r.deps.Vault, r.deps.Index, r.deps.Projects, r.mcpTokens(), from, to)
+	return err
 }
 
 // stillProvisionedFor reports whether the audit log records project as the
@@ -181,34 +176,6 @@ func stillProvisionedFor(al *audit.Log, userID, project string) bool {
 		}
 	}
 	return true
-}
-
-// tokensScopedTo counts the unexpired MCP tokens whose scope names project.
-func (r *Router) tokensScopedTo(project string) int {
-	if r.deps.Auth == nil || r.deps.Auth.MCPTokens == nil {
-		return 0
-	}
-	n := 0
-	for _, t := range r.deps.Auth.MCPTokens.List() {
-		if !t.Expired() && slices.Contains(t.ProjectList(), project) {
-			n++
-		}
-	}
-	return n
-}
-
-// vaultHasProject reports whether the vault has a top-level project name.
-func vaultHasProject(v *vault.Vault, name string) bool {
-	projs, err := v.Projects()
-	if err != nil {
-		return false
-	}
-	for _, p := range projs {
-		if p.Name == name {
-			return true
-		}
-	}
-	return false
 }
 
 // personalProjectOf returns the account's personal project when it exists:

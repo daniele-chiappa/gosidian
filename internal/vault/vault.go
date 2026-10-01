@@ -538,6 +538,10 @@ func (v *Vault) CreateProject(name string) (string, error) {
 	return clean, nil
 }
 
+// CheckProjectName returns name as a top-level project folder name, trimmed,
+// or why it cannot be one: the check CreateProject and RenameProject apply.
+func CheckProjectName(name string) (string, error) { return sanitizeProjectName(name) }
+
 func sanitizeProjectName(name string) (string, error) {
 	clean := strings.TrimSpace(name)
 	if clean == "" {

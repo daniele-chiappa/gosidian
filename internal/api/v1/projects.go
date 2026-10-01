@@ -1,12 +1,15 @@
 package v1
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
+	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/gosidian/gosidian/internal/authz"
+	"github.com/gosidian/gosidian/internal/projectops"
 	"github.com/gosidian/gosidian/internal/projects"
 	"github.com/gosidian/gosidian/internal/server/events"
 )
@@ -376,21 +379,26 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 			return
 		}
 		if newName != name {
-			if err := r.deps.Vault.RenameProject(r.deps.Index, name, newName); err != nil {
+			_, err := projectops.Rename(r.deps.Vault, r.deps.Index, r.deps.Projects, r.mcpTokens(), name, newName)
+			switch {
+			case errors.Is(err, projectops.ErrInvalid):
 				WriteError(w, http.StatusBadRequest, CodeValidationFormat, "rename: "+err.Error())
 				return
-			}
-			if r.deps.Projects != nil {
-				if err := r.deps.Projects.Rename(name, newName); err != nil {
-					// The vault directory is already renamed; flags and
-					// members are still keyed by the old name. Surface it
-					// instead of returning 200 with a project that looks
-					// unflagged and member-less.
-					WriteError(w, http.StatusInternalServerError, CodeServerInternal, "project renamed on disk, but its flags and members could not follow: "+err.Error())
-					return
-				}
+			case err != nil && !errors.Is(err, projectops.ErrIncomplete):
+				WriteError(w, http.StatusInternalServerError, CodeServerInternal, "rename: "+err.Error())
+				return
 			}
 			r.auditNote(req, audit.ActionRenameProject, user, name, newName, 0)
+			if err != nil {
+				// The rename stands, audited and announced, but something
+				// did not follow: say so rather than answer 200.
+				if flagsChanged {
+					r.auditNote(req, audit.ActionProjectFlagsUpdate, user, newName, "", 0)
+				}
+				r.publishSidebarEvent("update", newName)
+				WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
+				return
+			}
 			finalName = newName
 		}
 	}
@@ -472,7 +480,15 @@ func (r *Router) projectFlag(name string) projects.Flags {
 // projectExists reuses vault.Projects() — cheap and always
 // authoritative against the on-disk state. Avoids a second Stat call.
 func (r *Router) projectExists(name string) bool {
-	return vaultHasProject(r.deps.Vault, name)
+	return projectops.Exists(r.deps.Vault, name)
+}
+
+// mcpTokens returns the MCP token store, nil when auth is not configured.
+func (r *Router) mcpTokens() *auth.Store {
+	if r.deps.Auth == nil {
+		return nil
+	}
+	return r.deps.Auth.MCPTokens
 }
 
 // publishSidebarEvent emits an SSE notification on the `sidebar`

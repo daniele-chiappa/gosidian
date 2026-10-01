@@ -32,8 +32,9 @@ func TestCreateProject_MembershipFailureSurfaces(t *testing.T) {
 	}
 }
 
-// When the vault directory was renamed but the flags/members store could not
-// follow, the caller must not get a 200 with an unflagged project (BUG-050).
+// When the flags/members store cannot follow a rename, the caller must not
+// get a 200 with an unflagged project (BUG-050). The store now moves first,
+// so the rename fails before the folder moves, and the grants stay (BUG-078).
 func TestUpdateProject_RenameStoreFailureSurfaces(t *testing.T) {
 	f := newNotesFixture(t)
 	f.seedNote(t, "Old/a.md", "x")
@@ -46,5 +47,11 @@ func TestUpdateProject_RenameStoreFailureSurfaces(t *testing.T) {
 	rec := f.request(http.MethodPut, "/api/v1/projects/Old", `{"new_name":"New"}`, map[string]string{"Authorization": "Bearer " + f.bearer})
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status=%d body=%s, want 500", rec.Code, rec.Body.String())
+	}
+	if !f.router.projectExists("Old") || f.router.projectExists("New") {
+		t.Error("a refused rename moved the folder")
+	}
+	if lvl, _ := f.projects.MemberLevel("Old", f.owner.ID); lvl != projects.LevelWrite {
+		t.Errorf("the grant left Old in memory: %q", lvl)
 	}
 }

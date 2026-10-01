@@ -107,7 +107,7 @@ func newRecoveryCodes() (plain []string, stored []RecoveryCode, err error) {
 			}
 			raw.WriteByte(recoveryAlphabet[int(buf[0])%len(recoveryAlphabet)])
 		}
-		hash, err := bcrypt.GenerateFromPassword([]byte(raw.String()), bcrypt.DefaultCost)
+		hash, err := bcrypt.GenerateFromPassword([]byte(raw.String()), hashCost)
 		if err != nil {
 			return nil, nil, err
 		}

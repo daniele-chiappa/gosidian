@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -508,6 +509,45 @@ func (s *Store) Revoke(id string) error {
 		}
 	}
 	return fmt.Errorf("token %q not found", id)
+}
+
+// RenameProject rewrites project from to to in every token's scope, so a
+// scoped token follows its project through a rename instead of losing it,
+// or reaching a later project that takes the old name (IMP-123). Returns how
+// many tokens changed.
+func (s *Store) RenameProject(from, to string) (int, error) {
+	if from == "" || to == "" || from == to {
+		return 0, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reloadIfStale()
+	n := 0
+	for i := range s.tokens {
+		t := &s.tokens[i]
+		changed := t.Project == from
+		if changed {
+			t.Project = to
+		}
+		if slices.Contains(t.Projects, from) {
+			renamed := make([]string, len(t.Projects))
+			for j, p := range t.Projects {
+				if p == from {
+					p = to
+				}
+				renamed[j] = p
+			}
+			t.Projects = normalizeProjects(renamed)
+			changed = true
+		}
+		if changed {
+			n++
+		}
+	}
+	if n == 0 {
+		return 0, nil
+	}
+	return n, s.save()
 }
 
 // RevokeByOwner deletes all tokens whose OwnerUserID matches userID. Returns

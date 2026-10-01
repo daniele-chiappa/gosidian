@@ -55,7 +55,7 @@ Actions:
               (lost authenticator; works while the server is running)
 
 Common options:
-  --vault <dir>      Vault directory (required)
+  --vault <dir>      Vault directory (default: $GOSIDIAN_VAULT)
   --state-dir <dir>  State dir (default <vault>/.gosidian; env GOSIDIAN_STATE_DIR)
 
 Setup options:
@@ -70,10 +70,7 @@ totp-reset options:
 // cliStateDir resolves the state dir like `serve` does (ADR-023):
 // --state-dir > GOSIDIAN_STATE_DIR > <vault>/.gosidian.
 func cliStateDir(vaultDir, stateDirFlag string) string {
-	if vaultDir == "" {
-		log.Fatal("--vault is required")
-	}
-	abs, err := filepath.Abs(vaultDir)
+	abs, err := filepath.Abs(cliVaultDir(vaultDir))
 	if err != nil {
 		log.Fatalf("vault: %v", err)
 	}

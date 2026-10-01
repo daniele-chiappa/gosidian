@@ -34,11 +34,26 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/pquerna/otp/totp"
 	"golang.org/x/crypto/bcrypt"
 )
+
+// hashCost is the bcrypt cost of new password and recovery-code hashes.
+// Verification reads the cost from the hash itself, so any cost verifies.
+var hashCost = bcrypt.DefaultCost
+
+// SetHashCostForTests makes new hashes use bcrypt's minimum cost; call it
+// from TestMain. At the default cost the fixtures' accounts made the
+// race-enabled suites take minutes (IMP-113). Such hashes still verify but
+// are cheap to crack, so outside a test binary it does nothing.
+func SetHashCostForTests() {
+	if testing.Testing() {
+		hashCost = bcrypt.MinCost
+	}
+}
 
 // Role defines the levels of privilege. Owner is singular and manages users +
 // sees all tokens. Member can create notes + their own tokens. Guest (v2.2) is
@@ -463,7 +478,7 @@ func newOwner(username, password string, withTOTP bool, issuer string) (User, st
 	if len(password) < 8 {
 		return User{}, "", errors.New("password must be at least 8 characters")
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), hashCost)
 	if err != nil {
 		return User{}, "", err
 	}
@@ -826,7 +841,7 @@ func newLocalUser(username, password string, role Role) (User, error) {
 	if !role.Valid() {
 		return User{}, fmt.Errorf("unknown role %q", role)
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), hashCost)
 	if err != nil {
 		return User{}, err
 	}
