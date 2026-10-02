@@ -570,38 +570,62 @@ func checkStatusIncoherent(ctx context.Context, l *Linter, project string) ([]Is
 		return nil, nil
 	}
 
-	notes, err := l.notesInProject(project)
+	// The notes hot.md links to, resolved by the index as broken-wikilink and
+	// the backlinks resolve them: [[basename]], [[plans/basename]] and the
+	// vault path all count. A substring match on the vault path only missed
+	// the bare form the templates use (BUG-080).
+	outs, err := l.index.Outlinks(hotPath)
+	if err != nil {
+		return nil, err
+	}
+	linked := make(map[string]bool, len(outs))
+	for _, o := range outs {
+		if o.TargetPath != "" {
+			linked[o.TargetPath] = true
+		}
+	}
+
+	// The in-progress plans, read as memory_query reads them: the type and
+	// status fields, or the type:/status: tags of a note without the field
+	// (the vault states status more often as a tag), case ignored.
+	plans, _, err := l.index.Query(index.QueryOptions{
+		Projects: []string{project},
+		Where: []index.FieldCond{
+			{Field: "type", Op: "eq", Values: []string{"plan"}},
+			{Field: "status", Op: "eq", Values: []string{"in-progress"}},
+		},
+		Sort:  "path",
+		Limit: maxInProgressPlans,
+	})
 	if err != nil {
 		return nil, err
 	}
 	var issues []Issue
-	for _, n := range notes {
-		raw := rawFrontmatter(n)
-		if strings.TrimSpace(raw) == "" {
+	for _, p := range plans {
+		// A wikilink to the plan, or its path in the text.
+		if linked[p.Path] || strings.Contains(hot, p.Path) || strings.Contains(hot, strings.TrimSuffix(p.Path, ".md")) {
 			continue
 		}
-		fm := parser.ParseFrontmatterFields(raw)
-		if !noteHasType(fm, "plan") {
-			continue
-		}
-		status, _ := fm["status"].(string)
-		if status != "in-progress" {
-			continue
-		}
-		// Look for the plan path or a wikilink to it in hot.md.
-		if strings.Contains(hot, n.Path) || strings.Contains(hot, strings.TrimSuffix(n.Path, ".md")) {
-			continue
+		// Hint the bare name only when it reaches this plan: another note
+		// can answer it first (a title, or the same basename elsewhere).
+		link := basenameNoExt(p.Path)
+		if l.index.Resolve(link) != p.Path {
+			link = strings.TrimSuffix(p.Path, filepath.Ext(p.Path))
 		}
 		issues = append(issues, Issue{
 			Severity: SeverityWarning,
-			File:     n.Path,
+			File:     p.Path,
 			Rule:     "status-incoherent",
 			Message:  fmt.Sprintf("plan has status:in-progress but is not referenced in %s Active plans section", hotPath),
-			FixHint:  "add a wikilink to this plan under ## Active plans in hot.md, or move the plan to status:draft/done",
+			FixHint:  fmt.Sprintf("add [[%s]] (or any wikilink that resolves to this plan) under ## Active plans in %s, or move the plan to status:draft/done", link, hotPath),
 		})
 	}
 	return issues, nil
 }
+
+// maxInProgressPlans bounds the plans status-incoherent reads per project,
+// far above any real project.
+const maxInProgressPlans = 10000
 
 // ---- unlinked-mentions (optional) ----
 

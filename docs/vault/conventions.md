@@ -67,8 +67,11 @@ and the initial YAML frontmatter block.
   (README.md, hot.md, log.md, and `docs/*` are exempt by default)
 - `frontmatter-missing` (error) — note without YAML frontmatter
 - `frontmatter-tag-unknown` (warning) — tag outside the vocabulary
-- `status-incoherent` (warning) — plan with `status:in-progress` but
-  not referenced in `<project>/hot.md` `## Active plans`
+- `status-incoherent` (warning) — plan with `status:in-progress` (the
+  field, or the `status:in-progress` tag when the field is absent) but
+  not referenced in `<project>/hot.md` `## Active plans`. Any wikilink
+  that resolves to the plan counts: `[[<basename>]]`,
+  `[[plans/<basename>]]` or the vault path
 
 A healthy vault returns zero `severity:error`. Use `min_severity=error`
 for strict CI-style gating.

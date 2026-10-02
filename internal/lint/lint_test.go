@@ -401,6 +401,79 @@ func TestLint_StatusIncoherent(t *testing.T) {
 	}
 }
 
+// TestLint_StatusIncoherent_WikilinkForms: a plan linked from hot.md by any
+// wikilink the index resolves to it counts, as for broken-wikilink and the
+// backlinks; only the vault path did before (BUG-080).
+func TestLint_StatusIncoherent_WikilinkForms(t *testing.T) {
+	l, v, idx := newTestLinter(t)
+	plan := func(name string) string {
+		return "---\ntitle: " + name + "\ntype: plan\nstatus: in-progress\ntags: [proj, type:plan]\n---\n\n# " + name + "\n"
+	}
+	seed(t, v, idx, "proj/plans/20261001-bare.md", plan("bare"))
+	seed(t, v, idx, "proj/plans/20261001-relative.md", plan("relative"))
+	seed(t, v, idx, "proj/plans/20261001-aliased.md", plan("aliased"))
+	seed(t, v, idx, "proj/plans/20261001-missing.md", plan("missing"))
+	seed(t, v, idx, "proj/hot.md", "---\ntitle: hot\ntags: [proj, type:index]\n---\n\n# hot\n\n## Active plans\n\n"+
+		"- [[20261001-bare]]\n- [[plans/20261001-relative]]\n- [[20261001-aliased|the aliased plan]]\n")
+
+	issues, err := l.Run(context.Background(), "proj", []string{"status-incoherent"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 1 || issues[0].File != "proj/plans/20261001-missing.md" {
+		t.Fatalf("expected only the unlinked plan to be flagged, got %+v", issues)
+	}
+	if !strings.Contains(issues[0].FixHint, "[[20261001-missing]]") {
+		t.Errorf("fix hint should name the link to add: %q", issues[0].FixHint)
+	}
+}
+
+// TestLint_StatusIncoherent_StatusFromTag: the rule reads type and status
+// as memory_query does: a status:in-progress tag counts when the note has
+// no status field, the field wins when both are there (even empty), case
+// is ignored.
+func TestLint_StatusIncoherent_StatusFromTag(t *testing.T) {
+	l, v, idx := newTestLinter(t)
+	seed(t, v, idx, "proj/hot.md", "---\ntitle: hot\ntags: [proj, type:index]\n---\n\n# hot\n\n## Active plans\n\nnone\n")
+	seed(t, v, idx, "proj/plans/tag-only.md", "---\ntitle: tag only\ntags: [proj, type:plan, status:in-progress]\n---\n\n# t\n")
+	seed(t, v, idx, "proj/plans/upper-case.md", "---\ntitle: upper case\ntype: Plan\nstatus: In-Progress\ntags: [proj]\n---\n\n# u\n")
+	seed(t, v, idx, "proj/plans/field-wins.md", "---\ntitle: field wins\nstatus: done\ntags: [proj, type:plan, status:in-progress]\n---\n\n# f\n")
+	seed(t, v, idx, "proj/plans/empty-field.md", "---\ntitle: empty field\nstatus: \"\"\ntags: [proj, type:plan, status:in-progress]\n---\n\n# e\n")
+	seed(t, v, idx, "proj/notes/not-a-plan.md", "---\ntitle: not a plan\ntags: [proj, status:in-progress]\n---\n\n# n\n")
+
+	issues, err := l.Run(context.Background(), "proj", []string{"status-incoherent"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, is := range issues {
+		got = append(got, is.File)
+	}
+	want := "proj/plans/tag-only.md proj/plans/upper-case.md"
+	if strings.Join(got, " ") != want {
+		t.Fatalf("flagged %v, want %s", got, want)
+	}
+}
+
+// TestLint_StatusIncoherent_HintWhenBasenameIsTaken: the fix hint names the
+// bare [[basename]] only when it reaches the plan; with the same basename
+// in another project it names the vault path.
+func TestLint_StatusIncoherent_HintWhenBasenameIsTaken(t *testing.T) {
+	l, v, idx := newTestLinter(t)
+	plan := "---\ntitle: r\ntype: plan\nstatus: in-progress\ntags: [type:plan]\n---\n\n# r\n"
+	seed(t, v, idx, "aaa/plans/roadmap.md", plan)
+	seed(t, v, idx, "proj/plans/roadmap.md", plan)
+	seed(t, v, idx, "proj/hot.md", "---\ntitle: hot\ntags: [proj, type:index]\n---\n\n## Active plans\n\n- [[roadmap]]\n")
+
+	issues, err := l.Run(context.Background(), "proj", []string{"status-incoherent"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 1 || !strings.Contains(issues[0].FixHint, "[[proj/plans/roadmap]]") {
+		t.Fatalf("want one issue hinting [[proj/plans/roadmap]], got %+v", issues)
+	}
+}
+
 func TestLint_UnlinkedMentions(t *testing.T) {
 	l, v, idx := newTestLinter(t)
 

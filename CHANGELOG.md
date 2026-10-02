@@ -8,6 +8,48 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.41.3] — 2026-10-02 — "links"
+
+Links no longer look broken right after a write or a project rename, and
+`status-incoherent` accepts any wikilink to the plan. Pull the image and
+restart: nothing to migrate. `memory_lint` may report new
+`status-incoherent` warnings: plans whose status is only a
+`status:in-progress` tag are now checked too.
+
+### Fixed
+- **No false broken links right after a write** — a note was indexed in
+  two steps: its links were stored first, unresolved, and resolved in a
+  second transaction. `memory_lint` running in that window (in the same
+  parallel call as a `memory_append`, say) reported every link of the
+  note as broken, and the bootstrap's `broken_links`, the backlinks and
+  the graph could miss them too. The window opened twice per write,
+  since the file watcher indexes the note again. A note's links are now
+  stored resolved, and the links that now reach it are resolved, in the
+  same transaction.
+- **Links written before their target resolve in every form** — when a
+  note was created, only links naming it exactly (path, title or
+  basename) were resolved: `[[plans/<basename>]]`,
+  `[[<basename>#heading]]` or the frontmatter title, written in hot.md
+  before the plan existed, stayed broken until the next restart. They
+  now resolve as if the note had existed first.
+- **Renaming a project no longer leaves links broken** — the rename
+  indexes each note at its new path and then removes the old one, and
+  the removal cleared the links that reached the old path: a link
+  between two notes of the renamed project stayed unresolved until the
+  next restart. Removing a note now resolves those links again, so they
+  reach the note at its new path.
+- **`status-incoherent` accepts any wikilink to the plan** — the rule
+  looked in `hot.md` for the plan's full vault path, so `[[<basename>]]`
+  (the form the templates use) and `[[plans/<basename>]]` were reported
+  as missing although they resolve for `broken-wikilink` and the
+  backlinks. hot.md's links are now resolved the same way, and the fix
+  hint names a link that reaches the plan (the vault path when another
+  note answers the bare name). The rule now reads type and status
+  exactly as `memory_query` does: a `status:in-progress` tag counts when
+  the note has no status field, and case is ignored. Plans whose status
+  was only a tag were never checked, so a vault can see new warnings for
+  in-progress plans that hot.md does not mention.
+
 ## [2.41.2] — 2026-10-01 — "renames"
 
 Renaming a project from an agent now keeps its visibility and grants,

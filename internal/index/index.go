@@ -222,26 +222,23 @@ func extractForPath(path, body string) (links []parser.WikiLinkRef, tags []strin
 }
 
 // Upsert stores the note, extracts links/tags from the body, and refreshes
-// notes_fts. Existing rows for the same path are replaced.
+// notes_fts. Existing rows for the same path are replaced. The note's links
+// are stored resolved, and the links elsewhere that now match it are
+// resolved, in the same transaction: a reader never sees the note with its
+// links unresolved, which lint reported as broken right after a write
+// (BUG-079).
 func (i *Index) Upsert(n NoteDoc) error {
-	id, err := i.upsertLocked(n)
-	if err != nil {
-		return err
-	}
-	if err := i.ResolveLinksFor(id); err != nil {
-		return err
-	}
-	// Resolve any previously-unresolved link that now matches this note.
-	return i.resolveInbound(id, n.Path, n.Title)
+	_, err := i.upsertLocked(n, true)
+	return err
 }
 
 // UpsertUnresolved stores the note like Upsert but leaves link resolution to
 // a ResolveAll once the batch is in. For bulk loads: per-note resolution
-// rescans the links table (resolveInbound matches on lower(target), which no
-// index serves), so a full scan resolving note by note grows with notes ×
-// links, while one ResolveAll at the end reaches the same result.
+// rescans the links table (inbound resolution matches on lower(target),
+// which no index serves), so a full scan resolving note by note grows with
+// notes × links, while one ResolveAll at the end reaches the same result.
 func (i *Index) UpsertUnresolved(n NoteDoc) error {
-	_, err := i.upsertLocked(n)
+	_, err := i.upsertLocked(n, false)
 	return err
 }
 
@@ -284,51 +281,76 @@ func (i *Index) Touch(path string, modTime, size int64) error {
 	return err
 }
 
-// resolveInbound updates previously-unresolved links whose raw target matches
-// the given note's path/title/basename to point at noteID's path.
-func (i *Index) resolveInbound(noteID int64, notePath, title string) error {
-	i.mu.Lock()
-	defer i.mu.Unlock()
+// likeEscaper escapes the LIKE wildcards of a link target, which are literal
+// characters there (used with ESCAPE '\').
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
+// resolveInbound resolves the unresolved links elsewhere that the note now
+// answers: every unresolved link whose target contains the note's basename
+// or one of its titles goes through resolveTarget again, so
+// [[plans/<base>]], [[<base>#heading]] and [[<frontmatter title>]] resolve
+// as if the note had existed first. Matching the exact target only left
+// those unresolved until the next boot. It runs inside the Upsert
+// transaction.
+func resolveInbound(tx *sql.Tx, notePath string, titles ...string) error {
 	base := notePath
 	if idx := strings.LastIndex(base, "/"); idx >= 0 {
 		base = base[idx+1:]
 	}
-	base = stripNoteExt(base)
-
-	// Candidate target strings that should resolve to this note.
-	candidates := []string{notePath, stripNoteExt(notePath), title, base}
-	seen := map[string]struct{}{}
-	var dedup []string
-	for _, c := range candidates {
-		c = strings.TrimSpace(c)
-		if c == "" {
+	var conds []string
+	var args []any
+	seen := map[string]bool{}
+	for _, s := range append([]string{stripNoteExt(base)}, titles...) {
+		s = strings.ToLower(strings.TrimSpace(s))
+		if s == "" || seen[s] {
 			continue
 		}
-		if _, ok := seen[strings.ToLower(c)]; ok {
-			continue
-		}
-		seen[strings.ToLower(c)] = struct{}{}
-		dedup = append(dedup, c)
+		seen[s] = true
+		conds = append(conds, `lower(target) LIKE ? ESCAPE '\'`)
+		args = append(args, "%"+likeEscaper.Replace(s)+"%")
 	}
-	tx, err := i.db.Begin()
+	return reresolveLinks(tx,
+		`SELECT rowid, target FROM links WHERE (target_path IS NULL OR target_path = '') AND (`+strings.Join(conds, " OR ")+`)`,
+		args...)
+}
+
+// reresolveLinks runs resolveTarget again, through tx, on the links the
+// query selects (rowid, target) and stores the result, NULL when the target
+// reaches no note.
+func reresolveLinks(tx *sql.Tx, query string, args ...any) error {
+	rows, err := tx.Query(query, args...)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
-	for _, c := range dedup {
-		if _, err := tx.Exec(
-			`UPDATE links SET target_path = ? WHERE (target_path IS NULL OR target_path = '') AND lower(target) = lower(?)`,
-			notePath, c,
-		); err != nil {
+	type link struct {
+		rowid  int64
+		target string
+	}
+	var links []link
+	for rows.Next() {
+		var l link
+		if err := rows.Scan(&l.rowid, &l.target); err != nil {
+			rows.Close()
+			return err
+		}
+		links = append(links, l)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, l := range links {
+		if _, err := tx.Exec(`UPDATE links SET target_path = ? WHERE rowid = ?`, nullable(resolveTarget(tx, l.target)), l.rowid); err != nil {
 			return err
 		}
 	}
-	_ = noteID
-	return tx.Commit()
+	return nil
 }
 
-func (i *Index) upsertLocked(n NoteDoc) (int64, error) {
+// upsertLocked writes the note in one transaction. With resolve, its links
+// are stored with their target_path and the inbound links are resolved
+// before the commit; without, the links stay unresolved for a ResolveAll.
+func (i *Index) upsertLocked(n NoteDoc, resolve bool) (int64, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
@@ -377,8 +399,14 @@ func (i *Index) upsertLocked(n NoteDoc) (int64, error) {
 	}
 
 	for _, l := range links {
+		var targetPath any
+		if resolve {
+			// Read through tx: it sees this note's new row, so a link to
+			// the note itself (by path, title or basename) resolves too.
+			targetPath = nullable(resolveTarget(tx, l.Target))
+		}
 		if _, err := tx.Exec(`INSERT INTO links(src_id, target, target_path, alias) VALUES(?,?,?,?)`,
-			id, l.Target, nil, l.Alias); err != nil {
+			id, l.Target, targetPath, l.Alias); err != nil {
 			return 0, err
 		}
 	}
@@ -400,6 +428,12 @@ func (i *Index) upsertLocked(n NoteDoc) (int64, error) {
 		id, title, meta, ftsBody,
 	); err != nil {
 		return 0, err
+	}
+
+	if resolve {
+		if err := resolveInbound(tx, n.Path, n.Title, title); err != nil {
+			return 0, err
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -433,11 +467,20 @@ func (i *Index) Delete(path string) error {
 	if _, err := tx.Exec(`DELETE FROM notes WHERE path = ?`, path); err != nil {
 		return err
 	}
-	// clear target_id references pointing at this path
-	if _, err := tx.Exec(`UPDATE links SET target_path = NULL WHERE target_path = ?`, path); err != nil {
+	// The links that reached this note resolve again without it: another
+	// note may answer them, as the note's new path does in a rename, which
+	// indexes the new path before deleting the old one. Clearing them left
+	// them unresolved until the next boot (BUG-081).
+	if err := reresolveLinks(tx, `SELECT rowid, target FROM links WHERE target_path = ?`, path); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// Resolve returns the note path the index links target to, or "" when the
+// target reaches no note: the resolution of the links table.
+func (i *Index) Resolve(target string) string {
+	return resolveTarget(i.db, target)
 }
 
 // ResolveLinksFor re-resolves outgoing links from a single note.
@@ -475,7 +518,7 @@ func (i *Index) ResolveLinksFor(noteID int64) error {
 	// ResolveAll repeat for the whole vault.
 	resolved := make([]string, len(pending))
 	for k, p := range pending {
-		resolved[k] = i.resolveTargetLocked(p.target)
+		resolved[k] = resolveTarget(i.db, p.target)
 	}
 	tx, err := i.db.Begin()
 	if err != nil {
@@ -490,9 +533,15 @@ func (i *Index) ResolveLinksFor(noteID int64) error {
 	return tx.Commit()
 }
 
-// resolveTargetLocked maps a [[wiki-link]] target to a note path.
+// rowQuerier is what resolveTarget reads through: the database, or the
+// transaction of an Upsert, which sees the note being written.
+type rowQuerier interface {
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+// resolveTarget maps a [[wiki-link]] target to a note path.
 // Matches by exact path, title (case-insensitive), or basename (case-insensitive).
-func (i *Index) resolveTargetLocked(target string) string {
+func resolveTarget(q rowQuerier, target string) string {
 	t := strings.TrimSpace(target)
 	// [[note#heading]] links to a heading INSIDE the note (Obsidian
 	// semantics): resolve the path part, the fragment is presentation-level.
@@ -514,22 +563,22 @@ func (i *Index) resolveTargetLocked(target string) string {
 	}
 	for _, p := range tryPaths {
 		var got string
-		if err := i.db.QueryRow(`SELECT path FROM notes WHERE path = ?`, p).Scan(&got); err == nil {
+		if err := q.QueryRow(`SELECT path FROM notes WHERE path = ?`, p).Scan(&got); err == nil {
 			return got
 		}
 	}
 	// 2. title match
 	var got string
-	if err := i.db.QueryRow(`SELECT path FROM notes WHERE lower(title) = lower(?) LIMIT 1`, t).Scan(&got); err == nil {
+	if err := q.QueryRow(`SELECT path FROM notes WHERE lower(title) = lower(?) LIMIT 1`, t).Scan(&got); err == nil {
 		return got
 	}
 	// 3. basename match across note extensions (.md before .html). "_" and
 	// "%" are literal characters in a link target, so they are escaped for
 	// LIKE; ORDER BY keeps a multi-match deterministic.
 	lowerT := strings.ToLower(t)
-	likeT := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(lowerT)
+	likeT := likeEscaper.Replace(lowerT)
 	for _, e := range noteExts {
-		if err := i.db.QueryRow(
+		if err := q.QueryRow(
 			`SELECT path FROM notes WHERE lower(path) LIKE ? ESCAPE '\' OR lower(path) = ? ORDER BY path LIMIT 1`,
 			"%/"+likeT+e, lowerT+e,
 		).Scan(&got); err == nil {
