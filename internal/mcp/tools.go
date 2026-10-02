@@ -736,6 +736,7 @@ func (s *Server) handleCreate(ctx context.Context, req mcp.CallToolRequest) (*mc
 		return mcp.NewToolResultErrorFromErr("write failed", err), nil
 	}
 	s.auditWrite(ctx, audit.ActionCreate, rel, "", int64(len(content)))
+	s.noteSchemaProblems(ctx, rel, []byte(content))
 	if fresh, err := s.vault.Load(rel); err == nil {
 		s.publishNoteChange("create", rel, fresh.ETag(), true)
 	} else {
@@ -777,6 +778,7 @@ func (s *Server) handleUpdate(ctx context.Context, req mcp.CallToolRequest) (*mc
 		return mcp.NewToolResultErrorFromErr("write failed", err), nil
 	}
 	s.auditWrite(ctx, audit.ActionUpdate, rel, "", int64(len(content)))
+	s.noteSchemaProblems(ctx, rel, []byte(content))
 	// Return the new etag so the caller can pipeline further edits without a
 	// re-read. Note: reloading here is cheap (likely cache hit on the write).
 	out := map[string]any{"path": rel}
@@ -883,6 +885,7 @@ func (s *Server) appendNote(ctx context.Context, tok *auth.Token, rel, addition,
 		return appendOutcome{}, &appendError{http.StatusInternalServerError, "write failed: " + err.Error()}
 	}
 	s.auditWrite(ctx, audit.ActionAppend, rel, "", int64(len(merged)))
+	s.noteSchemaProblems(ctx, rel, merged)
 	res := appendOutcome{Path: rel, Created: len(existing) == 0}
 	if fresh, err := s.vault.Load(rel); err == nil {
 		res.ETag = fresh.ETag()
@@ -997,6 +1000,7 @@ func (s *Server) handleEdit(ctx context.Context, req mcp.CallToolRequest) (*mcp.
 		return mcp.NewToolResultErrorFromErr("write failed", err), nil
 	}
 	s.auditWrite(ctx, audit.ActionUpdate, rel, "", int64(len(updated)))
+	s.noteSchemaProblems(ctx, rel, []byte(updated))
 	out := map[string]any{
 		"path":         rel,
 		"replacements": count,

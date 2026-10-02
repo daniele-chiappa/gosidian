@@ -472,6 +472,15 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 		}
 	}
 
+	// databases (IMP-127): the project's database notes with their schema,
+	// so an agent filing or closing an entry knows the declared fields
+	// without opening the database note — in the lab benchmark, an agent
+	// that did not read it invented `resolved:` for `closed:`. Present only
+	// when the project has database notes; best-effort like the blocks above.
+	if dbs := s.bootstrapDatabases(project); len(dbs) > 0 {
+		payload["databases"] = dbs
+	}
+
 	// pending_insights surfaces the owner's un-triaged self-improvement
 	// insights (status:pending) regardless of which project is being
 	// bootstrapped, so they're seen at every session start. Only present

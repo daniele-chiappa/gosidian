@@ -8,6 +8,35 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.43.0] — 2026-10-02 — "schemas"
+
+Database notes get a schema that gosidian checks. Pull the image and
+restart; nothing to migrate. A database note written for 2.42.0 with
+`fields` as a list of prose lines is reported by lint until its `fields`
+become a map, see below.
+
+### Added
+- **Database schemas are checked** — a `type: database` note declares
+  its fields as a map (`fields: {status: {type: select, required: true,
+  options: [open, done]}, closed: {type: date}, …}`), with the types text,
+  number, date, checkbox, select, multi-select, url, relation and list.
+  Its rows, the notes directly inside its `source` folder, are held to it:
+  - the new lint rule `database-field-invalid` (on by default) reports a
+    row with an undeclared field, a missing required one, a value of the
+    wrong type or an `id` that differs from the file name, and a database
+    note whose schema does not parse;
+  - `memory_create`, `memory_update`, `memory_edit`, `memory_append` and
+    `memory_ingest` add a note to their result (`notices`) when the note
+    just written breaks its schema, so the agent can fix it at once; the
+    write itself is not refused;
+  - `memory_bootstrap` lists the project's databases, with their fields
+    and row count, in `databases`.
+  Directives v15 tell agents about both. In a benchmark, agents closing an
+  entry without this sometimes invented field names (`resolved:` for
+  `closed:`) that a query on the declared field then missed; with it they
+  wrote only the declared fields. See
+  [docs/vault/databases.md](docs/vault/databases.md).
+
 ## [2.42.0] — 2026-10-02 — "backlogs"
 
 A project's backlog can now be a database: one note per entry, with status,

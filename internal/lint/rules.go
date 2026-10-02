@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/gosidian/gosidian/internal/attach"
+	"github.com/gosidian/gosidian/internal/dbschema"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/parser"
 )
@@ -22,6 +24,58 @@ var allRules = []ruleSpec{
 	{name: "status-incoherent", defaultSeverity: SeverityWarning, fn: checkStatusIncoherent},
 	{name: "hot-oversize", defaultSeverity: SeverityWarning, fn: checkHotOversize},
 	{name: "skill-oversize", defaultSeverity: SeverityWarning, fn: checkSkillOversize},
+	{name: "database-field-invalid", defaultSeverity: SeverityWarning, fn: checkDatabaseFields},
+}
+
+// checkDatabaseFields checks the rows of each database note of the project
+// against its schema (IMP-127): without it agents drift, inventing field
+// names (`resolved:` for `closed:`) that a query on the declared field then
+// misses. A database note whose schema does not parse is reported too, since
+// its rows would otherwise go unchecked silently.
+func checkDatabaseFields(_ context.Context, l *Linter, project string) ([]Issue, error) {
+	schemas, bad, err := dbschema.ForProject(l.index, l.vault, project)
+	if err != nil {
+		return nil, err
+	}
+	var issues []Issue
+	badPaths := make([]string, 0, len(bad))
+	for p := range bad {
+		badPaths = append(badPaths, p)
+	}
+	sort.Strings(badPaths)
+	for _, p := range badPaths {
+		issues = append(issues, Issue{
+			Severity: SeverityWarning,
+			File:     p,
+			Rule:     "database-field-invalid",
+			Message:  "database schema does not parse: " + bad[p].Error(),
+			FixHint:  "declare `fields` as a map of name to {type, options, required}; types: " + strings.Join(dbschema.Types, ", "),
+		})
+	}
+	if len(schemas) == 0 {
+		return issues, nil
+	}
+	notes, err := l.notesInProject(project)
+	if err != nil {
+		return nil, err
+	}
+	for _, n := range notes {
+		for _, s := range schemas {
+			if !s.Covers(n.Path) {
+				continue
+			}
+			for _, p := range s.Validate(n.Path, rawFrontmatter(n)) {
+				issues = append(issues, Issue{
+					Severity: SeverityWarning,
+					File:     n.Path,
+					Rule:     "database-field-invalid",
+					Message:  p.Message,
+					FixHint:  "write only the fields declared in " + s.Path + ", with values of their type; details go in the body",
+				})
+			}
+		}
+	}
+	return issues, nil
 }
 
 // DefaultSkillOversizeBytes is the skill-oversize threshold when the caller

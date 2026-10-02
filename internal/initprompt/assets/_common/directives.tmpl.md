@@ -63,7 +63,9 @@ raccoglie una nota per voce nella cartella con lo stesso nome; stato e campi sta
 delle voci e si leggono con `memory_query` (la nota database ha gli esempi). Per sapere cosa è aperto
 interroga il database, non una lista scritta a mano, e in `hot.md` non elencare le voci aperte di un
 database: rimanda alla nota database. Nel frontmatter di una voce scrivi solo i campi dello schema della
-nota database (`fields`), senza inventarne altri: commit e dettagli vanno nel corpo.
+nota database (`fields`), senza inventarne altri: commit e dettagli vanno nel corpo. I database del
+progetto, con i loro campi, sono anche in `databases[]` del bootstrap; se una scrittura viola lo schema,
+il risultato del tool lo dice in `notices`: correggi subito con `memory_edit`.
 
 **Cattura immediata**: bug/OQ/improvement si scrivono **quando emergono**,
 non a fine task — lasciarli come "side finding" in un plan outcome equivale

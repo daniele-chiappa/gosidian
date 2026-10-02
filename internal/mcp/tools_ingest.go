@@ -352,6 +352,7 @@ func (s *Server) writeIngestedNote(ctx context.Context, project, ext, fnForExt, 
 	if err := s.writeAndIndex(rel, content); err != nil {
 		return mcp.NewToolResultErrorFromErr("write failed", err), nil
 	}
+	s.noteSchemaProblems(ctx, rel, content)
 	action := audit.ActionCreate
 	event := "create"
 	if !created {

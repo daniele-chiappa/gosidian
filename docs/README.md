@@ -54,6 +54,8 @@ trial, read the [root README](../README.md) first.
   as projects, cross-project links
 - [Global projects](vault/global-projects.md) — shared skills, agents
   & scaffold templates that any project can opt into
+- [Database notes](vault/databases.md) — one note per entry with a
+  schema: backlogs and lists that `memory_query` can filter
 - [Obsidian compatibility](vault/obsidian-compat.md) — what's fully
   compatible, what degrades, what's ignored
 
