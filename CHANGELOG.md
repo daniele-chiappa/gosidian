@@ -8,6 +8,25 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.42.0] — 2026-10-02 — "backlogs"
+
+A project's backlog can now be a database: one note per entry, with status,
+priority and dates in the frontmatter, instead of one long note with a
+section per entry. Pull the image and restart; nothing to migrate. Projects
+that keep the old layout work as before.
+
+### Changed
+- **Directives v14: backlogs can be databases** — when a project's
+  `docs/improvements.md` or `docs/bugs.md` is a note with `type: database`,
+  the operational directives tell agents to file a new entry as its own note
+  in the folder of the same name (`docs/improvements/IMP-NNN.md`), to read
+  what is open with `memory_query` instead of a hand-written list, to keep
+  `hot.md` free of such lists, and to write only the fields the database
+  note declares. Agents pick the new directives up at their next
+  `memory_bootstrap`. On a backlog of about 130 entries, agents asked what is
+  still open went from about half of the open entries, copied from a list
+  kept by hand, to all of them, with one `memory_query`.
+
 ## [2.41.6] — 2026-10-02 — "anchors"
 
 Two fixes. Renaming a note no longer breaks the links that point at one of its

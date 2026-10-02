@@ -50,13 +50,20 @@ Quando scopri qualcosa che sopravvive al task corrente:
 | Task non banale in partenza | `{{PROJECT}}/plans/<YYYYMMDD>-<slug>.md` | `memory_create` **prima** del codice |
 | Procedura ripetuta ≥2 volte in sessione | `{{PROJECT}}/skills/<slug>.md` | `memory_create` `type:skill` + trigger + step + gotcha |
 | Dominio riletto in 2+ task (stesse 3-5 note) | `{{PROJECT}}/agents/<slug>.md` | `memory_create` `type:agent` + "Contesto obbligatorio" |
-| Bug fuori scope del task | `{{PROJECT}}/docs/bugs.md` | `memory_append` `## BUG-NNN` |
+| Bug fuori scope del task | `{{PROJECT}}/docs/bugs.md` | `memory_append` `## BUG-NNN`; se la nota è `type: database`, `memory_create` di `{{PROJECT}}/docs/bugs/BUG-NNN.md` come spiega la nota |
 | Domanda aperta | `{{PROJECT}}/docs/open-questions.md` | `memory_append` sezione "Aperte", `### OQ-NNN` |
-| Improvement / tech debt | `{{PROJECT}}/docs/improvements.md` | `memory_append` `## IMP-NNN` |
+| Improvement / tech debt | `{{PROJECT}}/docs/improvements.md` | `memory_append` `## IMP-NNN`; se la nota è `type: database`, `memory_create` di `{{PROJECT}}/docs/improvements/IMP-NNN.md` come spiega la nota |
 | Report/dashboard HTML self-contained | nota `.html` (es. `{{PROJECT}}/docs/`) | `memory_create` path `.html` (se `capabilities.html_notes`) |
 | Dati tabellari lunghi (audit, export CSV) | table note linkata dal report | `memory_ingest` del `.csv` + caption (se `capabilities.table_notes`) |
 | File binario (screenshot, PDF, zip) | attachment/media note del vault | `memory_ingest` (bridge dir, `source_path`, `url` o ticket `transfer:"http"`; **mai** base64 per file grandi) |
 | Fine task | `{{PROJECT}}/log.md` + `hot.md` | `memory_append` log, `memory_edit` hot |
+
+**Note database**: una nota con `type: database` (per esempio `{{PROJECT}}/docs/improvements.md`)
+raccoglie una nota per voce nella cartella con lo stesso nome; stato e campi stanno nel frontmatter
+delle voci e si leggono con `memory_query` (la nota database ha gli esempi). Per sapere cosa è aperto
+interroga il database, non una lista scritta a mano, e in `hot.md` non elencare le voci aperte di un
+database: rimanda alla nota database. Nel frontmatter di una voce scrivi solo i campi dello schema della
+nota database (`fields`), senza inventarne altri: commit e dettagli vanno nel corpo.
 
 **Cattura immediata**: bug/OQ/improvement si scrivono **quando emergono**,
 non a fine task — lasciarli come "side finding" in un plan outcome equivale

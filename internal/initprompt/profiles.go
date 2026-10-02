@@ -163,7 +163,7 @@ const StubVersion = 3
 // v13 (2026-09-29, BUG-067): the pre-stub check names the real marker
 // (gosidian:stub v=N) and says to look for it in the file on disk, since
 // agents that drop HTML comments from what they load never see it there.
-const DirectivesVersion = 13
+const DirectivesVersion = 14
 
 // AnchorVersion is the version of the agent-anchor template/format. It is
 // substituted into the `<!-- gosidian:anchor v=N ... -->` marker so the
