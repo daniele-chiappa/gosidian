@@ -283,8 +283,8 @@ func TestTrash_PurgeRemoves(t *testing.T) {
 func TestTrash_RestoreUnknownID(t *testing.T) {
 	f := newAdminFixture(t)
 	w := f.doAuthRecorder(http.MethodPost, "/api/v1/trash/unknown/restore", "", nil)
-	if w.code != http.StatusBadRequest {
-		t.Errorf("status=%d, want 400 body=%s", w.code, w.body)
+	if w.code != http.StatusNotFound {
+		t.Errorf("status=%d, want 404 body=%s", w.code, w.body)
 	}
 }
 

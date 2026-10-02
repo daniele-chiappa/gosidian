@@ -46,7 +46,7 @@ working):
 | `/query` | notes by their frontmatter (see below) |
 | `/settings` | theme preset, language, git sync |
 | `/admin/*` | users, tokens, invites, audit (owner only) |
-| `/trash` | soft-deleted notes (if enabled) |
+| `/trash` | soft-deleted notes and projects (if enabled); a project comes back with the access it had: who could read it sees it, who administered it (or the owner) restores or purges it |
 
 ## Query window
 

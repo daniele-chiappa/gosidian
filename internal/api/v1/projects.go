@@ -244,35 +244,26 @@ func (r *Router) createProject(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusBadRequest, CodeValidationRequired, "name required")
 		return
 	}
-	clean, err := r.deps.Vault.CreateProject(body.Name)
-	if err != nil {
-		// The vault returns a clear error string on duplicate / invalid name.
-		if strings.Contains(err.Error(), "already exists") {
-			WriteError(w, http.StatusConflict, CodeConflict, err.Error())
-			return
-		}
+	// The visibility is pinned at creation (the store default now), so a
+	// later change of the default does not reclassify the project; the
+	// creator administers what they just made, the owner already does.
+	// projectops.Create saves both before the folder appears, from a fresh
+	// entry, and refuses a name MCP tokens are scoped to (IMP-124).
+	var admin string
+	if !user.principal().CanAdmin() {
+		admin = user.ID
+	}
+	clean, err := projectops.Create(r.deps.Vault, r.deps.Projects, r.mcpTokens(), body.Name, "", admin)
+	switch {
+	case errors.Is(err, projectops.ErrExists):
+		WriteError(w, http.StatusConflict, CodeConflict, err.Error())
+		return
+	case errors.Is(err, projectops.ErrInvalid):
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
 		return
-	}
-	if r.deps.Projects != nil {
-		// Pin the visibility at creation so a later change of the store
-		// default does not retroactively reclassify this project.
-		if f := r.deps.Projects.Get(clean); f.Visibility == "" {
-			f.Visibility = r.deps.Projects.DefaultVisibility()
-			if err := r.deps.Projects.Set(clean, f); err != nil {
-				WriteError(w, http.StatusInternalServerError, CodeServerInternal, "project created, but its visibility could not be saved: "+err.Error())
-				return
-			}
-		}
-		// The creator administers what they just made; the owner already
-		// does. Say so if the grant cannot be saved, rather than answering
-		// 201 to someone who is now locked out of a private project.
-		if !user.principal().CanAdmin() {
-			if err := r.deps.Projects.SetMember(clean, user.ID, projects.LevelAdmin); err != nil {
-				WriteError(w, http.StatusInternalServerError, CodeServerInternal, "project created, but the creator's grant could not be saved (an owner can grant access): "+err.Error())
-				return
-			}
-		}
+	case err != nil:
+		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
+		return
 	}
 	r.auditNote(req, audit.ActionCreateProject, user, clean, "", 0)
 	r.publishSidebarEvent("create", clean)
@@ -439,32 +430,24 @@ func (r *Router) deleteProject(w http.ResponseWriter, req *http.Request, name st
 		return
 	}
 
-	var removed []string
-	if r.deps.Trash != nil {
-		_, notes, err := r.deps.Trash.DiscardProject(name)
-		if err != nil {
-			WriteError(w, http.StatusInternalServerError, CodeServerInternal, "trash: "+err.Error())
-			return
-		}
-		removed = notes
-	} else {
-		var err error
-		removed, err = r.deps.Vault.DeleteProject(name)
-		if err != nil {
-			WriteError(w, http.StatusInternalServerError, CodeServerInternal, "delete: "+err.Error())
-			return
-		}
+	// Into the trash with its access saved for the restore, then out of the
+	// index, the access store and the MCP token scopes (IMP-124).
+	res, err := projectops.Delete(r.deps.Vault, r.deps.Index, r.deps.Projects, r.mcpTokens(), r.deps.Trash, name)
+	switch {
+	case errors.Is(err, projectops.ErrInvalid):
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "delete: "+err.Error())
+		return
+	case err != nil && !errors.Is(err, projectops.ErrIncomplete):
+		WriteError(w, http.StatusInternalServerError, CodeServerInternal, "delete: "+err.Error())
+		return
 	}
-	if r.deps.Index != nil {
-		for _, p := range removed {
-			_ = r.deps.Index.Delete(p)
-		}
-	}
-	if r.deps.Projects != nil {
-		_ = r.deps.Projects.Delete(name)
-	}
-	r.auditNote(req, audit.ActionDeleteProject, user, name, "", int64(len(removed)))
+	r.auditNote(req, audit.ActionDeleteProject, user, name, res.TrashID, int64(len(res.Removed)))
 	r.publishSidebarEvent("delete", name)
+	if err != nil {
+		// The project is gone, but something did not follow: say so.
+		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

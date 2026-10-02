@@ -7,12 +7,14 @@ package trash
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gosidian/gosidian/internal/vault"
@@ -71,8 +73,16 @@ func (b *Bin) DiscardNote(rel string) (string, error) {
 	return id, nil
 }
 
+// projectMetaFile is the sidecar DiscardProject keeps inside a trashed
+// project folder: the caller's record of the project (its access, IMP-124),
+// handed back by Restore and gone with the entry on purge or expiry.
+const projectMetaFile = ".gosidian-trash-project.json"
+
 // DiscardProject moves an entire project directory (recursively) into trash.
-func (b *Bin) DiscardProject(name string) (string, []string, error) {
+// A non-nil meta is stored with it (see ProjectMeta and Restore); it is
+// written before the move, so the project is trashed with its meta or not
+// at all.
+func (b *Bin) DiscardProject(name string, meta []byte) (string, []string, error) {
 	src := filepath.Join(b.vaultRoot, name)
 	st, err := os.Stat(src)
 	if err != nil {
@@ -101,10 +111,53 @@ func (b *Bin) DiscardProject(name string) (string, []string, error) {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return "", nil, err
 	}
+	metaPath := filepath.Join(src, projectMetaFile)
+	if meta != nil {
+		// The name is reserved: a file (or symlink) already there is not
+		// overwritten, or followed.
+		if _, err := os.Lstat(metaPath); err == nil {
+			return "", nil, fmt.Errorf("project folder holds a file named %s", projectMetaFile)
+		}
+		f, err := os.OpenFile(metaPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err != nil {
+			return "", nil, err
+		}
+		_, werr := f.Write(meta)
+		if cerr := f.Close(); werr == nil {
+			werr = cerr
+		}
+		if werr != nil {
+			_ = os.Remove(metaPath)
+			return "", nil, werr
+		}
+	}
 	if err := os.Rename(src, dst); err != nil {
+		if meta != nil {
+			_ = os.Remove(metaPath)
+		}
 		return "", nil, err
 	}
 	return id, notes, nil
+}
+
+// ProjectMeta returns the meta stored with a trashed project, or nil when
+// the entry has none (a note, or a project trashed without one).
+func (b *Bin) ProjectMeta(id string) ([]byte, error) {
+	if err := checkID(id); err != nil {
+		return nil, err
+	}
+	path := filepath.Join(b.dir, id, projectMetaFile)
+	st, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !st.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", projectMetaFile)
+	}
+	return os.ReadFile(path)
 }
 
 // Entry is one item in the trash listing.
@@ -148,26 +201,40 @@ func (b *Bin) List() ([]Entry, error) {
 
 // Restore moves an entry back to its original location. The caller is
 // expected to reindex what comes back. Returns the list of vault-relative
-// .md paths that were restored (single entry for notes, multi for projects).
-func (b *Bin) Restore(id string) ([]string, error) {
+// .md paths that were restored (single entry for notes, multi for projects)
+// and, for a project, the meta stored by DiscardProject (nil if none); the
+// meta file does not come back into the vault.
+func (b *Bin) Restore(id string) ([]string, []byte, error) {
+	if err := checkID(id); err != nil {
+		return nil, nil, err
+	}
 	src := filepath.Join(b.dir, id)
 	st, err := os.Stat(src)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	_, origin := parseID(id)
 	if origin == "" {
-		return nil, errors.New("cannot determine original path from id")
+		return nil, nil, errors.New("cannot determine original path from id")
 	}
 	dst := filepath.Join(b.vaultRoot, filepath.FromSlash(origin))
 	if _, err := os.Stat(dst); err == nil {
-		return nil, errors.New("destination already exists")
+		return nil, nil, errors.New("destination already exists")
+	}
+	var meta []byte
+	if st.IsDir() {
+		if meta, err = b.ProjectMeta(id); err != nil {
+			return nil, nil, err
+		}
 	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := os.Rename(src, dst); err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	if meta != nil {
+		_ = os.Remove(filepath.Join(dst, projectMetaFile))
 	}
 
 	// Collect restored note paths (file = single, dir = walk).
@@ -187,12 +254,25 @@ func (b *Bin) Restore(id string) ([]string, error) {
 	} else {
 		restored = append(restored, origin)
 	}
-	return restored, nil
+	return restored, meta, nil
 }
 
 // Purge deletes a single trashed entry permanently.
 func (b *Bin) Purge(id string) error {
+	if err := checkID(id); err != nil {
+		return err
+	}
 	return os.RemoveAll(filepath.Join(b.dir, id))
+}
+
+// checkID refuses an id that is not a single name inside the trash
+// directory. The HTTP router already cleans dot segments out of the path;
+// this keeps Purge's RemoveAll inside the bin whoever calls it.
+func checkID(id string) error {
+	if id == "" || id == "." || id == ".." || strings.ContainsAny(id, "/\\\x00") {
+		return errors.New("invalid trash id")
+	}
+	return nil
 }
 
 // PurgeAll empties the trash.
@@ -247,6 +327,13 @@ func newID(originalPath string) string {
 		" ", "%20",
 	).Replace(originalPath)
 	return formatNano(ts) + "__" + clean
+}
+
+// Origin returns the vault-relative path an entry was discarded from (for a
+// project, its name), or "" when the id does not carry one.
+func Origin(id string) string {
+	_, origin := parseID(id)
+	return origin
 }
 
 func parseID(id string) (time.Time, string) {

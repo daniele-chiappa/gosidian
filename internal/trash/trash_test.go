@@ -47,7 +47,7 @@ func TestBin_DiscardAndRestoreNote(t *testing.T) {
 		t.Errorf("origin = %q", entries[0].OriginPath)
 	}
 
-	restored, err := b.Restore(id)
+	restored, _, err := b.Restore(id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestBin_DiscardProject(t *testing.T) {
 	write(t, root, "Old/a.md", "a")
 	write(t, root, "Old/sub/b.md", "b")
 
-	id, notes, err := b.DiscardProject("Old")
+	id, notes, err := b.DiscardProject("Old", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestBin_DiscardProject(t *testing.T) {
 		t.Errorf("project should be gone")
 	}
 
-	restored, err := b.Restore(id)
+	restored, _, err := b.Restore(id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,5 +102,78 @@ func TestBin_PurgeAndPruneExpired(t *testing.T) {
 	// already gone so nothing to prune; verify zero return.
 	if removed, _ := b.PruneExpired(); removed != 0 {
 		t.Errorf("removed = %d, want 0", removed)
+	}
+}
+
+// The meta given to DiscardProject travels with the trashed folder, comes
+// back from Restore and does not land in the vault (IMP-124).
+func TestBin_ProjectMeta(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "P"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "P", "n.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b := New(root, -1)
+	id, notes, err := b.DiscardProject("P", []byte(`{"flags":{"visibility":"private"}}`))
+	if err != nil || len(notes) != 1 {
+		t.Fatalf("discard: %v %v", notes, err)
+	}
+	meta, err := b.ProjectMeta(id)
+	if err != nil || string(meta) != `{"flags":{"visibility":"private"}}` {
+		t.Fatalf("ProjectMeta = %q, %v", meta, err)
+	}
+	restored, back, err := b.Restore(id)
+	if err != nil || len(restored) != 1 || string(back) != string(meta) {
+		t.Fatalf("Restore = %v, %q, %v", restored, back, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "P", projectMetaFile)); !os.IsNotExist(err) {
+		t.Errorf("the meta file came back into the vault: %v", err)
+	}
+
+	// Without meta, and for a note, there is none.
+	id2, _, err := b.DiscardProject("P", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta, err := b.ProjectMeta(id2); meta != nil || err != nil {
+		t.Errorf("ProjectMeta without meta = %q, %v", meta, err)
+	}
+}
+
+// Ids that are not a single name in the bin are refused before any disk
+// operation.
+func TestBin_RefusesBadIDs(t *testing.T) {
+	b := New(t.TempDir(), -1)
+	for _, id := range []string{"", ".", "..", "../x", "a/b", `a\b`, "a\x00b"} {
+		if err := b.Purge(id); err == nil {
+			t.Errorf("Purge(%q) accepted", id)
+		}
+		if _, _, err := b.Restore(id); err == nil {
+			t.Errorf("Restore(%q) accepted", id)
+		}
+		if _, err := b.ProjectMeta(id); err == nil {
+			t.Errorf("ProjectMeta(%q) accepted", id)
+		}
+	}
+}
+
+// A project folder that already holds a file with the sidecar's name is not
+// trashed: the file is neither overwritten nor followed.
+func TestBin_ProjectMetaNameReserved(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "P")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, projectMetaFile), []byte("mine"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := New(root, -1).DiscardProject("P", []byte("{}")); err == nil {
+		t.Fatal("discard over an existing sidecar name succeeded")
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, projectMetaFile)); string(b) != "mine" {
+		t.Errorf("the existing file was changed: %q", b)
 	}
 }

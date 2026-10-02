@@ -160,7 +160,7 @@ async function exportZip(p: Project) {
 }
 
 async function destroy(p: Project) {
-  if (!confirm(`Delete project "${p.name}" and ${p.note_count} note(s)?`)) return
+  if (!confirm(`Delete project "${p.name}" and ${p.note_count} note(s)?\n\nMCP tokens limited to this project are revoked; tokens that also list other projects lose this one.`)) return
   try {
     await deleteProject(p.name)
     await refresh()

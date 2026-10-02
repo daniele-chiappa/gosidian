@@ -8,6 +8,57 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.41.4] — 2026-10-02 — "lifecycle"
+
+Deleting, creating and restoring a project now keeps its access and the
+MCP token scopes coherent, and a private project restored from the trash
+comes back private. Pull the image and restart: nothing to migrate. Two
+things to know: deleting a project now revokes the MCP tokens scoped to
+it alone (tokens that list other projects just lose it), and a project
+trashed before this release is the owner's alone in the trash and comes
+back private, with the owner as admin.
+
+### Security
+- **A project restored from the trash keeps its access** — deleting a
+  project dropped its visibility, member and team grants, so the trash
+  brought it back under the default visibility: with the default
+  `internal`, a private project restored by the owner became readable by
+  every member, and the account that created it could no longer write
+  to it nor restore it. The access now travels with the trashed folder
+  and comes back with it. The trash also judges a deleted project on
+  that saved access: only who could read it sees it, only who
+  administered it (or the owner) restores or purges it; before, every
+  member saw the name of every deleted project. A trashed note whose
+  project is gone waits for the project to be restored, and a note
+  trashed from an earlier project with the same name (deleted, or
+  renamed away) stays the owner's: a project that takes the name later
+  does not see it.
+- **Deleting a project takes it out of the MCP token scopes** — a token
+  scoped to a deleted project kept naming it, and a project created
+  later with that name, maybe by someone else, fell into its scope.
+  Deleting a project, from the web UI or `memory_delete_project`, now
+  revokes the tokens scoped to it alone (an empty scope would mean every
+  project) and removes it from tokens that list others. Creating,
+  restoring or renaming a project onto a name that MCP tokens are still
+  scoped to is refused.
+- **A new project starts from a clean slate** — a project created with
+  the name of a deleted one inherited what that one had left in the
+  access store (the MCP delete never removed it): its visibility and its
+  member grants, which then reached the new project, a personal project
+  included. Creating a project now replaces any such leftover. Create,
+  rename, delete and restore of projects are also serialized, so a
+  creation can no longer slip into a rename half-way.
+- **Trash ids are validated** — restore and purge refuse an id that is
+  not a single name inside the trash directory.
+
+### Changed
+- **`memory_delete_project` uses the trash** — it deleted the project
+  from disk at once, while the web UI moved it to the trash. It now
+  takes the same path: with the trash on, the result carries the
+  `trash_id`, and the project can be restored from the web UI with its
+  access. The result also reports `tokens_revoked` and
+  `tokens_narrowed`.
+
 ## [2.41.3] — 2026-10-02 — "links"
 
 Links no longer look broken right after a write or a project rename, and

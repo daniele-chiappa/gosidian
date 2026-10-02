@@ -2,6 +2,7 @@ package projectops
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -33,6 +34,9 @@ func newFixture(t *testing.T) fixture {
 	}
 	tokens, err := auth.Open(filepath.Join(dir, "tokens.json"))
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "vault"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return fixture{vault.New(filepath.Join(dir, "vault")), idx, ps, tokens}

@@ -20,6 +20,7 @@ import (
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/projects"
 	"github.com/gosidian/gosidian/internal/server/events"
+	"github.com/gosidian/gosidian/internal/trash"
 	"github.com/gosidian/gosidian/internal/vault"
 	"github.com/gosidian/gosidian/internal/webauth"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -104,6 +105,7 @@ type Server struct {
 	index              *index.Index
 	tokens             *auth.Store
 	projects           *projects.Store
+	trash              *trash.Bin // nil = memory_delete_project removes from disk
 	audit              *audit.Log
 	impl               *server.MCPServer
 	limiter            *writeLimiter
@@ -344,6 +346,11 @@ func (s *Server) publishRename(from, to string, rewritten []string) {
 func (s *Server) SetProjects(p *projects.Store) {
 	s.projects = p
 }
+
+// SetTrash wires the trash bin: memory_delete_project then moves the project
+// there, restorable from the web UI, as the web UI's delete does. nil keeps
+// deleting from disk.
+func (s *Server) SetTrash(b *trash.Bin) { s.trash = b }
 
 // SetWriteLimits configures the per-token write/minute cap and the per-note
 // size cap. Pass zero values to keep the defaults already set in New().

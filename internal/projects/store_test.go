@@ -115,8 +115,12 @@ func TestStore_Rename(t *testing.T) {
 	if got := s.Get("alpha2"); !got.SkipGitSync || !got.HiddenFromMCP {
 		t.Errorf("new lost flags: %+v", got)
 	}
+	// A source without an entry still stamps the target as just named.
 	if err := s.Rename("nonexistent", "whatever"); err != nil {
-		t.Errorf("rename missing should be no-op: %v", err)
+		t.Errorf("rename of a name without entry: %v", err)
+	}
+	if s.Get("whatever").Since == 0 {
+		t.Error("rename did not record when the target took its name")
 	}
 }
 

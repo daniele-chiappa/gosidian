@@ -207,7 +207,7 @@ func (s *Server) registerTools() {
 	), s.handleCreateProject)
 
 	s.impl.AddTool(mcp.NewTool("memory_delete_project",
-		mcp.WithDescription("Delete a project (top-level folder) and all notes inside, recursively. Admin tokens only."),
+		mcp.WithDescription("Delete a project (top-level folder) and all notes inside, recursively. With the server's trash on (trash_id in the result) the project can be restored from the web UI's trash, with its access; otherwise it is gone. MCP tokens scoped to this project alone are revoked, and it is removed from the scope of tokens that list others (tokens_revoked, tokens_narrowed). Admin tokens only."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Project name.")),
 	), s.handleDeleteProject)
 
@@ -1060,20 +1060,12 @@ func (s *Server) handleCreateProject(ctx context.Context, req mcp.CallToolReques
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	clean, err := s.vault.CreateProject(name)
+	// The visibility is pinned at creation (the store default now), from a
+	// fresh access entry; a name MCP tokens are scoped to is refused
+	// (IMP-124).
+	clean, err := projectops.Create(s.vault, s.projects, s.tokens, name, "", "")
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("create project failed", err), nil
-	}
-	// Pin the visibility at creation so a later change of the store default
-	// does not retroactively reclassify this project.
-	if s.projects != nil {
-		f := s.projects.Get(clean)
-		if f.Visibility == "" {
-			f.Visibility = s.projects.DefaultVisibility()
-			if err := s.projects.Set(clean, f); err != nil {
-				return mcp.NewToolResultErrorFromErr("project created, but its visibility could not be saved", err), nil
-			}
-		}
 	}
 	s.auditWrite(ctx, audit.ActionCreateProject, clean, "", 0)
 	return mcp.NewToolResultJSON(map[string]any{"name": clean, "visibility": s.projectVisibility(clean)})
@@ -1235,20 +1227,28 @@ func (s *Server) handleDeleteProject(ctx context.Context, req mcp.CallToolReques
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	removed, err := s.vault.DeleteProject(name)
-	if err != nil {
+	// The same path as the web UI: into the trash when it is on, with the
+	// access saved for the restore, then out of the index, the access store
+	// and the MCP token scopes (IMP-124).
+	res, err := projectops.Delete(s.vault, s.index, s.projects, s.tokens, s.trash, name)
+	if err != nil && !errors.Is(err, projectops.ErrIncomplete) {
 		return mcp.NewToolResultErrorFromErr("delete project failed", err), nil
 	}
-	for _, p := range removed {
-		_ = s.index.Delete(p)
-	}
-	s.auditWrite(ctx, audit.ActionDeleteProject, name, "", int64(len(removed)))
-	s.publishTreeChange("delete_project", name, map[string]any{"removed_notes": len(removed)})
-	return mcp.NewToolResultJSON(map[string]any{
-		"deleted":       true,
-		"name":          name,
-		"removed_notes": removed,
+	removed := res.Removed
+	s.auditWrite(ctx, audit.ActionDeleteProject, res.Name, res.TrashID, int64(len(removed)))
+	s.publishTreeChange("delete_project", res.Name, map[string]any{"removed_notes": len(removed)})
+	out, jerr := mcp.NewToolResultJSON(map[string]any{
+		"deleted":         true,
+		"name":            res.Name,
+		"trash_id":        res.TrashID,
+		"tokens_revoked":  res.TokensRevoked,
+		"tokens_narrowed": res.TokensNarrowed,
+		"removed_notes":   removed,
 	})
+	if err != nil && jerr == nil {
+		appendNotice(out, "Note: "+err.Error())
+	}
+	return out, jerr
 }
 
 func (s *Server) handleBacklinks(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

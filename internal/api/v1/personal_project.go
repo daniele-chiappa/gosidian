@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
+	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/gosidian/gosidian/internal/projectops"
 	"github.com/gosidian/gosidian/internal/projects"
 	"github.com/gosidian/gosidian/internal/vault"
@@ -23,9 +24,12 @@ const ActionPersonalProjectCreate audit.Action = "personal_project_create"
 // admin grant, so a new account has a place to work before anyone grants it
 // anything. Owners and guests get none. Unless force is set, the store
 // setting (Settings → Project access) must allow it. Returns the project
-// name, or "" when nothing was created; an existing folder with that name is
-// an error the caller reports without failing the account creation.
-func ProvisionPersonalProject(v *vault.Vault, ps *projects.Store, al *audit.Log, u webauth.User, force bool) (string, error) {
+// name, or "" when nothing was created; an existing folder with that name,
+// or MCP tokens scoped to it, is an error the caller reports without failing
+// the account creation. projectops.Create starts the project from a fresh
+// access entry, so grants left under the name by a deleted project do not
+// reach the new account's private project (IMP-124).
+func ProvisionPersonalProject(v *vault.Vault, ps *projects.Store, tokens *auth.Store, al *audit.Log, u webauth.User, force bool) (string, error) {
 	if v == nil || ps == nil {
 		return "", nil
 	}
@@ -35,17 +39,9 @@ func ProvisionPersonalProject(v *vault.Vault, ps *projects.Store, al *audit.Log,
 	if !force && !ps.PersonalProjectsEnabled() {
 		return "", nil
 	}
-	name, err := v.CreateProject(u.Username)
+	name, err := projectops.Create(v, ps, tokens, u.Username, projects.VisibilityPrivate, u.ID)
 	if err != nil {
 		return "", fmt.Errorf("create project %q: %w", u.Username, err)
-	}
-	f := ps.Get(name)
-	f.Visibility = projects.VisibilityPrivate
-	if err := ps.Set(name, f); err != nil {
-		return name, fmt.Errorf("set visibility on %q: %w", name, err)
-	}
-	if err := ps.SetMember(name, u.ID, projects.LevelAdmin); err != nil {
-		return name, fmt.Errorf("grant admin on %q: %w", name, err)
 	}
 	if al != nil {
 		_ = al.Write(audit.Entry{Source: audit.SourceHTTP, Actor: u.Username, UserID: u.ID, Action: ActionPersonalProjectCreate, Path: name})
@@ -60,12 +56,12 @@ func ProvisionPersonalProject(v *vault.Vault, ps *projects.Store, al *audit.Log,
 // way first and then provisions this one, as the admin who asked
 // (reclaimPersonalProject). Failures are only logged: the account exists
 // either way.
-func PersonalProjectHook(v *vault.Vault, ps *projects.Store, al *audit.Log) func(webauth.User, *webauth.User) {
+func PersonalProjectHook(v *vault.Vault, ps *projects.Store, tokens *auth.Store, al *audit.Log) func(webauth.User, *webauth.User) {
 	return func(u webauth.User, replaced *webauth.User) {
 		if replaced != nil {
 			return
 		}
-		name, err := ProvisionPersonalProject(v, ps, al, u, false)
+		name, err := ProvisionPersonalProject(v, ps, tokens, al, u, false)
 		switch {
 		case err != nil:
 			log.Printf("webauth: user %s created, personal project not provisioned: %v", u.Username, err)
@@ -112,7 +108,7 @@ func (r *Router) reclaimPersonalProject(req *http.Request, actor *RequestUser, a
 			return "", moved, "no personal project: " + err.Error()
 		}
 	}
-	personal, err := ProvisionPersonalProject(r.deps.Vault, ps, r.deps.Audit, u, false)
+	personal, err := ProvisionPersonalProject(r.deps.Vault, ps, r.mcpTokens(), r.deps.Audit, u, false)
 	if err != nil {
 		return "", moved, "no personal project: " + err.Error()
 	}
@@ -209,7 +205,7 @@ func (r *Router) createPersonalProject(w http.ResponseWriter, req *http.Request,
 		WriteError(w, http.StatusConflict, CodeConflict, "personal project already exists: "+existing)
 		return
 	}
-	name, err := ProvisionPersonalProject(r.deps.Vault, r.deps.Projects, r.deps.Audit, u, true)
+	name, err := ProvisionPersonalProject(r.deps.Vault, r.deps.Projects, r.mcpTokens(), r.deps.Audit, u, true)
 	if err != nil {
 		WriteError(w, http.StatusConflict, CodeConflict, err.Error())
 		return

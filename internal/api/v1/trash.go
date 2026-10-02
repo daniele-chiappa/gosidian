@@ -1,12 +1,17 @@
 package v1
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
+	"github.com/gosidian/gosidian/internal/authz"
 	"github.com/gosidian/gosidian/internal/index"
+	"github.com/gosidian/gosidian/internal/projectops"
+	"github.com/gosidian/gosidian/internal/trash"
+	"github.com/gosidian/gosidian/internal/webauth"
 )
 
 // trashView is the JSON shape returned for each trash entry. The
@@ -40,8 +45,8 @@ func (r *Router) handleTrash(w http.ResponseWriter, req *http.Request) {
 	princ := principalFromContext(req)
 	out := make([]trashView, 0, len(entries))
 	for _, e := range entries {
-		if !r.canSee(princ, e.OriginPath) {
-			continue // hide trashed notes from projects the user can't access
+		if r.trashLevel(princ, e) < authz.LevelRead {
+			continue // hide what the user could not read before it was trashed
 		}
 		out = append(out, trashView{
 			ID:          e.ID,
@@ -102,22 +107,47 @@ func (r *Router) handleTrashItem(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) restoreTrash(w http.ResponseWriter, req *http.Request, id string, user *RequestUser) {
-	// Restoring re-creates a note in its origin project — gate it on write
-	// access there. Look the origin up before the restore mutates anything.
-	// See BUG-020 / per-project access.
-	{
-		if entries, lerr := r.deps.Trash.List(); lerr == nil {
-			for _, e := range entries {
-				if e.ID == id {
-					if r.denyWriteProject(w, user.principal(), projectOf(e.OriginPath)) {
-						return
-					}
-					break
-				}
-			}
-		}
+	e, ok := r.trashEntry(id)
+	if !ok {
+		WriteError(w, http.StatusNotFound, CodeNotFound, "trash entry not found")
+		return
 	}
-	restored, err := r.deps.Trash.Restore(id)
+	princ := user.principal()
+	lvl := r.trashLevel(princ, e)
+	if e.IsDir {
+		// A project comes back as it went: admin on it, as for the delete,
+		// judged on the access stored with it (IMP-124).
+		if denyTrashLevel(w, lvl, authz.LevelAdmin) {
+			return
+		}
+		res, err := projectops.RestoreProject(r.deps.Vault, r.deps.Index, r.deps.Projects, r.mcpTokens(), r.deps.Trash, id, user.ID)
+		switch {
+		case errors.Is(err, projectops.ErrExists):
+			WriteError(w, http.StatusConflict, CodeConflict, err.Error())
+			return
+		case errors.Is(err, projectops.ErrInvalid):
+			WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
+			return
+		case err != nil:
+			WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
+			return
+		}
+		r.auditNote(req, audit.ActionCreate, user, id, strings.Join(res.Restored, ","), int64(len(res.Restored)))
+		r.publishSidebarEvent("create", res.Name)
+		WriteJSON(w, http.StatusOK, map[string]any{"restored": res.Restored, "project": res.Name, "access_restored": res.AccessRestored})
+		return
+	}
+	// Restoring re-creates a note in its origin project — gate it on write
+	// access there (BUG-020 / per-project access). A project that is gone
+	// would come back implicitly, without its access: restore it first.
+	if denyTrashLevel(w, lvl, authz.LevelWrite) {
+		return
+	}
+	if project, ok := trashedNoteProject(e.OriginPath); ok && !projectops.FolderExists(r.deps.Vault, project) {
+		WriteError(w, http.StatusConflict, CodeConflict, "project "+project+" does not exist: restore it first")
+		return
+	}
+	restored, _, err := r.deps.Trash.Restore(id)
 	if err != nil {
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
 		return
@@ -145,19 +175,20 @@ func (r *Router) restoreTrash(w http.ResponseWriter, req *http.Request, id strin
 }
 
 func (r *Router) purgeTrash(w http.ResponseWriter, req *http.Request, id string, user *RequestUser) {
-	// Permanently deleting a trashed note from a project the user can't write to
-	// would be a cross-project mutation — gate it on write access there.
-	{
-		if entries, lerr := r.deps.Trash.List(); lerr == nil {
-			for _, e := range entries {
-				if e.ID == id {
-					if r.denyWriteProject(w, user.principal(), projectOf(e.OriginPath)) {
-						return
-					}
-					break
-				}
-			}
-		}
+	e, ok := r.trashEntry(id)
+	if !ok {
+		WriteError(w, http.StatusNotFound, CodeNotFound, "trash entry not found")
+		return
+	}
+	// Permanently deleting a trashed note from a project the user can't
+	// write to would be a cross-project mutation; a trashed project needs
+	// admin on it, as its delete did.
+	need := authz.LevelWrite
+	if e.IsDir {
+		need = authz.LevelAdmin
+	}
+	if denyTrashLevel(w, r.trashLevel(user.principal(), e), need) {
+		return
 	}
 	if err := r.deps.Trash.Purge(id); err != nil {
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
@@ -165,4 +196,77 @@ func (r *Router) purgeTrash(w http.ResponseWriter, req *http.Request, id string,
 	}
 	r.auditNote(req, audit.ActionDelete, user, id, "", 0)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// trashEntry finds a trash entry by id.
+func (r *Router) trashEntry(id string) (trash.Entry, bool) {
+	entries, err := r.deps.Trash.List()
+	if err != nil {
+		return trash.Entry{}, false
+	}
+	for _, e := range entries {
+		if e.ID == id {
+			return e, true
+		}
+	}
+	return trash.Entry{}, false
+}
+
+// trashLevel is the principal's level on what a trash entry was. A trashed
+// project is judged on the access stored with it at delete time; the live
+// store no longer has it and answered with the default visibility, so any
+// account saw, restored (exposed) or purged another's private project
+// (IMP-124). A project trashed without stored access, a note whose project
+// is gone, and a note trashed before the current project with its name
+// began, are the owner's alone.
+func (r *Router) trashLevel(p authz.Principal, e trash.Entry) authz.Level {
+	if p.Role == webauth.RoleOwner {
+		return authz.LevelAdmin
+	}
+	if e.IsDir {
+		if r.deps.Projects == nil {
+			return authz.LevelNone
+		}
+		a, ok, err := projectops.TrashedAccess(r.deps.Trash, e.ID)
+		if err != nil || !ok {
+			return authz.LevelNone
+		}
+		return p.Level(e.OriginPath, r.deps.Projects.AccessConfigWith(e.OriginPath, a))
+	}
+	if project, ok := trashedNoteProject(e.OriginPath); ok {
+		if !projectops.FolderExists(r.deps.Vault, project) {
+			return authz.LevelNone
+		}
+		// Trashed before the project took the name (created, restored,
+		// renamed onto it): it came from an earlier project, whose readers
+		// are not this one's.
+		if since := r.projectFlag(project).Since; since > 0 && e.DiscardedAt.UnixNano() < since {
+			return authz.LevelNone
+		}
+	}
+	return r.levelOf(p, projectOf(e.OriginPath))
+}
+
+// trashedNoteProject returns the project folder a trashed note came from;
+// false for a note at the vault root, which has none.
+func trashedNoteProject(origin string) (string, bool) {
+	if !strings.Contains(origin, "/") {
+		return "", false
+	}
+	return projectOf(origin), true
+}
+
+// denyTrashLevel answers 404 when the entry is not even readable by the
+// principal (it does not list it either), 403 when it is but lvl is below
+// need; true means the caller stops.
+func denyTrashLevel(w http.ResponseWriter, lvl, need authz.Level) bool {
+	switch {
+	case lvl >= need:
+		return false
+	case lvl < authz.LevelRead:
+		WriteError(w, http.StatusNotFound, CodeNotFound, "trash entry not found")
+	default:
+		WriteError(w, http.StatusForbidden, CodeAuthForbidden, "you do not have the access this needs on the trashed item's project")
+	}
+	return true
 }

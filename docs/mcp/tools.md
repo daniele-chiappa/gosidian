@@ -123,8 +123,12 @@ a note naming it (and the likely intended argument, e.g. `Project` →
 
 ## Admin
 
-- `memory_create_project(name)`
-- `memory_delete_project(name)`
+- `memory_create_project(name)` — refuses a name MCP tokens are scoped
+  to
+- `memory_delete_project(name)` — into the trash when it is on
+  (`trash_id`, restorable from the web UI with its access); revokes the
+  MCP tokens scoped to it alone and narrows the others
+  (`tokens_revoked`, `tokens_narrowed`)
 - `memory_rename_project(from, to)`
 - `memory_global_check(project)` — owner-only: report which
   `global-private` notes a project references, for private→public

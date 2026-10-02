@@ -17,18 +17,21 @@ import (
 	"github.com/gosidian/gosidian/internal/vault"
 )
 
-// ErrInvalid wraps a rename refused by its checks, before any change: a bad
-// name, a missing source, a taken target, tokens scoped to the target.
-var ErrInvalid = errors.New("rename refused")
+// ErrInvalid wraps an operation refused by its checks, before any change: a
+// bad name, a missing project, a taken target, tokens scoped to the name.
+var ErrInvalid = errors.New("refused")
 
-// ErrIncomplete wraps a failure that came after the project folder moved:
-// the rename stands, and the error says what did not follow (the index or
-// the MCP token scopes).
-var ErrIncomplete = errors.New("project renamed, but not everything followed")
+// ErrIncomplete wraps a failure that came after the project folder moved
+// (renamed, deleted): the operation stands, and the error says what did not
+// follow (the index, the access entry or the MCP token scopes).
+var ErrIncomplete = errors.New("the project folder changed, but not everything followed")
 
-// renameMu serialises renames: two onto the same free name would both pass
-// the checks, and the loser's rollback would strip the winner.
-var renameMu sync.Mutex
+// projectMu serialises the operations that decide who a project name
+// belongs to: Create, Rename, Delete and RestoreProject. Two of them on the
+// same name would both pass their checks: a create landing between a
+// rename's access move and its folder move gave the creator's grant to the
+// source project on rollback (IMP-124).
+var projectMu sync.Mutex
 
 // Rename renames project from to to everywhere it is known: its flags and
 // member and team grants (projects.Store), its folder and index entries
@@ -43,8 +46,8 @@ var renameMu sync.Mutex
 // the folder, and moves back if the folder does not move. ps and tokens may
 // be nil. Returns how many tokens changed.
 func Rename(v *vault.Vault, idx *index.Index, ps *projects.Store, tokens *auth.Store, from, to string) (int, error) {
-	renameMu.Lock()
-	defer renameMu.Unlock()
+	projectMu.Lock()
+	defer projectMu.Unlock()
 	from, err := vault.CheckProjectName(from)
 	if err != nil {
 		return 0, fmt.Errorf("%w: source name: %v", ErrInvalid, err)
@@ -65,10 +68,12 @@ func Rename(v *vault.Vault, idx *index.Index, ps *projects.Store, tokens *auth.S
 	if folderExists(v, to) {
 		return 0, fmt.Errorf("%w: target %q already exists", ErrInvalid, to)
 	}
-	if n := scopedTokens(tokens, to); n > 0 {
-		return 0, fmt.Errorf("%w: %d MCP tokens are scoped to a project named %q and would reach this one: revoke them or pick another name", ErrInvalid, n, to)
+	if err := refuseScopedName(tokens, to); err != nil {
+		return 0, err
 	}
+	var since int64
 	if ps != nil {
+		since = ps.Get(from).Since
 		if err := ps.Rename(from, to); err != nil {
 			return 0, err
 		}
@@ -76,7 +81,13 @@ func Rename(v *vault.Vault, idx *index.Index, ps *projects.Store, tokens *auth.S
 	if err := v.RenameProject(idx, from, to); err != nil {
 		if folderExists(v, from) {
 			if ps != nil {
-				_ = ps.Rename(to, from)
+				// Moving the entry back stamps from as just named; it was
+				// not, so its Since goes back too.
+				if ps.Rename(to, from) == nil {
+					f := ps.Get(from)
+					f.Since = since
+					_ = ps.Set(from, f)
+				}
 			}
 			return 0, err
 		}

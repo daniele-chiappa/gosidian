@@ -328,7 +328,7 @@ func main() {
 	}
 	// A new account starts with its personal project (IMP-101 phase 3): a
 	// private project named after it where it is admin. Off via Settings.
-	webauthStore.SetOnUserCreated(apiv1.PersonalProjectHook(v, projectsStore, auditLog))
+	webauthStore.SetOnUserCreated(apiv1.PersonalProjectHook(v, projectsStore, tokenStore, auditLog))
 	if cfg.Vault.CacheSize != 128 {
 		v.SetCacheSize(cfg.Vault.CacheSize)
 		log.Printf("vault cache size set to %d", cfg.Vault.CacheSize)
@@ -502,6 +502,7 @@ func main() {
 		log.Printf("mcp ingest url allowlist: %s (memory_ingest url source enabled)", strings.Join(cfg.MCP.IngestURLAllowlist, ", "))
 	}
 	mcpServer.SetProjects(projectsStore)
+	mcpServer.SetTrash(trashBin)
 	// A token owned by a web account is narrowed on every request to what
 	// that account may currently read and write (BUG-055): the resolver maps
 	// the token's owner id to its live role; a disabled account fails closed.

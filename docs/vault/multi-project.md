@@ -82,8 +82,16 @@ limitation of the tool. Refactor freely: `memory_rename_project` and
 
 ## Project discovery / creation
 
-- **Create** (admin token): `memory_create_project(name="newproject")`
-- **Delete** (admin token): `memory_delete_project(name)`
+- **Create** (admin token): `memory_create_project(name="newproject")`.
+  The project starts with a fresh access entry (the store's default
+  visibility); a name that MCP tokens are still scoped to is refused,
+  since the new project would fall into their scope.
+- **Delete** (admin token): `memory_delete_project(name)`. With the
+  trash on (`trash.enabled`) the project goes there with its access
+  (visibility, member and team grants) and the web UI's trash restores
+  it as it was; otherwise it is removed from disk. MCP tokens scoped to
+  it alone are revoked, and tokens that also list other projects lose
+  it.
 - **Rename** (admin token): `memory_rename_project(from, to)`
 - **Scaffold** the Karpathy-Wiki layout:
   `memory_project_scaffold(project, template="karpathy-wiki")`

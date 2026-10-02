@@ -77,6 +77,12 @@ type Flags struct {
 	// copy (IMP-102). It moves the project's notes onto other machines, so
 	// a project admin opts in; off by default.
 	AllowLocalMirror bool `json:"allow_local_mirror,omitempty"`
+	// Since is when the project took its name, in unix nanoseconds: set by
+	// projectops.Create, by a rename (Store.Rename) and, from the saved
+	// access, by RestoreProject. A note trashed under the name before it
+	// came from an earlier project, so only the owner sees or restores it
+	// (IMP-124). Zero for projects named before it was recorded.
+	Since int64 `json:"since_ns,omitempty"`
 }
 
 // Entry is a (name, flags) pair returned by All().
@@ -326,8 +332,9 @@ func (s *Store) Delete(name string) error {
 // Rename moves oldName's entry (flags, member grants, team grants) to
 // newName, replacing whatever newName had: an entry left behind by a project
 // that is gone from the vault must not graft its grants onto the renamed
-// one. No-op when neither name has an entry. If the save fails the maps are
-// put back, so memory never runs ahead of the file (BUG-078).
+// one. newName's Since becomes now: notes trashed under that name before
+// came from another project. If the save fails the maps are put back, so
+// memory never runs ahead of the file (BUG-078).
 func (s *Store) Rename(oldName, newName string) error {
 	if newName == "" || strings.ContainsAny(newName, "/\\") {
 		return fmt.Errorf("invalid project name")
@@ -338,9 +345,6 @@ func (s *Store) Rename(oldName, newName string) error {
 	restore := s.snapshotLocked(oldName, newName)
 	f, hadFlags := s.data[oldName]
 	m, hadMembers := s.members[oldName]
-	_, staleFlags := s.data[newName]
-	_, staleMembers := s.members[newName]
-	changed := hadFlags || hadMembers || staleFlags || staleMembers
 	delete(s.data, newName)
 	delete(s.members, newName)
 	if hadFlags {
@@ -366,11 +370,10 @@ func (s *Store) Rename(oldName, newName string) error {
 			t.Grants[newName] = lvl
 		}
 		s.teams[id] = t
-		changed = true
 	}
-	if !changed {
-		return nil
-	}
+	f = s.data[newName]
+	f.Since = time.Now().UnixNano()
+	s.data[newName] = f
 	if err := s.save(); err != nil {
 		restore()
 		return err

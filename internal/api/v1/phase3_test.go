@@ -19,7 +19,7 @@ import (
 // wirePersonalProjects installs the creation hook the way main does, so
 // accounts created through the API get their personal project.
 func (f *notesFixture) wirePersonalProjects() {
-	f.webauth.SetOnUserCreated(PersonalProjectHook(f.router.deps.Vault, f.projects, f.router.deps.Audit))
+	f.webauth.SetOnUserCreated(PersonalProjectHook(f.router.deps.Vault, f.projects, f.router.mcpTokens(), f.router.deps.Audit))
 }
 
 // A restricted account ignores visibility: internal and public projects stay

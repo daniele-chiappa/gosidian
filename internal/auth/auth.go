@@ -315,8 +315,11 @@ func (s *Store) Empty() bool {
 
 // List returns a copy of the current tokens (without plaintext).
 func (s *Store) List() []Token {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	// Reload first: a token minted by the CLI must count in the scope
+	// checks of project operations (projectops) as soon as it exists.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reloadIfStale()
 	out := make([]Token, len(s.tokens))
 	copy(out, s.tokens)
 	return out
@@ -548,6 +551,54 @@ func (s *Store) RenameProject(from, to string) (int, error) {
 		return 0, nil
 	}
 	return n, s.save()
+}
+
+// RemoveProject takes a deleted project out of every token's scope, so no
+// token reaches a later project that takes the name (IMP-124). A token
+// scoped to that project alone is revoked, not emptied: an empty scope
+// means admin. A token scoped to several loses that one. Expired tokens are
+// cleaned up the same way. Returns how many tokens were revoked and how
+// many narrowed; if the save fails nothing changes.
+func (s *Store) RemoveProject(name string) (revoked, narrowed int, err error) {
+	if name == "" {
+		return 0, 0, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reloadIfStale()
+	kept := make([]Token, 0, len(s.tokens))
+	for _, t := range s.tokens {
+		list := t.ProjectList()
+		if !slices.Contains(list, name) {
+			kept = append(kept, t)
+			continue
+		}
+		rest := slices.DeleteFunc(slices.Clone(list), func(p string) bool { return p == name })
+		if len(rest) == 0 {
+			revoked++
+			continue
+		}
+		// Same shape as mint: Project holds the first project, so a binary
+		// that reads only the legacy field sees a narrower scope, never an
+		// empty (admin) one; Projects only when there are several.
+		t.Project = rest[0]
+		t.Projects = nil
+		if len(rest) > 1 {
+			t.Projects = rest
+		}
+		narrowed++
+		kept = append(kept, t)
+	}
+	if revoked == 0 && narrowed == 0 {
+		return 0, 0, nil
+	}
+	old := s.tokens
+	s.tokens = kept
+	if err := s.save(); err != nil {
+		s.tokens = old
+		return 0, 0, err
+	}
+	return revoked, narrowed, nil
 }
 
 // RevokeByOwner deletes all tokens whose OwnerUserID matches userID. Returns
