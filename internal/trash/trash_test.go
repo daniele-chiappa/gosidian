@@ -177,3 +177,34 @@ func TestBin_ProjectMetaNameReserved(t *testing.T) {
 		t.Errorf("the existing file was changed: %q", b)
 	}
 }
+
+// An entry whose decoded origin leaves the vault, or lands in a hidden
+// folder, is refused by Restore and fails ValidOrigin: checkID only sees the
+// raw id, where "/" is still %2F (BUG-083).
+func TestBin_RestoreRefusesOriginsOutsideTheVault(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "vault")
+	b := New(root, -1)
+	if err := os.MkdirAll(b.dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, origin := range []string{"../escape.md", "a/../../escape.md", ".gosidian/x.md", "a//b.md", "/abs.md"} {
+		id := newID(origin)
+		if err := os.WriteFile(filepath.Join(b.dir, id), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if ValidOrigin(Origin(id)) {
+			t.Errorf("ValidOrigin(%q) = true", Origin(id))
+		}
+		if _, _, err := b.Restore(id); err == nil {
+			t.Errorf("Restore of origin %q succeeded", origin)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(root), "escape.md")); !os.IsNotExist(err) {
+		t.Errorf("a file was written outside the vault: %v", err)
+	}
+	for _, ok := range []string{"p/n.md", "n.md", "p/sub/n.md", "P"} {
+		if !ValidOrigin(ok) {
+			t.Errorf("ValidOrigin(%q) = false", ok)
+		}
+	}
+}

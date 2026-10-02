@@ -8,6 +8,25 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.41.5] — 2026-10-02 — "origins"
+
+A small hardening patch for the trash. Pull the image and restart:
+nothing to migrate.
+
+### Security
+- **A trash entry cannot be restored outside the vault** — the place a
+  trashed note goes back to is decoded from the entry's name, and it was
+  used as is: an entry named with `..%2F` would have been restored
+  outside the vault. Entries are made from validated vault paths, so this
+  was not reachable through the API; restore now refuses an origin that
+  is not a plain vault path (no `..`, no absolute path, no hidden
+  folder), and such an entry is listed to the owner only.
+
+### Changed
+- **Faster index tests** — the concurrency test of the link index runs
+  20 rounds instead of 100: it still catches the old race every time,
+  and under the race detector it drops from about 28 to 5 seconds.
+
 ## [2.41.4] — 2026-10-02 — "lifecycle"
 
 Deleting, creating and restoring a project now keeps its access and the

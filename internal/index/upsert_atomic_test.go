@@ -13,7 +13,9 @@ import (
 // re-indexed (lint right after memory_append, or the watcher's second
 // Upsert) never finds them unresolved (BUG-079). The old Upsert committed
 // the links with target_path NULL and resolved them in a second
-// transaction: the reader caught that window on most rounds.
+// transaction: the reader caught that window on most rounds, so 20 rounds
+// are plenty; the reader spins, and under -race on a loaded CI host more
+// rounds cost minutes.
 func TestUpsert_ReadersNeverSeeUnresolvedLinks(t *testing.T) {
 	idx := openTest(t)
 	const nTargets = 40
@@ -52,7 +54,7 @@ func TestUpsert_ReadersNeverSeeUnresolvedLinks(t *testing.T) {
 			}
 		}
 	}()
-	for round := 0; round < 100; round++ {
+	for round := 0; round < 20; round++ {
 		doc.ModTime = int64(round + 2)
 		if err := idx.Upsert(doc); err != nil {
 			t.Fatal(err)

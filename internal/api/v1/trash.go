@@ -223,6 +223,11 @@ func (r *Router) trashLevel(p authz.Principal, e trash.Entry) authz.Level {
 	if p.Role == webauth.RoleOwner {
 		return authz.LevelAdmin
 	}
+	// An origin that is not a vault path (an entry put in the trash by
+	// hand) names no project anyone else could have read (BUG-083).
+	if !trash.ValidOrigin(e.OriginPath) {
+		return authz.LevelNone
+	}
 	if e.IsDir {
 		if r.deps.Projects == nil {
 			return authz.LevelNone

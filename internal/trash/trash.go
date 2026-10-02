@@ -217,7 +217,15 @@ func (b *Bin) Restore(id string) ([]string, []byte, error) {
 	if origin == "" {
 		return nil, nil, errors.New("cannot determine original path from id")
 	}
-	dst := filepath.Join(b.vaultRoot, filepath.FromSlash(origin))
+	// The origin is decoded from the id (%2F back to "/"), which checkID
+	// does not see: "..%2F" would lead out of the vault (BUG-083). The
+	// check sits next to the join on purpose; ValidOrigin is the same test
+	// for callers.
+	rel := filepath.FromSlash(origin)
+	if !filepath.IsLocal(rel) || hiddenSegment(origin) {
+		return nil, nil, fmt.Errorf("invalid origin %q in trash id", origin)
+	}
+	dst := filepath.Join(b.vaultRoot, rel)
 	if _, err := os.Stat(dst); err == nil {
 		return nil, nil, errors.New("destination already exists")
 	}
@@ -327,6 +335,25 @@ func newID(originalPath string) string {
 		" ", "%20",
 	).Replace(originalPath)
 	return formatNano(ts) + "__" + clean
+}
+
+// ValidOrigin reports whether origin, decoded from a trash id, is a place
+// inside the vault a restore may write: relative, without "..", and without
+// hidden segments, as vault paths are (BUG-083). Entries are made from
+// validated vault paths, so only an entry put in the trash by hand fails it.
+func ValidOrigin(origin string) bool {
+	return origin != "" && filepath.IsLocal(filepath.FromSlash(origin)) && !hiddenSegment(origin)
+}
+
+// hiddenSegment reports whether a slash-separated path has an empty or
+// hidden segment.
+func hiddenSegment(p string) bool {
+	for _, seg := range strings.Split(p, "/") {
+		if seg == "" || strings.HasPrefix(seg, ".") {
+			return true
+		}
+	}
+	return false
 }
 
 // Origin returns the vault-relative path an entry was discarded from (for a
