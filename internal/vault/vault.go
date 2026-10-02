@@ -754,36 +754,108 @@ func (v *Vault) RenameNote(idx *index.Index, from, to string) ([]string, error) 
 }
 
 // rewriteWikiLinks returns a new body with every wiki-link pointing at
-// oldBase (or at the old full path) rewritten to newBase. Alias text is
-// preserved. Targets outside the match set are left untouched.
+// oldBase (or at the old full path) rewritten to newBase. Alias text, a
+// #heading or #^block fragment and a `\|` alias separator (the escape a
+// markdown table cell needs) are preserved. Links inside code fences and
+// inline code are left alone: the index does not count them as links
+// either. Targets outside the match set are left untouched.
 func rewriteWikiLinks(body []byte, oldBase, newBase, oldRel, newRel string) []byte {
 	oldRelNoExt := stripNoteExt(oldRel)
 	newRelNoExt := stripNoteExt(newRel)
+	code := codeSpans(body)
 
-	replaced := wikiLinkRegex.ReplaceAllFunc(body, func(match []byte) []byte {
-		sub := wikiLinkRegex.FindSubmatch(match)
-		target, alias := splitWikiLink(string(sub[1]))
+	var out bytes.Buffer
+	last, c := 0, 0
+	for _, m := range wikiLinkRegex.FindAllSubmatchIndex(body, -1) {
+		for c < len(code) && code[c][1] <= m[0] {
+			c++
+		}
+		if c < len(code) && code[c][0] <= m[0] {
+			continue // inside code
+		}
+		inner := string(body[m[2]:m[3]])
+		target, alias := splitWikiLink(inner)
+		base, frag := target, ""
+		if i := strings.IndexByte(target, '#'); i >= 0 {
+			base, frag = target[:i], target[i:]
+		}
 
-		// Decide what to replace the target with.
 		replacement := ""
 		switch {
-		case strings.EqualFold(target, oldBase):
+		case strings.EqualFold(base, oldBase):
 			replacement = newBase
-		case strings.EqualFold(target, oldRel), strings.EqualFold(target, oldRelNoExt):
+		case strings.EqualFold(base, oldRel), strings.EqualFold(base, oldRelNoExt):
 			replacement = newRelNoExt
-		case strings.HasSuffix(strings.ToLower(target), "/"+strings.ToLower(oldBase)):
+		case strings.HasSuffix(strings.ToLower(base), "/"+strings.ToLower(oldBase)):
 			// Folder-qualified target like [[sub/OldBase]] — swap the tail.
-			replacement = target[:len(target)-len(oldBase)] + newBase
+			replacement = base[:len(base)-len(oldBase)] + newBase
 		}
 		if replacement == "" {
-			return match // no change
+			continue
 		}
+		out.Write(body[last:m[0]])
+		out.WriteString("[[" + replacement + frag)
 		if alias != "" {
-			return []byte("[[" + replacement + "|" + alias + "]]")
+			sep := "|"
+			if strings.Contains(inner, `\|`) {
+				sep = `\|`
+			}
+			out.WriteString(sep + alias)
 		}
-		return []byte("[[" + replacement + "]]")
-	})
-	return replaced
+		out.WriteString("]]")
+		last = m[1]
+	}
+	if last == 0 {
+		return body
+	}
+	out.Write(body[last:])
+	return out.Bytes()
+}
+
+// codeSpans returns the byte ranges, in document order, of fenced code
+// blocks and inline code spans. It follows the line-based rules of
+// parser.StripCode, so a rename rewrites exactly the links the index sees.
+func codeSpans(body []byte) [][2]int {
+	var spans [][2]int
+	inFence, fenceStart := false, 0
+	for off := 0; off < len(body); {
+		lineEnd := len(body)
+		if i := bytes.IndexByte(body[off:], '\n'); i >= 0 {
+			lineEnd = off + i
+		}
+		line := body[off:lineEnd]
+		trim := bytes.TrimSpace(line)
+		switch {
+		case bytes.HasPrefix(trim, []byte("```")) || bytes.HasPrefix(trim, []byte("~~~")):
+			if inFence {
+				spans = append(spans, [2]int{fenceStart, lineEnd})
+			} else {
+				fenceStart = off
+			}
+			inFence = !inFence
+		case !inFence:
+			open := -1
+			for i, ch := range line {
+				if ch != '`' {
+					continue
+				}
+				if open < 0 {
+					open = off + i
+				} else {
+					spans = append(spans, [2]int{open, off + i + 1})
+					open = -1
+				}
+			}
+			if open >= 0 { // an unclosed span runs to the end of the line
+				spans = append(spans, [2]int{open, lineEnd})
+			}
+		}
+		off = lineEnd + 1
+	}
+	if inFence {
+		spans = append(spans, [2]int{fenceStart, len(body)})
+	}
+	return spans
 }
 
 // MoveNote moves a note from its current location to the given target

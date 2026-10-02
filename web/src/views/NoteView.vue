@@ -19,7 +19,7 @@ import { useDebounceFn } from '@vueuse/core'
 import { Printer, Download, Copy, Check, GitBranch } from 'lucide-vue-next'
 import { getNote, updateNote, deleteNote, type Note } from '@/api/notes'
 import { renderPreview } from '@/api/preview'
-import { onApiEvent, type ConcurrencyConflictDetail } from '@/api/client'
+import { isConcurrencyConflict, onApiEvent, type ConcurrencyConflictDetail } from '@/api/client'
 import MarkdownPreview from '@/components/domain/MarkdownPreview.vue'
 import HTMLPreview from '@/components/domain/HTMLPreview.vue'
 import MediaPreview from '@/components/domain/MediaPreview.vue'
@@ -162,7 +162,8 @@ async function save() {
     dirty.value = false
     lastSavedAt.value = new Date().toLocaleTimeString()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Save failed'
+    // The conflict banner owns a 412: an error pane would hide the draft.
+    if (!isConcurrencyConflict(e)) error.value = e instanceof Error ? e.message : 'Save failed'
   } finally {
     saving.value = false
   }

@@ -102,10 +102,25 @@ client.interceptors.response.use(
   },
 )
 
+/**
+ * True for the 412 that `note.concurrency-conflict` already announced, so a
+ * caller can leave it to the conflict banner instead of an error pane.
+ */
+export function isConcurrencyConflict(e: unknown): boolean {
+  if (!axios.isAxiosError(e)) return false
+  const data = e.response?.data as { error?: { code?: string } } | undefined
+  return e.response?.status === 412 && data?.error?.code === 'concurrency.etag_mismatch'
+}
+
+// Call sites pass URLs relative to baseURL (`/notes/…`); the absolute form
+// is kept for requests built outside this client.
+const NOTE_URL_PREFIXES = ['/notes/', '/api/v1/notes/']
+
 function extractPath(cfg: AxiosRequestConfig | undefined): string {
-  if (!cfg?.url) return ''
-  const url = cfg.url.startsWith('/api/v1/notes/') ? cfg.url.slice('/api/v1/notes/'.length) : cfg.url
-  return decodeURIComponent(url)
+  const url = cfg?.url
+  if (!url) return ''
+  const prefix = NOTE_URL_PREFIXES.find((p) => url.startsWith(p))
+  return decodeURIComponent(prefix ? url.slice(prefix.length) : url)
 }
 
 export default client

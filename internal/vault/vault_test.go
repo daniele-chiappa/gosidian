@@ -295,6 +295,56 @@ func TestVault_RenameNote_FolderQualified(t *testing.T) {
 	}
 }
 
+// BUG-085: links that cite a section of the renamed note must follow it.
+func TestVault_RenameNote_AnchoredLinks(t *testing.T) {
+	v := newTestVault(t)
+	idx := openIndex(t)
+	write(t, v.Root, "p/docs/improvements.md", "# Improvements\n\n## IMP-126 — x\n")
+	write(t, v.Root, "p/ref.md", "See [[p/docs/improvements#IMP-126]] and [[improvements#IMP-126|that one]].")
+	_ = v.ScanInto(idx)
+	_ = idx.ResolveAll()
+
+	rewritten, err := v.RenameNote(idx, "p/docs/improvements.md", "p/docs/backlog.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rewritten) != 1 {
+		t.Fatalf("rewritten = %v, want [p/ref.md]", rewritten)
+	}
+	ref, _ := v.Load("p/ref.md")
+	want := "See [[p/docs/backlog#IMP-126]] and [[backlog#IMP-126|that one]]."
+	if string(ref.Content) != want {
+		t.Errorf("body = %q, want %q", ref.Content, want)
+	}
+	if backs, _ := idx.Backlinks("p/docs/backlog.md"); len(backs) != 1 {
+		t.Errorf("backlinks post-rename = %+v", backs)
+	}
+}
+
+func TestRewriteWikiLinks(t *testing.T) {
+	const fence = "```"
+	cases := []struct{ name, in, want string }{
+		{"heading fragment", "[[d/old#H 1]]", "[[d/new#H 1]]"},
+		{"block fragment with alias", "[[old#^b1|blk]]", "[[new#^b1|blk]]"},
+		{"table escape kept", `| [[d/old#IMP-1\|first]] |`, `| [[d/new#IMP-1\|first]] |`},
+		{"plain alias keeps plain pipe", "[[old|x]]", "[[new|x]]"},
+		{"embed", "![[old]]", "![[new]]"},
+		{"same-note anchor untouched", "[[#old]]", "[[#old]]"},
+		{"other note untouched", "[[older#old]]", "[[older#old]]"},
+		{"inline code untouched", "`[[old]]` and [[old]]", "`[[old]]` and [[new]]"},
+		{"fenced code untouched", fence + "\n[[old]]\n" + fence + "\n[[old]]", fence + "\n[[old]]\n" + fence + "\n[[new]]"},
+		{"unclosed fence runs to the end", "[[old]]\n" + fence + "\n[[old]]", "[[new]]\n" + fence + "\n[[old]]"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := string(rewriteWikiLinks([]byte(tc.in), "old", "new", "d/old.md", "d/new.md"))
+			if got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestVault_MoveNote(t *testing.T) {
 	v := newTestVault(t)
 	idx := openIndex(t)

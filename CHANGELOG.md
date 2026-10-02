@@ -8,6 +8,25 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.41.6] — 2026-10-02 — "anchors"
+
+Two fixes. Renaming a note no longer breaks the links that point at one of its
+sections, and the web editor shows its conflict banner again when the note
+changed elsewhere. Pull the image and restart; nothing to migrate.
+
+### Fixed
+- **Renaming a note keeps links to its sections** — a link that cites a
+  heading or a block of the renamed note (`[[folder/note#Heading]]`,
+  `[[note#^block|alias]]`) was left pointing at the old name, so every such
+  link broke. The fragment now follows the note. A link written with `\|`
+  inside a markdown table cell keeps that escape instead of splitting the
+  cell, and links inside code fences and inline code are left as they are,
+  as the index already ignores them.
+- **The edit conflict banner shows up** — saving a note that changed
+  elsewhere since you opened it should offer *Reload remote* or *Overwrite*,
+  but the banner never appeared and an error message replaced the editor
+  instead. The banner now appears and the editor keeps your draft.
+
 ## [2.41.5] — 2026-10-02 — "origins"
 
 A small hardening patch for the trash. Pull the image and restart:

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import client, { onApiEvent } from '@/api/client'
+import client, { isConcurrencyConflict, onApiEvent } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 
 // We exercise the interceptors via axios's request adapter by
@@ -80,10 +80,16 @@ describe('api/client interceptors', () => {
 
     const handler = vi.fn()
     const off = onApiEvent('note.concurrency-conflict', handler)
-    await expect(client.put('/notes/foo.md', { content: 'x' })).rejects.toBeDefined()
+    // Same URL shape as api/notes.ts: relative to baseURL, path encoded.
+    const err = await client
+      .put(`/notes/${encodeURIComponent('p/a b.md')}`, { content: 'x' })
+      .catch((e: unknown) => e)
+    expect(isConcurrencyConflict(err)).toBe(true)
+    expect(isConcurrencyConflict(new Error('boom'))).toBe(false)
     expect(handler).toHaveBeenCalledTimes(1)
     expect(handler).toHaveBeenCalledWith(
       expect.objectContaining({
+        path: 'p/a b.md',
         current_etag: '"new-etag"',
         current_size: 42,
         current_content_excerpt: 'updated by another tab',
