@@ -87,6 +87,9 @@ updated: 2026-04-23
   retrieved by `memory_pinned`.
 - **`updated`** is informational (gosidian uses `mtime` for
   retrieval, not this field).
+- **`type: database`** makes a note the schema of the rows in a folder:
+  see [Database notes](databases.md). A ```` ```view ```` block in the body
+  lists notes live: see [Views](views.md).
 
 ### `.html` notes
 

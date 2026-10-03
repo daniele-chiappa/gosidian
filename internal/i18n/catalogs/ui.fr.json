@@ -326,6 +326,20 @@
     "read_only": "lecture seule",
     "not_declared": "Hors du schéma",
     "relation_hint": "[[note]], ou un titre",
-    "suggestions": "Notes"
+    "suggestions": "Notes",
+    "no_value": "Sans valeur",
+    "column_empty": "Aucune note",
+    "move_to": "Déplacer {title} vers…",
+    "new_row": "Nouvelle ligne",
+    "new_row_in": "Nouvelle ligne dans {column}",
+    "row_name": "Nom",
+    "row_title": "Titre",
+    "row_with": "Avec",
+    "create": "Créer",
+    "cancel": "Annuler",
+    "name_taken": "{name} existe déjà : {next} est proposé.",
+    "create_invalid": "Ligne non créée : {reason}",
+    "create_forbidden": "Cet accès ne permet pas d’ajouter des lignes à cette base de données.",
+    "create_failed": "La ligne n’a pas été créée."
   }
 }

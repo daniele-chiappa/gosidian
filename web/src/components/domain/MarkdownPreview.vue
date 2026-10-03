@@ -17,7 +17,8 @@
  *
  * Views (IMP-127 phase 5): given the note's views as data (`views`, from
  * /api/v1/preview), a table view is shown by ViewTable, whose cells edit
- * the rows; any other view keeps the HTML the server rendered. Each view
+ * the rows, and a board view by ViewBoard, whose cards move between columns;
+ * a list view keeps the HTML the server rendered. Each view
  * sits in its `<div class="gosidian-view" data-view="N">` placeholder.
  */
 import { computed, inject, ref } from 'vue'
@@ -26,6 +27,7 @@ import { useWindowsStore, type OpenSpec } from 'plancia'
 import { planciaKey } from '@/composables/planciaKey'
 import type { ViewData } from '@/api/preview'
 import ViewTable from '@/components/views/ViewTable.vue'
+import ViewBoard from '@/components/views/ViewBoard.vue'
 import { splitViews } from '@/components/views/segments'
 
 const props = defineProps<{ html: string; views?: ViewData[] }>()
@@ -46,10 +48,10 @@ const sanitized = computed(() =>
 // The note cut at its views, when there are views to show as components.
 const segments = computed(() => (props.views?.length ? splitViews(sanitized.value) : null))
 
-/** The view at a placeholder's index, when ViewTable shows it. */
-function tableView(index: number): ViewData | undefined {
+/** The view at a placeholder's index, when a component of kind `as` shows it. */
+function viewAs(index: number, as: 'table' | 'board'): ViewData | undefined {
   const v = props.views?.[index]
-  return v && !v.error && v.as === 'table' ? v : undefined
+  return v && !v.error && v.as === as ? v : undefined
 }
 
 function onClick(e: MouseEvent) {
@@ -105,8 +107,11 @@ function onClick(e: MouseEvent) {
   <div v-else ref="root" :class="proseClass" @click="onClick">
     <template v-for="(s, i) in segments" :key="s.kind === 'view' ? `view-${s.index}` : `html-${i}`">
       <div v-if="s.kind === 'html'" class="contents" v-html="s.html" />
-      <div v-else-if="tableView(s.index)" class="gosidian-view" :data-view="s.index">
-        <ViewTable :view="tableView(s.index)!" />
+      <div v-else-if="viewAs(s.index, 'table')" class="gosidian-view" :data-view="s.index">
+        <ViewTable :view="viewAs(s.index, 'table')!" />
+      </div>
+      <div v-else-if="viewAs(s.index, 'board')" class="gosidian-view" :data-view="s.index">
+        <ViewBoard :view="viewAs(s.index, 'board')!" />
       </div>
       <div v-else class="gosidian-view" :data-view="s.index" v-html="s.html" />
     </template>

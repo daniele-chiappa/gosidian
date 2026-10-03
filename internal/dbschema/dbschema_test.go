@@ -158,3 +158,56 @@ func TestValidate(t *testing.T) {
 		})
 	}
 }
+
+func TestParse_Template(t *testing.T) {
+	base := "type: database\nsource: p/docs/improvements\nfields:\n  id: {type: text}\ntemplate: "
+	for in, want := range map[string]string{
+		"p/templates/improvement":          "p/templates/improvement.md",
+		"p/templates/improvement.md":       "p/templates/improvement.md",
+		`"[[p/templates/improvement]]"`:    "p/templates/improvement.md",
+		`"[[p/templates/improvement|x]]"`:  "p/templates/improvement.md",
+		"/p/templates/../tpl/improvement/": "p/tpl/improvement.md",
+	} {
+		s, err := Parse("p/docs/improvements.md", base+in)
+		if err != nil {
+			t.Errorf("%s: %v", in, err)
+			continue
+		}
+		if s.Template != want {
+			t.Errorf("%s: template = %q, want %q", in, s.Template, want)
+		}
+	}
+	for _, in := range []string{
+		"q/templates/improvement",          // another project
+		"improvement",                      // no project
+		"p/../q/x",                         // escapes the project
+		"p/docs/improvements/IMP-template", // a row
+	} {
+		if _, err := Parse("p/docs/improvements.md", base+in); err == nil {
+			t.Errorf("%s: want an error", in)
+		}
+	}
+	if s, _ := Parse("p/docs/improvements.md", strings.TrimSuffix(base, "\ntemplate: ")); s.Template != "" {
+		t.Errorf("no template key: template = %q", s.Template)
+	}
+}
+
+func TestNextName(t *testing.T) {
+	for _, c := range []struct {
+		names []string
+		want  string
+	}{
+		{[]string{"IMP-001", "IMP-137", "IMP-002"}, "IMP-138"},
+		{[]string{"T-009", "T-001"}, "T-010"},
+		{[]string{"T-1", "T-9"}, "T-10"},
+		{[]string{"IMP-1", "IMP-099"}, "IMP-100"},
+		{[]string{"BUG-001", "IMP-004", "IMP-005", "notes"}, "IMP-006"}, // the most common prefix
+		{[]string{"b-1", "a-1"}, "a-2"},                                 // a tie goes to the first prefix
+		{[]string{"readme", "ideas"}, ""},
+		{nil, ""},
+	} {
+		if got := NextName(c.names); got != c.want {
+			t.Errorf("NextName(%v) = %q, want %q", c.names, got, c.want)
+		}
+	}
+}

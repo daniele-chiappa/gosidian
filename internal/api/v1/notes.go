@@ -105,18 +105,26 @@ func (r *Router) handleNoteByPath(w http.ResponseWriter, req *http.Request) {
 }
 
 // noteSubroutes lists the suffixes routed off /notes/{path}/: read-only
-// GETs, and PATCH /frontmatter. Order matters only for documentation; the
+// GETs, PATCH /frontmatter and POST /rows (a new row of a database note). Order matters only for documentation; the
 // loop matches by suffix regardless. New entries get a handler in
 // dispatchNoteSubroute below.
-var noteSubroutes = []string{"backlinks", "excerpt", "history", "frontmatter", "fields"}
+var noteSubroutes = []string{"backlinks", "excerpt", "history", "frontmatter", "fields", "new-row", "rows"}
 
 func (r *Router) dispatchNoteSubroute(w http.ResponseWriter, req *http.Request, notePath, sub string) {
-	if sub == "frontmatter" {
+	switch sub {
+	case "frontmatter":
 		if req.Method != http.MethodPatch {
 			WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
 			return
 		}
 		r.patchFrontmatter(w, req, notePath)
+		return
+	case "rows":
+		if req.Method != http.MethodPost {
+			WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
+			return
+		}
+		r.createRow(w, req, notePath)
 		return
 	}
 	if req.Method != http.MethodGet {
@@ -132,6 +140,8 @@ func (r *Router) dispatchNoteSubroute(w http.ResponseWriter, req *http.Request, 
 		r.readHistory(w, req, notePath)
 	case "fields":
 		r.readRowFields(w, req, notePath)
+	case "new-row":
+		r.readNewRow(w, req, notePath)
 	default:
 		WriteError(w, http.StatusNotFound, CodeNotFound, "unknown note subroute")
 	}

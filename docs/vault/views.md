@@ -36,7 +36,13 @@ of a database, its columns follow the options of that select field (empty
 ones included), then `false` and `true` for a checkbox; other values come
 after them, and a column for the notes without a value comes last, when
 there are some. Without a schema the columns are the values found.
-Agents read a board as one list per non-empty column.
+Agents read a board as one list per non-empty column. In the web UI it is
+a row of columns; on a card you may write, dragging it to another column,
+or picking one from its "Move to…" menu, rewrites its `group_by` field
+(the column without a value removes it), unless someone moved the card
+meanwhile. A view of a database also offers a new row (under a
+table, in each column of a board) to a reader who may write it: see
+[new rows](databases.md#editing-rows-in-the-web-ui).
 
 ```view
 from: myproject/docs/improvements
@@ -70,8 +76,10 @@ note its reader could not open.
   block, with links you can follow. `POST /api/v1/preview` also returns
   each view as data in `views` (columns typed by the database's schema,
   the rows with their fields and whether the reader may edit them, a
-  board's columns), matched to its place in the HTML by the `data-view`
-  index of its `<div class="gosidian-view">`. The schema of a database is
+  board's columns, and for a database the values a new row starts with,
+  `defaults`, and whether the reader may add one, `creatable`), matched
+  to its place in the HTML by the `data-view` index of its
+  `<div class="gosidian-view">`. The schema of a database is
   given only when the reader may open the database note.
 - **`memory_bootstrap`** — `hot_md` and the other session files come with
   their views computed: each block stays, and its result follows it between

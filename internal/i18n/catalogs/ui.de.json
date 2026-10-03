@@ -326,6 +326,20 @@
     "read_only": "nur lesen",
     "not_declared": "Nicht im Schema",
     "relation_hint": "[[Notiz]] oder ein Titel",
-    "suggestions": "Notizen"
+    "suggestions": "Notizen",
+    "no_value": "Ohne Wert",
+    "column_empty": "Keine Notizen",
+    "move_to": "{title} verschieben nach…",
+    "new_row": "Neue Zeile",
+    "new_row_in": "Neue Zeile in {column}",
+    "row_name": "Name",
+    "row_title": "Titel",
+    "row_with": "Mit",
+    "create": "Erstellen",
+    "cancel": "Abbrechen",
+    "name_taken": "{name} gibt es schon: {next} wird vorgeschlagen.",
+    "create_invalid": "Zeile nicht erstellt: {reason}",
+    "create_forbidden": "Mit diesem Zugriff lassen sich dieser Datenbank keine Zeilen hinzufügen.",
+    "create_failed": "Die Zeile wurde nicht erstellt."
   }
 }

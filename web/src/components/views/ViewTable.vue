@@ -12,6 +12,9 @@
  * value and says so, and nothing is overwritten. A value the schema refuses
  * (422) or a row the reader may not write (403) leaves the cell as it was,
  * with the reason.
+ *
+ * Under the table, "New row" opens NewRowForm when the reader may add rows
+ * to the database, with the values the view's filters ask for.
  */
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -21,7 +24,8 @@ import { cellValue, expectValue, isEditable, shownValue, toChange } from './cell
 import { saveField } from './fieldSave'
 import FieldEditor from './FieldEditor.vue'
 import FieldValueView from './FieldValue.vue'
-import { Pencil } from 'lucide-vue-next'
+import NewRowForm from './NewRowForm.vue'
+import { Pencil, Plus } from 'lucide-vue-next'
 
 const props = defineProps<{ view: ViewData }>()
 const { t } = useI18n()
@@ -37,6 +41,7 @@ watch(
   { immediate: true },
 )
 const columns = computed(() => props.view.columns ?? [])
+const adding = ref(false)
 
 // The open editor, with the value the cell showed when it opened: what
 // `expect` checks, even if the view is computed again meanwhile.
@@ -175,6 +180,24 @@ async function commit(row: ViewRow, col: ViewColumn, input: string | boolean | s
   <p v-if="view.total > rows.length">
     <em>{{ t('views.showing', { shown: rows.length, total: view.total }) }}</em>
   </p>
+  <template v-if="view.creatable && view.database">
+    <NewRowForm
+      v-if="adding"
+      :database="view.database"
+      :values="view.defaults"
+      @done="adding = false"
+    />
+    <button
+      v-else
+      type="button"
+      class="not-prose inline-flex items-center gap-1 rounded px-1 py-0.5 text-sm text-text-muted hover:bg-surface-hover hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+      data-new-row-button
+      @click="adding = true"
+    >
+      <Plus class="h-3.5 w-3.5" aria-hidden="true" />
+      {{ t('views.new_row') }}
+    </button>
+  </template>
   <p
     :class="message ? 'text-sm text-danger' : 'sr-only'"
     role="status"

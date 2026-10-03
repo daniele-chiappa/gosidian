@@ -298,3 +298,38 @@ func TestData_Links(t *testing.T) {
 		t.Errorf("links = %+v", links)
 	}
 }
+
+// A new row made from a view starts with the values its filters ask of the
+// declared fields, typed by the schema, so it shows in the view.
+func TestData_Defaults(t *testing.T) {
+	s, err := dbschema.Parse("p/db.md", "type: database\nsource: p/rows\nfields:\n"+
+		"  id: {type: text}\n  title: {type: text}\n"+
+		"  status: {type: select, options: [open, done]}\n"+
+		"  points: {type: number}\n  blocked: {type: checkbox}\n"+
+		"  labels: {type: multi-select, options: [ui, mcp]}\n  owner: {type: text}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := Parse("from: p/rows\nwhere:\n"+
+		"  - status in [open, done]\n  - status = done\n"+ // the first filter on a field wins
+		"  - points = 3\n  - blocked = false\n  - labels contains ui\n"+
+		"  - owner != bob\n  - id = T-001\n  - title = x\n"+ // ne, id and title give nothing
+		"  - priority = high\n", Context{}) // not declared
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := Context{CanWrite: func(p string) bool { return p == "p/rows/_.md" }}
+	d := (&Result{Spec: spec, Schema: s}).Data(c)
+	want := map[string]any{"status": "open", "points": 3.0, "blocked": false}
+	if !reflect.DeepEqual(d.Defaults, want) || !d.Creatable {
+		t.Errorf("defaults = %#v, creatable = %v", d.Defaults, d.Creatable)
+	}
+	spec, _ = Parse("from: p/rows\nwhere:\n  - status = closed\n  - labels = ui\n", Context{})
+	d = (&Result{Spec: spec, Schema: s}).Data(Context{})
+	if !reflect.DeepEqual(d.Defaults, map[string]any{"labels": []any{"ui"}}) || d.Creatable {
+		t.Errorf("an option the schema lacks is left out; a multi-select is a list: %#v, creatable = %v", d.Defaults, d.Creatable)
+	}
+	if d := (&Result{Spec: spec}).Data(c); d.Defaults != nil || d.Creatable {
+		t.Errorf("without a schema: %+v", d)
+	}
+}

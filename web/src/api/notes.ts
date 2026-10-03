@@ -112,3 +112,37 @@ export async function getRowFields(path: string): Promise<RowFields> {
   const { data } = await client.get<RowFields>(`/notes/${encodeURIComponent(path)}/fields`)
   return data
 }
+
+/** What the form for a new row of a database starts from. */
+export interface NewRow {
+  /** The suggested file name, without .md; "" when the rows are not numbered. */
+  name: string
+  source: string
+  template?: string
+  /** The schema's fields, in declaration order. */
+  columns: import('./preview').ViewColumn[]
+  /** The fields the template sets. */
+  preset?: string[]
+}
+
+/** GET /api/v1/notes/{database}/new-row — the suggested name of a new row. */
+export async function getNewRow(database: string): Promise<NewRow> {
+  const { data } = await client.get<NewRow>(`/notes/${encodeURIComponent(database)}/new-row`)
+  return data
+}
+
+export interface CreateRowBody {
+  name: string
+  title: string
+  values: Record<string, FieldValue>
+}
+
+/**
+ * POST /api/v1/notes/{database}/rows — a new row of a database, from its
+ * template when it has one. 409 when the name is taken (`details.name` is
+ * the next one), 422 when the row would break the schema.
+ */
+export async function createRow(database: string, body: CreateRowBody): Promise<Note> {
+  const { data } = await client.post<Note>(`/notes/${encodeURIComponent(database)}/rows`, body)
+  return data
+}

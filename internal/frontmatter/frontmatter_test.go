@@ -37,6 +37,28 @@ func TestSetKeys_NewKeyGoesLast(t *testing.T) {
 	}
 }
 
+// A new key goes before tags when tags is the last key, as the vault's
+// notes are written; otherwise last.
+func TestSetKeys_NewKeyBeforeTrailingTags(t *testing.T) {
+	for _, c := range []struct{ name, in, want string }{
+		{"tags last", "---\ntitle: T\ntags: [a]\n---\n", "---\ntitle: T\nstatus: open\ntags: [a]\n---\n"},
+		{"block tags last", "---\ntitle: T\ntags:\n  - a\n---\n", "---\ntitle: T\nstatus: open\ntags:\n  - a\n---\n"},
+		{"tags in the middle", "---\ntags: [a]\ntitle: T\n---\n", "---\ntags: [a]\ntitle: T\nstatus: open\n---\n"},
+	} {
+		if got := setKeys(t, c.in, []Field{{"status", "open"}}, nil); got != c.want {
+			t.Errorf("%s: got\n%s\nwant\n%s", c.name, got, c.want)
+		}
+	}
+	// Tags set in the same call stays where it is, after the new key.
+	if got := setKeys(t, "---\ntitle: T\ntags: [a]\n---\n", []Field{{"tags", []string{"b"}}, {"status", "open"}}, nil); got != "---\ntitle: T\nstatus: open\ntags: [b]\n---\n" {
+		t.Errorf("tags set too: got\n%s", got)
+	}
+	// Tags removed: the new key goes last.
+	if got := setKeys(t, "---\ntitle: T\ntags: [a]\n---\n", []Field{{"status", "open"}}, []string{"tags"}); got != "---\ntitle: T\nstatus: open\n---\n" {
+		t.Errorf("tags removed: got\n%s", got)
+	}
+}
+
 func TestSetKeys_Unset(t *testing.T) {
 	in := "---\ntitle: T\nstatus: open\nimplements:\n  - IMP-1\n  - IMP-2\nfields:\n  a: {type: text}\n---\n"
 	got := setKeys(t, in, nil, []string{"status", "implements", "fields", "absent"})

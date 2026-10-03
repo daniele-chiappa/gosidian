@@ -326,6 +326,20 @@
     "read_only": "solo lectura",
     "not_declared": "Fuera del esquema",
     "relation_hint": "[[nota]], o un título",
-    "suggestions": "Notas"
+    "suggestions": "Notas",
+    "no_value": "Sin valor",
+    "column_empty": "Sin notas",
+    "move_to": "Mover {title} a…",
+    "new_row": "Nueva fila",
+    "new_row_in": "Nueva fila en {column}",
+    "row_name": "Nombre",
+    "row_title": "Título",
+    "row_with": "Con",
+    "create": "Crear",
+    "cancel": "Cancelar",
+    "name_taken": "{name} ya existe: se propone {next}.",
+    "create_invalid": "Fila no creada: {reason}",
+    "create_forbidden": "Con este acceso no se pueden añadir filas a esta base de datos.",
+    "create_failed": "La fila no se ha creado."
   }
 }

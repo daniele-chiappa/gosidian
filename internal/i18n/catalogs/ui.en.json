@@ -395,6 +395,20 @@
     "read_only": "read only",
     "not_declared": "Not in the schema",
     "relation_hint": "[[note]], or type a title",
-    "suggestions": "Notes"
+    "suggestions": "Notes",
+    "no_value": "No value",
+    "column_empty": "No notes",
+    "move_to": "Move {title} to…",
+    "new_row": "New row",
+    "new_row_in": "New row in {column}",
+    "row_name": "Name",
+    "row_title": "Title",
+    "row_with": "With",
+    "create": "Create",
+    "cancel": "Cancel",
+    "name_taken": "{name} already exists: {next} proposed instead.",
+    "create_invalid": "Row not created: {reason}",
+    "create_forbidden": "Rows cannot be added to this database with your access.",
+    "create_failed": "The row was not created."
   }
 }

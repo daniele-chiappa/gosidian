@@ -395,6 +395,20 @@
     "read_only": "sola lettura",
     "not_declared": "Fuori dallo schema",
     "relation_hint": "[[nota]], o scrivi un titolo",
-    "suggestions": "Note"
+    "suggestions": "Note",
+    "no_value": "Senza valore",
+    "column_empty": "Nessuna nota",
+    "move_to": "Sposta {title} in…",
+    "new_row": "Nuova riga",
+    "new_row_in": "Nuova riga in {column}",
+    "row_name": "Nome",
+    "row_title": "Titolo",
+    "row_with": "Con",
+    "create": "Crea",
+    "cancel": "Annulla",
+    "name_taken": "{name} esiste già: proposto {next}.",
+    "create_invalid": "Riga non creata: {reason}",
+    "create_forbidden": "Con il tuo accesso non si possono aggiungere righe a questo database.",
+    "create_failed": "La riga non è stata creata."
   }
 }

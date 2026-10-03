@@ -42,6 +42,35 @@ frontmatter and free text in its body. The body of the database note is
 the place for instructions: the `memory_query` calls that list open
 entries, how a new ID is chosen, how an entry is closed.
 
+### A template for new rows
+
+`template` (optional) names the note a row added from the web UI starts
+from: a vault path, with or without `.md`, or a `[[wikilink]]` written as
+a path. It must be a note of the same project, outside the source folder
+(there it would be a row).
+
+```yaml
+template: myproject/templates/improvement
+```
+
+```markdown
+---
+title: "{{ID}} — {{TITLE}}"
+status: open
+created: "{{TODAY}}"
+tags: ["{{PROJECT}}", type:doc]
+---
+
+# {{ID}} — {{TITLE}}
+```
+
+The placeholders are those of the project templates, `{{PROJECT}}` and
+`{{TODAY}}` (UTC), plus `{{ID}}` (the row's name) and `{{TITLE}}`. Quote
+them in the frontmatter, as above: unquoted, `{{` is not valid YAML. They
+are filled field by field, so a title holding a colon or quotes keeps the
+frontmatter valid. Without a template a new row gets its title, its `id`,
+the values given and the project's tag, over a heading.
+
 ### Field types
 
 | Type | Accepts |
@@ -109,13 +138,32 @@ Both save one field at a time with the call below, checking the value
 shown when the editor opened: if someone changed that field since,
 nothing is overwritten and the editor says so.
 
+- **New rows** — a table view of a database has "New row" under it, and
+  each column of a board a "+", for a reader who may write the project.
+  The form suggests the row's name from the numbering of the rows (the
+  most common prefix, the highest number plus one, zero-padded alike:
+  `IMP-137` gives `IMP-138`), which can be changed; it asks for the title
+  and for the required fields nothing else gives. The row starts with the
+  values the view's `eq` and `in` filters ask (the first value of an
+  `in`) and, on a board, with the column's value, so it shows where it
+  was made. The new note opens in a window.
+
+`GET /api/v1/notes/<database>/new-row` returns the suggested `name`, the
+schema's `columns` and the fields the template sets (`preset`). `POST
+/api/v1/notes/<database>/rows` with `{"name", "title", "values"}` writes
+the row from the template and answers 201 with the note. The whole row
+must match the schema (**422** with `details.problems`), so a row made
+this way passes lint; a name already taken answers **409** with the next
+one in `details.name`. Both need write access to the project.
+
 ## Editing fields over HTTP
 
 `PATCH /api/v1/notes/<path>/frontmatter` writes and removes frontmatter
 keys of a markdown note without sending the whole note. It rewrites only
 the lines of the keys named: order, comments, quoting and the body stay as
 written, and a new key goes after the others, in the order the schema
-declares them.
+declares them, or just before `tags` when that is the last key, as the
+vault's notes are written.
 
 ```json
 {"set": {"status": "done", "closed": "2026-10-03", "labels": ["ui"]},

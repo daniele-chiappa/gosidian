@@ -8,6 +8,50 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.46.0] — 2026-10-03 — "boards and new rows"
+
+The second half of database editing in the web UI: kanban boards whose
+cards you drag from column to column, and new rows made from a view, from
+a template the database names. Pull the image and restart; nothing to
+migrate.
+
+### Added
+- **Kanban boards in the web UI** — a view with `as: board` shows as
+  columns of cards, one per value of its `group_by` field, empty columns
+  included. A card you may write moves to another column by drag and drop,
+  or with its "Move to…" menu from the keyboard. The move rewrites only
+  that field, and a card someone else moved meanwhile is not moved back.
+  The column without a value removes the field.
+- **New database rows from a view** — under a table view of a database,
+  "New row", and in each column of a board, "+", open a form for a reader
+  who may write the project. It suggests the row's name from the numbering
+  of the rows (`IMP-137` gives `IMP-138`), which you can change, and asks
+  for the title and for the required fields nothing else gives. The row
+  starts with the values the view's filters ask for and, on a board, with
+  the column's value, so it shows where it was made. The new note opens in
+  a window.
+- **Row templates** — a database note can name a `template` note, with the
+  placeholders `{{ID}}`, `{{TITLE}}`, `{{TODAY}}` and `{{PROJECT}}` (quoted
+  in the frontmatter). The server fills them field by field, so a title
+  with a colon or quotes keeps the YAML valid, and checks the whole row
+  against the schema: a row made this way passes lint. A name taken
+  meanwhile is not overwritten; the next one is proposed.
+- **API** — `GET /api/v1/notes/<database>/new-row` returns the suggested
+  name, the schema's columns and the fields the template sets; `POST
+  /api/v1/notes/<database>/rows` writes the row (201; 422 with the
+  problems; 409 with the next name). The views data of `POST
+  /api/v1/preview` gains `defaults` and `creatable`.
+
+### Changed
+- **A new frontmatter key goes before `tags`** — `PATCH
+  /api/v1/notes/<path>/frontmatter` and new rows write a key the note does
+  not have yet just before `tags` when that is the last key, as notes are
+  usually written, instead of after it.
+
+### Notes
+- Documentation: `docs/vault/databases.md` (templates and new rows),
+  `docs/vault/views.md`, `docs/vault/format.md`.
+
 ## [2.45.0] — 2026-10-03 — "database editing"
 
 Database rows can now be edited from the web UI, in a view's table or in

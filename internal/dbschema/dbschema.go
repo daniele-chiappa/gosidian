@@ -10,9 +10,11 @@
 //	  id: {type: text, required: true}
 //	  status: {type: select, required: true, options: [open, done]}
 //	  closed: {type: date}
+//	template: proj/templates/improvement
 //
 // Each row is a note directly inside the source folder, with the values in
-// its own frontmatter. The schema is read with a YAML parser; the index keeps
+// its own frontmatter. The optional template is the note a row made from the
+// web UI starts from. The schema is read with a YAML parser; the index keeps
 // its own frontmatter extraction, so nothing here changes what is indexed.
 package dbschema
 
@@ -41,9 +43,12 @@ type Field struct {
 
 // Schema is a parsed database note.
 type Schema struct {
-	Path   string  `json:"path"`   // the database note
-	Source string  `json:"source"` // folder of the rows, vault-relative
-	Fields []Field `json:"fields"` // in declaration order
+	Path   string `json:"path"`   // the database note
+	Source string `json:"source"` // folder of the rows, vault-relative
+	// Template is the note a new row starts from, "" when the database
+	// declares none: a note of the same project, outside Source.
+	Template string  `json:"template,omitempty"`
+	Fields   []Field `json:"fields"` // in declaration order
 }
 
 // Types are the field types a schema may declare.
@@ -71,6 +76,13 @@ func Parse(notePath, frontmatter string) (*Schema, error) {
 	s := &Schema{Path: notePath, Source: strings.Trim(scalar(m, "source"), "/")}
 	if s.Source == "" {
 		return nil, errors.New("database note has no `source` (the folder of its rows)")
+	}
+	if t := scalar(m, "template"); t != "" {
+		tp, err := templatePath(notePath, s.Source, t)
+		if err != nil {
+			return nil, err
+		}
+		s.Template = tp
 	}
 	fields := valueOf(m, "fields")
 	if fields == nil || fields.Kind != yaml.MappingNode {
@@ -101,6 +113,68 @@ func Parse(notePath, frontmatter string) (*Schema, error) {
 		s.Fields = append(s.Fields, f)
 	}
 	return s, nil
+}
+
+// templatePath reads the template key: a vault path or a [[wikilink]] to a
+// note, with or without .md. The template must be a note of the database's
+// project, so it never shows a reader a note of a project they cannot see,
+// and outside the source folder, where it would be a row.
+func templatePath(notePath, source, t string) (string, error) {
+	t = strings.TrimSpace(t)
+	if strings.HasPrefix(t, "[[") && strings.HasSuffix(t, "]]") {
+		t, _, _ = strings.Cut(strings.TrimSuffix(strings.TrimPrefix(t, "[["), "]]"), "|")
+		t, _, _ = strings.Cut(t, "#")
+	}
+	t = strings.Trim(path.Clean("/"+strings.TrimSpace(t)), "/")
+	if !strings.HasSuffix(strings.ToLower(t), ".md") {
+		t += ".md"
+	}
+	project, _, _ := strings.Cut(notePath, "/")
+	if p, _, ok := strings.Cut(t, "/"); !ok || p != project {
+		return "", fmt.Errorf("template %q must be a note of project %s, as a vault path such as %s/templates/row", t, project, project)
+	}
+	if path.Dir(t) == source {
+		return "", fmt.Errorf("template %q is inside the source folder %s, where it would be a row: move it elsewhere", t, source)
+	}
+	return t, nil
+}
+
+var numberedName = regexp.MustCompile(`^(.*?)(\d{1,9})$`)
+
+// NextName suggests the file name of a new row from the names of the rows
+// (without .md): among those ending in a number, the ones with the most
+// common prefix; their highest number plus one, zero-padded to the widest
+// of them. "IMP-137" gives "IMP-138", "T-009" gives "T-010". It returns ""
+// when no name ends in a number.
+func NextName(names []string) string {
+	type stat struct{ count, max, width int }
+	byPrefix := map[string]*stat{}
+	for _, n := range names {
+		m := numberedName.FindStringSubmatch(n)
+		if m == nil {
+			continue
+		}
+		v, _ := strconv.Atoi(m[2])
+		st := byPrefix[m[1]]
+		if st == nil {
+			st = &stat{}
+			byPrefix[m[1]] = st
+		}
+		st.count++
+		st.max = max(st.max, v)
+		st.width = max(st.width, len(m[2]))
+	}
+	best := ""
+	var bs *stat
+	for p, st := range byPrefix {
+		if bs == nil || st.count > bs.count || st.count == bs.count && p < best {
+			best, bs = p, st
+		}
+	}
+	if bs == nil {
+		return ""
+	}
+	return fmt.Sprintf("%s%0*d", best, bs.width, bs.max+1)
 }
 
 // Covers reports whether the note at rel is a row of this database: a note

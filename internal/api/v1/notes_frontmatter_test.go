@@ -72,7 +72,8 @@ func TestFrontmatterPatch_RewritesOnlyTheKeys(t *testing.T) {
 		t.Fatalf("status=%d body=%s", r.code, r.body)
 	}
 	want := strings.Replace(taskRow, "status: todo\npriority: high\n", "status: done\n", 1)
-	want = strings.Replace(want, "tags: [p, type:doc]\n---", "tags: [p, type:doc]\ndue: 2026-10-10\ndone: true\n---", 1)
+	// New keys go before tags, the last key, as the vault's notes have it.
+	want = strings.Replace(want, "tags: [p, type:doc]\n---", "due: 2026-10-10\ndone: true\ntags: [p, type:doc]\n---", 1)
 	if got := f.content(t, "p/docs/tasks/T-1.md"); got != want {
 		t.Errorf("content\n%s\nwant\n%s", got, want)
 	}

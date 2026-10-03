@@ -35,6 +35,10 @@ export interface ViewData {
   total: number
   database?: string
   source?: string
+  /** The values a new row made from the view starts with: its filters. */
+  defaults?: Record<string, import('./notes').FieldValue>
+  /** Whether the reader may add rows to the database. */
+  creatable?: boolean
   error?: string
 }
 

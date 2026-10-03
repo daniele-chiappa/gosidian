@@ -15,6 +15,7 @@ import (
 	"math"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -65,7 +66,9 @@ var (
 
 // SetKeys returns content with the keys of set written and the keys of unset
 // removed. A key already present is replaced in place, a new one goes last in
-// the frontmatter; a note without frontmatter gets one when set is not empty.
+// the frontmatter, or just before `tags` when that is the last key, the way
+// the vault's notes are written; a note without frontmatter gets one when set
+// is not empty.
 // Nothing is changed when any key fails: the error is a *ValueError, a
 // *ComplexError or ErrUnterminated.
 func SetKeys(content []byte, set []Field, unset []string) ([]byte, error) {
@@ -129,9 +132,14 @@ func SetKeys(content []byte, set []Field, unset []string) ([]byte, error) {
 		return nil, ErrUnterminated
 	}
 
+	entries := parseEntries(lines, closing)
 	byKey := map[string][]*entry{}
-	for _, e := range parseEntries(lines, closing) {
+	for _, e := range entries {
 		byKey[e.key] = append(byKey[e.key], e)
+	}
+	insertAt := closing
+	if n := len(entries); n > 0 && entries[n-1].key == "tags" && len(byKey["tags"]) == 1 && !slices.Contains(unset, "tags") {
+		insertAt = entries[n-1].start
 	}
 	replace := map[int]string{}
 	drop := map[int]bool{}
@@ -174,7 +182,7 @@ func SetKeys(content []byte, set []Field, unset []string) ([]byte, error) {
 	out := make([]string, 0, len(lines)+len(added))
 	var raw []string
 	for i, l := range lines {
-		if i == closing {
+		if i == insertAt {
 			out = append(out, added...)
 			raw = append(raw, added...)
 		}

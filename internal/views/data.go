@@ -1,6 +1,7 @@
 package views
 
 import (
+	"strconv"
 	"time"
 
 	"github.com/gosidian/gosidian/internal/index"
@@ -23,6 +24,11 @@ type Data struct {
 	// the rows of one.
 	Database string `json:"database,omitempty"`
 	Source   string `json:"source,omitempty"`
+	// Defaults holds the values a new row made from the view starts with:
+	// those its eq and in filters ask of a declared field, so the row shows
+	// in the view. Creatable reports whether the reader may add rows.
+	Defaults  map[string]any `json:"defaults,omitempty"`
+	Creatable bool           `json:"creatable,omitempty"`
 	// Error is why the view could not be computed; the rest is empty.
 	Error string `json:"error,omitempty"`
 }
@@ -63,6 +69,8 @@ func (r *Result) Data(c Context) Data {
 	d := Data{As: r.Spec.As, Total: r.Total}
 	if r.Schema != nil {
 		d.Database, d.Source = r.Schema.Path, r.Schema.Source
+		d.Defaults = r.defaults()
+		d.Creatable = c.CanWrite != nil && c.CanWrite(r.Schema.Source+"/_.md")
 	}
 	for _, name := range r.Spec.Columns {
 		d.Columns = append(d.Columns, r.column(name))
@@ -114,6 +122,48 @@ func fieldLinks(h index.QueryHit, c Context) map[string][]Link {
 				out[name] = append(out[name], link)
 			}
 		}
+	}
+	return out
+}
+
+// defaults reads the values of a new row off the view's filters: for each
+// declared field (but id and title, which the row's name and title give)
+// the value of its first eq filter, or the first of an in filter, typed as
+// the schema declares it. A value the schema would refuse is left out.
+func (r *Result) defaults() map[string]any {
+	var out map[string]any
+	for _, w := range r.Spec.Where {
+		if w.Op != index.OpEq && w.Op != index.OpIn || len(w.Values) == 0 || w.Field == "id" || builtin[w.Field] {
+			continue
+		}
+		f, ok := r.Schema.Field(w.Field)
+		if _, done := out[w.Field]; !ok || done {
+			continue
+		}
+		var v any = w.Values[0]
+		switch f.Type {
+		case "checkbox":
+			b, err := strconv.ParseBool(w.Values[0])
+			if err != nil {
+				continue
+			}
+			v = b
+		case "number":
+			n, err := strconv.ParseFloat(w.Values[0], 64)
+			if err != nil {
+				continue
+			}
+			v = n
+		case "multi-select", "list":
+			v = []any{w.Values[0]}
+		}
+		if len(r.Schema.CheckEdit(r.Schema.Source+"/_.md", map[string]any{w.Field: v}, nil)) > 0 {
+			continue
+		}
+		if out == nil {
+			out = map[string]any{}
+		}
+		out[w.Field] = v
 	}
 	return out
 }
