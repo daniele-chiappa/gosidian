@@ -12,6 +12,7 @@ import (
 	"github.com/gosidian/gosidian/internal/dbschema"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/parser"
+	"github.com/gosidian/gosidian/internal/views"
 )
 
 // allRules is the registry of baseline rules run by default, in stable
@@ -653,6 +654,18 @@ func checkStatusIncoherent(ctx context.Context, l *Linter, project string) ([]Is
 	})
 	if err != nil {
 		return nil, err
+	}
+	// A plan listed by a ```view block of hot.md counts too (IMP-127): the
+	// Active plans section is often a view on the plans folder, and its rows
+	// exist only once the view is computed.
+	if len(views.FindBlocks(hotBody.Content)) > 0 {
+		inProject := func(o index.QueryOptions) ([]index.QueryHit, int, error) {
+			o.Projects = []string{project}
+			return l.index.Query(o)
+		}
+		c := views.Context{This: views.ThisFields(hotPath, parser.ParseFrontmatterFields(parser.FrontmatterRawForPath(hotPath, hotBody.Content)))}
+		rendered, _ := views.RenderNote(hotBody.Content, true, c, inProject)
+		hot = string(rendered)
 	}
 	var issues []Issue
 	for _, p := range plans {

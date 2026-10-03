@@ -56,6 +56,8 @@ trial, read the [root README](../README.md) first.
   & scaffold templates that any project can opt into
 - [Database notes](vault/databases.md) — one note per entry with a
   schema: backlogs and lists that `memory_query` can filter
+- [Views](vault/views.md) — `view` blocks: notes that list other notes
+  by folder and frontmatter, computed when the note is read
 - [Obsidian compatibility](vault/obsidian-compat.md) — what's fully
   compatible, what degrades, what's ignored
 

@@ -86,6 +86,9 @@ filters and sorts rows by their fields:
  "fields": ["id", "title", "priority"], "limit": 200}
 ```
 
+A note can also show rows live with a [view](views.md) block, for
+instance the open entries in `hot.md`.
+
 ## Backlogs and the directives
 
 The operational directives served by `memory_bootstrap` (v14 and later)

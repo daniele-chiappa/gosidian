@@ -30,7 +30,7 @@ func (s *Server) registerBootstrapTool() {
 		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder) to bootstrap. "+scopedProjectNote)),
 		mcp.WithString("profile", mcp.Description("CLI/agent profile for agent-anchor materialisation (default \"claude\"). When the master switch + the project's use_anchors flag are on and the profile supports native subagents, the response carries an `anchors` block: thin agent-anchor files to reconcile in the agent's cwd.")),
 		mcp.WithNumber("known_directives_version", mcp.Description("The directives_version you already hold from a previous bootstrap: on match, directives_block is omitted (directives_version is always present to detect it).")),
-		mcp.WithObject("known_etags", mcp.Description("Map of vault-relative path → etag from a previous bootstrap: files whose etag still matches come back unchanged:true with no body (hot_md, readme, agent_md).")),
+		mcp.WithObject("known_etags", mcp.Description("Map of vault-relative path → etag from a previous bootstrap: files whose etag still matches come back unchanged:true with no body (hot_md, readme, agent_md). For a file with ```view blocks pass its views_etag: its views are computed at every bootstrap and its plain etag no longer proves it unchanged.")),
 		mcp.WithObject("known_anchor_metas", mcp.Description("Map of canonical vault path → meta_version from a previous bootstrap's anchors.items: anchors whose meta still matches come back as {path, canonical, meta_version, unchanged:true} with no content. If an unchanged anchor file is missing from disk, re-bootstrap without this param to get the content back.")),
 		mcp.WithString("mode", mcp.Description("auto (default) | full | lite. lite serves hot.md as frontmatter + heading outline (fetch sections via memory_get_section); auto switches to lite only when hot.md crosses the oversize threshold (flagged auto_lite:true).")),
 	), s.handleBootstrap)
@@ -41,6 +41,10 @@ type bootstrapFile struct {
 	Path    string `json:"path,omitempty"`
 	Content string `json:"content,omitempty"`
 	ETag    string `json:"etag,omitempty"`
+	// ViewsETag is set when the file has view blocks (IMP-127): the file's
+	// etag plus a hash of the computed views. Pass it in known_etags; ETag
+	// stays the file's own, the one if_match on a write needs.
+	ViewsETag string `json:"views_etag,omitempty"`
 	// ExpectedExternal marks an instruction file that is absent from the vault
 	// but expected to live in the agent's working dir (the stub model, ADR-010).
 	// Only ever set on the agent_md payload, never on hot.md/README.md.
@@ -287,7 +291,7 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 
 	for _, f := range conventionFiles {
 		full := path.Join(project, f.rel)
-		file := s.loadBootstrapFile(full)
+		file := s.withRenderedViews(tok, s.loadBootstrapFile(full))
 		file = applyKnownEtag(file, knownEtags)
 		liteHot := mode == "lite"
 		if (mode == "" || mode == "auto") && f.key == "hot_md" &&
@@ -542,7 +546,11 @@ func applyKnownEtag(file bootstrapFile, known map[string]string) bootstrapFile {
 	if !file.Present || file.Path == "" || len(known) == 0 {
 		return file
 	}
-	if et, ok := known[file.Path]; ok && et != "" && et == file.ETag {
+	want := file.ETag
+	if file.ViewsETag != "" {
+		want = file.ViewsETag
+	}
+	if et, ok := known[file.Path]; ok && et != "" && et == want {
 		file.Content = ""
 		file.Unchanged = true
 	}

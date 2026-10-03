@@ -126,6 +126,9 @@ Status dei plan: `draft` → `in-progress` → `done` | `archived` (tag
    attuale. Il Current focus dice in poche righe cosa è in corso e il
    prossimo passo; la cronaca va in `log.md` (step 3). Oltre la soglia
    (8 KB di default) il bootstrap segnala `maintenance.hot_oversize`.
+   Una sezione fatta da un blocco ` ```view ` si aggiorna da sola: non
+   riscriverla e non copiare nel file il risultato calcolato (quello fra i
+   marcatori `gosidian:view-result` che il bootstrap mostra sotto il blocco).
 3. Append a `{{PROJECT}}/log.md` (entry tipizzata con data ISO: `bootstrap`,
    `plan-closed`, `adr`, `pattern`, `fix`, `discovery`, `ops`)
 4. Compila l'`Outcome` del plan se esisteva

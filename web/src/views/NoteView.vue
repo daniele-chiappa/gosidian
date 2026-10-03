@@ -20,6 +20,7 @@ import { Printer, Download, Copy, Check, GitBranch } from 'lucide-vue-next'
 import { getNote, updateNote, deleteNote, type Note } from '@/api/notes'
 import { renderPreview } from '@/api/preview'
 import { isConcurrencyConflict, onApiEvent, type ConcurrencyConflictDetail } from '@/api/client'
+import { useSSE } from '@/composables/useSSE'
 import MarkdownPreview from '@/components/domain/MarkdownPreview.vue'
 import HTMLPreview from '@/components/domain/HTMLPreview.vue'
 import MediaPreview from '@/components/domain/MediaPreview.vue'
@@ -58,6 +59,9 @@ const error = ref<string | null>(null)
 const dirty = ref(false)
 const lastSavedAt = ref<string | null>(null)
 const conflict = ref<ConcurrencyConflictDetail | null>(null)
+// The note changed on the server while it had unsaved edits (IMP-127).
+const remoteChanged = ref(false)
+const sse = useSSE(['note'])
 const copied = ref(false)
 let copiedTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -106,12 +110,13 @@ async function load() {
   error.value = null
   try {
     const fetched = await getNote(path.value)
+    remoteChanged.value = false
     note.value = fetched
     draft.value = fetched.content
     recents.record(fetched.path, fetched.title || fetched.path)
     emit('title', fetched.title || fetched.path)
     // HTML notes bypass the markdown renderer; the iframe shows raw content.
-    previewHTML.value = isHtml.value ? '' : await renderPreview(fetched.content)
+    previewHTML.value = isHtml.value ? '' : await renderPreview(fetched.content, fetched.path)
     dirty.value = false
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Failed to load note'
@@ -123,7 +128,7 @@ async function load() {
 
 const refreshPreview = useDebounceFn(async () => {
   try {
-    previewHTML.value = await renderPreview(draft.value)
+    previewHTML.value = await renderPreview(draft.value, path.value)
   } catch {
     /* preview failure shouldn't block editing */
   }
@@ -138,6 +143,34 @@ watch(draft, () => {
 })
 watch(dirty, (d) => emit('dirty', d))
 
+// ```view blocks are computed on the server when the note is rendered
+// (IMP-127): render again when other notes change, so the tables stay live.
+const refreshViews = useDebounceFn(async () => {
+  if (!note.value || isHtml.value) return
+  try {
+    const src = mode.value === 'edit' ? draft.value : note.value.content
+    previewHTML.value = await renderPreview(src, path.value)
+  } catch {
+    /* keep the last render */
+  }
+}, 800)
+
+const bareEtag = (e?: string) => (e ?? '').replace(/"/g, '')
+
+function onNoteEvent(p: { path?: string; etag?: string }) {
+  if (!note.value) return
+  if (p.path === path.value) {
+    if (p.etag && bareEtag(p.etag) === bareEtag(note.value.etag)) return // our own save
+    if (dirty.value) {
+      remoteChanged.value = true // keep the draft; the banner offers a reload
+      return
+    }
+    void load()
+    return
+  }
+  if (previewHTML.value.includes('gosidian-view')) void refreshViews()
+}
+
 function enterEdit() {
   if (!access.canWrite(props.path)) return
   mode.value = 'edit'
@@ -145,7 +178,7 @@ function enterEdit() {
 async function enterView() {
   mode.value = 'view'
   // View shows the saved content; the draft stays in memory for re-editing.
-  if (note.value && !isHtml.value) previewHTML.value = await renderPreview(note.value.content)
+  if (note.value && !isHtml.value) previewHTML.value = await renderPreview(note.value.content, note.value.path)
 }
 
 async function save() {
@@ -161,6 +194,9 @@ async function save() {
     draft.value = updated.content
     dirty.value = false
     lastSavedAt.value = new Date().toLocaleTimeString()
+    remoteChanged.value = false
+    // Our own save's event may arrive before this reply: not a remote change.
+    remoteChanged.value = false
   } catch (e) {
     // The conflict banner owns a 412: an error pane would hide the draft.
     if (!isConcurrencyConflict(e)) error.value = e instanceof Error ? e.message : 'Save failed'
@@ -303,6 +339,7 @@ onMounted(() => {
   unsub = onApiEvent('note.concurrency-conflict', (detail) => {
     if (detail.path === path.value) conflict.value = detail
   })
+  sse.on('note', onNoteEvent)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
@@ -430,6 +467,17 @@ watch(path, load)
         @click="forceOverwrite"
       >
         Overwrite
+      </button>
+    </div>
+
+    <div
+      v-if="remoteChanged && !conflict"
+      class="flex flex-wrap items-center gap-2 border-b border-warning/40 bg-warning/10 px-4 py-2 text-xs"
+    >
+      <span class="text-warning">Changed elsewhere while you were editing.</span>
+      <div class="flex-1" />
+      <button type="button" class="rounded px-2 py-1 hover:bg-surface-hover" @click="reloadRemote">
+        Reload remote
       </button>
     </div>
 

@@ -45,3 +45,20 @@ func TestLint_DatabaseFieldInvalid(t *testing.T) {
 		t.Errorf("prose schema: %q", got["p/docs/bugs.md"])
 	}
 }
+
+// IMP-127: an Active plans section made of a view on the plans folder
+// references the in-progress plans it lists.
+func TestLint_StatusIncoherent_PlansListedByAView(t *testing.T) {
+	_, v, idx := newTestLinter(t)
+	seed(t, v, idx, "p/plans/20261002-a.md", "---\ntitle: Plan A\ntype: plan\nstatus: in-progress\ntags: [p, type:plan]\n---\n")
+	seed(t, v, idx, "p/plans/20261002-b.md", "---\ntitle: Plan B\ntype: plan\nstatus: in-progress\ntags: [p, type:plan]\n---\n")
+	hot := "---\ntitle: Hot\ntags: [p]\n---\n# Hot\n\n## Active plans\n\n```view\nfrom: p/plans\nwhere:\n  - title = Plan A\n```\n"
+	seed(t, v, idx, "p/hot.md", hot)
+	issues, err := New(v, idx).Run(context.Background(), "p", []string{"status-incoherent"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 1 || issues[0].File != "p/plans/20261002-b.md" {
+		t.Errorf("want only Plan B (not listed by the view) flagged, got %+v", issues)
+	}
+}

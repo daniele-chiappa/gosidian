@@ -400,3 +400,46 @@ func TestNotes_RequiresAuth(t *testing.T) {
 		t.Errorf("status=%d, want 401", w.Code)
 	}
 }
+
+// IMP-127: a ```view block is rendered as its computed table, with links
+// the SPA can follow, and this.<field> resolves against the previewed note.
+func TestPreview_RendersViews(t *testing.T) {
+	f := newNotesFixture(t)
+	f.seedNote(t, "p/docs/improvements/IMP-001.md", "---\ntitle: \"IMP-001 — open one\"\nid: IMP-001\nstatus: open\n---\n")
+	f.seedNote(t, "p/docs/improvements/IMP-002.md", "---\ntitle: \"IMP-002 — done one\"\nid: IMP-002\nstatus: done\n---\n")
+	f.seedNote(t, "p/plans/plan.md", "---\ntitle: The plan\nimplements_imp: [IMP-002]\n---\n")
+	md := "---\nid: IMP-002\n---\n# Hot\n\n```view\nfrom: p/docs/improvements\nwhere:\n  - status = open\ncolumns: [id, title]\n```\n\n" +
+		"```view\nfrom: p/plans\nwhere:\n  - implements_imp contains this.id\n```\n"
+	req, _ := json.Marshal(map[string]string{"markdown": md, "path": "p/docs/improvements/IMP-002.md"})
+	w := f.doAuthRecorder(http.MethodPost, "/api/v1/preview", string(req), nil)
+	if w.code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.code, w.body)
+	}
+	var decoded previewResponse
+	if err := json.NewDecoder(strings.NewReader(w.body)).Decode(&decoded); err != nil {
+		t.Fatal(err)
+	}
+	h := decoded.HTML
+	for _, want := range []string{`class="gosidian-view"`, "<table", `data-preview-path="p/docs/improvements/IMP-001.md"`, `data-preview-path="p/plans/plan.md"`} {
+		if !strings.Contains(h, want) {
+			t.Errorf("preview lacks %q:\n%s", want, h)
+		}
+	}
+	if strings.Contains(h, "IMP-002 — done one") || strings.Contains(h, "from: p/docs") {
+		t.Errorf("preview shows a filtered row or the raw spec:\n%s", h)
+	}
+}
+
+// BUG-086: a full-path wikilink without extension resolves in the preview.
+func TestPreview_ResolvesFullPathLinks(t *testing.T) {
+	f := newNotesFixture(t)
+	f.seedNote(t, "p/plans/a-plan.md", "---\ntitle: Something else\n---\n")
+	w := f.doAuthRecorder(http.MethodPost, "/api/v1/preview", `{"markdown":"See [[p/plans/a-plan]] and [[p/plans/a-plan.md|x]]."}`, nil)
+	var decoded previewResponse
+	if err := json.NewDecoder(strings.NewReader(w.body)).Decode(&decoded); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(decoded.HTML, "unresolved") || strings.Count(decoded.HTML, `data-preview-path="p/plans/a-plan.md"`) != 2 {
+		t.Errorf("full-path links unresolved:\n%s", decoded.HTML)
+	}
+}

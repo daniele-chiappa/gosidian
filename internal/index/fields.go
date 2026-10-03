@@ -123,11 +123,14 @@ type FieldCond struct {
 type QueryOptions struct {
 	Projects []string
 	Exclude  []string
-	Where    []FieldCond
-	Sort     string
-	Desc     bool
-	Limit    int
-	Fields   []string
+	// Folders, when set, keeps only notes directly inside one of these
+	// vault-relative folders, the rows of a database note (IMP-127).
+	Folders []string
+	Where   []FieldCond
+	Sort    string
+	Desc    bool
+	Limit   int
+	Fields  []string
 }
 
 // QueryHit is one matching note, with the requested fields' values in
@@ -151,6 +154,15 @@ func (i *Index) Query(opts QueryOptions) ([]QueryHit, int, error) {
 		return nil, 0, fmt.Errorf("%w: at most %d conditions", ErrBadQuery, MaxQueryConds)
 	}
 	where, args := scopeClause(opts.Projects, opts.Exclude)
+	if len(opts.Folders) > 0 {
+		ors := make([]string, 0, len(opts.Folders))
+		for _, f := range opts.Folders {
+			in := likeUnder(strings.Trim(f, "/"))
+			ors = append(ors, `(n.path LIKE ? ESCAPE '\' AND n.path NOT LIKE ? ESCAPE '\')`)
+			args = append(args, in, in+"/%")
+		}
+		where += " AND (" + strings.Join(ors, " OR ") + ")"
+	}
 	for _, c := range opts.Where {
 		sqlc, cargs, err := condSQL(c)
 		if err != nil {

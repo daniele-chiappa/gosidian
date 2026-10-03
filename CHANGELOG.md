@@ -8,6 +8,42 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.44.0] — 2026-10-03 — "views"
+
+Notes can show live data: a ```` ```view ```` block lists other notes by
+folder and frontmatter, computed every time the note is read. Pull the
+image and restart; nothing to migrate.
+
+### Added
+- **Views** — a fenced `view` block holds a small YAML spec: `from` (the
+  folder whose notes it lists), `where` (`"status in [open, done]"`
+  strings or `memory_query`-style maps), `sort`, `columns`, `limit` and
+  `as: table | list`, with `this.<field>` for the note's own fields and
+  `today±Nd` for relative dates. The note keeps only the spec; the list is
+  computed on every read, with the reader's own permissions.
+  - The web UI shows the table in place of the block and renders it again
+    when other notes change.
+  - `memory_bootstrap` returns `hot.md` and the other session files with
+    their views computed (the block stays, its result follows between
+    `gosidian:view-result` markers) and a `views_etag` to pass in
+    `known_etags`; `etag` stays the file's, for `if_match`.
+  - `memory_get` and `memory_get_section` return the file as stored, or the
+    computed views with `render_views: true`.
+  - Directives v16 ask agents to leave sections made of views alone at the
+    end of a task.
+  See [docs/vault/views.md](docs/vault/views.md).
+- **Open notes follow server changes** — a note open in the web UI reloads
+  when it changes elsewhere; with unsaved edits it says so and offers a
+  reload instead of losing the draft.
+
+### Fixed
+- **Full-path links resolve in the web UI** — a wikilink naming a note by
+  its full path without extension (`[[folder/sub/note]]`) showed as a
+  dangling link in the note view and the editor preview, though the note
+  existed.
+- **Lint and views** — `status-incoherent` no longer flags in-progress
+  plans that `hot.md` lists through a view.
+
 ## [2.43.0] — 2026-10-02 — "schemas"
 
 Database notes get a schema that gosidian checks. Pull the image and

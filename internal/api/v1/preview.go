@@ -2,10 +2,24 @@ package v1
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gosidian/gosidian/internal/authz"
+	"github.com/gosidian/gosidian/internal/index"
+	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/gosidian/gosidian/internal/vault"
+	"github.com/gosidian/gosidian/internal/views"
 )
+
+// withNoteExts lists target with each recognised note extension appended.
+func withNoteExts(target string) []string {
+	exts := vault.NoteExtensions()
+	out := make([]string, 0, len(exts))
+	for _, e := range exts {
+		out = append(out, target+e)
+	}
+	return out
+}
 
 // pathWithNoteExt reports whether path equals target plus one of the
 // recognised note extensions (extension-less wikilink form).
@@ -21,6 +35,9 @@ func pathWithNoteExt(path, target string) bool {
 // previewRequest carries raw markdown from the editor split-pane.
 type previewRequest struct {
 	Markdown string `json:"markdown"`
+	// Path is the note being previewed, when there is one: its views
+	// resolve this.<field> against it (IMP-127).
+	Path string `json:"path,omitempty"`
 }
 
 // previewResponse returns sanitized HTML the SPA can drop into a
@@ -51,7 +68,18 @@ func (r *Router) handlePreview(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	html, err := r.deps.Renderer.Render([]byte(body.Markdown), previewResolver{r: r, p: principalFromContext(req)})
+	p := principalFromContext(req)
+	md := []byte(body.Markdown)
+	if r.deps.Index != nil {
+		// ```view blocks become their computed result before rendering
+		// (IMP-127), queried with the reader's own scope.
+		c := views.Context{
+			This:  views.ThisFields(body.Path, parser.ParseFrontmatterFields(parser.FrontmatterRawForPath(body.Path, md))),
+			Today: time.Now(),
+		}
+		md, _ = views.RenderNote(md, false, c, r.viewQuery(p))
+	}
+	html, err := r.deps.Renderer.Render(md, previewResolver{r: r, p: p})
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, "render: "+err.Error())
 		return
@@ -77,6 +105,13 @@ func (pr previewResolver) Resolve(target string) string {
 	// Try by exact path first (allows wikilinks like [[folder/Note]]). The
 	// extension-less form is tried against every note extension, not just .md,
 	// so links to .html notes resolve like they do in the index (BUG-024).
+	// NotesByPrefix below only finds notes inside a folder named target, so
+	// the note itself is looked up by path here (BUG-086).
+	for _, cand := range append([]string{target}, withNoteExts(target)...) {
+		if n, err := r.deps.Index.Note(cand); err == nil && n != nil && r.canSee(pr.p, n.Path) {
+			return n.Path
+		}
+	}
 	if rows, err := r.deps.Index.NotesByPrefix(target); err == nil {
 		for _, n := range rows {
 			if (n.Path == target || pathWithNoteExt(n.Path, target) || n.Title == target) && r.canSee(pr.p, n.Path) {
@@ -116,4 +151,29 @@ func (pr previewResolver) ResolveImage(target string) string {
 		}
 	}
 	return ""
+}
+
+// viewQuery runs the query of a view with the reader's scope, as
+// POST /query does: a view never shows a note its reader cannot see.
+func (r *Router) viewQuery(p authz.Principal) views.QueryFunc {
+	return func(o index.QueryOptions) ([]index.QueryHit, int, error) {
+		scope, err := r.searchScope(p, "")
+		if err != nil {
+			return nil, 0, err
+		}
+		o.Projects = scope
+		hits, total, err := r.deps.Index.Query(o)
+		if err != nil {
+			return nil, 0, err
+		}
+		out := hits[:0]
+		for _, h := range hits {
+			if !r.canSee(p, h.Path) {
+				total--
+				continue
+			}
+			out = append(out, h)
+		}
+		return out, total, nil
+	}
 }

@@ -123,12 +123,14 @@ func (s *Server) registerTools() {
 		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative path to the .md file.")),
 		mcp.WithBoolean("raw", mcp.Description("Bypass the oversize guard and return the full body regardless of size.")),
 		mcp.WithNumber("max_bytes", mcp.Description("Explicit body cap in bytes — truncates even below the default threshold. Ignored when raw:true.")),
+		mcp.WithBoolean("render_views", mcp.Description("Also compute the note's ```view blocks: each block stays and its result follows it between gosidian:view-result markers. Off by default, so a note read to be edited comes back as it is on disk; never write the computed result back.")),
 	), s.handleGet)
 
 	s.impl.AddTool(mcp.NewTool("memory_get_section",
 		mcp.WithDescription("Read a single section of a note (heading + content up to the next heading of equal or higher level). Use when a note is long and you only need one section — much cheaper than memory_get on large files."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative path to the .md file.")),
 		mcp.WithString("heading", mcp.Required(), mcp.Description("The heading text to retrieve, without the leading '#'s. Match is case-insensitive.")),
+		mcp.WithBoolean("render_views", mcp.Description("Also compute the note's ```view blocks: each block stays and its result follows it between gosidian:view-result markers. Off by default, so a note read to be edited comes back as it is on disk; never write the computed result back.")),
 	), s.handleGetSection)
 
 	s.impl.AddTool(mcp.NewTool("memory_batch_get",
@@ -545,12 +547,15 @@ func (s *Server) handleNotesByTag(ctx context.Context, req mcp.CallToolRequest) 
 }
 
 type noteContent struct {
-	Path    string          `json:"path"`
-	Title   string          `json:"title"`
-	Content string          `json:"content"`
-	ETag    string          `json:"etag"`
-	Kind    string          `json:"kind,omitempty"`  // "image" for a resolved media note (ADR-013); empty otherwise
-	Media   *vault.MediaRef `json:"media,omitempty"` // resolved image payload when Kind=="image"
+	Path    string `json:"path"`
+	Title   string `json:"title"`
+	Content string `json:"content"`
+	ETag    string `json:"etag"`
+	// ViewsRendered says Content carries computed views (render_views), so
+	// it is not the file as stored; ETag is still the stored file's.
+	ViewsRendered bool            `json:"views_rendered,omitempty"`
+	Kind          string          `json:"kind,omitempty"`  // "image" for a resolved media note (ADR-013); empty otherwise
+	Media         *vault.MediaRef `json:"media,omitempty"` // resolved image payload when Kind=="image"
 	// Oversize-guard fields (plan 20260706-token-economy-round2): set only
 	// when the body was truncated. ETag always stamps the FULL note, so
 	// optimistic locking works unchanged on a truncated read.
@@ -607,6 +612,11 @@ func (s *Server) handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	if ref, kind := s.vault.MediaRefForNote(note.Path, note.Content); kind != "" {
 		nc.Kind = kind
 		nc.Media = ref
+	}
+	if req.GetBool("render_views", false) {
+		if out, hash := s.renderViews(tok, note.Path, note.Content); hash != "" {
+			nc.Content, nc.ViewsRendered = string(out), true
+		}
 	}
 
 	// Oversize guard: truncate the body (default threshold, or the caller's
@@ -692,7 +702,13 @@ func (s *Server) handleGetSection(ctx context.Context, req mcp.CallToolRequest) 
 	if err != nil {
 		return readNoteError(path, err), nil
 	}
-	section := parser.ExtractSection(note.Content, heading)
+	content := note.Content
+	if req.GetBool("render_views", false) {
+		if out, hash := s.renderViews(tok, note.Path, content); hash != "" {
+			content = out
+		}
+	}
+	section := parser.ExtractSection(content, heading)
 	if section == "" {
 		return mcp.NewToolResultErrorf("heading %q not found in %q", heading, path), nil
 	}
