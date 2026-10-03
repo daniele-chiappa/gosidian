@@ -56,12 +56,22 @@ note its reader could not open.
   `gosidian:view-result` markers. The file's `etag` is unchanged (it is the
   one `if_match` needs); `views_etag` adds a hash of the results and is the
   value to pass in `known_etags`, since the plain etag can no longer prove
-  that the views are unchanged.
+  that the views are unchanged. In `mode: "lite"` `hot_md` is an outline
+  without the body, so without the views: see below.
 - **`memory_get` / `memory_get_section`** — return the note as stored, so
   an agent editing it sees the file; `render_views: true` computes the
   views too.
 
+A read that returns view blocks without their rows says so: `memory_get`,
+`memory_get_section` and `memory_batch_get` (content mode) add a `hint`
+with the number of blocks left uncomputed. Outlines mark the sections that
+hold views with `views: N` — `memory_get_outline`, `memory_batch_get` in
+outline mode, a truncated `memory_get` and the lite `hot_md` of
+`memory_bootstrap`, which also carries a `hint`. An agent reading `hot.md`
+by sections then knows which ones to fetch with `render_views: true`.
+
 The computed result is never written to the file. A result copied into a
 note by mistake is dropped the next time the views are computed, rather
-than shown twice, and the directives (v16) tell agents to leave sections
-made of views alone at the end of a task.
+than shown twice, and the directives (v16 and later) tell agents to leave
+sections made of views alone at the end of a task; v17 adds when to read
+with `render_views`.

@@ -286,14 +286,35 @@ type Heading struct {
 // rules as goldmark's WithAutoHeadingID so anchor links match the rendered
 // HTML: lowercase, non-alphanumerics → '-', collapsed dashes.
 func ExtractHeadings(body []byte) []Heading {
-	src := string(body)
-	if m := frontmatterRe.FindStringSubmatch(src); m != nil {
-		src = src[len(m[0]):]
-	}
-	src = stripCode(src)
-
 	var out []Heading
-	for _, line := range strings.Split(src, "\n") {
+	scanHeadings(body, func(h Heading, _ int) { out = append(out, h) })
+	return out
+}
+
+// HeadingOffsets returns the byte offset in body of the line of each heading
+// ExtractHeadings returns, in the same order.
+func HeadingOffsets(body []byte) []int {
+	var out []int
+	scanHeadings(body, func(_ Heading, off int) { out = append(out, off) })
+	return out
+}
+
+// scanHeadings calls fn for each ATX heading of body with the byte offset of
+// its line. Code is blanked line by line (stripCode keeps the line count), so
+// the n-th line of the stripped text is the n-th line of the original.
+func scanHeadings(body []byte, fn func(h Heading, off int)) {
+	src := string(body)
+	off := 0
+	if m := frontmatterRe.FindStringSubmatch(src); m != nil {
+		off = len(m[0])
+		src = src[off:]
+	}
+	orig := strings.Split(src, "\n")
+	for n, line := range strings.Split(stripCode(src), "\n") {
+		lineOff := off
+		if n < len(orig) {
+			off += len(orig[n]) + 1
+		}
 		i := 0
 		for i < len(line) && line[i] == '#' && i < 6 {
 			i++
@@ -305,13 +326,8 @@ func ExtractHeadings(body []byte) []Heading {
 		if text == "" {
 			continue
 		}
-		out = append(out, Heading{
-			Level: i,
-			Text:  text,
-			ID:    headingID(text),
-		})
+		fn(Heading{Level: i, Text: text, ID: headingID(text)}, lineOff)
 	}
-	return out
 }
 
 // ExtractSection returns the slice of body that belongs to the given heading

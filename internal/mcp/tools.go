@@ -123,20 +123,20 @@ func (s *Server) registerTools() {
 		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative path to the .md file.")),
 		mcp.WithBoolean("raw", mcp.Description("Bypass the oversize guard and return the full body regardless of size.")),
 		mcp.WithNumber("max_bytes", mcp.Description("Explicit body cap in bytes — truncates even below the default threshold. Ignored when raw:true.")),
-		mcp.WithBoolean("render_views", mcp.Description("Also compute the note's ```view blocks: each block stays and its result follows it between gosidian:view-result markers. Off by default, so a note read to be edited comes back as it is on disk; never write the computed result back.")),
+		mcp.WithBoolean("render_views", mcp.Description("Also compute the note's ```view blocks: each block stays and its result follows it between gosidian:view-result markers. Off by default, so a note read to be edited comes back as it is on disk (the response's hint then says how many blocks were left uncomputed); never write the computed result back.")),
 	), s.handleGet)
 
 	s.impl.AddTool(mcp.NewTool("memory_get_section",
 		mcp.WithDescription("Read a single section of a note (heading + content up to the next heading of equal or higher level). Use when a note is long and you only need one section — much cheaper than memory_get on large files."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative path to the .md file.")),
 		mcp.WithString("heading", mcp.Required(), mcp.Description("The heading text to retrieve, without the leading '#'s. Match is case-insensitive.")),
-		mcp.WithBoolean("render_views", mcp.Description("Also compute the note's ```view blocks: each block stays and its result follows it between gosidian:view-result markers. Off by default, so a note read to be edited comes back as it is on disk; never write the computed result back.")),
+		mcp.WithBoolean("render_views", mcp.Description("Also compute the note's ```view blocks: each block stays and its result follows it between gosidian:view-result markers. Off by default, so a note read to be edited comes back as it is on disk (the response's hint then says how many blocks were left uncomputed); never write the computed result back.")),
 	), s.handleGetSection)
 
 	s.impl.AddTool(mcp.NewTool("memory_batch_get",
 		mcp.WithDescription("Read multiple notes in a single call. Use this instead of N sequential memory_get calls when reconstructing context at session start. Each entry in the result has either content (success) or error (path not found / outside scope). The call itself does not fail because one path is missing. Result size is controllable: mode=outline|frontmatter skips bodies entirely, max_bytes_per_note truncates long bodies (entry gets truncated:true) — use them to keep bulk reads inside your context budget and fetch the few notes you actually need in full afterwards."),
 		mcp.WithArray("paths", mcp.Required(), mcp.Description("Array of vault-relative paths to read (max 50).")),
-		mcp.WithString("mode", mcp.Description("What to return per note: content (default, full body), outline (headings only), frontmatter (raw frontmatter block only). outline/frontmatter cost a fraction of the tokens.")),
+		mcp.WithString("mode", mcp.Description("What to return per note: content (default, full body), outline (headings only; views:N marks a section holding ```view blocks), frontmatter (raw frontmatter block only). Content comes as stored: a note with views says so in hint. outline/frontmatter cost a fraction of the tokens.")),
 		mcp.WithNumber("max_bytes_per_note", mcp.Description("Optional cap on the returned content bytes per note (content mode only). Longer bodies are cut at the cap and flagged truncated:true; the etag still stamps the full note.")),
 	), s.handleBatchGet)
 
@@ -153,7 +153,7 @@ func (s *Server) registerTools() {
 	), s.handleGetFrontmatter)
 
 	s.impl.AddTool(mcp.NewTool("memory_get_outline",
-		mcp.WithDescription("Read the heading outline of a note (level + text + anchor id). Use to discover the structure of a long note so you can target a specific section with memory_get_section instead of fetching the whole body."),
+		mcp.WithDescription("Read the heading outline of a note (level + text + anchor id). Use to discover the structure of a long note so you can target a specific section with memory_get_section instead of fetching the whole body. A heading with views:N holds N ```view blocks: read that section with render_views:true to see their rows."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative path to the .md file.")),
 	), s.handleGetOutline)
 
@@ -613,10 +613,13 @@ func (s *Server) handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 		nc.Kind = kind
 		nc.Media = ref
 	}
+	viewsNote := ""
 	if req.GetBool("render_views", false) {
 		if out, hash := s.renderViews(tok, note.Path, note.Content); hash != "" {
 			nc.Content, nc.ViewsRendered = string(out), true
 		}
+	} else {
+		viewsNote = viewsHint(note.Content, "pass render_views:true")
 	}
 
 	// Oversize guard: truncate the body (default threshold, or the caller's
@@ -631,7 +634,11 @@ func (s *Server) handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 		}
 	}
 	if limit > 0 {
-		cut := note.Content[:limit]
+		// Cut what is served: with render_views, the body with its views.
+		cut := []byte(nc.Content)
+		if limit < len(cut) {
+			cut = cut[:limit]
+		}
 		if i := bytes.LastIndexByte(cut, '\n'); i > 0 {
 			cut = cut[:i+1]
 		}
@@ -639,21 +646,25 @@ func (s *Server) handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 		nc.Truncated = true
 		nc.Size = note.Size
 		nc.Frontmatter = parser.FrontmatterRawForPath(note.Path, note.Content)
-		hs := parser.ExtractHeadings(note.Content)
+		hs := outline(note.Content)
 		nc.OutlineTotal = len(hs)
 		if len(hs) > getTruncMaxHeadings {
-			capped := make([]parser.Heading, 0, getTruncMaxHeadings)
+			capped := make([]outlineHeading, 0, getTruncMaxHeadings)
 			capped = append(capped, hs[:getTruncHeadHeadings]...)
 			capped = append(capped, hs[len(hs)-(getTruncMaxHeadings-getTruncHeadHeadings):]...)
 			hs = capped
 		}
-		for _, h := range hs {
-			nc.Headings = append(nc.Headings, outlineHeading{Level: h.Level, Text: h.Text, ID: h.ID})
-		}
+		nc.Headings = hs
 		nc.Hint = fmt.Sprintf("body truncated (%d of %d bytes): fetch one section with memory_get_section, pass raw:true for the full body, or GET it onto your disk without context tokens via the HTTP /download endpoint (your MCP base URL plus /download?path=<path>, bearer token; the ETag header works as if_match)", len(nc.Content), note.Size)
 		if nc.OutlineTotal > len(nc.Headings) {
 			nc.Hint += fmt.Sprintf("; outline capped to %d of %d headings (first %d + most recent)", len(nc.Headings), nc.OutlineTotal, getTruncHeadHeadings)
 		}
+	}
+	if viewsNote != "" {
+		if nc.Hint != "" {
+			nc.Hint += "; "
+		}
+		nc.Hint += viewsNote
 	}
 	return mcp.NewToolResultJSON(nc)
 }
@@ -703,7 +714,8 @@ func (s *Server) handleGetSection(ctx context.Context, req mcp.CallToolRequest) 
 		return readNoteError(path, err), nil
 	}
 	content := note.Content
-	if req.GetBool("render_views", false) {
+	rendered := req.GetBool("render_views", false)
+	if rendered {
 		if out, hash := s.renderViews(tok, note.Path, content); hash != "" {
 			content = out
 		}
@@ -712,12 +724,18 @@ func (s *Server) handleGetSection(ctx context.Context, req mcp.CallToolRequest) 
 	if section == "" {
 		return mcp.NewToolResultErrorf("heading %q not found in %q", heading, path), nil
 	}
-	return mcp.NewToolResultJSON(map[string]any{
+	out := map[string]any{
 		"path":    path,
 		"heading": heading,
 		"content": section,
 		"etag":    note.ETag(),
-	})
+	}
+	if !rendered {
+		if hint := viewsHint([]byte(section), "pass render_views:true"); hint != "" {
+			out["hint"] = hint
+		}
+	}
+	return mcp.NewToolResultJSON(out)
 }
 
 func (s *Server) handleCreate(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1361,6 +1379,7 @@ type batchGetEntry struct {
 	Headings    []outlineHeading `json:"headings,omitempty"`
 	ETag        string           `json:"etag,omitempty"`
 	Truncated   bool             `json:"truncated,omitempty"`
+	Hint        string           `json:"hint,omitempty"`
 	Error       string           `json:"error,omitempty"`
 }
 
@@ -1405,9 +1424,7 @@ func (s *Server) handleBatchGet(ctx context.Context, req mcp.CallToolRequest) (*
 		entry.ETag = note.ETag()
 		switch mode {
 		case "outline":
-			for _, h := range parser.ExtractHeadings(note.Content) {
-				entry.Headings = append(entry.Headings, outlineHeading{Level: h.Level, Text: h.Text, ID: h.ID})
-			}
+			entry.Headings = outline(note.Content)
 		case "frontmatter":
 			entry.Frontmatter = parser.FrontmatterRawForPath(p, note.Content)
 		default:
@@ -1417,6 +1434,7 @@ func (s *Server) handleBatchGet(ctx context.Context, req mcp.CallToolRequest) (*
 				entry.Truncated = true
 			}
 			entry.Content = body
+			entry.Hint = viewsHint(note.Content, "read it with memory_get and render_views:true")
 		}
 		out = append(out, entry)
 	}
@@ -1504,6 +1522,9 @@ type outlineHeading struct {
 	Level int    `json:"level"`
 	Text  string `json:"text"`
 	ID    string `json:"id"`
+	// Views counts the ```view blocks in the heading's own lines (up to the
+	// next heading): read that section with render_views to see their rows.
+	Views int `json:"views,omitempty"`
 }
 
 func (s *Server) handleGetOutline(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1522,14 +1543,9 @@ func (s *Server) handleGetOutline(ctx context.Context, req mcp.CallToolRequest) 
 	if err != nil {
 		return readNoteError(path, err), nil
 	}
-	heads := parser.ExtractHeadings(note.Content)
-	out := make([]outlineHeading, 0, len(heads))
-	for _, h := range heads {
-		out = append(out, outlineHeading{Level: h.Level, Text: h.Text, ID: h.ID})
-	}
 	return mcp.NewToolResultJSON(map[string]any{
 		"path":     path,
-		"headings": out,
+		"headings": outline(note.Content),
 		"etag":     note.ETag(),
 	})
 }

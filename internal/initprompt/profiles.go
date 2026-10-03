@@ -163,7 +163,16 @@ const StubVersion = 3
 // v13 (2026-09-29, BUG-067): the pre-stub check names the real marker
 // (gosidian:stub v=N) and says to look for it in the file on disk, since
 // agents that drop HTML comments from what they load never see it there.
-const DirectivesVersion = 16
+//
+// v14–v16 (2026-10-02/03, IMP-127): database notes (rows as notes, the
+// schema in fields), databases[] and notices in the bootstrap, sections made
+// of views left alone at the end of a task.
+//
+// v17 (2026-10-03, BUG-087): reads return view blocks without their rows —
+// the outline marks such sections with views:N (lite bootstrap included) and
+// the hint says so; render_views:true shows the rows, a read for an edit
+// goes without it.
+const DirectivesVersion = 17
 
 // AnchorVersion is the version of the agent-anchor template/format. It is
 // substituted into the `<!-- gosidian:anchor v=N ... -->` marker so the

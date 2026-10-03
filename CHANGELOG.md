@@ -8,6 +8,34 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.44.2] — 2026-10-03 — "view hints"
+
+Agents now learn when a read returns views without their rows. Pull the
+image and restart; nothing to migrate.
+
+### Fixed
+- **Reads say when views are not computed** — an agent that bootstrapped
+  with `mode: "lite"` and then read a `hot.md` section made of views got
+  the view specs and no rows, with nothing telling it so.
+  - `memory_get`, `memory_get_section` and `memory_batch_get` (content
+    mode) add a `hint` with the number of view blocks left uncomputed and
+    how to get their rows (`render_views: true`).
+  - Outlines mark each section that holds views with `views: N`. That
+    covers `memory_get_outline`, `memory_batch_get` in outline mode, a
+    truncated `memory_get` and the lite `hot_md` of `memory_bootstrap`,
+    which also carries a `hint`.
+  - Directives v17 tell agents to read such sections with
+    `render_views: true`, and without it when the note is to be edited.
+  - A truncated `memory_get` with `render_views: true` now cuts the body
+    with its views computed, not the file as stored.
+
+### Security
+- **brace-expansion 5.0.12 in the web UI's build tooling** — a development
+  dependency, updated for the advisory on 5.0.9; it is not part of the
+  built web UI. Still open, with no fix released: an advisory on `braces`
+  3.0.3 (GHSA-vfj7-8cjw-p6xm), which Tailwind's file watcher and glob
+  matcher use at build time on the project's own content globs.
+
 ## [2.44.1] — 2026-10-03 — "deps"
 
 Two dependency updates in the web UI that clear open security advisories.

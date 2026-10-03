@@ -32,7 +32,7 @@ func (s *Server) registerBootstrapTool() {
 		mcp.WithNumber("known_directives_version", mcp.Description("The directives_version you already hold from a previous bootstrap: on match, directives_block is omitted (directives_version is always present to detect it).")),
 		mcp.WithObject("known_etags", mcp.Description("Map of vault-relative path → etag from a previous bootstrap: files whose etag still matches come back unchanged:true with no body (hot_md, readme, agent_md). For a file with ```view blocks pass its views_etag: its views are computed at every bootstrap and its plain etag no longer proves it unchanged.")),
 		mcp.WithObject("known_anchor_metas", mcp.Description("Map of canonical vault path → meta_version from a previous bootstrap's anchors.items: anchors whose meta still matches come back as {path, canonical, meta_version, unchanged:true} with no content. If an unchanged anchor file is missing from disk, re-bootstrap without this param to get the content back.")),
-		mcp.WithString("mode", mcp.Description("auto (default) | full | lite. lite serves hot.md as frontmatter + heading outline (fetch sections via memory_get_section); auto switches to lite only when hot.md crosses the oversize threshold (flagged auto_lite:true).")),
+		mcp.WithString("mode", mcp.Description("auto (default) | full | lite. lite serves hot.md as frontmatter + heading outline (fetch sections via memory_get_section; a heading with views:N holds ```view blocks, so fetch it with render_views:true); auto switches to lite only when hot.md crosses the oversize threshold (flagged auto_lite:true).")),
 	), s.handleBootstrap)
 }
 
@@ -59,6 +59,8 @@ type bootstrapFile struct {
 	// oversize threshold while the caller left mode unset (auto). Pass
 	// mode:"full" to force the body.
 	AutoLite bool `json:"auto_lite,omitempty"`
+	// Hint tells a lite reader that some sections hold view blocks.
+	Hint string `json:"hint,omitempty"`
 }
 
 // autoLiteThreshold: with mode unset (auto), a hot.md larger than this is
@@ -305,8 +307,14 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 			// pulls the sections it needs via memory_get_section.
 			content := []byte(file.Content)
 			file.Frontmatter = parser.FrontmatterRawForPath(file.Path, content)
-			for _, h := range parser.ExtractHeadings(content) {
-				file.Headings = append(file.Headings, outlineHeading{Level: h.Level, Text: h.Text, ID: h.ID})
+			file.Headings = outline(content)
+			for _, h := range file.Headings {
+				if h.Views > 0 {
+					// The computed views go with the body (BUG-087): say
+					// which sections need render_views to show them again.
+					file.Hint = "headings with views:N hold ```view blocks: fetch those sections with memory_get_section and render_views:true to see their rows"
+					break
+				}
 			}
 			file.Content = ""
 		}

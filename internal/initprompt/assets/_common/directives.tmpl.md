@@ -168,12 +168,17 @@ dichiarativi. Non editare a mano il frontmatter di lifecycle.
   (canonical → meta_version: item invariati senza `content`).
   `mode` default è **auto**: hot.md oltre soglia arriva in forma lite
   (frontmatter+outline, `auto_lite:true`) — le sezioni via
-  `memory_get_section`.
+  `memory_get_section`. Un'intestazione con `views: N` contiene viste:
+  leggi quella sezione con `render_views: true`, se no ne vedi solo la
+  specifica.
 - **Letture**: `memory_get` **tronca** i body oltre 24 KiB (outline + primo
   chunk + `truncated:true`): prendi la sezione che serve con
   `memory_get_section`, o `raw:true` solo se serve davvero tutto. Letture
   bulk con `memory_batch_get` (`mode: outline|frontmatter`,
-  `max_bytes_per_note`).
+  `max_bytes_per_note`). Le letture danno il file com'è, quindi un blocco
+  ` ```view ` senza le sue righe (lo dice il `hint`): per vederle passa
+  `render_views: true` a `memory_get` o `memory_get_section`; per
+  modificare la nota leggila senza.
 - **Domande sul frontmatter** (stato, tipo, date, `importance`, liste come
   `implements_imp`): `memory_query` risponde in una chiamata con i soli
   campi chiesti, invece di `memory_notes_by_tag` + `memory_batch_get` +

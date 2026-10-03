@@ -1,6 +1,8 @@
 package mcp
 
 import (
+	"fmt"
+	"sort"
 	"time"
 
 	"github.com/gosidian/gosidian/internal/auth"
@@ -45,6 +47,40 @@ func (s *Server) renderViews(tok *auth.Token, rel string, content []byte) ([]byt
 		Today: time.Now(),
 	}
 	return views.RenderNote(content, true, c, s.viewQuery(tok))
+}
+
+// outline lists the headings of body for an outline response, each with the
+// view blocks of its own lines, so an agent that reads a note by sections
+// knows which ones need render_views (BUG-087).
+func outline(body []byte) []outlineHeading {
+	hs := parser.ExtractHeadings(body)
+	out := make([]outlineHeading, len(hs))
+	for i, h := range hs {
+		out[i] = outlineHeading{Level: h.Level, Text: h.Text, ID: h.ID}
+	}
+	blocks := views.FindBlocks(body)
+	offs := parser.HeadingOffsets(body)
+	if len(blocks) == 0 || len(offs) != len(out) {
+		return out
+	}
+	for _, b := range blocks {
+		// The last heading before the block owns it.
+		if i := sort.SearchInts(offs, b.Start+1) - 1; i >= 0 {
+			out[i].Views++
+		}
+	}
+	return out
+}
+
+// viewsHint is the hint of a read that returns view blocks without their
+// result (BUG-087): the text alone gives the spec and no rows. how says how
+// to get them. "" when content has no view blocks.
+func viewsHint(content []byte, how string) string {
+	n := len(views.FindBlocks(content))
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d ```view block(s) here, not computed: %s to see their rows (as returned, the text is the file as stored, the form an edit needs)", n, how)
 }
 
 // withRenderedViews computes the views of a bootstrap file in place and sets

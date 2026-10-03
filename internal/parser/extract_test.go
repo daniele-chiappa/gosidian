@@ -163,6 +163,19 @@ func TestExtractHeadings(t *testing.T) {
 	}
 }
 
+func TestHeadingOffsets(t *testing.T) {
+	body := []byte("---\ntitle: x\n---\n# Top `code` heading\n\nbody\n\n```\n# fake heading inside code\n```\n\n## Sub è\n")
+	offs := HeadingOffsets(body)
+	if len(offs) != len(ExtractHeadings(body)) {
+		t.Fatalf("offsets %v do not match the headings", offs)
+	}
+	for i, want := range []string{"# Top `code` heading\n", "## Sub è\n"} {
+		if got := string(body[offs[i]:]); !strings.HasPrefix(got, want) {
+			t.Errorf("offset %d points at %q, want %q", i, got, want)
+		}
+	}
+}
+
 func TestExtractSection(t *testing.T) {
 	body := []byte(`---
 title: x
