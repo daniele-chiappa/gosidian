@@ -311,22 +311,22 @@ func scanHeadings(body []byte, fn func(h Heading, off int)) {
 	}
 	orig := strings.Split(src, "\n")
 	for n, line := range strings.Split(stripCode(src), "\n") {
+		if n >= len(orig) {
+			break
+		}
 		lineOff := off
-		if n < len(orig) {
-			off += len(orig[n]) + 1
-		}
-		i := 0
-		for i < len(line) && line[i] == '#' && i < 6 {
-			i++
-		}
-		if i == 0 || i >= len(line) || line[i] != ' ' {
+		off += len(orig[n]) + 1
+		// The stripped line says whether this is a heading (a "# …" in a
+		// fence is blanked); the text comes from the original line, where
+		// inline code is still there instead of spaces (BUG-088).
+		if level, _ := parseHeadingLine(line); level == 0 {
 			continue
 		}
-		text := strings.TrimSpace(line[i+1:])
+		level, text := parseHeadingLine(orig[n])
 		if text == "" {
 			continue
 		}
-		fn(Heading{Level: i, Text: text, ID: headingID(text)}, lineOff)
+		fn(Heading{Level: level, Text: text, ID: headingID(text)}, lineOff)
 	}
 }
 

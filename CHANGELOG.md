@@ -8,6 +8,24 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.44.3] — 2026-10-03 — "outline headings"
+
+Outlines now give headings exactly as written, so an agent can read a
+section by the heading text it got from the outline. Pull the image and
+restart; nothing to migrate.
+
+### Fixed
+- **Outlines keep inline code in headings** — a heading such as
+  ``## Skill `deploy-lxc` created`` came out of an outline with spaces
+  where the code was, and an agent that passed that text to
+  `memory_get_section` got "heading not found". A heading made only of
+  code was left out of the outline entirely.
+  - The text now comes from the line as written, and so does the `id`,
+    which matches the anchor of the rendered page again.
+  - This affects `memory_get_outline`, a truncated `memory_get`,
+    `memory_batch_get` in outline mode, the lite `hot_md` of
+    `memory_bootstrap` and `memory_search` with `include_outline`.
+
 ## [2.44.2] — 2026-10-03 — "view hints"
 
 Agents now learn when a read returns views without their rows. Pull the

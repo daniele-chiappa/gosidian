@@ -163,6 +163,29 @@ func TestExtractHeadings(t *testing.T) {
 	}
 }
 
+// Inline code in a heading stays in its text (BUG-088): an agent passes the
+// outline text to memory_get_section, and the id must match goldmark's.
+func TestExtractHeadings_InlineCode(t *testing.T) {
+	body := []byte("# Log\n\n## Skill `deploy-lxc` creata\n\none\n\n## `only-code`\n\ntwo\n\n```\n## `fake` in a fence\n```\n")
+	hs := ExtractHeadings(body)
+	want := []struct{ text, id string }{
+		{"Log", "log"},
+		{"Skill `deploy-lxc` creata", "skill-deploy-lxc-creata"},
+		{"`only-code`", "only-code"},
+	}
+	if len(hs) != len(want) {
+		t.Fatalf("expected %d headings, got %d: %+v", len(want), len(hs), hs)
+	}
+	for i, w := range want {
+		if hs[i].Text != w.text || hs[i].ID != w.id {
+			t.Errorf("h[%d] = %+v, want text %q id %q", i, hs[i], w.text, w.id)
+		}
+		if ExtractSection(body, hs[i].Text) == "" {
+			t.Errorf("ExtractSection(%q) found no section", hs[i].Text)
+		}
+	}
+}
+
 func TestHeadingOffsets(t *testing.T) {
 	body := []byte("---\ntitle: x\n---\n# Top `code` heading\n\nbody\n\n```\n# fake heading inside code\n```\n\n## Sub è\n")
 	offs := HeadingOffsets(body)
