@@ -8,6 +8,21 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.44.1] — 2026-10-03 — "deps"
+
+Two dependency updates in the web UI that clear open security advisories.
+Pull the image and restart; nothing to migrate.
+
+### Security
+- **axios 1.20.0 and DOMPurify 3.4.16 in the web UI** — axios 1.18.1 had
+  advisories for header injection through inherited headers and FormData
+  headers, a prototype-pollution gadget in the Node HTTP adapter and
+  ignored CIDR-form `NO_PROXY` entries; DOMPurify 3.4.15 one for event
+  handlers left armed in subtrees an `afterSanitize` hook removes with
+  `IN_PLACE`. The web UI runs axios in the browser (no Node adapter, no
+  proxy settings) and DOMPurify without `IN_PLACE` or hooks, so none of
+  them applies as used there; the update clears the alerts.
+
 ## [2.44.0] — 2026-10-03 — "views"
 
 Notes can show live data: a ```` ```view ```` block lists other notes by
