@@ -55,16 +55,12 @@ func ExtractHTML(body []byte) (links []WikiLinkRef, tags []string, title, text s
 	rest := src
 	if m := htmlFrontmatterRe.FindStringSubmatch(src); m != nil {
 		raw := m[1]
-		if tm := frontTitleRe.FindStringSubmatch(raw); tm != nil {
-			title = strings.TrimSpace(tm[1])
-		}
+		title = frontmatterTitle(raw)
 		tags = extractFrontmatterTags(raw)
 		rest = src[len(m[0]):]
 	} else if m := frontmatterRe.FindStringSubmatch(src); m != nil {
 		raw := m[1]
-		if tm := frontTitleRe.FindStringSubmatch(raw); tm != nil {
-			title = strings.TrimSpace(tm[1])
-		}
+		title = frontmatterTitle(raw)
 		tags = extractFrontmatterTags(raw)
 		rest = src[len(m[0]):]
 	}

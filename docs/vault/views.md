@@ -28,7 +28,24 @@ view stays a readable code block.
 | `sort` | a field, or `path`, `title`, `modified`, optionally followed by `asc` or `desc` |
 | `columns` | what to show; `title` links to the note, `path` and `modified` come from the note itself, anything else from its frontmatter. Default: `title` plus the fields used in `where` and `sort` |
 | `limit` | rows to show (default 50, max 500); a note under the table says when more match |
-| `as` | `table` (default) or `list` |
+| `as` | `table` (default), `list`, or `board` |
+| `group_by` | with `as: board`, the field whose values make the board's columns: a `select` or `checkbox` field of the database the view lists |
+
+A **board** groups the notes by `group_by`. When the view lists the rows
+of a database, its columns follow the options of that select field (empty
+ones included), then `false` and `true` for a checkbox; other values come
+after them, and a column for the notes without a value comes last, when
+there are some. Without a schema the columns are the values found.
+Agents read a board as one list per non-empty column.
+
+```view
+from: myproject/docs/improvements
+where:
+  - status != superseded
+as: board
+group_by: status
+columns: [title, priority]
+```
 
 String conditions use `=`, `!=`, `<`, `<=`, `>`, `>=`, `in [a, b]`,
 `contains`, `exists` and `!exists`. ISO dates and numbers compare as such,
@@ -49,8 +66,13 @@ Two kinds of relative values:
 A view is always computed with the reader's own scope: it never lists a
 note its reader could not open.
 
-- **Web UI** — the note shows the table (or list) in place of the block,
-  with links you can follow.
+- **Web UI** — the note shows the table, list or board in place of the
+  block, with links you can follow. `POST /api/v1/preview` also returns
+  each view as data in `views` (columns typed by the database's schema,
+  the rows with their fields and whether the reader may edit them, a
+  board's columns), matched to its place in the HTML by the `data-view`
+  index of its `<div class="gosidian-view">`. The schema of a database is
+  given only when the reader may open the database note.
 - **`memory_bootstrap`** — `hot_md` and the other session files come with
   their views computed: each block stays, and its result follows it between
   `gosidian:view-result` markers. The file's `etag` is unchanged (it is the

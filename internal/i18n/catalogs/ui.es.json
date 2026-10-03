@@ -309,5 +309,23 @@
     "redirecting": "Volviendo a la aplicación…",
     "error_missing": "Esta solicitud de autorización es desconocida o ha caducado. Empieza de nuevo desde la aplicación.",
     "error_generic": "Algo ha fallado. Inténtalo de nuevo desde la aplicación."
+  },
+  "views": {
+    "no_rows": "No hay notas que coincidan.",
+    "showing": "{shown} de {total} notas.",
+    "edit": "Editar {field}",
+    "list_hint": "Valores separados por comas",
+    "conflict": "{field} se cambió mientras tanto y ahora vale «{value}»: el cambio no se ha guardado.",
+    "conflict_empty": "{field} se vació mientras tanto: el cambio no se ha guardado.",
+    "invalid": "No guardado: {reason}",
+    "forbidden": "No guardado: este acceso no permite editar la nota.",
+    "not_a_number": "{field}: no es un número.",
+    "save_failed": "El cambio no se ha guardado.",
+    "properties": "Propiedades",
+    "row_of": "fila de",
+    "read_only": "solo lectura",
+    "not_declared": "Fuera del esquema",
+    "relation_hint": "[[nota]], o un título",
+    "suggestions": "Notas"
   }
 }

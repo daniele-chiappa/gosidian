@@ -75,7 +75,7 @@ const schemaVersion = 3
 // keeping rows extracted by the old code. TestContentVersion_Golden fails
 // when the extraction output changes without a bump. Link resolution is not
 // covered: the boot scan runs ResolveAll every time.
-const ContentVersion = 1
+const ContentVersion = 3
 
 // migrate brings an index file to schemaVersion and reports whether it had
 // to. The index is a cache of the vault — the boot scan re-upserts every

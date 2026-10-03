@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"regexp"
 	"strings"
 )
@@ -65,7 +66,9 @@ var persistedRe = regexp.MustCompile(`(?s)\n?` + regexp.QuoteMeta(resultOpen) + 
 // Expand returns body with every view block rendered by render. With
 // keepSpec the block stays and its result follows it between markers (the
 // form for agents, who must see what produces a section); without, the
-// block is replaced by its result (the form for the web UI). The second
+// block is replaced by its result inside <div class="gosidian-view"
+// data-view="N">, N the block's position among the note's views (the form
+// for the web UI, whose editors find their view by N). The second
 // value hashes the results, so a caller can tell a changed view from an
 // unchanged file.
 func Expand(body []byte, keepSpec bool, render func(spec string) string) ([]byte, string) {
@@ -77,7 +80,7 @@ func Expand(body []byte, keepSpec bool, render func(spec string) string) ([]byte
 	h := sha256.New()
 	var out bytes.Buffer
 	last := 0
-	for _, b := range blocks {
+	for i, b := range blocks {
 		res := render(b.Spec)
 		h.Write([]byte(res))
 		if keepSpec {
@@ -85,7 +88,7 @@ func Expand(body []byte, keepSpec bool, render func(spec string) string) ([]byte
 			out.WriteString(resultOpen + "\n\n" + res + "\n" + resultClose + "\n")
 		} else {
 			out.Write(body[last:b.Start])
-			out.WriteString(`<div class="gosidian-view">` + "\n\n" + res + "\n</div>\n")
+			fmt.Fprintf(&out, "<div class=\"gosidian-view\" data-view=\"%d\">\n\n%s\n</div>\n", i, res)
 		}
 		last = b.End
 	}
@@ -119,13 +122,31 @@ func ThisFields(notePath string, fm map[string]any) map[string][]string {
 // one-line warning instead of breaking the note.
 func RenderNote(body []byte, keepSpec bool, c Context, q QueryFunc) ([]byte, string) {
 	return Expand(body, keepSpec, func(spec string) string {
-		s, err := Parse(spec, c)
-		if err == nil {
-			var r *Result
-			if r, err = Run(s, q); err == nil {
-				return r.Markdown()
-			}
+		r, err := compute(spec, c, q)
+		if err != nil {
+			return warning(err)
 		}
-		return "> ⚠️ view: " + strings.ReplaceAll(err.Error(), "\n", " ") + "\n"
+		return r.Markdown()
 	})
+}
+
+// RenderNoteData expands the view blocks of a note for the web UI, as
+// RenderNote without the spec, and returns the views in the form the
+// editors use, in the order of their data-view index.
+func RenderNoteData(body []byte, c Context, q QueryFunc) ([]byte, []Data) {
+	var data []Data
+	out, _ := Expand(body, false, func(spec string) string {
+		r, err := compute(spec, c, q)
+		if err != nil {
+			data = append(data, Data{Error: err.Error()})
+			return warning(err)
+		}
+		data = append(data, r.Data(c))
+		return r.Markdown()
+	})
+	return out, data
+}
+
+func warning(err error) string {
+	return "> ⚠️ view: " + strings.ReplaceAll(err.Error(), "\n", " ") + "\n"
 }

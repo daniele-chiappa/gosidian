@@ -378,5 +378,23 @@
     "redirecting": "Ti riporto all'applicazione…",
     "error_missing": "Questa richiesta di autorizzazione è sconosciuta o scaduta. Ricomincia dall'applicazione.",
     "error_generic": "Qualcosa è andato storto. Riprova dall'applicazione."
+  },
+  "views": {
+    "no_rows": "Nessuna nota corrispondente.",
+    "showing": "{shown} note su {total}.",
+    "edit": "Modifica {field}",
+    "list_hint": "Valori separati da virgola",
+    "conflict": "{field} è stato modificato nel frattempo e ora vale «{value}»: la modifica non è stata salvata.",
+    "conflict_empty": "{field} è stato svuotato nel frattempo: la modifica non è stata salvata.",
+    "invalid": "Non salvato: {reason}",
+    "forbidden": "Non salvato: con il tuo accesso questa nota non si può modificare.",
+    "not_a_number": "{field}: non è un numero.",
+    "save_failed": "La modifica non è stata salvata.",
+    "properties": "Proprietà",
+    "row_of": "riga di",
+    "read_only": "sola lettura",
+    "not_declared": "Fuori dallo schema",
+    "relation_hint": "[[nota]], o scrivi un titolo",
+    "suggestions": "Note"
   }
 }

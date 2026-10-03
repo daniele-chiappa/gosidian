@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gosidian/gosidian/internal/auth"
+	"github.com/gosidian/gosidian/internal/dbschema"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/gosidian/gosidian/internal/views"
@@ -43,10 +44,25 @@ func (s *Server) viewQuery(tok *auth.Token) views.QueryFunc {
 // ("" when the note has no views).
 func (s *Server) renderViews(tok *auth.Token, rel string, content []byte) ([]byte, string) {
 	c := views.Context{
-		This:  views.ThisFields(rel, parser.ParseFrontmatterFields(parser.FrontmatterRawForPath(rel, content))),
-		Today: time.Now(),
+		This:   views.ThisFields(rel, parser.ParseFrontmatterFields(parser.FrontmatterRawForPath(rel, content))),
+		Today:  time.Now(),
+		Schema: s.viewSchema(tok),
 	}
 	return views.RenderNote(content, true, c, s.viewQuery(tok))
+}
+
+// viewSchema resolves the schema of the database whose rows are the notes
+// of a folder, when the token may read the database note: it orders the
+// columns of a board as the select's options.
+func (s *Server) viewSchema(tok *auth.Token) func(folder string) *dbschema.Schema {
+	filter := buildProjectsFilter(nil, tok.ProjectList())
+	return func(folder string) *dbschema.Schema {
+		schema, err := dbschema.Covering(s.index, s.vault, folder+"/_")
+		if err != nil || schema == nil || !tok.AllowsPath(schema.Path) || !filter.matches(schema.Path) || s.pathInHiddenProject(schema.Path) {
+			return nil
+		}
+		return schema
+	}
 }
 
 // outline lists the headings of body for an outline response, each with the

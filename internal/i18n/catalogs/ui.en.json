@@ -378,5 +378,23 @@
     "redirecting": "Sending you back to the application…",
     "error_missing": "This authorization request is unknown or has expired. Start again from the application.",
     "error_generic": "Something went wrong. Try again from the application."
+  },
+  "views": {
+    "no_rows": "No matching notes.",
+    "showing": "Showing {shown} of {total} notes.",
+    "edit": "Edit {field}",
+    "list_hint": "Comma-separated values",
+    "conflict": "{field} was changed meanwhile and is now “{value}”: the change was not saved.",
+    "conflict_empty": "{field} was emptied meanwhile: the change was not saved.",
+    "invalid": "Not saved: {reason}",
+    "forbidden": "Not saved: this note cannot be edited with your access.",
+    "not_a_number": "{field}: not a number.",
+    "save_failed": "The change was not saved.",
+    "properties": "Properties",
+    "row_of": "row of",
+    "read_only": "read only",
+    "not_declared": "Not in the schema",
+    "relation_hint": "[[note]], or type a title",
+    "suggestions": "Notes"
   }
 }

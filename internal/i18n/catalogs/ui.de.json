@@ -309,5 +309,23 @@
     "redirecting": "Zurück zur Anwendung…",
     "error_missing": "Diese Autorisierungsanfrage ist unbekannt oder abgelaufen. Beginne erneut in der Anwendung.",
     "error_generic": "Etwas ist schiefgelaufen. Versuche es erneut aus der Anwendung."
+  },
+  "views": {
+    "no_rows": "Keine passenden Notizen.",
+    "showing": "{shown} von {total} Notizen.",
+    "edit": "{field} bearbeiten",
+    "list_hint": "Durch Kommas getrennte Werte",
+    "conflict": "{field} wurde inzwischen geändert und ist jetzt „{value}“: die Änderung wurde nicht gespeichert.",
+    "conflict_empty": "{field} wurde inzwischen geleert: die Änderung wurde nicht gespeichert.",
+    "invalid": "Nicht gespeichert: {reason}",
+    "forbidden": "Nicht gespeichert: mit deinem Zugriff lässt sich diese Notiz nicht bearbeiten.",
+    "not_a_number": "{field}: keine Zahl.",
+    "save_failed": "Die Änderung wurde nicht gespeichert.",
+    "properties": "Eigenschaften",
+    "row_of": "Zeile von",
+    "read_only": "nur lesen",
+    "not_declared": "Nicht im Schema",
+    "relation_hint": "[[Notiz]] oder ein Titel",
+    "suggestions": "Notizen"
   }
 }

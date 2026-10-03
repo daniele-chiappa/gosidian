@@ -164,6 +164,9 @@ func TestQuery_ScopeSortLimitFields(t *testing.T) {
 	if !reflect.DeepEqual(got, []string{"alpha/plans/a.md", "alpha/plans/b.md", "alpha/plans/c.md"}) {
 		t.Errorf("project scope: %v", got)
 	}
+	if got, total := queryPaths(t, idx, QueryOptions{Paths: []string{"alpha/plans/b.md", "beta/plans/d.md", "nope.md"}, Sort: "path"}); !reflect.DeepEqual(got, []string{"alpha/plans/b.md", "beta/plans/d.md"}) || total != 2 {
+		t.Errorf("paths: %v (total %d)", got, total)
+	}
 	if got, total := queryPaths(t, idx, QueryOptions{Projects: []string{}, Where: plans}); got != nil || total != 0 {
 		t.Errorf("empty project list must match nothing: %v %d", got, total)
 	}

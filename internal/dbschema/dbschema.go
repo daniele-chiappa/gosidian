@@ -177,6 +177,49 @@ func (s *Schema) Validate(rel, frontmatter string) []Problem {
 	return out
 }
 
+// CheckEdit reports how setting the keys of set and removing those of unset
+// would break the schema for the row at rel. Values are as JSON decodes them
+// (string, float64, bool, []any, nil). Only the keys named are looked at, so
+// a row that breaks the schema elsewhere can still be edited one field at a
+// time (IMP-127 phase 5).
+func (s *Schema) CheckEdit(rel string, set map[string]any, unset []string) []Problem {
+	keys := make([]string, 0, len(set))
+	for k := range set {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var out []Problem
+	for _, k := range keys {
+		v := set[k]
+		f, declared := s.Field(k)
+		if !declared {
+			if !slices.Contains(implicitFields, k) {
+				out = append(out, Problem{Field: k, Message: fmt.Sprintf(
+					"field %q is not in the schema of %s (fields: %s)", k, s.Path, strings.Join(s.FieldNames(), ", "))})
+			}
+			continue
+		}
+		if f.Required && (v == nil || v == "") {
+			out = append(out, Problem{Field: k, Message: fmt.Sprintf("required field %q cannot be empty", k)})
+			continue
+		}
+		if msg := checkValue(f, v); msg != "" {
+			out = append(out, Problem{Field: k, Message: msg})
+		}
+		if k == "id" {
+			if base := strings.TrimSuffix(path.Base(rel), path.Ext(rel)); fmt.Sprint(v) != base {
+				out = append(out, Problem{Field: "id", Message: fmt.Sprintf("id %q does not match the file name %q", fmt.Sprint(v), base)})
+			}
+		}
+	}
+	for _, k := range unset {
+		if f, ok := s.Field(k); ok && f.Required {
+			out = append(out, Problem{Field: k, Message: fmt.Sprintf("required field %q cannot be removed", k)})
+		}
+	}
+	return out
+}
+
 // checkValue returns why v is not a valid value of f, or "".
 func checkValue(f Field, v any) string {
 	if v == nil {

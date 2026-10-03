@@ -84,6 +84,17 @@ func normalizeTag(s string) string {
 	return strings.TrimSpace(s)
 }
 
+// WikiLinks returns the [[wikilinks]] of s, in order: a frontmatter value,
+// for instance, where the body's code rules do not apply.
+func WikiLinks(s string) []WikiLinkRef {
+	var out []WikiLinkRef
+	for _, m := range wikiLinkRe.FindAllStringSubmatch(s, -1) {
+		target, alias := parseWikiLinkInner(m[1])
+		out = append(out, WikiLinkRef{Target: target, Alias: alias})
+	}
+	return out
+}
+
 // parseWikiLinkInner takes the raw content between [[ and ]] and returns
 // (target, alias). The \| sequence is recognized as a markdown-table escape
 // for the pipe and treated identically to a regular | alias separator —
@@ -104,7 +115,7 @@ var tagRe = regexp.MustCompile(`(^|[\s>(])#([\p{L}_][\p{L}\p{N}_\-/]*)`)
 
 // frontmatter: lines between --- / --- at top
 var frontmatterRe = regexp.MustCompile(`(?s)\A---\r?\n(.*?)\r?\n---\r?\n`)
-var frontTitleRe = regexp.MustCompile(`(?m)^title:\s*["']?(.*?)["']?\s*$`)
+var frontTitleRe = regexp.MustCompile(`(?m)^title:[ \t]*(.*)$`)
 var frontTagsKeyRe = regexp.MustCompile(`(?m)^tags:\s*(.*)$`)
 var frontScalarRe = regexp.MustCompile(`(?m)^([a-zA-Z_][\w-]*):\s*(.*)$`)
 
@@ -446,9 +457,7 @@ func Extract(body []byte) (links []WikiLinkRef, tags []string, title string) {
 
 	var fmTags []string
 	if m := frontmatterRe.FindStringSubmatch(src); m != nil {
-		if tm := frontTitleRe.FindStringSubmatch(m[1]); tm != nil {
-			title = strings.TrimSpace(tm[1])
-		}
+		title = frontmatterTitle(m[1])
 		fmTags = extractFrontmatterTags(m[1])
 		src = src[len(m[0]):]
 	}
@@ -559,15 +568,32 @@ func HasFrontmatterKey(raw, key string) bool {
 	return false
 }
 
+// frontmatterTitle returns the title key of raw frontmatter, unquoted like
+// any other scalar (BUG-089), or "" when there is none.
+func frontmatterTitle(raw string) string {
+	if tm := frontTitleRe.FindStringSubmatch(raw); tm != nil {
+		return unquoteScalar(strings.TrimSpace(tm[1]))
+	}
+	return ""
+}
+
 // unquoteScalar strips the quotes around a frontmatter scalar. A
 // double-quoted value is decoded so escaped quotes and backslashes written by
-// a YAML emitter round-trip; single-quoted (and bare) values keep the historic
-// trim behaviour.
+// a YAML emitter round-trip; a single-quoted one turns each doubled single
+// quote back into one. Only a value that opens and closes with the same quote
+// is quoted: `say "hi"` is plain text and keeps its quotes (BUG-089).
 func unquoteScalar(val string) string {
-	if len(val) >= 2 && val[0] == '"' && val[len(val)-1] == '"' {
+	if len(val) < 2 {
+		return val
+	}
+	switch first, last := val[0], val[len(val)-1]; {
+	case first == '"' && last == '"':
 		if u, err := strconv.Unquote(val); err == nil {
 			return u
 		}
+		return val[1 : len(val)-1]
+	case first == '\'' && last == '\'':
+		return strings.ReplaceAll(val[1:len(val)-1], "''", "'")
 	}
-	return strings.Trim(val, `"'`)
+	return val
 }

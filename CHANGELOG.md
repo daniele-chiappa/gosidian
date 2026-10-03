@@ -8,6 +8,64 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.45.0] — 2026-10-03 — "database editing"
+
+Database rows can now be edited from the web UI, in a view's table or in
+a row's own note, one field at a time and without overwriting a change
+made meanwhile. Pull the image and restart; at the first start the index
+re-reads every note once, which takes a few seconds.
+
+### Added
+- **Edit database rows from a table view** — on a row you may write, a
+  cell of a field the database's schema declares turns into its editor on
+  click or Enter: the options of a select, a date picker, a number,
+  checkboxes for a multi-select, a note picker for a relation, text for
+  the rest (lists comma-separated). A checkbox toggles at once.
+  - Only that field of the row is rewritten. If someone changed the same
+    field since the cell opened, nothing is overwritten: the cell shows
+    the current value and says so.
+  - A value the schema refuses, or a row you may not write, leaves the
+    cell as it was, with the reason.
+  - The table looks as before, follows changes made elsewhere, and shows
+    values holding wikilinks as links.
+- **Property panel for database rows** — a note that is a row of a
+  database shows its fields above the body, with the same editors: the
+  schema's fields first, then the note's other fields, read-only. The
+  `id`, which is the file name, is shown but not edited. `GET
+  /api/v1/notes/<path>/fields` serves the panel.
+- **Board views** — a view can be `as: board` with `group_by:` a select or
+  checkbox field. When it lists a database, its columns follow the
+  schema's options, empty ones included, then any other value, then the
+  notes without one. Agents read a board as one list per column, and so
+  does the web UI for now.
+- **View data in the preview** — `POST /api/v1/preview` also returns each
+  view as data (`views`): columns typed by the database's schema, rows
+  with their fields, their links and whether the reader may edit them,
+  and a board's columns. Each view's placeholder in the HTML carries its
+  index (`data-view`). A database's schema is given only to a reader who
+  may open the database note. Tables and lists render for agents as
+  before.
+- **Edit frontmatter fields over HTTP** — `PATCH
+  /api/v1/notes/<path>/frontmatter` sets and removes keys of a markdown
+  note and rewrites only their lines, so the rest of the frontmatter and
+  the body stay as written.
+  - `expect` checks each field against the value the client saw: 409 when
+    that field changed, while a change to another field does not get in
+    the way. `If-Match` remains the strict check on the whole note (412).
+  - On a database row, a value that breaks the schema for the fields
+    touched is refused (422, with the problems), as is a value that cannot
+    be written so that every reader reads it back. A key whose YAML is too
+    complex to edit line by line answers 400.
+
+### Fixed
+- **Frontmatter values that end with a quoted phrase** — a value such as
+  `title: Sync v1.12 "Agent workflow"` lost its last quote in the note's
+  title, the index, the views and every tool that reads fields, because
+  any quote at either end was stripped; an escaped quote in a quoted title
+  kept its backslash. A value is now unquoted only when it opens and
+  closes with the same quote, and a single-quoted one turns a doubled
+  quote back into one, as in YAML.
+
 ## [2.44.3] — 2026-10-03 — "outline headings"
 
 Outlines now give headings exactly as written, so an agent can read a

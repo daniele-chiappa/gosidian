@@ -14,24 +14,43 @@
  *   - external link                          → open in a new tab
  * Modified clicks (ctrl/cmd/middle) fall through to the browser (new tab on
  * the canonical deep-link URL).
+ *
+ * Views (IMP-127 phase 5): given the note's views as data (`views`, from
+ * /api/v1/preview), a table view is shown by ViewTable, whose cells edit
+ * the rows; any other view keeps the HTML the server rendered. Each view
+ * sits in its `<div class="gosidian-view" data-view="N">` placeholder.
  */
 import { computed, inject, ref } from 'vue'
 import DOMPurify from 'dompurify'
 import { useWindowsStore, type OpenSpec } from 'plancia'
 import { planciaKey } from '@/composables/planciaKey'
+import type { ViewData } from '@/api/preview'
+import ViewTable from '@/components/views/ViewTable.vue'
+import { splitViews } from '@/components/views/segments'
 
-const props = defineProps<{ html: string }>()
+const props = defineProps<{ html: string; views?: ViewData[] }>()
 
 const store = useWindowsStore()
 const openWindow = inject<(spec: OpenSpec) => string>('openWindow', (s) => store.open(s))
 const root = ref<HTMLElement | null>(null)
+const proseClass =
+  'prose prose-invert max-w-none prose-pre:bg-bg-elevated prose-pre:border prose-pre:border-border prose-code:before:hidden prose-code:after:hidden'
 
 const sanitized = computed(() =>
   DOMPurify.sanitize(props.html, {
     ADD_TAGS: ['math', 'mfrac', 'mrow', 'msup', 'mn', 'mi'],
-    ADD_ATTR: ['class', 'data-preview-path'],
+    ADD_ATTR: ['class', 'data-preview-path', 'data-view'],
   }),
 )
+
+// The note cut at its views, when there are views to show as components.
+const segments = computed(() => (props.views?.length ? splitViews(sanitized.value) : null))
+
+/** The view at a placeholder's index, when ViewTable shows it. */
+function tableView(index: number): ViewData | undefined {
+  const v = props.views?.[index]
+  return v && !v.error && v.as === 'table' ? v : undefined
+}
 
 function onClick(e: MouseEvent) {
   if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return
@@ -77,9 +96,30 @@ function onClick(e: MouseEvent) {
 
 <template>
   <div
+    v-if="!segments"
     ref="root"
-    class="prose prose-invert max-w-none prose-pre:bg-bg-elevated prose-pre:border prose-pre:border-border prose-code:before:hidden prose-code:after:hidden"
+    :class="proseClass"
     v-html="sanitized"
     @click="onClick"
   />
+  <div v-else ref="root" :class="proseClass" @click="onClick">
+    <template v-for="(s, i) in segments" :key="s.kind === 'view' ? `view-${s.index}` : `html-${i}`">
+      <div v-if="s.kind === 'html'" class="contents" v-html="s.html" />
+      <div v-else-if="tableView(s.index)" class="gosidian-view" :data-view="s.index">
+        <ViewTable :view="tableView(s.index)!" />
+      </div>
+      <div v-else class="gosidian-view" :data-view="s.index" v-html="s.html" />
+    </template>
+  </div>
 </template>
+
+<style scoped>
+/* The note's first and last blocks sit inside the segment wrappers, out of
+   reach of the prose rules that drop their outer margins. */
+.contents:first-child > :deep(:first-child) {
+  margin-top: 0;
+}
+.contents:last-child > :deep(:last-child) {
+  margin-bottom: 0;
+}
+</style>

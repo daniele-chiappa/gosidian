@@ -309,5 +309,23 @@
     "redirecting": "Retour vers l'application…",
     "error_missing": "Cette demande d'autorisation est inconnue ou a expiré. Recommencez depuis l'application.",
     "error_generic": "Une erreur est survenue. Réessayez depuis l'application."
+  },
+  "views": {
+    "no_rows": "Aucune note correspondante.",
+    "showing": "{shown} notes sur {total}.",
+    "edit": "Modifier {field}",
+    "list_hint": "Valeurs séparées par des virgules",
+    "conflict": "{field} a été modifié entre-temps et vaut maintenant « {value} » : la modification n'a pas été enregistrée.",
+    "conflict_empty": "{field} a été vidé entre-temps : la modification n'a pas été enregistrée.",
+    "invalid": "Non enregistré : {reason}",
+    "forbidden": "Non enregistré : votre accès ne permet pas de modifier cette note.",
+    "not_a_number": "{field} : ce n'est pas un nombre.",
+    "save_failed": "La modification n'a pas été enregistrée.",
+    "properties": "Propriétés",
+    "row_of": "ligne de",
+    "read_only": "lecture seule",
+    "not_declared": "Hors du schéma",
+    "relation_hint": "[[note]], ou un titre",
+    "suggestions": "Notes"
   }
 }

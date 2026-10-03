@@ -18,10 +18,11 @@ import { useI18n } from 'vue-i18n'
 import { useDebounceFn } from '@vueuse/core'
 import { Printer, Download, Copy, Check, GitBranch } from 'lucide-vue-next'
 import { getNote, updateNote, deleteNote, type Note } from '@/api/notes'
-import { renderPreview } from '@/api/preview'
+import { renderPreviewData, type ViewData } from '@/api/preview'
 import { isConcurrencyConflict, onApiEvent, type ConcurrencyConflictDetail } from '@/api/client'
 import { useSSE } from '@/composables/useSSE'
 import MarkdownPreview from '@/components/domain/MarkdownPreview.vue'
+import PropertiesPanel from '@/components/views/PropertiesPanel.vue'
 import HTMLPreview from '@/components/domain/HTMLPreview.vue'
 import MediaPreview from '@/components/domain/MediaPreview.vue'
 import TablePreview from '@/components/domain/TablePreview.vue'
@@ -53,6 +54,15 @@ const articleEl = ref<HTMLElement | null>(null)
 const note = ref<Note | null>(null)
 const draft = ref<string>('')
 const previewHTML = ref<string>('')
+// The note's views as data, for the editors of ViewTable (IMP-127 phase 5).
+const previewViews = ref<ViewData[]>([])
+
+/** Renders md for the preview pane: its HTML and its views as data. */
+async function renderInto(md: string, notePath: string) {
+  const r = await renderPreviewData(md, notePath)
+  previewHTML.value = r.html
+  previewViews.value = r.views
+}
 const loading = ref(false)
 const saving = ref(false)
 const error = ref<string | null>(null)
@@ -116,7 +126,12 @@ async function load() {
     recents.record(fetched.path, fetched.title || fetched.path)
     emit('title', fetched.title || fetched.path)
     // HTML notes bypass the markdown renderer; the iframe shows raw content.
-    previewHTML.value = isHtml.value ? '' : await renderPreview(fetched.content, fetched.path)
+    if (isHtml.value) {
+      previewHTML.value = ''
+      previewViews.value = []
+    } else {
+      await renderInto(fetched.content, fetched.path)
+    }
     dirty.value = false
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Failed to load note'
@@ -128,7 +143,7 @@ async function load() {
 
 const refreshPreview = useDebounceFn(async () => {
   try {
-    previewHTML.value = await renderPreview(draft.value, path.value)
+    await renderInto(draft.value, path.value)
   } catch {
     /* preview failure shouldn't block editing */
   }
@@ -149,7 +164,7 @@ const refreshViews = useDebounceFn(async () => {
   if (!note.value || isHtml.value) return
   try {
     const src = mode.value === 'edit' ? draft.value : note.value.content
-    previewHTML.value = await renderPreview(src, path.value)
+    await renderInto(src, path.value)
   } catch {
     /* keep the last render */
   }
@@ -178,7 +193,7 @@ function enterEdit() {
 async function enterView() {
   mode.value = 'view'
   // View shows the saved content; the draft stays in memory for re-editing.
-  if (note.value && !isHtml.value) previewHTML.value = await renderPreview(note.value.content, note.value.path)
+  if (note.value && !isHtml.value) await renderInto(note.value.content, note.value.path)
 }
 
 async function save() {
@@ -512,7 +527,9 @@ watch(path, load)
         <p v-if="note" class="text-xs text-text-muted font-mono mb-6">
           {{ note.path }} · etag {{ note.etag.slice(0, 12) }} · {{ note.size }} bytes
         </p>
-        <MarkdownPreview :html="previewHTML" />
+        <!-- A row of a database: its fields, editable (IMP-127 phase 5) -->
+        <PropertiesPanel v-if="note" :path="note.path" :etag="note.etag" />
+        <MarkdownPreview :html="previewHTML" :views="previewViews" />
       </article>
     </div>
 
@@ -538,7 +555,7 @@ watch(path, load)
       </div>
       <div v-if="layout !== 'editor'" class="overflow-auto p-4 max-w-none">
         <HTMLPreview v-if="isHtml" :html="draft" />
-        <MarkdownPreview v-else :html="previewHTML" />
+        <MarkdownPreview v-else :html="previewHTML" :views="previewViews" />
       </div>
     </div>
   </div>

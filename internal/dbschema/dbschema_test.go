@@ -81,6 +81,47 @@ func TestCovers(t *testing.T) {
 	}
 }
 
+// CheckEdit looks only at the keys an edit touches, with values as JSON
+// decodes them.
+func TestCheckEdit(t *testing.T) {
+	s := mustParse(t)
+	const rel = "p/docs/improvements/IMP-129.md"
+	valid := map[string]any{
+		"status": "done", "closed": "2026-10-03", "points": float64(3), "blocked": true,
+		"labels": []any{"ui"}, "link": "https://example.com", "plan": "[[p/plans/x]]",
+		"aliases": []any{"a"}, "title": "anything", "id": "IMP-129",
+	}
+	if probs := s.CheckEdit(rel, valid, []string{"priority"}); len(probs) != 0 {
+		t.Fatalf("valid edit has problems: %+v", probs)
+	}
+	cases := []struct {
+		name  string
+		set   map[string]any
+		unset []string
+		field string
+		want  string
+	}{
+		{"invented field", map[string]any{"resolved": "x"}, nil, "resolved", "not in the schema"},
+		{"select off-list", map[string]any{"status": "fixed"}, nil, "status", "not one of"},
+		{"required emptied", map[string]any{"status": ""}, nil, "status", "cannot be empty"},
+		{"required removed", nil, []string{"status"}, "status", "cannot be removed"},
+		{"bad date", map[string]any{"closed": "ieri"}, nil, "closed", "ISO date"},
+		{"not a bool", map[string]any{"blocked": "yes"}, nil, "blocked", "true or false"},
+		{"multi-select off-list", map[string]any{"labels": []any{"web"}}, nil, "labels", "not one of"},
+		{"id vs file name", map[string]any{"id": "IMP-130"}, nil, "id", "does not match the file name"},
+	}
+	for _, tc := range cases {
+		probs := s.CheckEdit(rel, tc.set, tc.unset)
+		found := false
+		for _, p := range probs {
+			found = found || (p.Field == tc.field && strings.Contains(p.Message, tc.want))
+		}
+		if !found {
+			t.Errorf("%s: want a problem on %q containing %q, got %+v", tc.name, tc.field, tc.want, probs)
+		}
+	}
+}
+
 func TestValidate(t *testing.T) {
 	s := mustParse(t)
 	const rel = "p/docs/improvements/IMP-129.md"

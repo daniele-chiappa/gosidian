@@ -61,7 +61,8 @@ func (r *Router) handleNotes(w http.ResponseWriter, req *http.Request) {
 }
 
 // handleNoteByPath routes per-path operations: GET, PUT, DELETE plus
-// the read-only subroutes /backlinks and /excerpt. The path is
+// the read-only subroutes /backlinks, /excerpt, /history and /fields, and
+// PATCH /frontmatter. The path is
 // everything after `/api/v1/notes/` — empty falls back to the
 // list/create endpoint above so a misconfigured client doesn't 404 in
 // a confusing way.
@@ -103,12 +104,21 @@ func (r *Router) handleNoteByPath(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-// noteSubroutes lists the read-only suffixes routed off /notes/{path}/.
-// Order matters only for documentation; the loop matches by suffix
-// regardless. New entries get a handler in dispatchNoteSubroute below.
-var noteSubroutes = []string{"backlinks", "excerpt", "history"}
+// noteSubroutes lists the suffixes routed off /notes/{path}/: read-only
+// GETs, and PATCH /frontmatter. Order matters only for documentation; the
+// loop matches by suffix regardless. New entries get a handler in
+// dispatchNoteSubroute below.
+var noteSubroutes = []string{"backlinks", "excerpt", "history", "frontmatter", "fields"}
 
 func (r *Router) dispatchNoteSubroute(w http.ResponseWriter, req *http.Request, notePath, sub string) {
+	if sub == "frontmatter" {
+		if req.Method != http.MethodPatch {
+			WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
+			return
+		}
+		r.patchFrontmatter(w, req, notePath)
+		return
+	}
 	if req.Method != http.MethodGet {
 		WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
 		return
@@ -120,6 +130,8 @@ func (r *Router) dispatchNoteSubroute(w http.ResponseWriter, req *http.Request, 
 		r.readExcerpt(w, req, notePath)
 	case "history":
 		r.readHistory(w, req, notePath)
+	case "fields":
+		r.readRowFields(w, req, notePath)
 	default:
 		WriteError(w, http.StatusNotFound, CodeNotFound, "unknown note subroute")
 	}

@@ -10,7 +10,8 @@
 //	columns: [id, title, priority]
 //	```
 //
-// and renders them as a markdown table or list. A view is computed when the
+// and renders them as a markdown table, a list, or a board (as: board, with
+// group_by: a select or checkbox field whose values make the columns). A view is computed when the
 // note is read; the file keeps only the spec, so a note whose data changes
 // never needs rewriting. The caller runs the query with its own scope, so a
 // reader only ever sees rows it may read.
@@ -21,12 +22,15 @@ import (
 	"fmt"
 	"path"
 	"regexp"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/gosidian/gosidian/internal/dbschema"
 	"github.com/gosidian/gosidian/internal/index"
 )
 
@@ -38,7 +42,8 @@ type Spec struct {
 	Desc    bool
 	Columns []string
 	Limit   int
-	As      string // "table" or "list"
+	As      string // "table", "list" or "board"
+	GroupBy string // the field whose values make the columns of a board
 }
 
 // Context resolves the relative values a spec may use: this.<field>, the
@@ -46,6 +51,18 @@ type Spec struct {
 type Context struct {
 	This  map[string][]string
 	Today time.Time
+	// Schema returns the schema of the database whose rows are the notes of
+	// folder, or nil. It types the columns of a view that lists one folder
+	// and orders the columns of a board. The caller resolves it within the
+	// reader's scope. Nil means no schema.
+	Schema func(folder string) *dbschema.Schema
+	// CanWrite reports whether the reader may edit the note at path; it
+	// marks the rows of Data. Nil means no row is writable.
+	CanWrite func(path string) bool
+	// Resolve returns the path of the note a wikilink target names, among
+	// those the reader may see, or "". It resolves the links in the field
+	// values of Data. Nil leaves them unresolved.
+	Resolve func(target string) string
 }
 
 // rawSpec is the YAML shape; where entries are a "field op value" string or
@@ -57,6 +74,7 @@ type rawSpec struct {
 	Columns []string `yaml:"columns"`
 	Limit   int      `yaml:"limit"`
 	As      string   `yaml:"as"`
+	GroupBy string   `yaml:"group_by"`
 }
 
 // Parse reads a view spec.
@@ -65,7 +83,7 @@ func Parse(src string, c Context) (*Spec, error) {
 	if err := yaml.Unmarshal([]byte(src), &r); err != nil {
 		return nil, fmt.Errorf("spec is not valid YAML: %w", err)
 	}
-	s := &Spec{Columns: r.Columns, As: strings.TrimSpace(r.As)}
+	s := &Spec{Columns: r.Columns, As: strings.TrimSpace(r.As), GroupBy: strings.TrimSpace(r.GroupBy)}
 	switch f := r.From.(type) {
 	case string:
 		s.From = []string{f}
@@ -104,9 +122,15 @@ func Parse(src string, c Context) (*Spec, error) {
 	switch s.As {
 	case "":
 		s.As = "table"
-	case "table", "list":
+	case "table", "list", "board":
 	default:
-		return nil, fmt.Errorf("as: %q is not table or list", s.As)
+		return nil, fmt.Errorf("as: %q is not table, list or board", s.As)
+	}
+	switch {
+	case s.As == "board" && s.GroupBy == "":
+		return nil, errors.New("as: board needs group_by: the select or checkbox field whose values make the columns")
+	case s.As != "board" && s.GroupBy != "":
+		return nil, errors.New("group_by works only with as: board")
 	}
 	if len(s.Columns) == 0 {
 		s.Columns = append([]string{"title"}, withoutBuiltins(index.DefaultQueryFields(s.Where, s.Sort))...)
@@ -247,18 +271,96 @@ type Result struct {
 	Spec  *Spec
 	Hits  []index.QueryHit
 	Total int
+	// Schema is the database the view lists, when it lists the rows of one
+	// (Context.Schema), or nil.
+	Schema *dbschema.Schema
 }
 
 // Run computes a view.
 func Run(s *Spec, q QueryFunc) (*Result, error) {
+	fields := withoutBuiltins(s.Columns)
+	if s.GroupBy != "" && !slices.Contains(fields, s.GroupBy) {
+		fields = append(fields, s.GroupBy)
+	}
 	hits, total, err := q(index.QueryOptions{
 		Folders: s.From, Where: s.Where, Sort: s.Sort, Desc: s.Desc, Limit: s.Limit,
-		Fields: withoutBuiltins(s.Columns),
+		Fields: fields,
 	})
 	if err != nil {
 		return nil, err
 	}
 	return &Result{Spec: s, Hits: hits, Total: total}, nil
+}
+
+// compute parses and computes a view in context c: with the schema of the
+// database it lists, and a board checked against it.
+func compute(spec string, c Context, q QueryFunc) (*Result, error) {
+	s, err := Parse(spec, c)
+	if err != nil {
+		return nil, err
+	}
+	r, err := Run(s, q)
+	if err != nil {
+		return nil, err
+	}
+	if c.Schema != nil && len(s.From) == 1 {
+		r.Schema = c.Schema(s.From[0])
+	}
+	if s.As == "board" {
+		if _, err := r.Groups(); err != nil {
+			return nil, err
+		}
+	}
+	return r, nil
+}
+
+// Group is a column of a board: the notes whose group_by field has Value,
+// "" for the notes without one.
+type Group struct {
+	Value string
+	Hits  []index.QueryHit
+}
+
+// Groups splits the notes of a board by their group_by field. The columns
+// follow the options of a select field in the schema (false then true for a
+// checkbox), then any other value found, alphabetically; the column of the
+// notes without a value comes last, and only when it holds some.
+func (r *Result) Groups() ([]Group, error) {
+	field := r.Spec.GroupBy
+	var order []string
+	if r.Schema != nil {
+		if f, ok := r.Schema.Field(field); ok {
+			switch f.Type {
+			case "select":
+				order = f.Options
+			case "checkbox":
+				order = []string{"false", "true"}
+			default:
+				return nil, fmt.Errorf("group_by: %q is a %s field; a board groups by a select or checkbox field", field, f.Type)
+			}
+		}
+	}
+	byValue := map[string][]index.QueryHit{}
+	var extra []string
+	for _, h := range r.Hits {
+		v := ""
+		if vs := h.Fields[field]; len(vs) > 0 {
+			v = vs[0]
+		}
+		if _, seen := byValue[v]; !seen && v != "" && !slices.Contains(order, v) {
+			extra = append(extra, v)
+		}
+		byValue[v] = append(byValue[v], h)
+	}
+	sort.Strings(extra)
+	var out []Group
+	for _, v := range append(append(slices.Clone(order), extra...), "") {
+		if v == "" && len(byValue[""]) == 0 {
+			continue
+		}
+		out = append(out, Group{Value: v, Hits: byValue[v]})
+	}
+	return out, nil
 }
 
 // Markdown renders the result as a table or a list. Note links are
@@ -270,20 +372,43 @@ func (r *Result) Markdown() string {
 		return "_No matching notes._\n"
 	}
 	cols := r.Spec.Columns
-	if r.Spec.As == "list" {
-		for _, h := range r.Hits {
-			b.WriteString("- " + link(h))
-			for _, c := range cols {
-				if c == "title" {
-					continue
-				}
-				if v := cell(h, c); v != "" {
-					b.WriteString(" · " + c + ": " + v)
-				}
+	listItem := func(h index.QueryHit) {
+		b.WriteString("- " + link(h))
+		for _, c := range cols {
+			if c == "title" || c == r.Spec.GroupBy {
+				continue
 			}
-			b.WriteString("\n")
+			if v := cell(h, c); v != "" {
+				b.WriteString(" · " + c + ": " + v)
+			}
 		}
-	} else {
+		b.WriteString("\n")
+	}
+	switch r.Spec.As {
+	case "list":
+		for _, h := range r.Hits {
+			listItem(h)
+		}
+	case "board":
+		// Agents read a board as a list per column; empty columns are left out.
+		groups, _ := r.Groups()
+		for i, g := range groups {
+			if len(g.Hits) == 0 {
+				continue
+			}
+			if i > 0 && b.Len() > 0 {
+				b.WriteString("\n")
+			}
+			name := g.Value
+			if name == "" {
+				name = "(no value)"
+			}
+			fmt.Fprintf(&b, "**%s: %s** (%d)\n\n", r.Spec.GroupBy, tableSafe(name), len(g.Hits))
+			for _, h := range g.Hits {
+				listItem(h)
+			}
+		}
+	default:
 		b.WriteString("| " + strings.Join(cols, " | ") + " |\n")
 		b.WriteString("|" + strings.Repeat("---|", len(cols)) + "\n")
 		for _, h := range r.Hits {

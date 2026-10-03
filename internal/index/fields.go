@@ -126,11 +126,13 @@ type QueryOptions struct {
 	// Folders, when set, keeps only notes directly inside one of these
 	// vault-relative folders, the rows of a database note (IMP-127).
 	Folders []string
-	Where   []FieldCond
-	Sort    string
-	Desc    bool
-	Limit   int
-	Fields  []string
+	// Paths, when set, keeps only these notes.
+	Paths  []string
+	Where  []FieldCond
+	Sort   string
+	Desc   bool
+	Limit  int
+	Fields []string
 }
 
 // QueryHit is one matching note, with the requested fields' values in
@@ -162,6 +164,12 @@ func (i *Index) Query(opts QueryOptions) ([]QueryHit, int, error) {
 			args = append(args, in, in+"/%")
 		}
 		where += " AND (" + strings.Join(ors, " OR ") + ")"
+	}
+	if len(opts.Paths) > 0 {
+		where += " AND n.path IN (?" + strings.Repeat(", ?", len(opts.Paths)-1) + ")"
+		for _, p := range opts.Paths {
+			args = append(args, p)
+		}
 	}
 	for _, c := range opts.Where {
 		sqlc, cargs, err := condSQL(c)

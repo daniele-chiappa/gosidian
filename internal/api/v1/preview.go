@@ -2,9 +2,11 @@ package v1
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gosidian/gosidian/internal/authz"
+	"github.com/gosidian/gosidian/internal/dbschema"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/gosidian/gosidian/internal/vault"
@@ -46,6 +48,9 @@ type previewRequest struct {
 // DOMPurify for defense in depth.
 type previewResponse struct {
 	HTML string `json:"html"`
+	// Views holds the note's views in the form the web UI's editors use,
+	// in the order of the data-view index of their placeholder in HTML.
+	Views []views.Data `json:"views,omitempty"`
 }
 
 // handlePreview renders markdown to HTML through the same parser
@@ -70,21 +75,25 @@ func (r *Router) handlePreview(w http.ResponseWriter, req *http.Request) {
 
 	p := principalFromContext(req)
 	md := []byte(body.Markdown)
+	var data []views.Data
 	if r.deps.Index != nil {
 		// ```view blocks become their computed result before rendering
 		// (IMP-127), queried with the reader's own scope.
 		c := views.Context{
-			This:  views.ThisFields(body.Path, parser.ParseFrontmatterFields(parser.FrontmatterRawForPath(body.Path, md))),
-			Today: time.Now(),
+			This:     views.ThisFields(body.Path, parser.ParseFrontmatterFields(parser.FrontmatterRawForPath(body.Path, md))),
+			Today:    time.Now(),
+			Schema:   r.viewSchema(p),
+			CanWrite: r.viewCanWrite(p),
+			Resolve:  previewResolver{r: r, p: p}.Resolve,
 		}
-		md, _ = views.RenderNote(md, false, c, r.viewQuery(p))
+		md, data = views.RenderNoteData(md, c, r.viewQuery(p))
 	}
 	html, err := r.deps.Renderer.Render(md, previewResolver{r: r, p: p})
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, "render: "+err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, previewResponse{HTML: html})
+	WriteJSON(w, http.StatusOK, previewResponse{HTML: html, Views: data})
 }
 
 // previewResolver resolves both `[[wiki-links]]` (Resolve) and `![[image]]`
@@ -155,6 +164,27 @@ func (pr previewResolver) ResolveImage(target string) string {
 
 // viewQuery runs the query of a view with the reader's scope, as
 // POST /query does: a view never shows a note its reader cannot see.
+// viewSchema resolves the schema a view's columns are typed with: the
+// database whose rows are the notes of a folder, when the reader may see
+// the database note.
+func (r *Router) viewSchema(p authz.Principal) func(folder string) *dbschema.Schema {
+	return func(folder string) *dbschema.Schema {
+		s, err := dbschema.Covering(r.deps.Index, r.deps.Vault, folder+"/_")
+		if err != nil || s == nil || !r.canSee(p, s.Path) {
+			return nil
+		}
+		return s
+	}
+}
+
+// viewCanWrite reports whether the reader may edit a row's fields from a
+// view: a markdown note in a project it may write to.
+func (r *Router) viewCanWrite(p authz.Principal) func(path string) bool {
+	return func(path string) bool {
+		return p.CanWrite() && strings.HasSuffix(strings.ToLower(path), ".md") && r.canWriteProject(p, projectOf(path))
+	}
+}
+
 func (r *Router) viewQuery(p authz.Principal) views.QueryFunc {
 	return func(o index.QueryOptions) ([]index.QueryHit, int, error) {
 		scope, err := r.searchScope(p, "")

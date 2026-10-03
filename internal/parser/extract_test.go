@@ -140,6 +140,47 @@ Line start:
 	}
 }
 
+// A value is quoted only when it opens and closes with the same quote: a
+// title that merely ends with a quoted phrase keeps both quotes (BUG-089).
+func TestParseFrontmatterFields_Quotes(t *testing.T) {
+	cases := map[string]string{
+		`title: Sync v1.12 "Agent workflow"`: `Sync v1.12 "Agent workflow"`,
+		`title: "Agent workflow" first`:      `"Agent workflow" first`,
+		`title: "escaped \"quote\""`:         `escaped "quote"`,
+		`title: 'it''s'`:                     `it's`,
+		`title: 'single'`:                    `single`,
+		`title: it's`:                        `it's`,
+		`title: "`:                           `"`,
+	}
+	for line, want := range cases {
+		if got := ParseFrontmatterFields(line + "\n")["title"]; got != want {
+			t.Errorf("%s → %q, want %q", line, got, want)
+		}
+	}
+}
+
+// The note title goes through the same unquoting as any other field
+// (BUG-089), in markdown and HTML notes alike.
+func TestExtract_TitleQuotes(t *testing.T) {
+	cases := map[string]string{
+		`title: Sync v1.12 "Agent workflow"`: `Sync v1.12 "Agent workflow"`,
+		`title: "escaped \"quote\""`:         `escaped "quote"`,
+		`title: 'it''s'`:                     `it's`,
+		`title: Plain`:                       `Plain`,
+	}
+	for line, want := range cases {
+		if _, _, got := Extract([]byte("---\n" + line + "\n---\n\nbody\n")); got != want {
+			t.Errorf("markdown %s → %q, want %q", line, got, want)
+		}
+		if _, _, got, _ := ExtractHTML([]byte("<!--\n---\n" + line + "\n---\n-->\n<p>x</p>\n")); got != want {
+			t.Errorf("html %s → %q, want %q", line, got, want)
+		}
+	}
+	if _, _, got := Extract([]byte("---\ntitle:\ndescription: not the title\n---\n")); got != "" {
+		t.Errorf("an empty title took the next line: %q", got)
+	}
+}
+
 func TestExtractHeadings(t *testing.T) {
 	body := []byte("---\ntitle: x\n---\n# Top heading\n\nbody\n\n## Sub one\n### Deep\n\n```\n# fake heading inside code\n```\n\n## Sub due\n")
 	hs := ExtractHeadings(body)
@@ -378,5 +419,16 @@ func TestExtractSection_IgnoresFencedHeadings(t *testing.T) {
 		if strings.Contains(got, miss) {
 			t.Errorf("section wrongly contains %q:\n%s", miss, got)
 		}
+	}
+}
+
+func TestWikiLinks(t *testing.T) {
+	got := WikiLinks(`[[p/a]], [[p/b|B]] and [[Some Note\|Alias]]`)
+	want := []WikiLinkRef{{Target: "p/a"}, {Target: "p/b", Alias: "B"}, {Target: "Some Note", Alias: "Alias"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %+v, want %+v", got, want)
+	}
+	if WikiLinks("no links") != nil {
+		t.Error("a value without links has none")
 	}
 }

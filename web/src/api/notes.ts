@@ -73,3 +73,42 @@ export async function updateNote(
 export async function deleteNote(path: string): Promise<void> {
   await client.delete(`/notes/${encodeURIComponent(path)}`)
 }
+
+/** A frontmatter value as the API takes it. */
+export type FieldValue = string | number | boolean | string[] | null
+
+export interface PatchFrontmatterBody {
+  set?: Record<string, FieldValue>
+  unset?: string[]
+  /** The values last seen, checked field by field: 409 when one changed. */
+  expect?: Record<string, FieldValue>
+}
+
+/**
+ * PATCH /api/v1/notes/{path}/frontmatter — write and remove frontmatter keys
+ * of a markdown note; only their lines change (IMP-127 phase 5).
+ */
+export async function patchFrontmatter(path: string, body: PatchFrontmatterBody): Promise<Note> {
+  const { data } = await client.patch<Note>(`/notes/${encodeURIComponent(path)}/frontmatter`, body)
+  return data
+}
+
+/** The fields of a note as the property panel shows them. */
+export interface RowFields {
+  /** The database the note is a row of; absent for any other note. */
+  database?: string
+  source?: string
+  /** The schema's fields, in declaration order. */
+  columns?: import('./preview').ViewColumn[]
+  /** The note's fields the schema does not declare. */
+  others?: string[]
+  values: Record<string, string | string[]>
+  links?: Record<string, import('./preview').ViewLink[]>
+  writable: boolean
+}
+
+/** GET /api/v1/notes/{path}/fields — a row's fields, for the property panel. */
+export async function getRowFields(path: string): Promise<RowFields> {
+  const { data } = await client.get<RowFields>(`/notes/${encodeURIComponent(path)}/fields`)
+  return data
+}
