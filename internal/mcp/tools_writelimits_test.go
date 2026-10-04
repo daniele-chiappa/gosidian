@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -93,8 +94,13 @@ func TestHTTPUpload_HonoursWriteLimiter(t *testing.T) {
 	if w := post(); w.Code != http.StatusOK {
 		t.Fatalf("first upload: %d %s", w.Code, w.Body.String())
 	}
-	if w := post(); w.Code != http.StatusTooManyRequests {
+	w := post()
+	if w.Code != http.StatusTooManyRequests {
 		t.Fatalf("second upload must hit the limiter: %d %s", w.Code, w.Body.String())
+	}
+	// The refusal says when a place frees up (IMP-141).
+	if ra, err := strconv.Atoi(w.Header().Get("Retry-After")); err != nil || ra < 1 || ra > 60 {
+		t.Errorf("Retry-After = %q, want 1..60 seconds", w.Header().Get("Retry-After"))
 	}
 }
 

@@ -86,7 +86,7 @@ func (s *Server) handlePromoteAgent(ctx context.Context, req mcp.CallToolRequest
 	}
 
 	canonical := buildCanonicalAgentNote(project, slug, []byte(foreign))
-	if errRes := s.checkWriteLimits(tok, len(canonical)); errRes != nil {
+	if errRes := s.checkWriteLimits(ctx, tok, len(canonical)); errRes != nil {
 		return errRes, nil
 	}
 	if err := s.writeAndIndex(rel, []byte(canonical)); err != nil {
@@ -201,7 +201,7 @@ func (s *Server) adoptIntoExisting(ctx context.Context, req mcp.CallToolRequest,
 	raw := parser.FrontmatterRawForPath(rel, canonical)
 	if !parser.HasFrontmatterKey(raw, "harness") {
 		if updated, ok := insertHarnessBlock(canonical, slug, f); ok {
-			if errRes := s.checkWriteLimits(tok, len(updated)); errRes != nil {
+			if errRes := s.checkWriteLimits(ctx, tok, len(updated)); errRes != nil {
 				return errRes, nil
 			}
 			if err := s.writeAndIndex(rel, updated); err != nil {

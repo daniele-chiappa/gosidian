@@ -13,7 +13,7 @@
  * Emits `title`/`dirty`/`close` to the window frame; History opens a sibling
  * window via the injected `openWindow`.
  */
-import { computed, defineAsyncComponent, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useDebounceFn } from '@vueuse/core'
 import { Printer, Download, Copy, Check, GitBranch } from 'lucide-vue-next'
@@ -22,6 +22,7 @@ import { renderPreviewData, type ViewData } from '@/api/preview'
 import { isConcurrencyConflict, onApiEvent, type ConcurrencyConflictDetail } from '@/api/client'
 import { useSSE } from '@/composables/useSSE'
 import MarkdownPreview from '@/components/domain/MarkdownPreview.vue'
+import { findHeading } from '@/components/domain/headings'
 import PropertiesPanel from '@/components/views/PropertiesPanel.vue'
 import RowViews from '@/components/views/RowViews.vue'
 import HTMLPreview from '@/components/domain/HTMLPreview.vue'
@@ -40,7 +41,9 @@ const CodeMirrorEditor = defineAsyncComponent(
 type Mode = 'view' | 'edit'
 type EditorLayout = 'editor' | 'split' | 'stacked' | 'preview'
 
-const props = defineProps<{ path: string; mode?: Mode }>()
+// anchor is the heading a link pointed at (IMP-140), anchorAt when it was
+// clicked: the window scrolls to the heading, again on every new click.
+const props = defineProps<{ path: string; mode?: Mode; anchor?: string; anchorAt?: number }>()
 const emit = defineEmits<{ title: [string]; dirty: [boolean]; close: [] }>()
 
 const { t } = useI18n()
@@ -132,6 +135,7 @@ async function load() {
       previewViews.value = []
     } else {
       await renderInto(fetched.content, fetched.path)
+      void scrollToAnchor()
     }
     dirty.value = false
   } catch (e) {
@@ -186,6 +190,28 @@ function onNoteEvent(p: { path?: string; etag?: string }) {
   }
   if (previewHTML.value.includes('gosidian-view') || previewHTML.value.includes('gosidian-count')) void refreshViews()
 }
+
+/** Scrolls to the heading the window was opened at, once it is rendered. */
+async function scrollToAnchor() {
+  const anchor = props.anchor
+  if (!anchor) return
+  // The preview renders on the next tick, its views a frame or two later.
+  for (let i = 0; i < 10; i++) {
+    await nextTick()
+    const el = articleEl.value ? findHeading(articleEl.value, anchor) : null
+    if (el) {
+      el.scrollIntoView({ block: 'start' })
+      return
+    }
+    await new Promise((r) => requestAnimationFrame(() => r(null)))
+  }
+}
+watch(
+  () => [props.anchor, props.anchorAt],
+  () => {
+    if (note.value && mode.value === 'view') void scrollToAnchor()
+  },
+)
 
 function enterEdit() {
   if (!access.canWrite(props.path)) return

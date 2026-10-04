@@ -34,7 +34,18 @@ const (
 	correlationCtxKey ctxKey = 2
 	langCtxKey        ctxKey = 3
 	basePathCtxKey    ctxKey = 4
+	sessionCtxKey     ctxKey = 5
 )
+
+// sessionFromContext returns the hashed id of the MCP session the message
+// belongs to, or "" when it carries none (a sessionless client, the HTTP byte
+// endpoints, tests). The write limiter counts per session with it (IMP-141).
+func sessionFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(sessionCtxKey).(string); ok {
+		return v
+	}
+	return ""
+}
 
 // basePathFromContext returns the mount prefix of the transport the current
 // MCP session arrived on ("/mcp" on the single-port mux, "" on the legacy
@@ -81,13 +92,22 @@ func generateCorrelationID() string {
 // endpoint and must not land in a log line. Sessionless messages keep a
 // fresh random id.
 func correlationIDFor(ctx context.Context) string {
+	if h := sessionHash(ctx); h != "" {
+		return h
+	}
+	return generateCorrelationID()
+}
+
+// sessionHash is the hashed transport session id of the message, "" when it
+// carries no MCP session.
+func sessionHash(ctx context.Context) string {
 	if cs := server.ClientSessionFromContext(ctx); cs != nil {
 		if sid := cs.SessionID(); sid != "" {
 			sum := sha256.Sum256([]byte(sid))
 			return hex.EncodeToString(sum[:4])
 		}
 	}
-	return generateCorrelationID()
+	return ""
 }
 
 // Server wraps a mark3labs MCPServer wired against a gosidian vault + index.
@@ -169,6 +189,11 @@ type Server struct {
 	ingestTicketsMu sync.Mutex
 	// ingestTicketTTL overrides the ticket lifetime; <= 0 uses the default.
 	ingestTicketTTL time.Duration
+	// downloadTickets holds the pending single-use download tickets minted
+	// by memory_get transfer:http (IMP-142), in memory like ingestTickets.
+	// Guarded by downloadTicketsMu.
+	downloadTickets   map[string]*downloadTicket
+	downloadTicketsMu sync.Mutex
 	// accessResolver maps an OAuth access token (internal/oauth) to the grant
 	// it was issued for; nil when OAuth is off. Consulted only for bearers the
 	// static token store does not know.
@@ -356,8 +381,9 @@ func (s *Server) SetProjects(p *projects.Store) {
 // deleting from disk.
 func (s *Server) SetTrash(b *trash.Bin) { s.trash = b }
 
-// SetWriteLimits configures the per-token write/minute cap and the per-note
-// size cap. Pass zero values to keep the defaults already set in New().
+// SetWriteLimits configures the write/minute cap of an MCP session (a token's
+// sessions share tokenLimitFactor times that) and the per-note size cap.
+// Pass zero values to keep the defaults already set in New().
 func (s *Server) SetWriteLimits(perMinute int, maxNoteBytes int64) {
 	if perMinute > 0 {
 		s.limiter = newWriteLimiter(perMinute)
@@ -557,6 +583,9 @@ func (s *Server) Handler(basePath string) http.Handler {
 	// large note reaches the agent's disk without crossing the model context
 	// (IMP-081).
 	mux.HandleFunc(basePath+"/download", s.handleHTTPDownload)
+	// The same without a bearer: a single-use ticket minted by memory_get
+	// transfer:"http" (IMP-142).
+	mux.HandleFunc(basePath+"/download/", s.handleDownloadTicketRedeem)
 	// Append-only write endpoint for scripts that hold a bearer but no MCP
 	// session (Claude Code hooks, IMP-094); same pipeline as memory_append.
 	mux.HandleFunc(basePath+"/append", s.handleHTTPAppend)
@@ -636,6 +665,9 @@ func (s *Server) CloseStreams() {
 func (s *Server) httpContext(basePath string) func(ctx context.Context, r *http.Request) context.Context {
 	return func(ctx context.Context, r *http.Request) context.Context {
 		ctx = context.WithValue(ctx, correlationCtxKey, correlationIDFor(ctx))
+		if h := sessionHash(ctx); h != "" {
+			ctx = context.WithValue(ctx, sessionCtxKey, h)
+		}
 		ctx = context.WithValue(ctx, basePathCtxKey, basePath)
 		if lang := r.Header.Get("Accept-Language"); lang != "" {
 			ctx = context.WithValue(ctx, langCtxKey, lang)

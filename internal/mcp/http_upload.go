@@ -77,8 +77,8 @@ func (s *Server) handleHTTPUpload(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusRequestEntityTooLarge, "file too large (max 10 MiB)")
 		return
 	}
-	if msg := s.writeLimitViolation(tok, len(data)); msg != "" {
-		writeJSONError(w, http.StatusTooManyRequests, msg)
+	if msg, wait := s.writeLimitViolation(r.Context(), tok, len(data)); msg != "" {
+		writeRateLimited(w, http.StatusTooManyRequests, msg, wait)
 		return
 	}
 

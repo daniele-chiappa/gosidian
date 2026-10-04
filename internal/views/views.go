@@ -366,6 +366,12 @@ func compute(spec string, c Context, q QueryFunc) (*Result, error) {
 	}
 	if schema != nil {
 		s.SortOrder = schema.OptionOrder(s.Sort)
+		// The rows of the database only (rows: {type: plan}): a view of the
+		// folder leaves out its index and other notes, and a new row made
+		// from it starts with those values.
+		for _, kv := range schema.RowConds() {
+			s.Where = append(s.Where, index.FieldCond{Field: kv[0], Op: index.OpEq, Values: []string{kv[1]}})
+		}
 	}
 	r, err := Run(s, q)
 	if err != nil {

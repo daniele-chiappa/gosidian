@@ -99,7 +99,7 @@ func (s *Server) handleAsk(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	nextID := nextOQIndex(existing)
 	body := appendOQBlock(existing, project, nextID, question, urgency, qContext)
 
-	if errRes := s.checkWriteLimits(tok, len(body)); errRes != nil {
+	if errRes := s.checkWriteLimits(ctx, tok, len(body)); errRes != nil {
 		return errRes, nil
 	}
 	if err := s.writeAndIndex(rel, body); err != nil {

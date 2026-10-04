@@ -125,8 +125,10 @@ If you build your own MCP client:
   the [internationalized error catalogue](../../internal/i18n/catalogs/errors.en.json).
 - Responses include an `etag` field on every read tool; pass it back
   as `if_match` on the matching write to get optimistic locking.
-- Check `memory_self_stats()` for the token's rate-limit headroom
-  before doing anything aggressive.
+- Check `memory_self_stats()` for the session's rate-limit headroom
+  (each MCP session has its own, the token five times that across its
+  sessions) before doing anything aggressive. A refused write says in how
+  many seconds to retry: wait, then repeat the same call.
 
 ## Verification
 

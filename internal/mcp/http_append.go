@@ -88,7 +88,7 @@ func (s *Server) handleHTTPAppend(w http.ResponseWriter, r *http.Request) {
 	ctx := context.WithValue(r.Context(), tokenCtxKey, tok)
 	res, aerr := s.appendNote(ctx, tok, rel, string(body), ifMatch)
 	if aerr != nil {
-		writeJSONError(w, aerr.status, aerr.msg)
+		writeRateLimited(w, aerr.status, aerr.msg, aerr.wait)
 		return
 	}
 	w.Header().Set("ETag", `"`+res.ETag+`"`)

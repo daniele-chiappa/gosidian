@@ -8,6 +8,7 @@ import (
 
 	"github.com/gosidian/gosidian/internal/dbschema"
 	"github.com/gosidian/gosidian/internal/frontmatter"
+	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/parser"
 )
 
@@ -43,7 +44,7 @@ func (s *Server) noteSchemaProblems(ctx context.Context, rel string, content []b
 		return
 	}
 	schema, err := dbschema.Covering(s.index, s.vault, rel)
-	if err != nil || schema == nil {
+	if err != nil || schema == nil || !schema.IsRow(rel, fm) {
 		return
 	}
 	probs := schema.Validate(rel, fm)
@@ -80,7 +81,12 @@ func (s *Server) bootstrapDatabases(project string) []bootstrapDatabase {
 	out := make([]bootstrapDatabase, 0, len(schemas))
 	for _, sc := range schemas {
 		rows := 0
-		if notes, err := s.index.NotesByPrefix(sc.Source); err == nil {
+		if len(sc.Rows) > 0 {
+			// Only the notes with the values of rows: ask the index.
+			if _, total, err := s.index.Query(index.QueryOptions{Folders: []string{sc.Source}, Where: rowConds(sc), Limit: 1}); err == nil {
+				rows = total
+			}
+		} else if notes, err := s.index.NotesByPrefix(sc.Source); err == nil {
 			for _, n := range notes {
 				if sc.Covers(n.Path) {
 					rows++
@@ -88,6 +94,16 @@ func (s *Server) bootstrapDatabases(project string) []bootstrapDatabase {
 			}
 		}
 		out = append(out, bootstrapDatabase{Path: sc.Path, Source: sc.Source, Template: sc.Template, Rows: rows, Fields: sc.Fields})
+	}
+	return out
+}
+
+// rowConds are the rows of a database (dbschema.Schema.Rows) as query
+// conditions.
+func rowConds(sc *dbschema.Schema) []index.FieldCond {
+	var out []index.FieldCond
+	for _, kv := range sc.RowConds() {
+		out = append(out, index.FieldCond{Field: kv[0], Op: index.OpEq, Values: []string{kv[1]}})
 	}
 	return out
 }

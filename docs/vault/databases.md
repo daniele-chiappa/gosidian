@@ -38,7 +38,11 @@ How to find, add and close entries: the examples agents follow.
 
 Each row is a note **directly inside** the source folder
 (`myproject/docs/improvements/IMP-127.md`), with the values in its own
-frontmatter and free text in its body. The body of the database note is
+frontmatter and free text in its body. When the folder also holds notes
+that are not rows, an index say, `rows` narrows the rows to the notes with
+given values: `rows: {type: plan}` keeps the notes with `type: plan`, or a
+`type:plan` tag when the field is missing. Those keys need no declaring; a
+view of the folder lists only the rows, and a new row starts with them. The body of the database note is
 the place for instructions: the `memory_query` calls that list open
 entries, how a new ID is chosen, how an entry is closed.
 

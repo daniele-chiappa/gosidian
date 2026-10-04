@@ -194,6 +194,22 @@ func TestLint_FrontmatterTagUnknown_AcceptsInsight(t *testing.T) {
 	}
 }
 
+// Every status of a handoff's lifecycle is the server's own tag: a claimed or
+// rejected handoff lints clean too (BUG-093).
+func TestLint_FrontmatterTagUnknown_AcceptsHandoffLifecycle(t *testing.T) {
+	l, v, idx := newTestLinter(t)
+	for _, st := range []string{"pending", "claimed", "done", "rejected"} {
+		seed(t, v, idx, "proj/handoffs/h-"+st+".md", "---\ntitle: h\ntype: handoff\nstatus: "+st+"\ntags: [type:handoff, status:"+st+"]\n---\n\n# h\n")
+	}
+	issues, err := l.Run(context.Background(), "proj", []string{"frontmatter-tag-unknown"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("expected 0 issues for the handoff lifecycle, got %d: %+v", len(issues), issues)
+	}
+}
+
 func TestLint_FrontmatterTagUnknown_AcceptsImage(t *testing.T) {
 	l, v, idx := newTestLinter(t)
 	// type:image is in the built-in vocabulary (ADR-013 media notes), so an

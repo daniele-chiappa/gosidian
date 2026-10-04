@@ -110,7 +110,7 @@ func (s *Server) handleProjectScaffold(ctx context.Context, req mcp.CallToolRequ
 			res.Skipped = append(res.Skipped, vaultPath)
 			continue
 		}
-		if errRes := s.checkWriteLimits(tok, len(body)); errRes != nil {
+		if errRes := s.checkWriteLimits(ctx, tok, len(body)); errRes != nil {
 			return errRes, nil
 		}
 		if err := s.writeAndIndex(vaultPath, []byte(body)); err != nil {

@@ -81,10 +81,11 @@ func (s *Server) viewResolve(tok *auth.Token) func(target string) string {
 }
 
 // rowSchema returns the schema of the database whose row is the note at
-// rel, when it declares row views and the token may read it; nil otherwise.
-func (s *Server) rowSchema(tok *auth.Token, rel string) *dbschema.Schema {
+// rel (content: the note as stored), when it declares row views and the
+// token may read it; nil otherwise.
+func (s *Server) rowSchema(tok *auth.Token, rel string, content []byte) *dbschema.Schema {
 	schema := s.viewSchema(tok)(path.Dir(rel))
-	if schema == nil || !schema.Covers(rel) || len(schema.RowViews) == 0 {
+	if schema == nil || len(schema.RowViews) == 0 || !schema.IsRow(rel, parser.FrontmatterRawForPath(rel, content)) {
 		return nil
 	}
 	return schema
@@ -94,7 +95,7 @@ func (s *Server) rowSchema(tok *auth.Token, rel string) *dbschema.Schema {
 // agent reads them (IMP-139): computed, between markers, after the body.
 // The bool reports whether there were any.
 func (s *Server) withRowViews(tok *auth.Token, rel string, note, content []byte) ([]byte, bool) {
-	schema := s.rowSchema(tok, rel)
+	schema := s.rowSchema(tok, rel, note)
 	if schema == nil {
 		return content, false
 	}
@@ -106,8 +107,8 @@ func (s *Server) withRowViews(tok *auth.Token, rel string, note, content []byte)
 // rowViewsHint is the hint of a read of a row without render_views: its
 // database declares row views, which only render_views computes. "" when
 // it declares none.
-func (s *Server) rowViewsHint(tok *auth.Token, rel, how string) string {
-	schema := s.rowSchema(tok, rel)
+func (s *Server) rowViewsHint(tok *auth.Token, rel string, note []byte, how string) string {
+	schema := s.rowSchema(tok, rel, note)
 	if schema == nil {
 		return ""
 	}

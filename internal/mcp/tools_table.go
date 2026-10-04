@@ -157,7 +157,7 @@ func (s *Server) handleCreateTableNote(ctx context.Context, req mcp.CallToolRequ
 
 	// Assemble and write the note.
 	content := buildTableNote(title, res.Path, project, caption, cols, rows)
-	if errRes := s.checkWriteLimits(tok, len(content)); errRes != nil {
+	if errRes := s.checkWriteLimits(ctx, tok, len(content)); errRes != nil {
 		return errRes, nil
 	}
 	if err := s.writeAndIndex(rel, []byte(content)); err != nil {

@@ -69,7 +69,7 @@ The dedicated tools remain for explicit workflows (and for the web UI):
 | **MCP `memory_upload_attachment`** | Single-step: upload + return a ready-to-splice markdown embed. |
 | **MCP `memory_upload_resource`** | Two-step stage-then-attach: upload first, decide note placement later. |
 | REST `/api/v1/upload` | Web-UI editor path (drag-and-drop). Authenticated by a **SPA** token (from login), not the MCP token. |
-| **HTTP download (`/download`)** | The read-side twin: `GET` the raw bytes of a **note** with the same MCP bearer token, onto your disk, without crossing the model context. See [below](#http-download-endpoint-notes). |
+| **HTTP download (`/download`)** | The read-side twin: `GET` the raw bytes of a **note** with the same MCP bearer token, onto your disk, without crossing the model context. Without the bearer at hand, `memory_get` with `transfer: "http"` gives a single-use URL instead. See [below](#http-download-endpoint-notes). |
 | **HTTP append (`/append`)** | Append-only write to a **note** with the same bearer, for scripts without an MCP session (Claude Code hooks). Same pipeline as `memory_append`. See [below](#http-append-endpoint-notes). |
 
 ## HTTP upload endpoint
@@ -157,6 +157,35 @@ curl -sf -F "file=@report.html" "https://host/mcp/ingest/<ticket>"
 - `memory_bootstrap` advertises it in
   `capabilities.attachments.download_endpoint_hint`, and a truncated
   `memory_get` points here in its `hint`.
+
+### Without the bearer: a single-use URL
+
+An agent may be unable to put its bearer in a `curl`: the token lives in
+its client's configuration, and a cautious client (Claude Code in auto
+mode, for one) refuses to read it from there. `memory_get` with
+`transfer: "http"` then returns, instead of the body, a URL to `GET` once
+with no `Authorization` header — the read-side twin of the
+`memory_ingest` upload ticket (IMP-142):
+
+```text
+memory_get({path: "Work/docs/report.html", transfer: "http"})
+→ {"path": "Work/docs/report.html", "etag": "<stamp>", "size": 48213,
+   "endpoint": "/mcp/download/<ticket>", "method": "GET",
+   "expires": "…", "single_use": true, "hint": "…"}
+```
+
+```bash
+curl -sf -D headers.txt -o report.html "https://host/mcp/download/<ticket>"
+```
+
+- **Single-use, 5 minutes**: any attempt consumes the ticket; mint a new
+  one on failure (`404` once consumed, `410` once expired). A token holds
+  at most 16 pending download tickets.
+- **The same checks as `/download`**, made when the ticket is minted and
+  again when it is redeemed: the minting token must still exist, hold the
+  read scope and reach the note, so a token revoked or narrowed in the
+  meantime gets `403` or `404`. The response is the same, inert headers
+  and `ETag` included.
 
 ## HTTP manifest endpoint (local mirrors)
 

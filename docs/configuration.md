@@ -26,7 +26,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_GIT_DEBOUNCE` | `git.commit_debounce` | `30s` |
 | `GOSIDIAN_GIT_PUSH` | `git.push` | `false` |
 | `GOSIDIAN_GIT_TOKEN_ENV` | `git.token_env` | empty |
-| `GOSIDIAN_MCP_WRITE_PER_MINUTE` | `mcp.write_per_minute` | `60` |
+| `GOSIDIAN_MCP_WRITE_PER_MINUTE` | `mcp.write_per_minute` | `60` (writes per minute of one MCP session, rolling window; all the sessions of a token together get 5× that, IMP-141) |
 | `GOSIDIAN_MCP_MAX_NOTE_BYTES` | `mcp.max_note_bytes` | `1048576` (1 MiB) |
 | `GOSIDIAN_MCP_PACKAGE_MAX_FILES` | `mcp.package_max_files` | `500` (files of a `memory_ingest` package) |
 | `GOSIDIAN_MCP_PACKAGE_MAX_BYTES` | `mcp.package_max_bytes` | `20971520` (20 MiB, a package unpacked) |

@@ -156,3 +156,27 @@ func TestRenderer_CodeBlockPreserved(t *testing.T) {
 		t.Errorf("literal wiki-link text missing: %s", out)
 	}
 }
+
+// A link to a heading carries the heading as written, so the web UI finds it
+// as memory_get_section does: by an ID at its start too (IMP-140).
+func TestRenderer_WikiLinkHeading(t *testing.T) {
+	r := NewRenderer()
+	resolver := ResolverFunc(func(target string) string {
+		if target == "Other" {
+			return "folder/other.md"
+		}
+		return ""
+	})
+	out, err := r.Render([]byte("See [[Other#ADR-010]] and [[#Local part|here]]."), resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`href="/notes/folder/other.md#adr-010" data-heading="ADR-010" data-preview-path="folder/other.md"`,
+		`href="#local-part" data-heading="Local part">here</a>`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %s in: %s", want, out)
+		}
+	}
+}

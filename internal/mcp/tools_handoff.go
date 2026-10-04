@@ -120,7 +120,7 @@ func (s *Server) handleCreateHandoff(ctx context.Context, req mcp.CallToolReques
 
 	creator := tokenIdentity(tok)
 	content := renderHandoffBody(fromAgent, toAgent, creator, now, summary, pending)
-	if errRes := s.checkWriteLimits(tok, len(content)); errRes != nil {
+	if errRes := s.checkWriteLimits(ctx, tok, len(content)); errRes != nil {
 		return errRes, nil
 	}
 
@@ -276,7 +276,7 @@ func (s *Server) handleClaimHandoff(ctx context.Context, req mcp.CallToolRequest
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("claim failed", err), nil
 	}
-	if errRes := s.checkWriteLimits(tok, len(updated)); errRes != nil {
+	if errRes := s.checkWriteLimits(ctx, tok, len(updated)); errRes != nil {
 		return errRes, nil
 	}
 	if err := s.writeAndIndex(rel, updated); err != nil {
@@ -355,7 +355,7 @@ func (s *Server) handleCompleteHandoff(ctx context.Context, req mcp.CallToolRequ
 		body := strings.TrimRight(string(updated), "\n")
 		updated = []byte(body + "\n\n## Outcome\n\n" + outcomeNote + "\n")
 	}
-	if errRes := s.checkWriteLimits(tok, len(updated)); errRes != nil {
+	if errRes := s.checkWriteLimits(ctx, tok, len(updated)); errRes != nil {
 		return errRes, nil
 	}
 	if err := s.writeAndIndex(rel, updated); err != nil {

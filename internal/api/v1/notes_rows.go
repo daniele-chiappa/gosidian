@@ -170,6 +170,20 @@ func (r *Router) createRow(w http.ResponseWriter, req *http.Request, rel string)
 		}
 		tpl = note.Content
 	}
+	// A database whose rows have given values (rows: {type: plan}) gives
+	// them to a new row, unless the request sets them otherwise.
+	if len(schema.Rows) > 0 {
+		vals := make(map[string]any, len(body.Values)+len(schema.Rows))
+		for k, v := range body.Values {
+			vals[k] = v
+		}
+		for _, kv := range schema.RowConds() {
+			if _, set := vals[kv[0]]; !set {
+				vals[kv[0]] = kv[1]
+			}
+		}
+		body.Values = vals
+	}
 	vars := map[string]string{
 		"ID": name, "TITLE": title, "PROJECT": projectOf(schema.Source),
 		"TODAY": time.Now().UTC().Format("2006-01-02"),

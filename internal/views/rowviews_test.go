@@ -124,3 +124,33 @@ func TestRowViews(t *testing.T) {
 		t.Errorf("data = %+v", data)
 	}
 }
+
+// A view of a database with rows: {…} lists only its rows, and a new row
+// made from it starts with the values of rows.
+func TestCompute_DatabaseRows(t *testing.T) {
+	idx := relIndex(t)
+	for p, body := range map[string]string{
+		"p/plans/README.md": "---\ntitle: Index\ntags: [p, type:index]\n---\n",
+		"p/plans/tagged.md": "---\ntitle: Tagged\nstatus: draft\ntags: [p, type:plan]\n---\n",
+	} {
+		if err := idx.Upsert(index.NoteDoc{Path: p, Title: p, Body: body, ModTime: 1, Size: int64(len(body))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s, err := dbschema.Parse("p/plans.md", "type: database\nsource: p/plans\nrows: {type: plan}\nfields:\n  type: {type: select, options: [plan]}\n  status: {type: select, options: [draft, done]}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := Context{Schema: func(string) *dbschema.Schema { return s }}
+	r, err := compute("from: p/plans\nsort: path", c, idx.Query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(r); got != "tagged" {
+		// fix, mention and other have no type: plan, the README is an index
+		t.Errorf("rows = %s", got)
+	}
+	if d := r.Data(Context{}); d.Defaults["type"] != "plan" {
+		t.Errorf("defaults = %v", d.Defaults)
+	}
+}

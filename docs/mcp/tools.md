@@ -221,8 +221,9 @@ The single-step / pre-uploader split, the equivalent REST endpoint
 `POST /api/upload`, and the full error catalogue live in
 [Upload flow](upload.md). The read-side twin — `GET /mcp/download?path=`
 serving a note's raw bytes with the same bearer token, so a large note
-reaches the agent's disk without crossing the model context — is
-documented there too, as is `POST /mcp/append?path=`, the append-only
+reaches the agent's disk without crossing the model context, or the
+single-use URL of `memory_get` with `transfer: "http"` for an agent that
+cannot read its bearer — is documented there too, as is `POST /mcp/append?path=`, the append-only
 write for scripts that hold a bearer but no MCP session (the Claude Code
 hooks in `contrib/claude-code/`); it runs the same pipeline as
 `memory_append`.
@@ -262,7 +263,8 @@ from the caller's token identity and cannot be forged, while
   scope list), `access` (every project the token reaches with its live
   level, `read` or `write`: a write-scoped token can still be read-only
   on projects where its account holds only a read grant) + rate-limit
-  snapshot (for auto-throttling)
+  snapshot of the session, with the token's shared cap (for
+  auto-throttling)
 - `memory_project_scaffold(project, template?, variables?)` — idempotent
   Karpathy-Wiki-Stack bootstrap
 - `memory_init_agent(project, existing_content?)` — produce the

@@ -105,6 +105,9 @@ func (r *Router) patchFrontmatter(w http.ResponseWriter, req *http.Request, rel 
 			WriteError(w, http.StatusInternalServerError, CodeServerInternal, "schema: "+err.Error())
 			return
 		}
+		if schema != nil && !schema.IsRow(rel, raw) {
+			schema = nil // a note of the folder that is not a row (rows: …)
+		}
 	}
 	if schema != nil {
 		if probs := schema.CheckEdit(rel, body.Set, body.Unset); len(probs) > 0 {
@@ -301,7 +304,7 @@ func (r *Router) readRowFields(w http.ResponseWriter, req *http.Request, rel str
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, "schema: "+err.Error())
 		return
 	}
-	if schema == nil || !r.canSee(p, schema.Path) {
+	if schema == nil || !r.canSee(p, schema.Path) || !schema.IsRow(rel, parser.FrontmatterRawForPath(rel, note.Content)) {
 		WriteJSON(w, http.StatusOK, resp)
 		return
 	}
@@ -368,7 +371,7 @@ func (r *Router) readRowViews(w http.ResponseWriter, req *http.Request, rel stri
 		return
 	}
 	schema := r.viewSchema(p)(path.Dir(rel))
-	if schema == nil || !schema.Covers(rel) || len(schema.RowViews) == 0 {
+	if schema == nil || len(schema.RowViews) == 0 || !schema.IsRow(rel, parser.FrontmatterRawForPath(rel, note.Content)) {
 		WriteJSON(w, http.StatusOK, resp)
 		return
 	}

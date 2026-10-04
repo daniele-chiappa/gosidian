@@ -340,7 +340,7 @@ func (s *Server) writeIngestedNote(ctx context.Context, project, ext, fnForExt, 
 	if errRes != nil {
 		return errRes, nil
 	}
-	if errRes := s.checkWriteLimits(tok, len(content)); errRes != nil {
+	if errRes := s.checkWriteLimits(ctx, tok, len(content)); errRes != nil {
 		return errRes, nil
 	}
 
@@ -437,7 +437,7 @@ func (s *Server) ingestRaw(ctx context.Context, in ingestIntent, data []byte) (*
 	if errRes != nil {
 		return errRes, nil
 	}
-	if errRes := s.checkWriteLimits(tok, len(data)); errRes != nil {
+	if errRes := s.checkWriteLimits(ctx, tok, len(data)); errRes != nil {
 		return errRes, nil
 	}
 	res, err := attach.Store(s.vault, data, in.Filename, in.Project)

@@ -114,7 +114,7 @@ func (s *Server) handleSelfImprove(ctx context.Context, req mcp.CallToolRequest)
 	}
 
 	body := renderInsight(project, now, category, title, friction, confidence, suggestion, agentLabel, tok.ID, correlationIDFromContext(ctx))
-	if errRes := s.checkWriteLimits(tok, len(body)); errRes != nil {
+	if errRes := s.checkWriteLimits(ctx, tok, len(body)); errRes != nil {
 		return errRes, nil
 	}
 	if err := s.writeAndIndex(rel, []byte(body)); err != nil {

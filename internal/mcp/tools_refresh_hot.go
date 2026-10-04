@@ -97,7 +97,7 @@ func (s *Server) handleRefreshHot(ctx context.Context, req mcp.CallToolRequest) 
 			Reason:  "already up to date",
 		})
 	}
-	if errRes := s.checkWriteLimits(tok, len(newBody)); errRes != nil {
+	if errRes := s.checkWriteLimits(ctx, tok, len(newBody)); errRes != nil {
 		return errRes, nil
 	}
 	if err := s.writeAndIndex(hotPath, []byte(newBody)); err != nil {

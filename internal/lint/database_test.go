@@ -93,3 +93,20 @@ func TestLint_RowViewsAndFrontmatterLinks(t *testing.T) {
 		t.Errorf("want the two broken row views and the link, got:\n%s", all)
 	}
 }
+
+// A database with rows: {type: plan} checks only its rows: the index of the
+// folder is not one.
+func TestLint_DatabaseRows(t *testing.T) {
+	_, v, idx := newTestLinter(t)
+	seed(t, v, idx, "p/plans.md", "---\ntitle: Plans\ntags: [p, type:index]\ntype: database\nsource: p/plans\nrows: {type: plan}\nfields:\n  status: {type: select, required: true, options: [draft, done]}\n---\n")
+	seed(t, v, idx, "p/plans/README.md", "---\ntitle: Plans index\ntags: [p, type:index]\n---\n")
+	seed(t, v, idx, "p/plans/a.md", "---\ntitle: A\ntype: plan\nstatus: draft\ntags: [p]\n---\n")
+	seed(t, v, idx, "p/plans/b.md", "---\ntitle: B\ntags: [p, type:plan]\n---\n")
+	issues, err := New(v, idx).Run(context.Background(), "p", []string{"database-field-invalid"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 1 || issues[0].File != "p/plans/b.md" || !strings.Contains(issues[0].Message, `required field "status"`) {
+		t.Errorf("issues = %+v", issues)
+	}
+}

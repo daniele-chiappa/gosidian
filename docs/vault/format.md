@@ -64,7 +64,10 @@ Unresolved targets render with an `unresolved` CSS class so authors
 notice typos. The MCP tool `memory_lint` reports them as
 `broken-wikilink` warnings. A link to a heading of the same note
 (`[[#heading]]`, `[[#^block]]`) is an anchor on the current page and is
-never reported.
+never reported. In the web UI a link to a heading, of the same note or of
+another, opens the note at that heading, found as `memory_get_section`
+finds it: its text, or an ID alone at its start (`[[decisions#ADR-010]]`
+for `## ADR-010 — …`).
 
 A wikilink in a frontmatter value is a link too, as a link property is in
 Obsidian: `related: "[[other-note]]"` or a list of them, at the top level

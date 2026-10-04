@@ -284,3 +284,31 @@ func TestParse_RowViews(t *testing.T) {
 		}
 	}
 }
+
+// rows narrows the rows to the notes of the folder with given values: a
+// field, or a namespaced tag when the field is missing.
+func TestParse_RowsAndIsRow(t *testing.T) {
+	s, err := Parse("p/plans.md", "type: database\nsource: p/plans\nrows: {type: plan}\nfields:\n  status: {type: select, options: [draft, done]}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Rows["type"] != "plan" || len(s.RowConds()) != 1 {
+		t.Fatalf("rows = %v", s.Rows)
+	}
+	for fm, want := range map[string]bool{
+		"title: A\ntype: plan\n":                     true,
+		"title: A\ntags: [p, type:plan]\n":           true,
+		"title: Index\ntags: [p, type:index]\n":      false,
+		"title: A\ntype: index\ntags: [type:plan]\n": false, // the field wins over the tag
+	} {
+		if got := s.IsRow("p/plans/a.md", fm); got != want {
+			t.Errorf("IsRow(%q) = %v, want %v", fm, got, want)
+		}
+	}
+	if s.IsRow("p/plans/sub/a.md", "type: plan\n") {
+		t.Error("a note below the folder is not a row")
+	}
+	if _, err := Parse("p/plans.md", "type: database\nsource: p/plans\nrows: plan\nfields:\n  a: {type: text}\n"); err == nil {
+		t.Error("rows must be a map")
+	}
+}

@@ -213,9 +213,10 @@ type TrashConfig struct {
 }
 
 // MCPConfig caps how aggressively an MCP client may mutate the vault.
-// Both fields are per-token. Zero values mean "use defaults".
+// The write rate counts per MCP session, the note size per write. Zero
+// values mean "use defaults".
 type MCPConfig struct {
-	WritePerMinute int   `toml:"write_per_minute"` // default 60
+	WritePerMinute int   `toml:"write_per_minute"` // default 60, per MCP session; a token gets 5× (IMP-141)
 	MaxNoteBytes   int64 `toml:"max_note_bytes"`   // default 1 MiB
 	// PackageMaxFiles and PackageMaxBytes cap a memory_ingest package
 	// (as: package, IMP-116): its files, and its size unpacked.

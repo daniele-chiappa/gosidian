@@ -65,3 +65,23 @@ func TestPreview_ResolvesFileName(t *testing.T) {
 		t.Errorf("preview = %d %s", r.code, r.body)
 	}
 }
+
+// A database with rows: {type: plan}: its index is not a row (no panel), a
+// new row gets type: plan.
+func TestDatabaseRows_REST(t *testing.T) {
+	f := newNotesFixture(t)
+	f.seedNote(t, "p/plans.md", "---\ntitle: Plans\ntype: database\nsource: p/plans\nrows: {type: plan}\nfields:\n  title: {type: text}\n  status: {type: select, options: [draft, done]}\ntags: [p, type:index]\n---\n")
+	f.seedNote(t, "p/plans/README.md", "---\ntitle: Plans index\ntags: [p, type:index]\n---\n")
+	auth := map[string]string{"Authorization": "Bearer " + f.bearer}
+	rec := f.request(http.MethodGet, "/api/v1/notes/p/plans/README.md/fields", "", auth)
+	if rec.Code != http.StatusOK || strings.Contains(rec.Body.String(), `"database"`) {
+		t.Errorf("the index is not a row: %d %s", rec.Code, rec.Body.String())
+	}
+	r := f.doAuthRecorder(http.MethodPost, "/api/v1/notes/p/plans.md/rows", `{"name":"20261004-x","title":"X","values":{"status":"draft"}}`, nil)
+	if r.code != http.StatusCreated {
+		t.Fatalf("create row = %d %s", r.code, r.body)
+	}
+	if c := f.content(t, "p/plans/20261004-x.md"); !strings.Contains(c, "type: plan") || !strings.Contains(c, "status: draft") {
+		t.Errorf("new row:\n%s", c)
+	}
+}

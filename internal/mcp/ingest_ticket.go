@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/gosidian/gosidian/internal/attach"
-	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -52,7 +51,7 @@ func (s *Server) mintIngestTicket(ctx context.Context, project, as string, req m
 	if errRes != nil {
 		return errRes, nil
 	}
-	if errRes := s.checkWriteLimits(tok, 0); errRes != nil {
+	if errRes := s.checkWriteLimits(ctx, tok, 0); errRes != nil {
 		return errRes, nil
 	}
 
@@ -166,21 +165,10 @@ func (s *Server) handleIngestTicketRedeem(w http.ResponseWriter, r *http.Request
 
 	// Rebind the minting token so scope, audit, and rate limits apply as if
 	// the bytes had arrived through the MCP call itself.
-	var tok *auth.Token
-	if s.tokens == nil || s.tokens.Empty() {
-		tok = auth.AdminToken()
-	} else {
-		for _, t := range s.tokens.List() {
-			if t.ID == tk.TokenID {
-				tt := t
-				tok = &tt
-				break
-			}
-		}
-		if tok == nil {
-			writeJSONError(w, http.StatusForbidden, "the token that minted this ticket no longer exists")
-			return
-		}
+	tok := s.tokenByID(tk.TokenID)
+	if tok == nil {
+		writeJSONError(w, http.StatusForbidden, "the token that minted this ticket no longer exists")
+		return
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, multipartBodyCap)
@@ -209,8 +197,8 @@ func (s *Server) handleIngestTicketRedeem(w http.ResponseWriter, r *http.Request
 	if tk.Intent.As == "package" {
 		limitSize = 0
 	}
-	if msg := s.writeLimitViolation(tok, limitSize); msg != "" {
-		writeJSONError(w, http.StatusTooManyRequests, msg)
+	if msg, wait := s.writeLimitViolation(r.Context(), tok, limitSize); msg != "" {
+		writeRateLimited(w, http.StatusTooManyRequests, msg, wait)
 		return
 	}
 

@@ -32,6 +32,7 @@ import ViewTable from '@/components/views/ViewTable.vue'
 import ViewBoard from '@/components/views/ViewBoard.vue'
 import ViewCount from '@/components/views/ViewCount.vue'
 import { splitViews } from '@/components/views/segments'
+import { findHeading } from './headings'
 
 const props = defineProps<{ html: string; views?: ViewData[] }>()
 
@@ -44,7 +45,7 @@ const proseClass =
 const sanitized = computed(() =>
   DOMPurify.sanitize(props.html, {
     ADD_TAGS: ['math', 'mfrac', 'mrow', 'msup', 'mn', 'mi'],
-    ADD_ATTR: ['class', 'data-preview-path', 'data-view'],
+    ADD_ATTR: ['class', 'data-preview-path', 'data-view', 'data-heading'],
   }),
 )
 
@@ -57,6 +58,17 @@ function viewAs(index: number, as: 'table' | 'board' | 'count'): ViewData | unde
   return v && !v.error && v.as === as ? v : undefined
 }
 
+/** The decoded fragment of an href, without the #; null when there is none. */
+function fragment(href: string): string | null {
+  const i = href.indexOf('#')
+  if (i < 0 || i === href.length - 1) return null
+  try {
+    return decodeURIComponent(href.slice(i + 1))
+  } catch {
+    return href.slice(i + 1)
+  }
+}
+
 function onClick(e: MouseEvent) {
   if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return
   const a = (e.target as HTMLElement | null)?.closest('a')
@@ -67,12 +79,21 @@ function onClick(e: MouseEvent) {
 
   if (previewPath) {
     e.preventDefault()
-    openWindow({
+    // A link to a heading opens the note there (IMP-140): the heading as
+    // written, else the fragment of the href. A window already open on the
+    // note gets the anchor too, and scrolls.
+    const anchor = a.getAttribute('data-heading') ?? fragment(href)
+    const key = planciaKey('note', previewPath)
+    const props = anchor
+      ? { path: previewPath, anchor, anchorAt: Date.now() }
+      : { path: previewPath }
+    const id = openWindow({
       type: 'note',
-      key: planciaKey('note', previewPath),
+      key,
       title: (previewPath.split('/').pop() ?? previewPath).replace(/\.md$/, ''),
-      props: { path: previewPath },
+      props,
     })
+    if (anchor && id) store.identify(id, key, props)
     return
   }
   if (href.startsWith('/tags/')) {
@@ -84,8 +105,8 @@ function onClick(e: MouseEvent) {
   }
   if (href.startsWith('#')) {
     e.preventDefault()
-    const id = href.slice(1)
-    root.value?.querySelector(`#${CSS.escape(id)}`)?.scrollIntoView({ behavior: 'smooth' })
+    const anchor = a.getAttribute('data-heading') ?? fragment(href) ?? ''
+    if (root.value) findHeading(root.value, anchor)?.scrollIntoView({ behavior: 'smooth' })
     return
   }
   if (href.startsWith('/notes/new')) {

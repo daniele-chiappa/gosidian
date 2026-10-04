@@ -47,10 +47,19 @@ func TestRelations_AgentTools(t *testing.T) {
 	if !reflect.DeepEqual(bl.Backlinks, want) {
 		t.Errorf("backlinks = %+v", bl.Backlinks)
 	}
+	// A path without its extension, as a wikilink writes it (BUG-092).
+	var bl2 struct {
+		Backlinks []backlinkEntry `json:"backlinks"`
+	}
+	res, err = s.handleBacklinks(ctx, call(map[string]any{"path": "p/docs/bugs/BUG-1"}))
+	decode(res, err, &bl2)
+	if len(bl2.Backlinks) != 2 {
+		t.Errorf("backlinks without .md = %+v", bl2.Backlinks)
+	}
 	var ol struct {
 		Outlinks []outlinkEntry `json:"outlinks"`
 	}
-	res, err = s.handleOutlinks(ctx, call(map[string]any{"path": "p/plans/fix.md"}))
+	res, err = s.handleOutlinks(ctx, call(map[string]any{"path": "p/plans/fix"}))
 	decode(res, err, &ol)
 	if len(ol.Outlinks) != 1 || ol.Outlinks[0].Field != "related" || ol.Outlinks[0].ResolvedPath != "p/docs/bugs/BUG-1.md" {
 		t.Errorf("outlinks = %+v", ol.Outlinks)

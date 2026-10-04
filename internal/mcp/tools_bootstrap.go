@@ -213,7 +213,7 @@ func (s *Server) buildCapabilities(readOnly bool) bootstrapCapabilities {
 
 // downloadEndpointHint is the read-side byte path (IMP-081), shared by the
 // full and the read-only capabilities block.
-const downloadEndpointHint = "to get a note's full bytes on your disk without context tokens (edit a large .html report locally, then re-ingest it), GET your MCP base URL plus /download?path=<vault path> (the URL you configured, minus any trailing /sse; bearer token, read scope): raw .md/.html body, ETag reusable as if_match on the next write. Attachments are served at /vault-files/<path> with the same bearer"
+const downloadEndpointHint = "to get a note's full bytes on your disk without context tokens (edit a large .html report locally, then re-ingest it), GET your MCP base URL plus /download?path=<vault path> (the URL you configured, minus any trailing /sse; bearer token, read scope): raw .md/.html body, ETag reusable as if_match on the next write. Without the bearer at hand, memory_get with transfer:\"http\" gives a single-use URL to GET with no header. Attachments are served at /vault-files/<path> with the same bearer"
 
 // conventionFiles maps the relative-to-project filename to the key we expose
 // in the JSON payload. Order matters: the `missing` list is emitted in this

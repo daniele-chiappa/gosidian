@@ -68,7 +68,7 @@ func checkDatabaseFields(_ context.Context, l *Linter, project string) ([]Issue,
 	}
 	for _, n := range notes {
 		for _, s := range schemas {
-			if !s.Covers(n.Path) {
+			if !s.IsRow(n.Path, rawFrontmatter(n)) {
 				continue
 			}
 			for _, p := range s.Validate(n.Path, rawFrontmatter(n)) {
@@ -555,8 +555,12 @@ var knownTagValues = map[string]map[string]struct{}{
 		"in-progress": {},
 		"done":        {},
 		"archived":    {},
-		"pending":     {},
-		"snapshot":    {},
+		// The lifecycle of a handoff, written by the server itself on
+		// create, claim and complete (BUG-093).
+		"pending":  {},
+		"claimed":  {},
+		"rejected": {},
+		"snapshot": {},
 	},
 }
 

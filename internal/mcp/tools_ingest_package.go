@@ -270,7 +270,7 @@ func (s *Server) importPackage(ctx context.Context, in packageIntent, entries []
 			len(conflicts), strings.Join(firstN(conflicts, 10), ", ")), nil
 	}
 	if !limited {
-		if msg := s.writeLimitViolation(tok, 0); msg != "" {
+		if msg, _ := s.writeLimitViolation(ctx, tok, 0); msg != "" {
 			return mcp.NewToolResultError(msg), nil
 		}
 	}

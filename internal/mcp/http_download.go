@@ -49,6 +49,14 @@ func (s *Server) handleHTTPDownload(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusBadRequest, "missing path query param (vault-relative note path, e.g. proj/docs/report.html)")
 		return
 	}
+	s.serveNoteBytes(w, tok, raw)
+}
+
+// serveNoteBytes writes one note's raw bytes for tok, after the checks every
+// byte download makes: a vault path, inside the token's scope, not in a
+// project hidden from MCP, and a note. Shared by /download and the download
+// ticket (IMP-142).
+func (s *Server) serveNoteBytes(w http.ResponseWriter, tok *auth.Token, raw string) {
 	rel, err := s.vault.Rel(raw)
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, "path rejected: "+err.Error())

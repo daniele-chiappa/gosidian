@@ -96,7 +96,7 @@ func (s *Server) storeAttachmentFromRequest(ctx context.Context, project, filena
 		if errRes != nil {
 			return nil, 0, errRes
 		}
-		if errRes := s.checkWriteLimits(tok, 0); errRes != nil {
+		if errRes := s.checkWriteLimits(ctx, tok, 0); errRes != nil {
 			return nil, 0, errRes
 		}
 		res, err := attach.StoreFromPath(s.vault, staged, filename, project, s.effectiveUploadRoots())
@@ -129,7 +129,7 @@ func (s *Server) storeAttachmentFromRequest(ctx context.Context, project, filena
 		if errRes != nil {
 			return nil, 0, errRes
 		}
-		if errRes := s.checkWriteLimits(tok, 0); errRes != nil {
+		if errRes := s.checkWriteLimits(ctx, tok, 0); errRes != nil {
 			return nil, 0, errRes
 		}
 		res, err := attach.StoreFromPath(s.vault, sourcePath, filename, project, s.effectiveUploadRoots())
@@ -160,7 +160,7 @@ func (s *Server) storeAttachmentFromRequest(ctx context.Context, project, filena
 	if errRes != nil {
 		return nil, 0, errRes
 	}
-	if errRes := s.checkWriteLimits(tok, len(data)); errRes != nil {
+	if errRes := s.checkWriteLimits(ctx, tok, len(data)); errRes != nil {
 		return nil, 0, errRes
 	}
 	res, err := attach.Store(s.vault, data, filename, project)
@@ -332,7 +332,7 @@ func (s *Server) handleDeleteAttachment(ctx context.Context, req mcp.CallToolReq
 	if errRes != nil {
 		return errRes, nil
 	}
-	if errRes := s.checkWriteLimits(tok, 0); errRes != nil {
+	if errRes := s.checkWriteLimits(ctx, tok, 0); errRes != nil {
 		return errRes, nil
 	}
 	if !s.vault.Exists(rel) {

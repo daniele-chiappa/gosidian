@@ -127,5 +127,7 @@ instance) for the authoritative current list.
 - **Goroutines**: one for the web HTTP server, one for the MCP SSE
   server, one for gitsync's debounce timer, one for fsnotify's event
   loop. Everything else is per-request.
-- **Rate limiting**: per-token write limiter (`60/minute` default)
-  protects against runaway agent loops.
+- **Rate limiting**: a write limiter per MCP session (`60/minute`
+  default, rolling window), with five times that shared by all the
+  sessions of a token, protects against runaway agent loops without
+  letting agents on one token take each other's budget.

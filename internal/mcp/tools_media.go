@@ -141,7 +141,7 @@ func (s *Server) handleCreateMediaNote(ctx context.Context, req mcp.CallToolRequ
 
 	// Assemble and write the note.
 	content := buildMediaNote(title, res.Path, project, caption)
-	if errRes := s.checkWriteLimits(tok, len(content)); errRes != nil {
+	if errRes := s.checkWriteLimits(ctx, tok, len(content)); errRes != nil {
 		return errRes, nil
 	}
 	if err := s.writeAndIndex(rel, []byte(content)); err != nil {

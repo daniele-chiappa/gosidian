@@ -8,6 +8,69 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.53.0] — 2026-10-04 — "rows and tickets"
+
+A database note can keep as rows only the notes with given values, a link
+to a heading opens the note at that heading, and two frictions agents met
+while moving their backlogs into databases are gone: the write limit now
+counts per MCP session, and a large note can be downloaded without handling
+the bearer token. Versions 2.51.0 and 2.52.0 were not published on their
+own; this release includes them. Pull the image and restart; nothing to
+migrate. Read the note on `mcp.write_per_minute` below if you changed it.
+
+### Added
+- **Rows narrowed by value** — a database note can declare
+  `rows: {type: plan}`: only the notes of the source folder with those
+  values (or the matching namespaced tag) are rows. An index or other notes
+  in the folder are not checked against the schema, get no property panel
+  or row views, and stay out of the views of the database; a new row starts
+  with the values, and the bootstrap counts only the rows.
+- **Download a note with a single-use URL** — `memory_get` with
+  `transfer: "http"` returns, instead of the body, a URL valid for 5
+  minutes that serves the note's raw bytes once to a `GET` with no
+  `Authorization` header, with its ETag: the read-side twin of the
+  `memory_ingest` upload ticket. An agent that cannot read its own bearer
+  for `/download` (a cautious client refuses to read it from its
+  configuration) still gets a large note onto its disk without spending
+  context tokens. The checks of `/download` are made at the mint and again
+  at the redemption; a token holds at most 16 pending tickets.
+
+### Changed
+- **Write limit per MCP session** — `mcp.write_per_minute` (default 60)
+  now caps each MCP session, and all the sessions of a token together get
+  five times that. Several agents on one token no longer take each other's
+  budget, and a runaway loop is still stopped by its own session's cap.
+  Writes with no MCP session (the HTTP byte endpoints, ticket
+  redemptions) share one session-sized budget of their token, as before. A
+  refusal says which cap it hit and in how many seconds to retry, the HTTP
+  endpoints send that as `Retry-After`, and `memory_self_stats` reports
+  both levels (`token_max_per_minute`, `token_used`).
+
+### Fixed
+- **A link to a heading opens the note there** — in the web UI
+  `[[note#Heading]]` opened the other note from the top, and a link to a
+  heading of the same note worked only when it matched the heading's id
+  exactly. The window now scrolls to the heading, found as
+  `memory_get_section` finds it: its text, an ID at its start (`#ADR-010`
+  for `## ADR-010 — …`), or its anchor id; a window already open on the
+  note scrolls too.
+- **`memory_backlinks` and `memory_outlinks` take a path without `.md`** —
+  the path as a wikilink writes it, `myproject/docs/bugs/BUG-091`, gave an
+  empty list with nothing to say why. It now names the note with that path
+  and `.md` (or `.html`).
+- **Handoff statuses pass the lint** — `memory_lint` flagged
+  `status:claimed` and `status:rejected`, the tags the server itself writes
+  when a handoff is claimed or completed, as outside the closed vocabulary.
+- **A ticket minted by a token that expired since is refused** — redeeming
+  an upload ticket rebound the minting token without checking its expiry.
+
+### Notes
+- `mcp.write_per_minute` (`GOSIDIAN_MCP_WRITE_PER_MINUTE`) now means writes
+  per minute of one MCP session. Where a token runs one session at a time
+  nothing changes; where several agents share a token, they get up to five
+  times the setting in total. The window was already rolling (60 seconds),
+  not fixed as the docs said.
+
 ## [2.50.1] — 2026-10-04 — "relations, counts and packages"
 
 Databases in notes, second round: relations between notes, views that each

@@ -108,7 +108,7 @@ func (s *Server) handleCompact(ctx context.Context, req mcp.CallToolRequest) (*m
 
 	newBody := renderCompactedHead(header, summary, original-keep, time.Now().UTC()) + string(keepSuffix)
 
-	if errRes := s.checkWriteLimits(tok, len(newBody)); errRes != nil {
+	if errRes := s.checkWriteLimits(ctx, tok, len(newBody)); errRes != nil {
 		return errRes, nil
 	}
 

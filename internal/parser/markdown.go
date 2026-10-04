@@ -122,6 +122,12 @@ func (r *Renderer) Render(body []byte, resolver Resolver) (string, error) {
 			class := "wikilink"
 			var href string
 			extraAttr := ""
+			if heading != "" {
+				// The heading as written: the web UI finds it the way
+				// memory_get_section does (its text, an ID at its start),
+				// which the slug of the href cannot (IMP-140).
+				extraAttr = ` data-heading="` + stdhtml.EscapeString(heading) + `"`
+			}
 			if target == "" && heading != "" {
 				// In-note jump: just an anchor on the current page.
 				href = "#" + headingID(heading)
@@ -135,7 +141,7 @@ func (r *Renderer) Render(body []byte, resolver Resolver) (string, error) {
 				}
 				// Emit the resolved vault path as a data attribute so the
 				// client-side wikilink-preview script can fetch an excerpt.
-				extraAttr = ` data-preview-path="` + stdhtml.EscapeString(resolved) + `"`
+				extraAttr += ` data-preview-path="` + stdhtml.EscapeString(resolved) + `"`
 			}
 			return `<a class="` + class + `" href="` + href + `"` + extraAttr + `>` + stdhtml.EscapeString(text) + `</a>`
 		})

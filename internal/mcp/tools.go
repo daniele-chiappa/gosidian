@@ -15,6 +15,7 @@ import (
 
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/auth"
+	"github.com/gosidian/gosidian/internal/dbschema"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/metrics"
 	"github.com/gosidian/gosidian/internal/parser"
@@ -59,10 +60,10 @@ func (s *Server) authorizeWrite(ctx context.Context, path string) (*auth.Token, 
 // CallToolResult error to be returned to the caller, or nil when the request
 // may proceed. Should be called AFTER authorizeWrite (so we know the token).
 // Every mutation goes through it — deletes, renames and uploads included,
-// with contentSize 0 when there is no body to cap — so the per-token budget
-// the operator configured really bounds what a runaway agent can do.
-func (s *Server) checkWriteLimits(tok *auth.Token, contentSize int) *mcp.CallToolResult {
-	if msg := s.writeLimitViolation(tok, contentSize); msg != "" {
+// with contentSize 0 when there is no body to cap — so the budget the
+// operator configured really bounds what a runaway agent can do.
+func (s *Server) checkWriteLimits(ctx context.Context, tok *auth.Token, contentSize int) *mcp.CallToolResult {
+	if msg, _ := s.writeLimitViolation(ctx, tok, contentSize); msg != "" {
 		return mcp.NewToolResultError(msg)
 	}
 	return nil
@@ -70,21 +71,37 @@ func (s *Server) checkWriteLimits(tok *auth.Token, contentSize int) *mcp.CallToo
 
 // writeLimitViolation is checkWriteLimits for non-MCP callers (the HTTP
 // upload endpoints): it returns the rejection message, or "" when the write
-// may proceed.
-func (s *Server) writeLimitViolation(tok *auth.Token, contentSize int) string {
+// may proceed, and for a rate refusal how long until a place frees up (the
+// HTTP callers send it as Retry-After).
+func (s *Server) writeLimitViolation(ctx context.Context, tok *auth.Token, contentSize int) (string, time.Duration) {
 	if s.maxNoteBytes > 0 && int64(contentSize) > s.maxNoteBytes {
 		metrics.MCPRateLimitHits.Inc()
-		return fmt.Sprintf("note size %d exceeds limit of %d bytes. A body this large usually belongs elsewhere: long tabular data → a table note, an image → a media note, a big generated file already on disk → memory_ingest (bridge_filename/source_path, or transfer:\"http\" for a single-use upload URL)", contentSize, s.maxNoteBytes)
+		return fmt.Sprintf("note size %d exceeds limit of %d bytes. A body this large usually belongs elsewhere: long tabular data → a table note, an image → a media note, a big generated file already on disk → memory_ingest (bridge_filename/source_path, or transfer:\"http\" for a single-use upload URL)", contentSize, s.maxNoteBytes), 0
 	}
 	id := ""
 	if tok != nil {
 		id = tok.ID
 	}
-	if !s.limiter.Allow(id) {
-		metrics.MCPRateLimitHits.Inc()
-		return fmt.Sprintf("write rate limit exceeded for token (max %d/min)", s.limiter.maxPerMinute)
+	ok, wait, tokenLevel := s.limiter.Allow(id, sessionFromContext(ctx))
+	if ok {
+		return "", 0
 	}
-	return ""
+	metrics.MCPRateLimitHits.Inc()
+	secs := retrySeconds(wait)
+	if tokenLevel {
+		return fmt.Sprintf("write rate limit exceeded for the token: at most %d writes per minute across all its sessions (each session up to %d). Nothing was written. Retry in %ds: wait, then repeat the same call", s.limiter.tokenMax(), s.limiter.maxPerMinute, secs), wait
+	}
+	return fmt.Sprintf("write rate limit exceeded for this session: at most %d writes per minute (the token allows %d across its sessions). Nothing was written. Retry in %ds: wait, then repeat the same call", s.limiter.maxPerMinute, s.limiter.tokenMax(), secs), wait
+}
+
+// writeRateLimited answers an HTTP write refused by writeLimitViolation: 429
+// with Retry-After for a rate refusal (wait > 0), else the given status.
+func writeRateLimited(w http.ResponseWriter, status int, msg string, wait time.Duration) {
+	if wait > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(retrySeconds(wait)))
+		status = http.StatusTooManyRequests
+	}
+	writeJSONError(w, status, msg)
 }
 
 func (s *Server) registerTools() {
@@ -120,11 +137,12 @@ func (s *Server) registerTools() {
 	), s.handleNotesByTag)
 
 	s.impl.AddTool(mcp.NewTool("memory_get",
-		mcp.WithDescription("Read a note by its vault-relative path (e.g. 'project/note.md'). Oversize guard: when the body exceeds 24 KiB (and raw is not set) the response is truncated — frontmatter + heading outline + the first chunk, with truncated:true, the full size, and the note's real etag (if_match still works). Fetch just the section you need via memory_get_section, or pass raw:true only when you really need the whole body. To get a large note onto your own disk without spending context tokens, GET the HTTP /download endpoint instead (your MCP base URL plus /download?path=<path>, bearer token) — see bootstrap capabilities."),
+		mcp.WithDescription("Read a note by its vault-relative path (e.g. 'project/note.md'). Oversize guard: when the body exceeds 24 KiB (and raw is not set) the response is truncated — frontmatter + heading outline + the first chunk, with truncated:true, the full size, and the note's real etag (if_match still works). Fetch just the section you need via memory_get_section, or pass raw:true only when you really need the whole body. To get a large note onto your own disk without spending context tokens, GET the HTTP /download endpoint instead (your MCP base URL plus /download?path=<path>, bearer token), or pass transfer:\"http\" for a single-use URL that needs no bearer — see bootstrap capabilities."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative path to the .md file.")),
 		mcp.WithBoolean("raw", mcp.Description("Bypass the oversize guard and return the full body regardless of size.")),
 		mcp.WithNumber("max_bytes", mcp.Description("Explicit body cap in bytes — truncates even below the default threshold. Ignored when raw:true.")),
 		mcp.WithBoolean("render_views", mcp.Description("Also compute the note's ```view blocks: each block stays and its result follows it between gosidian:view-result markers. Off by default, so a note read to be edited comes back as it is on disk (the response's hint then says how many blocks were left uncomputed); never write the computed result back.")),
+		mcp.WithString("transfer", mcp.Description("\"http\": instead of the body, a single-use URL (5 min) to GET the note's raw bytes with no Authorization header, plus its etag and size. For a body you want on your own disk without spending context tokens when you cannot read your bearer for /download (a cautious client blocks reading it from its config).")),
 	), s.handleGet)
 
 	s.impl.AddTool(mcp.NewTool("memory_get_section",
@@ -604,6 +622,9 @@ func (s *Server) handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	if err != nil {
 		return readNoteError(path, err), nil
 	}
+	if req.GetString("transfer", "") == "http" {
+		return s.mintDownloadTicket(ctx, tok, note.Path, note.ETag(), len(note.Content)), nil
+	}
 	nc := noteContent{
 		Path:    note.Path,
 		Title:   note.Title,
@@ -624,7 +645,7 @@ func (s *Server) handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 			nc.Content, nc.ViewsRendered = string(out), true
 		}
 	} else {
-		viewsNote = joinHints(viewsHint(note.Content, "pass render_views:true"), s.rowViewsHint(tok, note.Path, "pass render_views:true"))
+		viewsNote = joinHints(viewsHint(note.Content, "pass render_views:true"), s.rowViewsHint(tok, note.Path, note.Content, "pass render_views:true"))
 	}
 
 	// Oversize guard: truncate the body (default threshold, or the caller's
@@ -752,7 +773,7 @@ func (s *Server) handleGetSection(ctx context.Context, req mcp.CallToolRequest) 
 		"etag":    note.ETag(),
 	}
 	if !rendered {
-		if hint := joinHints(viewsHint([]byte(section), "pass render_views:true"), s.rowViewsHint(tok, note.Path, "pass render_views:true")); hint != "" {
+		if hint := joinHints(viewsHint([]byte(section), "pass render_views:true"), s.rowViewsHint(tok, note.Path, note.Content, "pass render_views:true")); hint != "" {
 			out["hint"] = hint
 		}
 	}
@@ -799,7 +820,7 @@ func (s *Server) handleCreate(ctx context.Context, req mcp.CallToolRequest) (*mc
 	if errRes != nil {
 		return errRes, nil
 	}
-	if errRes := s.checkWriteLimits(tok, len(content)); errRes != nil {
+	if errRes := s.checkWriteLimits(ctx, tok, len(content)); errRes != nil {
 		return errRes, nil
 	}
 	unlock := s.vault.LockPath(rel)
@@ -837,7 +858,7 @@ func (s *Server) handleUpdate(ctx context.Context, req mcp.CallToolRequest) (*mc
 	if errRes != nil {
 		return errRes, nil
 	}
-	if errRes := s.checkWriteLimits(tok, len(content)); errRes != nil {
+	if errRes := s.checkWriteLimits(ctx, tok, len(content)); errRes != nil {
 		return errRes, nil
 	}
 	unlock := s.vault.LockPath(rel)
@@ -906,10 +927,12 @@ type appendOutcome struct {
 }
 
 // appendError is an append failure with the HTTP status the byte endpoint
-// answers; the MCP tool uses the message alone.
+// answers, and for a rate refusal how long to wait; the MCP tool uses the
+// message alone.
 type appendError struct {
 	status int
 	msg    string
+	wait   time.Duration
 }
 
 // appendNote is the one append pipeline behind memory_append and
@@ -926,14 +949,14 @@ func (s *Server) appendNote(ctx context.Context, tok *auth.Token, rel, addition,
 	if note, err := s.vault.Load(rel); err == nil {
 		existing = note.Content
 		if errRes := checkIfMatch(note, ifMatch); errRes != nil {
-			return appendOutcome{}, &appendError{http.StatusPreconditionFailed, toolErrorText(errRes)}
+			return appendOutcome{}, &appendError{status: http.StatusPreconditionFailed, msg: toolErrorText(errRes)}
 		}
 	} else if !errors.Is(err, os.ErrNotExist) && !strings.Contains(err.Error(), "no such file") {
-		return appendOutcome{}, &appendError{http.StatusInternalServerError, "load failed: " + err.Error()}
+		return appendOutcome{}, &appendError{status: http.StatusInternalServerError, msg: "load failed: " + err.Error()}
 	} else if ifMatch != "" {
 		// Client provided if_match but the note doesn't exist — that's a
 		// mismatch too (they thought it was there).
-		return appendOutcome{}, &appendError{http.StatusPreconditionFailed, fmt.Sprintf("etag mismatch: note %q does not exist", rel)}
+		return appendOutcome{}, &appendError{status: http.StatusPreconditionFailed, msg: fmt.Sprintf("etag mismatch: note %q does not exist", rel)}
 	}
 	var merged []byte
 	if len(existing) == 0 {
@@ -949,15 +972,11 @@ func (s *Server) appendNote(ctx context.Context, tok *auth.Token, rel, addition,
 		}
 		merged = []byte(string(existing) + sep + addition)
 	}
-	if msg := s.writeLimitViolation(tok, len(merged)); msg != "" {
-		status := http.StatusRequestEntityTooLarge
-		if strings.Contains(msg, "rate limit") {
-			status = http.StatusTooManyRequests
-		}
-		return appendOutcome{}, &appendError{status, msg}
+	if msg, wait := s.writeLimitViolation(ctx, tok, len(merged)); msg != "" {
+		return appendOutcome{}, &appendError{status: http.StatusRequestEntityTooLarge, msg: msg, wait: wait}
 	}
 	if err := s.writeAndIndex(rel, merged); err != nil {
-		return appendOutcome{}, &appendError{http.StatusInternalServerError, "write failed: " + err.Error()}
+		return appendOutcome{}, &appendError{status: http.StatusInternalServerError, msg: "write failed: " + err.Error()}
 	}
 	s.auditWrite(ctx, audit.ActionAppend, rel, "", int64(len(merged)))
 	s.noteSchemaProblems(ctx, rel, merged)
@@ -1068,7 +1087,7 @@ func (s *Server) handleEdit(ctx context.Context, req mcp.CallToolRequest) (*mcp.
 		updated = strings.Replace(body, oldS, newS, 1)
 	}
 
-	if errRes := s.checkWriteLimits(tok, len(updated)); errRes != nil {
+	if errRes := s.checkWriteLimits(ctx, tok, len(updated)); errRes != nil {
 		return errRes, nil
 	}
 	if err := s.writeAndIndex(rel, []byte(updated)); err != nil {
@@ -1103,7 +1122,7 @@ func (s *Server) handleDelete(ctx context.Context, req mcp.CallToolRequest) (*mc
 	if errRes != nil {
 		return errRes, nil
 	}
-	if errRes := s.checkWriteLimits(tok, 0); errRes != nil {
+	if errRes := s.checkWriteLimits(ctx, tok, 0); errRes != nil {
 		return errRes, nil
 	}
 	if !s.vault.IsNoteFile(rel) {
@@ -1183,7 +1202,7 @@ func (s *Server) handleRenameNote(ctx context.Context, req mcp.CallToolRequest) 
 	if _, errRes := s.authorizeWrite(ctx, toRel); errRes != nil {
 		return errRes, nil
 	}
-	if errRes := s.checkWriteLimits(tok, 0); errRes != nil {
+	if errRes := s.checkWriteLimits(ctx, tok, 0); errRes != nil {
 		return errRes, nil
 	}
 	// Lock the source path only: it serializes rename-vs-update on the note
@@ -1235,7 +1254,7 @@ func (s *Server) handleMoveNote(ctx context.Context, req mcp.CallToolRequest) (*
 	if errRes != nil {
 		return errRes, nil
 	}
-	if errRes := s.checkWriteLimits(tok, 0); errRes != nil {
+	if errRes := s.checkWriteLimits(ctx, tok, 0); errRes != nil {
 		return errRes, nil
 	}
 	unlock := s.vault.LockPath(fromRel)
@@ -1339,6 +1358,7 @@ func (s *Server) handleBacklinks(ctx context.Context, req mcp.CallToolRequest) (
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	path = s.notePathArg(path)
 	if !tok.AllowsPath(path) {
 		return mcp.NewToolResultErrorf("path %q is outside the token's scope", path), nil
 	}
@@ -1354,6 +1374,24 @@ func (s *Server) handleBacklinks(ctx context.Context, req mcp.CallToolRequest) (
 		out = append(out, backlinkEntry{Path: b.Path, Title: b.Title, Fields: b.Fields})
 	}
 	return mcp.NewToolResultJSON(map[string]any{"backlinks": out})
+}
+
+// notePathArg resolves the path argument of a link tool: a note path, or
+// the same path without its extension, as a wikilink writes it
+// (gosidian/docs/bugs/BUG-091 for …/BUG-091.md). Before, such a path gave
+// an empty list, with nothing to say why (BUG-092).
+func (s *Server) notePathArg(p string) string {
+	p = strings.TrimSpace(p)
+	low := strings.ToLower(p)
+	if strings.HasSuffix(low, ".md") || strings.HasSuffix(low, ".html") {
+		return p
+	}
+	for _, ext := range []string{".md", ".html"} {
+		if n, err := s.index.Note(p + ext); err == nil && n != nil {
+			return p + ext
+		}
+	}
+	return p
 }
 
 // backlinkEntry is a note that links to the one asked about; Fields are
@@ -1382,6 +1420,7 @@ func (s *Server) handleOutlinks(ctx context.Context, req mcp.CallToolRequest) (*
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	path = s.notePathArg(path)
 	if !tok.AllowsPath(path) {
 		return mcp.NewToolResultErrorf("path %q is outside the token's scope", path), nil
 	}
@@ -1448,7 +1487,7 @@ func (s *Server) handleBatchGet(ctx context.Context, req mcp.CallToolRequest) (*
 		return mcp.NewToolResultErrorf("too many paths: %d (max 50)", len(paths)), nil
 	}
 	mode := strings.TrimSpace(req.GetString("mode", "content"))
-	rowHints := map[string]string{} // by folder
+	rowSchemas := map[string]*dbschema.Schema{} // by folder
 	switch mode {
 	case "content", "outline", "frontmatter":
 		// ok
@@ -1487,12 +1526,19 @@ func (s *Server) handleBatchGet(ctx context.Context, req mcp.CallToolRequest) (*
 				entry.Truncated = true
 			}
 			entry.Content = body
-			// The row views hint is the same for every row of a folder.
+			// The database of a folder is read once; whether the note is one
+			// of its rows depends on the note (rows: {type: plan}).
 			dir := path.Dir(p)
-			if _, ok := rowHints[dir]; !ok {
-				rowHints[dir] = s.rowViewsHint(tok, p, "read it with memory_get and render_views:true")
+			sc, seen := rowSchemas[dir]
+			if !seen {
+				sc = s.viewSchema(tok)(dir)
+				rowSchemas[dir] = sc
 			}
-			entry.Hint = joinHints(viewsHint(note.Content, "read it with memory_get and render_views:true"), rowHints[dir])
+			rowHint := ""
+			if sc != nil && len(sc.RowViews) > 0 && sc.IsRow(p, parser.FrontmatterRawForPath(p, note.Content)) {
+				rowHint = s.rowViewsHint(tok, p, note.Content, "read it with memory_get and render_views:true")
+			}
+			entry.Hint = joinHints(viewsHint(note.Content, "read it with memory_get and render_views:true"), rowHint)
 		}
 		out = append(out, entry)
 	}

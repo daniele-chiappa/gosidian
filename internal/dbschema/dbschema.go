@@ -17,7 +17,8 @@
 //	    where: [implements_imp = this.id]
 //
 // Each row is a note directly inside the source folder, with the values in
-// its own frontmatter. The optional template is the note a row made from the
+// its own frontmatter; `rows: {type: plan}` narrows them to the notes with
+// those values, when the folder also holds an index or other notes. The optional template is the note a row made from the
 // web UI starts from; the optional row_views are views every row shows
 // below its body, where `this` is the row (IMP-139). The schema is read with
 // a YAML parser; the index keeps its own frontmatter extraction, so nothing
@@ -57,6 +58,11 @@ type Schema struct {
 	// declares none: a note of the same project, outside Source.
 	Template string  `json:"template,omitempty"`
 	Fields   []Field `json:"fields"` // in declaration order
+	// Rows narrows the rows to the notes of Source whose frontmatter has
+	// these values (`rows: {type: plan}`): a folder may also hold an index
+	// (README.md) or other notes. A namespaced tag stands for a field the
+	// note lacks, as in memory_query (type:plan for type: plan).
+	Rows map[string]string `json:"rows,omitempty"`
 	// RowViews are the views every row shows below its body (IMP-139).
 	RowViews []RowView `json:"row_views,omitempty"`
 }
@@ -106,6 +112,19 @@ func Parse(notePath, frontmatter string) (*Schema, error) {
 			return nil, err
 		}
 		s.Template = tp
+	}
+	if rows := valueOf(m, "rows"); rows != nil {
+		if rows.Kind != yaml.MappingNode {
+			return nil, errors.New("`rows` must be a map of field to value, such as {type: plan}")
+		}
+		s.Rows = map[string]string{}
+		for i := 0; i+1 < len(rows.Content); i += 2 {
+			k, v := rows.Content[i], rows.Content[i+1]
+			if v.Kind != yaml.ScalarNode || strings.TrimSpace(v.Value) == "" {
+				return nil, fmt.Errorf("rows: %q needs one value", k.Value)
+			}
+			s.Rows[k.Value] = v.Value
+		}
 	}
 	fields := valueOf(m, "fields")
 	if fields == nil || fields.Kind != yaml.MappingNode {
@@ -252,6 +271,75 @@ func (s *Schema) Covers(rel string) bool {
 	return path.Dir(rel) == s.Source
 }
 
+// IsRow reports whether the note at rel, with this raw frontmatter, is a row
+// of the database: directly inside the source folder, and with the values
+// Rows asks for.
+func (s *Schema) IsRow(rel, frontmatter string) bool {
+	if !s.Covers(rel) {
+		return false
+	}
+	if len(s.Rows) == 0 {
+		return true
+	}
+	entries := parser.FrontmatterEntries(frontmatter)
+	for k, want := range s.Rows {
+		if !hasValue(entries, k, want) {
+			return false
+		}
+	}
+	return true
+}
+
+// RowConds are the conditions of Rows as query conditions, for a view or a
+// query over the rows.
+func (s *Schema) RowConds() [][2]string {
+	keys := make([]string, 0, len(s.Rows))
+	for k := range s.Rows {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := make([][2]string, len(keys))
+	for i, k := range keys {
+		out[i] = [2]string{k, s.Rows[k]}
+	}
+	return out
+}
+
+// hasValue reports a frontmatter key with the value want (a scalar, or an
+// item of a list), or, when the key is absent, the tag key:want.
+func hasValue(entries []parser.FMEntry, key, want string) bool {
+	for _, e := range entries {
+		if e.Key == key {
+			if strings.EqualFold(e.Text, want) {
+				return true
+			}
+			for _, it := range e.Items {
+				if strings.EqualFold(it, want) {
+					return true
+				}
+			}
+			return false
+		}
+	}
+	for _, e := range entries {
+		if e.Key == "tags" {
+			for _, it := range e.Items {
+				if strings.EqualFold(strings.TrimPrefix(it, "#"), key+":"+want) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// implicit reports a field a row may have without the schema declaring it:
+// title and tags, and the keys of Rows, which every row has.
+func (s *Schema) implicit(k string) bool {
+	_, row := s.Rows[k]
+	return row || slices.Contains(implicitFields, k)
+}
+
 // Field returns the declared field with the given name.
 func (s *Schema) Field(name string) (Field, bool) {
 	for _, f := range s.Fields {
@@ -344,7 +432,7 @@ func (s *Schema) Validate(rel, frontmatter string) []Problem {
 	for _, k := range keys {
 		f, declared := s.Field(k)
 		if !declared {
-			if !slices.Contains(implicitFields, k) {
+			if !s.implicit(k) {
 				out = append(out, Problem{Field: k, Message: fmt.Sprintf(
 					"field %q is not in the schema of %s (fields: %s)", k, s.Path, strings.Join(s.FieldNames(), ", "))})
 			}
@@ -384,7 +472,7 @@ func (s *Schema) CheckEdit(rel string, set map[string]any, unset []string) []Pro
 		v := set[k]
 		f, declared := s.Field(k)
 		if !declared {
-			if !slices.Contains(implicitFields, k) {
+			if !s.implicit(k) {
 				out = append(out, Problem{Field: k, Message: fmt.Sprintf(
 					"field %q is not in the schema of %s (fields: %s)", k, s.Path, strings.Join(s.FieldNames(), ", "))})
 			}

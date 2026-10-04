@@ -16,7 +16,7 @@ import (
 // registerSelfStatsTool adds memory_self_stats.
 func (s *Server) registerSelfStatsTool() {
 	s.impl.AddTool(mcp.NewTool("memory_self_stats",
-		mcp.WithDescription("Introspect the calling token's current state: rate-limit budget (max_per_minute, used, remaining), token identity (id, name, projects, scopes), access (every project the token can reach with its live level, read or write: an account can hold write on some projects only, whatever the token's scopes say), and correlation id of the current MCP session when available. Use this before a burst of writes to avoid hitting the rate limit, or to confirm which credentials you're running under and where you may write."),
+		mcp.WithDescription("Introspect the calling token's current state: rate-limit budget of this MCP session (max_per_minute, used, remaining; all the sessions of a token share token_max_per_minute, of which token_used are spent), token identity (id, name, projects, scopes), access (every project the token can reach with its live level, read or write: an account can hold write on some projects only, whatever the token's scopes say), and correlation id of the current MCP session when available. Use this before a burst of writes to avoid hitting the rate limit, or to confirm which credentials you're running under and where you may write."),
 	), s.handleSelfStats)
 }
 
@@ -79,7 +79,7 @@ func (s *Server) handleSelfStats(ctx context.Context, req mcp.CallToolRequest) (
 		Scopes:      append([]string(nil), tok.Scopes...),
 		ToolProfile: tok.ToolProfile,
 	}
-	stats := s.limiter.Stats(tok.ID)
+	stats := s.limiter.Stats(tok.ID, sessionFromContext(ctx))
 	payload := map[string]any{
 		"token":      info,
 		"access":     s.tokenAccess(tok),
