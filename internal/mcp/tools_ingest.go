@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"github.com/gosidian/gosidian/internal/pkgimport"
 	"io"
 	"net/http"
 	"net/url"
@@ -26,7 +27,8 @@ import (
 // Called from registerTools().
 func (s *Server) registerIngestTool() {
 	s.impl.AddTool(mcp.NewTool("memory_ingest",
-		mcp.WithDescription("Save a file into the vault with automatic routing — the ONE tool for \"store this file/report\". Provide the file ONE way, cheapest first: `bridge_filename` (staged in the server's bridge dir), `source_path` (server-side path inside an allowed upload root), `url` (the server fetches it — allowlisted prefixes only), `attachment` (vault path of a file already uploaded), or base64 `data` (small files only). Remote agents with a shell: pass `transfer:\"http\"` instead of a source to mint a single-use upload URL, then POST the bytes there (no bearer needed). Routing by extension: .csv → table note, image → media note, .md/.html → the note itself (body read server-side, no tokens through the context), anything else → plain attachment. Force a kind with `as`."),
+		mcp.WithDescription("Save a file into the vault with automatic routing — the ONE tool for \"store this file/report\". Provide the file ONE way, cheapest first: `bridge_filename` (staged in the server's bridge dir), `source_path` (server-side path inside an allowed upload root), `url` (the server fetches it — allowlisted prefixes only), `attachment` (vault path of a file already uploaded), or base64 `data` (small files only). Remote agents with a shell: pass `transfer:\"http\"` instead of a source to mint a single-use upload URL, then POST the bytes there (no bearer needed). Routing by extension: .csv → table note, image → media note, .md/.html → the note itself (body read server-side, no tokens through the context), anything else → plain attachment. Force a kind with `as`. "+
+			"`as: \"package\"` imports a whole folder or .zip in one call (a folder or .zip staged in the bridge dir, a server folder or .zip in source_path, base64 zip data, or transfer:\"http\" for a .zip) under `dest`: .md/.html become notes keeping their paths inside the package, other accepted files attachments; relative links between files of the package become wikilinks, a note without frontmatter gets a title and the project's tag. All or nothing: a note already there stops it unless overwrite:true; dry_run:true shows the plan without writing. One write of the rate limit."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Vault project to store into.")),
 		mcp.WithString("bridge_filename", mcp.Description("Basename of a file you staged in the server's bridge dir (GOSIDIAN_MCP_BRIDGE_DIR). Read and consumed server-side — near-zero token cost (co-located deploys).")),
 		mcp.WithString("source_path", mcp.Description("Absolute server-side filesystem path. Must be inside the vault, the bridge dir, or an allowed upload root (GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS).")),
@@ -35,11 +37,13 @@ func (s *Server) registerIngestTool() {
 		mcp.WithString("data", mcp.Description("Base64-encoded content. Costly for large files (~1 token/char) — prefer bridge_filename/source_path. Requires filename.")),
 		mcp.WithString("transfer", mcp.Description("Pass \"http\" (with NO source) to mint a single-use upload ticket: the response carries the endpoint to POST the file to (multipart, field 'file', no Authorization header — the ticket is the credential, TTL ~5 min). On receipt the server executes this call's intent (as/note_path/title/caption/overwrite).")),
 		mcp.WithString("filename", mcp.Description("Original filename for extension detection/validation. Required with data, optional otherwise (defaults to the source basename or the uploaded file's name).")),
-		mcp.WithString("as", mcp.Description("Force the result kind instead of routing by extension: auto (default) | table | media | note | attachment.")),
+		mcp.WithString("as", mcp.Description("Force the result kind instead of routing by extension: auto (default) | table | media | note | attachment | package (a folder or .zip imported whole under dest).")),
+		mcp.WithString("dest", mcp.Description("as: package only — the vault folder the package goes into, inside project (e.g. 'proj/docs/guide').")),
+		mcp.WithBoolean("dry_run", mcp.Description("as: package only — return the plan (notes, attachments, files left out, notes that would need overwrite, unresolved links) without writing.")),
 		mcp.WithString("note_path", mcp.Description("Explicit vault-relative note path for the table/media/note result (e.g. 'proj/report-2026-07.md'). Derived from the filename/title when omitted.")),
 		mcp.WithString("title", mcp.Description("Table/media notes: note title. Defaults to the filename stem.")),
 		mcp.WithString("caption", mcp.Description("Table/media notes: markdown body describing the content — the searchable text. Strongly recommended.")),
-		mcp.WithBoolean("overwrite", mcp.Description("Note kind only: replace the note when it already exists. Default false (fail on existing).")),
+		mcp.WithBoolean("overwrite", mcp.Description("Note kind and package: replace the notes that already exist. Default false (fail on existing).")),
 		mcp.WithString("if_match", mcp.Description("Note kind only, with overwrite: etag from a previous memory_get — the replace fails if the note changed since you read it.")),
 	), s.handleIngest)
 }
@@ -131,6 +135,12 @@ func (s *Server) handleIngest(ctx context.Context, req mcp.CallToolRequest) (*mc
 
 	switch transfer := strings.ToLower(strings.TrimSpace(req.GetString("transfer", ""))); transfer {
 	case "":
+		if as == "package" {
+			if attachment != "" || urlSrc != "" {
+				return mcp.NewToolResultError("a package comes from bridge_filename, source_path, data or transfer:\"http\", not from attachment or url"), nil
+			}
+			return s.ingestPackage(ctx, project, req)
+		}
 	case "http":
 		if dataB64 != "" || sourcePath != "" || bridgeFilename != "" || attachment != "" || urlSrc != "" {
 			return mcp.NewToolResultError("transfer:http mints a ticket for bytes POSTed later — do not pass a source in the same call"), nil
@@ -381,8 +391,11 @@ func (s *Server) writeIngestedNote(ctx context.Context, project, ext, fnForExt, 
 // ingestIntent is a routed ingestion request whose bytes arrive out of band
 // (url fetch, ticket redemption) instead of through an MCP source parameter.
 type ingestIntent struct {
-	Project   string
-	As        string
+	Project string
+	As      string
+	// Dest and DryRun are those of a package (as: package).
+	Dest      string
+	DryRun    bool
 	NotePath  string
 	Title     string
 	Caption   string
@@ -397,6 +410,14 @@ type ingestIntent struct {
 // creation with `attachment`, so validation, flags, and audit stay identical
 // to the MCP path.
 func (s *Server) ingestRaw(ctx context.Context, in ingestIntent, data []byte) (*mcp.CallToolResult, error) {
+	if in.As == "package" {
+		// The bytes are a .zip; the redemption has charged the write limit.
+		entries, skipped, err := pkgimport.ReadZip(data, pkgimport.Limits{MaxFiles: s.packageMaxFiles, MaxBytes: s.packageMaxBytes})
+		if err != nil {
+			return mcp.NewToolResultError("package: " + err.Error()), nil
+		}
+		return s.importPackage(ctx, packageIntent{Project: in.Project, Dest: in.Dest, DryRun: in.DryRun, Overwrite: in.Overwrite}, entries, skipped, true)
+	}
 	if strings.TrimSpace(in.Filename) == "" {
 		return mcp.NewToolResultError("cannot route: missing filename (pass filename with an extension)"), nil
 	}

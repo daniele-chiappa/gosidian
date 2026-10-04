@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS links (
     src_id      INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
     target      TEXT NOT NULL,           -- raw target text from [[...]]
     target_path TEXT,                    -- resolved vault-relative path (nullable)
-    alias       TEXT
+    alias       TEXT,
+    field       TEXT                     -- frontmatter key of the link (v4); NULL in the body
 );
 CREATE INDEX IF NOT EXISTS links_src ON links(src_id);
 CREATE INDEX IF NOT EXISTS links_target ON links(target);

@@ -12,6 +12,9 @@ import (
 type backlinkView struct {
 	Path  string `json:"path"`
 	Title string `json:"title"`
+	// Fields are the frontmatter keys whose values link here, absent when
+	// the links are in the body only (IMP-127 iteration 2).
+	Fields []string `json:"fields,omitempty"`
 }
 
 // readBacklinks lists notes that link to the requested path. Empty
@@ -44,7 +47,7 @@ func (r *Router) readBacklinks(w http.ResponseWriter, req *http.Request, notePat
 		if !r.canSee(p, b.Path) {
 			continue // don't reveal inbound links from projects the guest can't see
 		}
-		out = append(out, backlinkView{Path: b.Path, Title: b.Title})
+		out = append(out, backlinkView{Path: b.Path, Title: b.Title, Fields: b.Fields})
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"items": out, "total": len(out)})
 }

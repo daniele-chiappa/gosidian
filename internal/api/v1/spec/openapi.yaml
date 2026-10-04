@@ -646,16 +646,23 @@ paths:
       description: >-
         Every condition must hold. A namespaced tag counts as a field when
         the note has none; ISO dates and numbers compare as such, text
-        ignores case. Scoped to the projects the principal can read.
+        ignores case. A value written as a [[wikilink]] matches by link,
+        and the pseudo-field links covers every link of a note (links
+        contains [[p/x]]: what links to p/x); a link to no note the
+        principal can see is a 400. Scoped to the projects the principal
+        can read.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [where]
               properties:
                 project: {type: string}
+                from:
+                  type: array
+                  items: {type: string}
+                  description: "Folders whose notes directly inside are queried (a database's rows); with it, where may be empty."
                 where:
                   type: array
                   maxItems: 16

@@ -66,6 +66,13 @@ notice typos. The MCP tool `memory_lint` reports them as
 (`[[#heading]]`, `[[#^block]]`) is an anchor on the current page and is
 never reported.
 
+A wikilink in a frontmatter value is a link too, as a link property is in
+Obsidian: `related: "[[other-note]]"` or a list of them, at the top level
+of the frontmatter (not inside a nested map or inline code). It shows in
+backlinks, with the key it was written under, in the graph and in lint,
+and a rename rewrites it like a link in the body. A link resolves by path,
+by title or by file name alike in the index and in the web UI.
+
 ### Frontmatter
 
 ```yaml
@@ -91,6 +98,18 @@ updated: 2026-04-23
   see [Database notes](databases.md). A ```` ```view ```` block in the body
   lists notes live: see [Views](views.md).
 
+**How the frontmatter is read.** A frontmatter that is valid YAML is read
+as YAML, with every value kept as the text written: `007` stays `007`, a
+date stays its text, and a database's schema gives the types. A list is a
+list (`[a, b]` or `- item` lines), and `tags: a, b` still reads as two
+tags. An unquoted `[[wikilink]]` reads as the link. Quote a value that
+holds `: `, a `[[wikilink]]` among other text, a `{{placeholder}}`, or a
+` #` that belongs to the text: unquoted, ` #` starts a YAML comment and
+cuts the value there. A frontmatter that is not valid YAML is still read,
+line by line as before, so the note does not disappear; lint
+(`frontmatter-invalid-yaml`) and the write tools' `notices` report it,
+and a value cut by a comment.
+
 ### `.html` notes
 
 A single-file `.html` document can be a **first-class note** alongside
@@ -104,6 +123,13 @@ enable it with `[vault] html_notes = true` in `config.toml` (or the
   goldmark pipeline.
 - An `.html` note still **participates in the graph, full-text search,
   and backlinks** exactly like a `.md` note.
+- **Links** in the page work as in a site of their own: `href="#part"`
+  scrolls to the element with that id; a relative link (`other.html`,
+  `../notes/x.md`) opens the note it names, resolved against the note's own
+  folder, in a window of the web UI; a link to `/vault-files/…` or to an
+  external URL opens in a new tab. An image may reference a vault
+  attachment by `/vault-files/…` or by a relative path to an
+  `attachments/` folder. The page itself never reaches the network.
 
 See **ADR-011** for the rationale and security boundary.
 

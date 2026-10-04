@@ -41,8 +41,12 @@ type ingestTicket struct {
 func (s *Server) mintIngestTicket(ctx context.Context, project, as string, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	switch as {
 	case "", "auto", "table", "media", "note", "attachment":
+	case "package":
+		if _, errRes := s.packageDest(ctx, packageIntentOf(project, req)); errRes != nil {
+			return errRes, nil
+		}
 	default:
-		return mcp.NewToolResultError("as must be one of: auto, table, media, note, attachment"), nil
+		return mcp.NewToolResultError("as must be one of: auto, table, media, note, attachment, package"), nil
 	}
 	tok, errRes := s.authorizeWrite(ctx, project+"/ingest-probe.md")
 	if errRes != nil {
@@ -71,6 +75,8 @@ func (s *Server) mintIngestTicket(ctx context.Context, project, as string, req m
 			Filename:  strings.TrimSpace(req.GetString("filename", "")),
 			Overwrite: req.GetBool("overwrite", false),
 			IfMatch:   req.GetString("if_match", ""),
+			Dest:      strings.TrimSpace(req.GetString("dest", "")),
+			DryRun:    req.GetBool("dry_run", false),
 		},
 		TokenID: tok.ID,
 		Expires: time.Now().Add(ttl),
@@ -197,7 +203,13 @@ func (s *Server) handleIngestTicketRedeem(w http.ResponseWriter, r *http.Request
 		writeJSONError(w, http.StatusRequestEntityTooLarge, "file too large (max 10 MiB)")
 		return
 	}
-	if msg := s.writeLimitViolation(tok, len(data)); msg != "" {
+	// A package is a .zip, whose notes are checked one by one against the
+	// note size limit: only the write rate applies to the upload itself.
+	limitSize := len(data)
+	if tk.Intent.As == "package" {
+		limitSize = 0
+	}
+	if msg := s.writeLimitViolation(tok, limitSize); msg != "" {
 		writeJSONError(w, http.StatusTooManyRequests, msg)
 		return
 	}

@@ -47,6 +47,10 @@ const (
 	ActionDeleteProject    Action = "delete_project"
 	ActionRenameProject    Action = "rename_project"
 	ActionUploadAttachment Action = "upload_attachment"
+	// ActionIngestPackage summarises a memory_ingest package (IMP-116):
+	// Path is the destination folder, Size the notes written. Each note
+	// has its own create or update entry too.
+	ActionIngestPackage    Action = "ingest_package"
 	ActionDeleteAttachment Action = "delete_attachment"
 	ActionTokenCreate      Action = "token_create"
 	ActionTokenRevoke      Action = "token_revoke"

@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -186,4 +187,50 @@ func TestReads_FlagUncomputedViews(t *testing.T) {
 		t.Errorf("lite hot_md: content %q hint %q", boot.Hot.Content, boot.Hot.Hint)
 	}
 	wantViews("lite bootstrap", boot.Hot.Headings)
+}
+
+// The bootstrap holds the views of hot.md to their budget and decides the
+// lite shape on the prose: a short hot.md with a long view stays whole, its
+// view cut, and maintenance says so (IMP-136).
+func TestBootstrap_ViewsBudget(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	ctx := context.Background()
+	for i := 1; i <= 50; i++ {
+		path := fmt.Sprintf("p/docs/improvements/IMP-%03d.md", i)
+		content := fmt.Sprintf("---\ntitle: \"IMP-%03d — %s\"\nid: IMP-%03d\nstatus: open\n---\n", i, strings.Repeat("a fairly long title ", 9), i)
+		if res, _ := s.handleCreate(ctx, call(map[string]any{"path": path, "content": content})); res.IsError {
+			t.Fatalf("seed %s: %s", path, expectError(t, res))
+		}
+	}
+	hot := "---\ntitle: Hot\ntags: [p]\n---\n# Hot\n\n## Aperti\n\n```view\nfrom: p/docs/improvements\nwhere:\n  - status = open\nsort: id asc\ncolumns: [title, status]\nlimit: 200\n```\n"
+	if res, _ := s.handleCreate(ctx, call(map[string]any{"path": "p/hot.md", "content": hot})); res.IsError {
+		t.Fatalf("seed hot: %s", expectError(t, res))
+	}
+	res, _ := s.handleBootstrap(ctx, call(map[string]any{"project": "p"}))
+	var out struct {
+		Hot         bootstrapFile        `json:"hot_md"`
+		Maintenance bootstrapMaintenance `json:"maintenance"`
+	}
+	if err := json.Unmarshal([]byte(resultText(t, res)), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Hot.AutoLite || out.Hot.Content == "" {
+		t.Fatalf("a short hot.md stays whole: auto_lite=%v", out.Hot.AutoLite)
+	}
+	if n := len(out.Hot.Content); n > len(hot)+bootstrapViewsBudget+512 {
+		t.Errorf("hot_md is %d bytes, past the views budget", n)
+	}
+	if !strings.Contains(out.Hot.Content, "of 50 notes, cut to fit: all of them with memory_query(") || !strings.Contains(out.Hot.Content, "IMP-001") {
+		t.Errorf("the view should be cut with the query that returns all:\n%s", out.Hot.Content[len(out.Hot.Content)-600:])
+	}
+	m := out.Maintenance
+	if !m.HotViewsCut || m.HotComputedSize < 8*1024 || !m.Attention {
+		t.Errorf("maintenance = %+v", m)
+	}
+	// The query given in the tail line returns every row.
+	q := runQuery(t, s, ctx, map[string]any{"project": "p", "from": []any{"p/docs/improvements"},
+		"where": where(map[string]any{"field": "status", "op": "eq", "value": "open"}), "limit": float64(50)})
+	if q.Total != 50 || len(q.Notes) != 50 {
+		t.Errorf("memory_query from: total %d, notes %d", q.Total, len(q.Notes))
+	}
 }

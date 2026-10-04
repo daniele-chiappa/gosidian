@@ -21,14 +21,20 @@ a note naming it (and the likely intended argument, e.g. `Project` →
   `unchanged:true` with no body, and `mode="lite"` replaces the
   `hot.md` body with its frontmatter + heading outline. `mode` defaults
   to **auto**: an oversize `hot.md` is served lite automatically
-  (flagged `auto_lite:true`); pass `mode="full"` to force the body.
+  (flagged `auto_lite:true`); pass `mode="full"` to force the body. The
+  size that counts is the text as written: the results of its `view`
+  blocks are held to their own budget of about 8 KiB, and a view past its
+  share keeps the rows that fit and ends with the `memory_query` that
+  returns them all.
   `access` (`read` | `write`) says whether the token may write in the
   project.
   A project with the `lean_read_bootstrap` flag gives tokens that cannot
   write to it only the reading sections of the directives
   (`directives_scope: "read"`) — fewer tokens, less context; off by
   default.
-  The payload also carries a `maintenance` digest (hot.md size/age,
+  The payload also carries a `maintenance` digest (hot.md size/age, its
+  size with the views computed when it has some (`hot_computed_size`,
+  `hot_computed_oversize` past 12 KiB, `hot_views_cut`),
   broken wikilinks, stale-note count — indexed queries only): when its
   `attention` flag is true, the directives ask the agent to propose the
   relevant grooming at end of task
@@ -72,7 +78,16 @@ a note naming it (and the likely intended argument, e.g. `Project` →
   outline + first chunk, `truncated:true`, full `size`, a hint) so an
   append-only log can't flood the caller's context; `raw:true`
   bypasses it, `max_bytes` caps even below the threshold. The `etag`
-  always stamps the full note, so `if_match` works unchanged
+  always stamps the full note, so `if_match` works unchanged.
+  `memory_get_section` takes the start of a heading when it names only
+  one, such as an ID (`BUG-014` for `## BUG-014 — …`), and answers with
+  the full heading; among several, the one of the highest level wins
+  when it is alone there (an ADR over its addenda); otherwise, or when
+  none matches, the error lists the candidates. With `render_views:
+  true` both compute the note's view blocks and, on a row of a database
+  that declares `row_views`, append those after the text, between
+  `gosidian:row-views` markers; without it the `hint` says how many there
+  are ([databases](../vault/databases.md#row-views))
 - `memory_batch_get(paths, mode?, max_bytes_per_note?)` — one
   round-trip for multiple notes; `mode=outline|frontmatter` skips
   bodies entirely, `max_bytes_per_note` truncates long ones (flagged
@@ -80,7 +95,7 @@ a note naming it (and the likely intended argument, e.g. `Project` →
 - `memory_list_notes(project)`, `memory_list_projects()`,
   `memory_list_tags(project?)`
 - `memory_notes_by_tag(tag, project?)`
-- `memory_query(where, project?, sort?, order?, fields?, limit?)` —
+- `memory_query(where, project?, from?, sort?, order?, fields?, limit?)` —
   notes selected by their frontmatter, like a Dataview filter: every
   condition `{field, op, value}` must hold, with `eq`, `ne`, `in`,
   `exists`, `lt`, `lte`, `gt`, `gte`, `contains`. A list field matches
@@ -90,10 +105,24 @@ a note naming it (and the likely intended argument, e.g. `Project` →
   ignores case; `ne` and `exists: false` also match notes without the
   field. Each note comes back with its path, title, modification time
   and the fields asked for (default: those used to filter and sort),
-  plus `total` and `truncated`. One call replaces `memory_notes_by_tag`
+  plus `total` and `truncated`. With `project`, a `select` field of the
+  project's databases sorts by its options rather than alphabetically.
+  `from` (a folder or a list) keeps the notes directly inside it, the
+  rows of a database, as the `from` of a view does; with it `where` may
+  be empty. A value written as a `[[wikilink]]` matches by link, however
+  the note writes it: `{field: related, op: contains, value:
+  "[[p/docs/bugs/BUG-089]]"}` keeps the notes whose `related` field links
+  there, and the pseudo-field `links` covers every link, body and
+  frontmatter alike (a path works too) — what links to a note, filtered
+  by folder or by field. A link to no note the token can read is an
+  error. `eq`, `ne`, `in` and `contains` apply.
+  One call replaces `memory_notes_by_tag`
   + `memory_batch_get(mode: frontmatter)` + filtering by hand
 - `memory_backlinks(path)`, `memory_outlinks(path,
-  include_cross_project?)`
+  include_cross_project?)` — links in the body and in frontmatter values
+  alike (`related: "[[x]]"`): a backlink names in `fields` the frontmatter
+  keys its links come from (absent when they are in the body only), an
+  outlink its key in `field`
 
 ## Graph (read-only, scope-aware)
 
@@ -136,7 +165,7 @@ a note naming it (and the likely intended argument, e.g. `Project` →
 
 ## Attachments
 
-- `memory_ingest(project, bridge_filename|source_path|url|attachment|data, transfer?, as?, note_path?, title?, caption?, overwrite?, if_match?)` —
+- `memory_ingest(project, bridge_filename|source_path|url|attachment|data, transfer?, as?, dest?, dry_run?, note_path?, title?, caption?, overwrite?, if_match?)` —
   the single front door for "store this file": routes by extension —
   `.csv` → table note, image → media note, `.md`/`.html` → the note itself
   (body read server-side, no tokens through the context), anything else →
@@ -148,7 +177,28 @@ a note naming it (and the likely intended argument, e.g. `Project` →
   **single-use upload ticket** instead: POST the bytes (multipart, field
   `file`, no bearer — the ticket is the credential, TTL 5 min) to the
   returned `/ingest/<ticket>` endpoint and the server executes the parked
-  intent on receipt. The dedicated tools below remain for explicit workflows
+  intent on receipt. The dedicated tools below remain for explicit workflows.
+  **Packages** (`as: "package"`, `dest`, `dry_run?`): a folder or a `.zip`
+  imported whole in one call — a folder or `.zip` staged in the bridge dir
+  (`bridge_filename`), a server folder or `.zip` (`source_path`), a base64
+  `.zip` (`data`), or a `.zip` uploaded through a `transfer: "http"`
+  ticket. `.md` and `.html` files become notes under `dest`, keeping their
+  paths inside the package (the folder wrapping a `.zip` is dropped); other
+  accepted files become attachments; the rest is left out and listed in
+  `skipped`, as are symbolic links and hidden files. Relative links between
+  markdown files of the package become wikilinks (`[[dest/sub/x#part|text]]`),
+  links to its attachments point at `/vault-files/…`; links in an HTML note
+  to other notes stay relative, which the web UI follows. A relative link to
+  a file that is not in the package stays as written and is counted in
+  `unresolved`. A note without frontmatter gets a `title` and the project's
+  tag (`frontmatter_added`). All or nothing: a path climbing out of the
+  package (`..`, absolute) refuses it whole, a note already there stops the
+  import unless `overwrite: true`, and a write failing midway takes back the
+  notes written; `dry_run: true` returns the plan without writing. A
+  package counts as one write of the rate limit; it is capped at
+  `package_max_files` (500) and `package_max_bytes` unpacked (20 MiB), each
+  note at `max_note_bytes`. The audit has an entry per note plus an
+  `ingest_package` summary
 - `memory_upload_attachment(project, data|source_path, filename)` —
   single-step upload returning a ready-to-splice markdown embed
 - `memory_upload_resource(project, data|source_path, filename, kind?)` —
@@ -233,7 +283,13 @@ from the caller's token identity and cannot be forged, while
 ## Self-check
 
 - `memory_lint(project, rules?, min_severity?)` — structural vault
-  hygiene: `broken-wikilink`, `orphan-note`, `frontmatter-missing`,
+  hygiene: `broken-wikilink`, `broken-anchor` (a `[[note#Heading]]`
+  whose heading is not in the note; the heading's text, its anchor id or
+  an ID alone such as `ADR-010` for `## ADR-010 — …` all count),
+  `orphan-note`, `frontmatter-missing`, `frontmatter-invalid-yaml` (a
+  frontmatter that is not valid YAML, usually an unquoted `: `,
+  `[[wikilink]]` or `{{placeholder}}`; a write of such a note also says
+  so in `notices`),
   `frontmatter-tag-unknown`, `status-incoherent`, `hot-oversize`
   (a `hot.md` past 8 KiB has usually become a chronicle that belongs in
   `log.md`, and it is inlined into every bootstrap — threshold

@@ -418,6 +418,32 @@ func TestMCP_GetSection(t *testing.T) {
 	}
 }
 
+// The ID alone finds a heading such as "BUG-014 — …", and the response
+// names the full heading; several matches come back in the error (IMP-130).
+func TestMCP_GetSection_ByID(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	ctx := context.Background()
+	body := "# Bugs\n\n## BUG-014 — CI duplicated\nhang\n\n## BUG-015 — other\nx\n\n## IMP-1 (old)\na\n\n## IMP-1 (new)\nb\n"
+	_, _ = s.handleCreate(ctx, call(map[string]any{"path": "b.md", "content": body}))
+	res, _ := s.handleGetSection(ctx, call(map[string]any{"path": "b.md", "heading": "BUG-014"}))
+	got := resultText(t, res)
+	if !strings.Contains(got, "hang") || strings.Contains(got, "other") || !strings.Contains(got, `"heading":"BUG-014 — CI duplicated"`) {
+		t.Errorf("by ID: %s", got)
+	}
+	res, _ = s.handleGetSection(ctx, call(map[string]any{"path": "b.md", "heading": "IMP-1"}))
+	if msg := expectError(t, res); !strings.Contains(msg, `"IMP-1 (old)", "IMP-1 (new)"`) {
+		t.Errorf("several matches: %s", msg)
+	}
+	res, _ = s.handleGetSection(ctx, call(map[string]any{"path": "b.md", "heading": "duplicated"}))
+	if msg := expectError(t, res); !strings.Contains(msg, `"BUG-014 — CI duplicated"`) {
+		t.Errorf("a heading that contains it: %s", msg)
+	}
+	res, _ = s.handleGetSection(ctx, call(map[string]any{"path": "b.md", "heading": "zzz"}))
+	if msg := expectError(t, res); !strings.Contains(msg, "memory_get_outline") {
+		t.Errorf("nothing close: %s", msg)
+	}
+}
+
 func TestMCP_Edit(t *testing.T) {
 	s, _, _ := newTestServer(t)
 	ctx := context.Background()

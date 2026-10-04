@@ -31,33 +31,29 @@ var (
 	fieldDateRe = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?)?$`)
 )
 
-// extractFields turns a note's raw frontmatter and its tags into rows.
+// extractFields turns a note's raw frontmatter and its tags into rows. The
+// frontmatter is read by parser.FrontmatterEntries (IMP-138): a list gives a
+// row per item, a scalar one row, a nested map nothing.
 func extractFields(meta string, tags []string) []fieldRow {
 	var out []fieldRow
-	scalars := parser.ParseFrontmatterFields(meta)
 	seen := map[string]bool{}
-	for _, line := range strings.Split(meta, "\n") {
-		m := fieldKeyRe.FindStringSubmatch(line)
-		if m == nil || seen[m[1]] {
-			continue // indented lines belong to the key above
+	for _, e := range parser.FrontmatterEntries(meta) {
+		if !fieldKeyRe.MatchString(e.Key + ":") {
+			continue
 		}
-		key, rest := m[1], strings.TrimSpace(m[2])
-		seen[key] = true
+		seen[e.Key] = true
 		switch {
-		case key == "tags":
+		case e.Key == "tags":
 			// the tags table's list: frontmatter tags and inline #tags alike
 			for _, t := range tags {
-				out = append(out, typedField(key, t, "list"))
+				out = append(out, typedField(e.Key, t, "list"))
 			}
-		case rest == "" || strings.HasPrefix(rest, "["):
-			// inline [a, b] or a block list; a nested mapping yields nothing
-			for _, v := range parser.FrontmatterList(meta, key) {
-				out = append(out, typedField(key, v, "list"))
+		case e.Kind == parser.FMList:
+			for _, v := range parser.FrontmatterList(meta, e.Key) {
+				out = append(out, typedField(e.Key, v, "list"))
 			}
-		default:
-			if v, ok := scalars[key].(string); ok && v != "" {
-				out = append(out, typedField(key, v, "field"))
-			}
+		case e.Kind == parser.FMScalar && e.Text != "":
+			out = append(out, typedField(e.Key, e.Text, "field"))
 		}
 	}
 	for _, t := range tags {
@@ -114,6 +110,82 @@ type FieldCond struct {
 	Field  string
 	Op     string
 	Values []string
+	// Link makes the condition a test on the note's links (IMP-127
+	// iteration 2): Values are note paths, and the note matches when it
+	// links to one of them from the frontmatter field Field, or from
+	// anywhere for the pseudo-field links. ResolveLinkConds sets it.
+	Link bool
+}
+
+// LinksField is the pseudo-field of a condition on all the links of a note,
+// body and frontmatter alike: `links contains [[p/x]]` keeps the notes that
+// link to p/x, its backlinks as a query.
+const LinksField = "links"
+
+// LinkTarget returns the target of v when v is written as one [[wikilink]],
+// alias and heading dropped.
+func LinkTarget(v string) (string, bool) {
+	v = strings.TrimSpace(v)
+	if !strings.HasPrefix(v, "[[") || !strings.HasSuffix(v, "]]") || strings.Count(v, "[[") != 1 {
+		return "", false
+	}
+	t, _, _ := strings.Cut(strings.TrimSuffix(strings.TrimPrefix(v, "[["), "]]"), "|")
+	t, _, _ = strings.Cut(strings.TrimSuffix(t, `\`), "#")
+	t = strings.TrimSpace(t)
+	return t, t != ""
+}
+
+// ResolveLinkConds turns the conditions on relations into link conditions:
+// one whose values are written as [[wikilinks]] (related contains [[p/x]]),
+// and any condition on the pseudo-field links, whose values may also be
+// plain note paths. resolve maps a link target to the path of a note the
+// reader may see, "" when there is none; a target that names no note is an
+// error, rather than a filter that silently matches nothing. The other
+// conditions are returned as they are.
+func ResolveLinkConds(where []FieldCond, resolve func(target string) string) ([]FieldCond, error) {
+	out := make([]FieldCond, 0, len(where))
+	for _, c := range where {
+		field := strings.TrimSpace(c.Field)
+		links := field == LinksField
+		targets := make([]string, 0, len(c.Values))
+		for _, v := range c.Values {
+			if t, ok := LinkTarget(v); ok {
+				targets = append(targets, t)
+			} else if links {
+				targets = append(targets, strings.TrimSpace(v))
+			}
+		}
+		if c.Link || len(targets) == 0 && !links {
+			out = append(out, c)
+			continue
+		}
+		op := strings.ToLower(strings.TrimSpace(c.Op))
+		if op == "" {
+			op = OpEq
+		}
+		switch op {
+		case OpEq, OpNe, OpIn, OpContains:
+		default:
+			return nil, fmt.Errorf("%w: %s on %q: a condition on links takes eq, ne, in or contains", ErrBadQuery, op, field)
+		}
+		if len(targets) != len(c.Values) {
+			return nil, fmt.Errorf("%w: %s on %q mixes [[wikilinks]] with other values", ErrBadQuery, op, field)
+		}
+		if len(targets) == 0 {
+			return nil, fmt.Errorf("%w: %s on %q needs a note: a [[wikilink]] or a path", ErrBadQuery, op, field)
+		}
+		paths := make([]string, len(targets))
+		for k, t := range targets {
+			if resolve != nil {
+				paths[k] = resolve(t)
+			}
+			if paths[k] == "" {
+				return nil, fmt.Errorf("%w: %s on %q: [[%s]] names no note", ErrBadQuery, op, field, t)
+			}
+		}
+		out = append(out, FieldCond{Field: field, Op: op, Values: paths, Link: true})
+	}
+	return out, nil
 }
 
 // QueryOptions selects notes by their frontmatter. Projects/Exclude scope the
@@ -127,12 +199,16 @@ type QueryOptions struct {
 	// vault-relative folders, the rows of a database note (IMP-127).
 	Folders []string
 	// Paths, when set, keeps only these notes.
-	Paths  []string
-	Where  []FieldCond
-	Sort   string
-	Desc   bool
-	Limit  int
-	Fields []string
+	Paths []string
+	Where []FieldCond
+	Sort  string
+	// SortOrder, when set, orders the Sort field by the position of its
+	// value in this list, the options of a select field (IMP-127): values
+	// not listed come after the listed ones, notes without the field last.
+	SortOrder []string
+	Desc      bool
+	Limit     int
+	Fields    []string
 }
 
 // QueryHit is one matching note, with the requested fields' values in
@@ -191,7 +267,7 @@ func (i *Index) Query(opts QueryOptions) ([]QueryHit, int, error) {
 		return nil, 0, nil
 	}
 
-	order, sortArgs := sortSQL(opts.Sort, opts.Desc)
+	order, sortArgs := sortSQL(opts.Sort, opts.Desc, opts.SortOrder)
 	limit := opts.Limit
 	if limit <= 0 {
 		limit = 50
@@ -267,6 +343,9 @@ func condSQL(c FieldCond) (string, []any, error) {
 	if op == "" {
 		op = OpEq
 	}
+	if c.Link {
+		return linkCondSQL(field, op, c.Values)
+	}
 	has := `EXISTS (SELECT 1 FROM note_fields f WHERE f.note_id = n.id AND f.key = ?`
 	one := func() (string, error) {
 		if len(c.Values) != 1 {
@@ -330,6 +409,35 @@ func condSQL(c FieldCond) (string, []any, error) {
 	return "", nil, fmt.Errorf("%w: unknown operator %q (eq, ne, in, exists, lt, lte, gt, gte, contains)", ErrBadQuery, c.Op)
 }
 
+// linkCondSQL renders a link condition (FieldCond.Link): the note links to
+// one of paths from field, or from anywhere for the pseudo-field links. ne
+// keeps the notes that link to none of them.
+func linkCondSQL(field, op string, paths []string) (string, []any, error) {
+	if len(paths) == 0 {
+		return "", nil, fmt.Errorf("%w: %s on %q needs a note", ErrBadQuery, op, field)
+	}
+	if op != OpIn && len(paths) > 1 {
+		return "", nil, fmt.Errorf("%w: %s on %q takes one note (in takes several)", ErrBadQuery, op, field)
+	}
+	s := `EXISTS (SELECT 1 FROM links l WHERE l.src_id = n.id AND l.target_path IN (` + placeholders(len(paths)) + `)`
+	args := make([]any, 0, len(paths)+1)
+	for _, p := range paths {
+		args = append(args, p)
+	}
+	if field != LinksField {
+		s += ` AND l.field = ?`
+		args = append(args, field)
+	}
+	s += `)`
+	switch op {
+	case OpEq, OpIn, OpContains:
+		return s, args, nil
+	case OpNe:
+		return "NOT " + s, args, nil
+	}
+	return "", nil, fmt.Errorf("%w: %s on %q: a condition on links takes eq, ne, in or contains", ErrBadQuery, op, field)
+}
+
 // valueCmp compares f's value with v by the type v reads as: an ISO date (a
 // bare day compares with the day of a datetime), a number, or text ignoring
 // case.
@@ -351,8 +459,9 @@ func valueCmp(sym, v string) (string, any) {
 
 // sortSQL is the ORDER BY for a sort field: modified (default, newest
 // first), path, title, or a frontmatter field — notes without it last, then
-// by date, number or text.
-func sortSQL(field string, desc bool) (string, []any) {
+// by date, number or text. With order, a field sorts by the position of its
+// value in order instead, the values not listed after the listed ones.
+func sortSQL(field string, desc bool, order []string) (string, []any) {
 	dir := "ASC"
 	if desc {
 		dir = "DESC"
@@ -375,6 +484,26 @@ func sortSQL(field string, desc bool) (string, []any) {
 		return "(SELECT " + agg + "(f." + c + ") FROM note_fields f WHERE f.note_id = n.id AND f.key = ?)"
 	}
 	missing := "(SELECT COUNT(*) FROM note_fields f WHERE f.note_id = n.id AND f.key = ?) = 0"
+	if field != "" && len(order) > 0 {
+		// rank is the position of the value in order, len(order) when it is
+		// not listed; unlisted values go after the listed ones either way.
+		rank := "CASE f.value" + strings.Repeat(" WHEN ? THEN ?", len(order)) + " ELSE ? END"
+		var rankArgs []any
+		for i, o := range order {
+			rankArgs = append(rankArgs, o, i)
+		}
+		rankArgs = append(rankArgs, len(order))
+		unlisted := "(SELECT MIN(CASE WHEN f.value IN (" + placeholders(len(order)) + ") THEN 0 ELSE 1 END) FROM note_fields f WHERE f.note_id = n.id AND f.key = ?)"
+		args := []any{field}
+		for _, o := range order {
+			args = append(args, o)
+		}
+		args = append(args, field)
+		args = append(args, rankArgs...)
+		args = append(args, field, field)
+		return missing + ", " + unlisted + ", (SELECT " + agg + "(" + rank + ") FROM note_fields f WHERE f.note_id = n.id AND f.key = ?) " + dir + ", " +
+			col("value") + " COLLATE NOCASE " + dir + ", n.path", args
+	}
 	return missing + ", " + col("date") + " " + dir + ", " + col("num") + " " + dir + ", " +
 			col("value") + " COLLATE NOCASE " + dir + ", n.path",
 		[]any{field, field, field, field}
@@ -464,6 +593,9 @@ func DefaultQueryFields(where []FieldCond, sort string) []string {
 		out = append(out, f)
 	}
 	for _, c := range where {
+		if c.Link && strings.TrimSpace(c.Field) == LinksField {
+			continue // a pseudo-field: no values to show
+		}
 		add(c.Field)
 	}
 	switch strings.TrimSpace(sort) {

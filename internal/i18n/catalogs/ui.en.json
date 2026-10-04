@@ -409,6 +409,8 @@
     "name_taken": "{name} already exists: {next} proposed instead.",
     "create_invalid": "Row not created: {reason}",
     "create_forbidden": "Rows cannot be added to this database with your access.",
-    "create_failed": "The row was not created."
+    "create_failed": "The row was not created.",
+    "row_views": "Row views",
+    "count_notes": "note | notes"
   }
 }

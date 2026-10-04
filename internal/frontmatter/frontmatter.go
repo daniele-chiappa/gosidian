@@ -199,8 +199,18 @@ func SetKeys(content []byte, set []Field, unset []string) ([]byte, error) {
 	}
 	// The lines written are checked one by one; this catches an edit that
 	// breaks a frontmatter that was valid YAML as a whole.
-	if validYAML(strings.Join(lines[1:closing], "\n")) && !validYAML(strings.Join(raw, "\n")) {
+	after := strings.Join(raw, "\n")
+	if validYAML(strings.Join(lines[1:closing], "\n")) && !validYAML(after) {
 		return nil, fmt.Errorf("frontmatter edit would leave invalid YAML")
+	}
+	// A frontmatter that is not valid YAML is read line by line, which splits
+	// a list item at its comma.
+	if !validYAML(after) {
+		for _, f := range set {
+			if commaItem(f.Value) {
+				return nil, &ValueError{f.Key, "a list item holds a comma, which only a valid YAML frontmatter keeps whole: fix the frontmatter's YAML first"}
+			}
+		}
 	}
 	return []byte(strings.Join(out, "\n")), nil
 }
@@ -343,30 +353,30 @@ func scalar(s string) string {
 	return quote(s)
 }
 
-// list writes items as an inline flow list. The line-based reader splits it
-// on commas and trims quotes, spaces and a leading # from each item, so items
-// it would read differently are refused.
+// list writes items as an inline flow list, quoting an item when YAML needs
+// it, a comma included (IMP-138: one reader reads the list as YAML). The
+// reading of a list trims quotes, spaces and a leading # from each item, as
+// it always did for tags, so an item it would read differently is refused.
 func list(key string, items []string) (string, error) {
 	parts := make([]string, len(items))
 	for i, it := range items {
 		switch {
 		case it == "" || it != strings.TrimSpace(it):
 			return "", &ValueError{key, "a list item cannot be empty or start or end with a space"}
-		case strings.Contains(it, ","):
-			return "", &ValueError{key, "a list item cannot contain a comma"}
 		case strings.HasPrefix(it, "#"):
 			return "", &ValueError{key, "a list item cannot start with #"}
+		case strings.ContainsAny(it[:1]+it[len(it)-1:], `"'`):
+			return "", &ValueError{key, "a list item cannot start or end with a quote"}
+		case strings.ContainsAny(it, "\n\r"):
+			return "", &ValueError{key, "a list item cannot contain a line break"}
 		}
-		if !strings.ContainsAny(it[:1], "-?:,[]{}#&*!|>'\"%@`") && !strings.ContainsAny(it, "[]{},\n\r\t") &&
+		if !strings.ContainsAny(it[:1], "-?:,[]{}#&*!|>'\"%@`") && !strings.ContainsAny(it, "[]{},\n\r\t\"\\") &&
 			!strings.Contains(it, ": ") && !strings.Contains(it, " #") && !strings.HasSuffix(it, ":") &&
 			yamlReads("k: ["+it+"]", []string{it}) {
 			parts[i] = it
 			continue
 		}
-		if strings.ContainsAny(it, "\"\\\n\r\t") {
-			return "", &ValueError{key, "a list item cannot contain quotes, backslashes or line breaks"}
-		}
-		parts[i] = `"` + it + `"`
+		parts[i] = quote(it)
 	}
 	return "[" + strings.Join(parts, ", ") + "]", nil
 }
@@ -456,8 +466,8 @@ func sameValue(got, want any) bool {
 	return false
 }
 
-// lineReads reports whether the line-based reader of package parser returns
-// want for key from line, the way the index reads it.
+// lineReads reports whether package parser, the reader the index uses,
+// returns want for key from line: lists trimmed as tags are, scalars as text.
 func lineReads(key, line string, want any) bool {
 	fields := parser.ParseFrontmatterFields(line)
 	switch w := want.(type) {
@@ -480,7 +490,47 @@ func lineReads(key, line string, want any) bool {
 	return false
 }
 
+func commaItem(v any) bool {
+	switch x := v.(type) {
+	case []string:
+		for _, it := range x {
+			if strings.Contains(it, ",") {
+				return true
+			}
+		}
+	case []any:
+		for _, it := range x {
+			if s, ok := it.(string); ok && strings.Contains(s, ",") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func validYAML(raw string) bool {
+	return YAMLError(raw) == nil
+}
+
+var yamlLineRe = regexp.MustCompile(`^yaml: line (\d+): `)
+
+// YAMLError reports why raw frontmatter (the text between the --- lines) is
+// not valid YAML, or nil (IMP-138). The line it names, when yaml.v3 gives
+// one, is the note's own, counting the opening --- as line 1. The index reads such a frontmatter
+// line by line and copes; yaml.v3, which reads the database schemas, does
+// not.
+func YAMLError(raw string) error {
 	var m map[string]any
-	return yaml.Unmarshal([]byte(raw), &m) == nil
+	err := yaml.Unmarshal([]byte(raw), &m)
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	if sm := yamlLineRe.FindStringSubmatch(msg); sm != nil {
+		n, _ := strconv.Atoi(sm[1])
+		msg = fmt.Sprintf("line %d of the note: %s", n+1, msg[len(sm[0]):])
+	} else {
+		msg = strings.TrimPrefix(msg, "yaml: ")
+	}
+	return errors.New(msg)
 }

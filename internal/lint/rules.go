@@ -10,6 +10,7 @@ import (
 
 	"github.com/gosidian/gosidian/internal/attach"
 	"github.com/gosidian/gosidian/internal/dbschema"
+	"github.com/gosidian/gosidian/internal/frontmatter"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/gosidian/gosidian/internal/views"
@@ -19,8 +20,10 @@ import (
 // declaration order (so the output is deterministic).
 var allRules = []ruleSpec{
 	{name: "broken-wikilink", defaultSeverity: SeverityWarning, fn: checkBrokenWikilink},
+	{name: "broken-anchor", defaultSeverity: SeverityWarning, fn: checkBrokenAnchor},
 	{name: "orphan-note", defaultSeverity: SeverityInfo, fn: checkOrphanNote},
 	{name: "frontmatter-missing", defaultSeverity: SeverityError, fn: checkFrontmatterMissing},
+	{name: "frontmatter-invalid-yaml", defaultSeverity: SeverityWarning, fn: checkFrontmatterInvalidYAML},
 	{name: "frontmatter-tag-unknown", defaultSeverity: SeverityWarning, fn: checkFrontmatterTagUnknown},
 	{name: "status-incoherent", defaultSeverity: SeverityWarning, fn: checkStatusIncoherent},
 	{name: "hot-oversize", defaultSeverity: SeverityWarning, fn: checkHotOversize},
@@ -53,6 +56,9 @@ func checkDatabaseFields(_ context.Context, l *Linter, project string) ([]Issue,
 			FixHint:  "declare `fields` as a map of name to {type, options, required}; types: " + strings.Join(dbschema.Types, ", "),
 		})
 	}
+	for _, s := range schemas {
+		issues = append(issues, checkRowViews(l, s)...)
+	}
 	if len(schemas) == 0 {
 		return issues, nil
 	}
@@ -77,6 +83,34 @@ func checkDatabaseFields(_ context.Context, l *Linter, project string) ([]Issue,
 		}
 	}
 	return issues, nil
+}
+
+// checkRowViews reports the row views of a database that would not compute
+// (IMP-139): each spec is read as a ```view block, for a row that has every
+// field of the schema, so a typo shows in lint rather than under every row.
+func checkRowViews(l *Linter, s *dbschema.Schema) []Issue {
+	if len(s.RowViews) == 0 {
+		return nil
+	}
+	row := s.Source + "/_lint.md"
+	fm := map[string]any{"title": "x", "tags": []string{"x"}}
+	for _, name := range s.FieldNames() {
+		fm[name] = "x"
+	}
+	c := views.Context{This: views.ThisFields(row, fm), Resolve: l.index.Resolve}
+	var issues []Issue
+	for _, rv := range s.RowViews {
+		if _, err := views.Parse(rv.Spec, c); err != nil {
+			issues = append(issues, Issue{
+				Severity: SeverityWarning,
+				File:     s.Path,
+				Rule:     "database-field-invalid",
+				Message:  fmt.Sprintf("row view %q does not compute: %v", rv.Title, err),
+				FixHint:  "write each row view as a ```view spec (from, where, sort, columns, as) plus its title; `this` is the row",
+			})
+		}
+	}
+	return issues
 }
 
 // DefaultSkillOversizeBytes is the skill-oversize threshold when the caller
@@ -262,6 +296,9 @@ func checkBrokenWikilink(ctx context.Context, l *Linter, project string) ([]Issu
 				}
 			}
 			msg := fmt.Sprintf("wikilink target %q does not resolve to any note", o.Target)
+			if o.Field != "" {
+				msg = fmt.Sprintf("wikilink target %q in frontmatter field %q does not resolve to any note", o.Target, o.Field)
+			}
 			issues = append(issues, Issue{
 				Severity: SeverityWarning,
 				File:     n.Path,
@@ -272,6 +309,91 @@ func checkBrokenWikilink(ctx context.Context, l *Linter, project string) ([]Issu
 		}
 	}
 	return issues, nil
+}
+
+// ---- broken-anchor ----
+
+// checkBrokenAnchor reports the [[note#Heading]] and [[#Heading]] links whose
+// heading is not in the note they point to (IMP-137): the link resolves, so
+// broken-wikilink is silent, but the section is gone. A heading matches as
+// memory_get_section finds it (its text, case aside, or the start of only
+// one heading, an ID such as ADR-010 for "ADR-010 — …"), or by its anchor
+// id. A note that does not resolve is left to broken-wikilink, and block
+// references (#^id) are left out, since the index keeps no block ids.
+func checkBrokenAnchor(ctx context.Context, l *Linter, project string) ([]Issue, error) {
+	notes, err := l.notesInProject(project)
+	if err != nil {
+		return nil, err
+	}
+	type target struct {
+		content  []byte
+		headings []parser.Heading
+	}
+	targets := map[string]*target{} // by path; nil when unreadable
+	load := func(path string) *target {
+		if t, ok := targets[path]; ok {
+			return t
+		}
+		var t *target
+		if strings.HasSuffix(strings.ToLower(path), ".md") {
+			if note, err := l.vault.Load(path); err == nil {
+				t = &target{content: note.Content, headings: parser.ExtractHeadings(note.Content)}
+			}
+		}
+		targets[path] = t
+		return t
+	}
+	var issues []Issue
+	for _, n := range notes {
+		outs, err := l.index.Outlinks(n.Path)
+		if err != nil {
+			return nil, err
+		}
+		for _, o := range outs {
+			note, frag, ok := strings.Cut(o.Target, "#")
+			if !ok || index.IsPlaceholder(o.Target) {
+				continue
+			}
+			frag = strings.TrimSpace(strings.TrimSuffix(frag, `\`))
+			if i := strings.LastIndexByte(frag, '#'); i >= 0 {
+				frag = strings.TrimSpace(frag[i+1:]) // [[note#Heading#Subheading]]
+			}
+			if frag == "" || strings.HasPrefix(frag, "^") {
+				continue
+			}
+			dest := o.TargetPath
+			if strings.TrimSpace(note) == "" {
+				dest = n.Path
+			}
+			if dest == "" {
+				continue
+			}
+			t := load(dest)
+			if t == nil || hasAnchor(t.content, t.headings, frag) {
+				continue
+			}
+			issues = append(issues, Issue{
+				Severity: SeverityWarning,
+				File:     n.Path,
+				Rule:     "broken-anchor",
+				Message:  fmt.Sprintf("wikilink %q: %s has no heading %q", o.Target, dest, frag),
+				FixHint:  "point the link at an existing heading (memory_get_outline lists them; an ID such as ADR-010 is enough) or drop the #part",
+			})
+		}
+	}
+	return issues, nil
+}
+
+func hasAnchor(content []byte, hs []parser.Heading, frag string) bool {
+	if resolved, _ := parser.ResolveHeading(content, frag); resolved != "" {
+		return true
+	}
+	for _, h := range hs {
+		if h.ID == frag || h.ID == strings.ToLower(frag) {
+			return true
+		}
+	}
+	return false
 }
 
 // ---- orphan-note ----
@@ -361,6 +483,47 @@ func checkFrontmatterMissing(ctx context.Context, l *Linter, project string) ([]
 			Message:  "note has no YAML frontmatter block",
 			FixHint:  "add a --- / --- block with at least title and tags",
 		})
+	}
+	return issues, nil
+}
+
+// ---- frontmatter-invalid-yaml ----
+
+// checkFrontmatterInvalidYAML reports a frontmatter that is not valid YAML
+// (IMP-138), which the index then reads with the old line reader: usually a
+// value holding ": ", a [[wikilink]] or a {{placeholder}} left unquoted. It
+// also reports a value YAML cuts at a " #" comment, which the line reader
+// used to keep whole.
+func checkFrontmatterInvalidYAML(ctx context.Context, l *Linter, project string) ([]Issue, error) {
+	notes, err := l.notesInProject(project)
+	if err != nil {
+		return nil, err
+	}
+	var issues []Issue
+	for _, n := range notes {
+		raw := rawFrontmatter(n)
+		if strings.TrimSpace(raw) == "" {
+			continue
+		}
+		if yerr := frontmatter.YAMLError(raw); yerr != nil {
+			issues = append(issues, Issue{
+				Severity: SeverityWarning,
+				File:     n.Path,
+				Rule:     "frontmatter-invalid-yaml",
+				Message:  "frontmatter is not valid YAML: " + yerr.Error(),
+				FixHint:  `quote the value that holds ": ", a [[wikilink]] or a {{placeholder}}, e.g. title: "Plan: one"`,
+			})
+			continue
+		}
+		for _, cut := range parser.CutByComment(raw) {
+			issues = append(issues, Issue{
+				Severity: SeverityWarning,
+				File:     n.Path,
+				Rule:     "frontmatter-invalid-yaml",
+				Message:  "a value is cut at a ' #', which YAML reads as a comment: " + cut,
+				FixHint:  `quote the value when the # belongs to it, e.g. title: "Alert #3"`,
+			})
+		}
 	}
 	return issues, nil
 }
@@ -663,7 +826,7 @@ func checkStatusIncoherent(ctx context.Context, l *Linter, project string) ([]Is
 			o.Projects = []string{project}
 			return l.index.Query(o)
 		}
-		c := views.Context{This: views.ThisFields(hotPath, parser.ParseFrontmatterFields(parser.FrontmatterRawForPath(hotPath, hotBody.Content)))}
+		c := views.Context{This: views.ThisFields(hotPath, parser.ParseFrontmatterFields(parser.FrontmatterRawForPath(hotPath, hotBody.Content))), Resolve: l.index.Resolve}
 		rendered, _ := views.RenderNote(hotBody.Content, true, c, inProject)
 		hot = string(rendered)
 	}

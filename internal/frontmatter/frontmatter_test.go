@@ -161,6 +161,8 @@ func TestSetKeys_Encoding(t *testing.T) {
 		{[]string{}, `k: []`},
 		{[]string{"type:doc", "IMP-1"}, `k: [type:doc, IMP-1]`},
 		{[]string{"[[a]]", "[[b]]"}, `k: ["[[a]]", "[[b]]"]`},
+		{[]string{"a, b", "c"}, `k: ["a, b", c]`}, // one reader: the comma stays inside the item
+		{[]string{`say "hi" now`, `a\b`}, `k: ["say \"hi\" now", "a\\b"]`},
 		{[]any{"x", float64(2), true}, `k: [x, "2", "true"]`},
 	}
 	for _, c := range cases {
@@ -173,14 +175,14 @@ func TestSetKeys_Encoding(t *testing.T) {
 
 func TestSetKeys_RefusesValues(t *testing.T) {
 	cases := map[string][]Field{
-		"comma in a list item":  {{"k", []string{"a, b"}}},
-		"list item with #":      {{"k", []string{"#x"}}},
-		"list item with spaces": {{"k", []string{" a"}}},
-		"list item with quotes": {{"k", []string{`say "hi"`}}},
-		"map value":             {{"k", map[string]any{"a": 1}}},
-		"not a number":          {{"k", math.NaN()}},
-		"invalid key":           {{"bad key", "x"}},
-		"key set twice":         {{"k", "a"}, {"k", "b"}},
+		"list item with a quote at an end": {{"k", []string{`say "hi"`}}},
+		"list item with #":                 {{"k", []string{"#x"}}},
+		"list item with spaces":            {{"k", []string{" a"}}},
+		"list item with quotes":            {{"k", []string{`say "hi"`}}},
+		"map value":                        {{"k", map[string]any{"a": 1}}},
+		"not a number":                     {{"k", math.NaN()}},
+		"invalid key":                      {{"bad key", "x"}},
+		"key set twice":                    {{"k", "a"}, {"k", "b"}},
 	}
 	for name, set := range cases {
 		_, err := SetKeys([]byte("---\ntitle: T\n---\n"), set, nil)
@@ -230,5 +232,35 @@ func TestSetKeys_ReadBack(t *testing.T) {
 	}
 	if !strings.HasSuffix(out, "---\n\n# Note\n") {
 		t.Errorf("body changed:\n%s", out)
+	}
+}
+
+// YAMLError names the line of the note, counting the opening --- as 1.
+func TestYAMLError(t *testing.T) {
+	if err := YAMLError("title: ok\ntags: [a, b]\n"); err != nil {
+		t.Errorf("valid YAML: %v", err)
+	}
+	err := YAMLError("title: ok\ndescription: Plan: one\n")
+	if err == nil || !strings.HasPrefix(err.Error(), "line 3 of the note: ") {
+		t.Errorf("a value with \": \": %v", err)
+	}
+	if err := YAMLError("related: [[p/note]]\n"); err != nil {
+		t.Logf("an unquoted wikilink parses as a nested list in YAML: %v", err)
+	}
+	if err := YAMLError("tags: [{{PROJECT}}, type:doc]\n"); err == nil {
+		t.Error("an unquoted {{placeholder}} in a flow list is not valid YAML")
+	}
+}
+
+// A list item with a comma needs a frontmatter that is valid YAML: otherwise
+// the note is read line by line, which splits the item.
+func TestSetKeys_CommaItemNeedsValidYAML(t *testing.T) {
+	if _, err := SetKeys([]byte("---\ntitle: ok\n---\n"), []Field{{"k", []string{"a, b"}}}, nil); err != nil {
+		t.Errorf("valid YAML: %v", err)
+	}
+	_, err := SetKeys([]byte("---\ntitle: Plan: one\n---\n"), []Field{{"k", []string{"a, b"}}}, nil)
+	var ve *ValueError
+	if !errors.As(err, &ve) || ve.Key != "k" {
+		t.Errorf("invalid YAML elsewhere: err = %v", err)
 	}
 }

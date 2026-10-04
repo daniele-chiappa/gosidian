@@ -432,3 +432,28 @@ func TestWikiLinks(t *testing.T) {
 		t.Error("a value without links has none")
 	}
 }
+
+// A heading can be named by its start, an ID alone, when that names one
+// heading; otherwise the candidates come back (IMP-130).
+func TestResolveHeading(t *testing.T) {
+	body := []byte("---\ntitle: x\n---\n# Bugs\n\n## BUG-014 — CI duplicated\n\ntext\n\n## BUG-0140 — another\n\n### OQ-006: four things\n\n## Notes (draft)\n\n## IMP-1 (old)\n\n## IMP-1 (new)\n\n## ADR-026 — Access\n\n### ADR-026 — addendum one\n\n### ADR-026 — addendum two\n\n```\n## BUG-099 — in a fence\n```\n")
+	for _, c := range []struct {
+		in, want   string
+		candidates []string
+	}{
+		{"BUG-014", "BUG-014 — CI duplicated", nil},
+		{"bug-014 — ci duplicated", "BUG-014 — CI duplicated", nil},
+		{"OQ-006", "OQ-006: four things", nil},
+		{"Notes", "Notes (draft)", nil},
+		{"IMP-1", "", []string{"IMP-1 (old)", "IMP-1 (new)"}}, // same level
+		{"ADR-026", "ADR-026 — Access", nil},                  // over its addenda
+		{"duplicated", "", []string{"BUG-014 — CI duplicated"}},
+		{"BUG-099", "", nil}, // inside a code fence
+		{"nothing", "", nil},
+	} {
+		got, cands := ResolveHeading(body, c.in)
+		if got != c.want || !reflect.DeepEqual(cands, c.candidates) {
+			t.Errorf("ResolveHeading(%q) = %q %v, want %q %v", c.in, got, cands, c.want, c.candidates)
+		}
+	}
+}

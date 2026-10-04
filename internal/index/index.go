@@ -64,8 +64,9 @@ func Open(path string) (*Index, error) {
 // frontmatter out of the FTS body into its own weighted column and adds
 // notes.importance; v2 (IMP-099) adds note_fields, which the boot scan fills
 // like every other table; v3 (IMP-104) adds notes.hash and the meta table, so
-// the boot scan can skip the notes whose content has not changed.
-const schemaVersion = 3
+// the boot scan can skip the notes whose content has not changed; v4
+// (IMP-127 iteration 2) adds links.field, the frontmatter key of a link.
+const schemaVersion = 4
 
 // ContentVersion identifies what an upsert extracts from a note: links,
 // tags, title, importance, note_fields and the FTS columns. Bump it whenever
@@ -75,7 +76,7 @@ const schemaVersion = 3
 // keeping rows extracted by the old code. TestContentVersion_Golden fails
 // when the extraction output changes without a bump. Link resolution is not
 // covered: the boot scan runs ResolveAll every time.
-const ContentVersion = 3
+const ContentVersion = 5
 
 // migrate brings an index file to schemaVersion and reports whether it had
 // to. The index is a cache of the vault — the boot scan re-upserts every
@@ -125,19 +126,20 @@ BEGIN
     UPDATE notes SET hash = NULL WHERE id = NEW.id;
 END`
 
-// addMissingColumns adds the notes columns that CREATE TABLE IF NOT EXISTS
-// leaves out of a table created by an older schema.
+// addMissingColumns adds the columns that CREATE TABLE IF NOT EXISTS leaves
+// out of a table created by an older schema.
 func addMissingColumns(db *sql.DB) error {
-	for _, col := range []struct{ name, def string }{
-		{"importance", "INTEGER NOT NULL DEFAULT 3"},
-		{"hash", "TEXT"},
+	for _, col := range []struct{ table, name, def string }{
+		{"notes", "importance", "INTEGER NOT NULL DEFAULT 3"},
+		{"notes", "hash", "TEXT"},
+		{"links", "field", "TEXT"},
 	} {
 		var n int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('notes') WHERE name = ?`, col.name).Scan(&n); err != nil {
+		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, col.table, col.name).Scan(&n); err != nil {
 			return err
 		}
 		if n == 0 {
-			if _, err := db.Exec(`ALTER TABLE notes ADD COLUMN ` + col.name + ` ` + col.def); err != nil {
+			if _, err := db.Exec(`ALTER TABLE ` + col.table + ` ADD COLUMN ` + col.name + ` ` + col.def); err != nil {
 				return err
 			}
 		}
@@ -366,6 +368,9 @@ func (i *Index) upsertLocked(n NoteDoc, resolve bool) (int64, error) {
 		title = frontTitle
 	}
 	meta := parser.FrontmatterRawForPath(n.Path, []byte(n.Body))
+	// The links of the frontmatter's values count as links too, each with
+	// its field (IMP-127 iteration 2): backlinks, graph and views see them.
+	links = append(links, parser.FrontmatterLinks(meta)...)
 
 	var oldID sql.NullInt64
 	_ = tx.QueryRow(`SELECT id FROM notes WHERE path = ?`, n.Path).Scan(&oldID)
@@ -405,8 +410,8 @@ func (i *Index) upsertLocked(n NoteDoc, resolve bool) (int64, error) {
 			// the note itself (by path, title or basename) resolves too.
 			targetPath = nullable(resolveTarget(tx, l.Target))
 		}
-		if _, err := tx.Exec(`INSERT INTO links(src_id, target, target_path, alias) VALUES(?,?,?,?)`,
-			id, l.Target, targetPath, l.Alias); err != nil {
+		if _, err := tx.Exec(`INSERT INTO links(src_id, target, target_path, alias, field) VALUES(?,?,?,?,?)`,
+			id, l.Target, targetPath, l.Alias, nullable(l.Field)); err != nil {
 			return 0, err
 		}
 	}

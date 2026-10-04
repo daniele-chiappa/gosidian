@@ -547,3 +547,27 @@ func TestVault_ScanIntoDropsVanishedNotes(t *testing.T) {
 		t.Errorf("link to a vanished note still resolved: %v", backs)
 	}
 }
+
+// A note that links to the renamed one only from its frontmatter (a
+// relation, IMP-127 iteration 2) is a backlink too, and its link follows.
+func TestVault_RenameNote_FrontmatterLinks(t *testing.T) {
+	v := newTestVault(t)
+	idx := openIndex(t)
+	write(t, v.Root, "p/bugs/BUG-1.md", "# Bug")
+	write(t, v.Root, "p/plans/fix.md", "---\ntitle: Fix\nrelated: [\"[[p/bugs/BUG-1]]\", \"[[other]]\"]\norigin: \"[[BUG-1|the bug]]\"\n---\n\nNo link in the body.\n")
+	_ = v.ScanInto(idx)
+	_ = idx.ResolveAll()
+
+	rewritten, err := v.RenameNote(idx, "p/bugs/BUG-1.md", "p/bugs/BUG-001.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fix, _ := v.Load("p/plans/fix.md")
+	want := "---\ntitle: Fix\nrelated: [\"[[p/bugs/BUG-001]]\", \"[[other]]\"]\norigin: \"[[BUG-001|the bug]]\"\n---\n\nNo link in the body.\n"
+	if string(fix.Content) != want || len(rewritten) != 1 {
+		t.Errorf("rewritten %v, content:\n%s", rewritten, fix.Content)
+	}
+	if bl, _ := idx.Backlinks("p/bugs/BUG-001.md"); len(bl) != 1 || bl[0].Path != "p/plans/fix.md" {
+		t.Errorf("backlinks after rename: %+v", bl)
+	}
+}

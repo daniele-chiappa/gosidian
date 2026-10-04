@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gosidian/gosidian/internal/dbschema"
 	"github.com/gosidian/gosidian/internal/index"
 )
 
@@ -13,7 +14,10 @@ import (
 // memory_query tool (IMP-099).
 type queryRequest struct {
 	Project string `json:"project"`
-	Where   []struct {
+	// From keeps the notes directly inside these folders, like the from of
+	// a view; with it, where may be empty.
+	From  []string `json:"from"`
+	Where []struct {
 		Field string `json:"field"`
 		Op    string `json:"op"`
 		Value any    `json:"value"`
@@ -48,8 +52,14 @@ func (r *Router) handleQuery(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
 		return
 	}
-	if len(body.Where) == 0 {
-		WriteError(w, http.StatusBadRequest, CodeValidationRequired, "where needs at least one condition")
+	var from []string
+	for _, f := range body.From {
+		if f = strings.Trim(strings.TrimSpace(f), "/"); f != "" {
+			from = append(from, f)
+		}
+	}
+	if len(body.Where) == 0 && len(from) == 0 {
+		WriteError(w, http.StatusBadRequest, CodeValidationRequired, "where needs at least one condition, unless from is given")
 		return
 	}
 	where := make([]index.FieldCond, 0, len(body.Where))
@@ -60,6 +70,13 @@ func (r *Router) handleQuery(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 		where = append(where, index.FieldCond{Field: c.Field, Op: c.Op, Values: values})
+	}
+	// Conditions on relations match through the links table (IMP-127
+	// iteration 2), the notes they name resolved for the reader.
+	where, err := index.ResolveLinkConds(where, previewResolver{r: r, p: principalFromContext(req)}.Resolve)
+	if err != nil {
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
+		return
 	}
 	desc, err := index.SortDesc(body.Sort, body.Order)
 	if err != nil {
@@ -77,10 +94,17 @@ func (r *Router) handleQuery(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
 		return
 	}
-	hits, total, err := r.deps.Index.Query(index.QueryOptions{
-		Projects: scope, Where: where, Sort: strings.TrimSpace(body.Sort), Desc: desc,
+	opts := index.QueryOptions{
+		Projects: scope, Folders: from, Where: where, Sort: strings.TrimSpace(body.Sort), Desc: desc,
 		Limit: index.ClampQueryLimit(body.Limit), Fields: fields,
-	})
+	}
+	if project := strings.TrimSpace(body.Project); project != "" && len(scope) == 1 && scope[0] == project {
+		// A select of the project's databases sorts by its options (IMP-127).
+		if schemas, _, err := dbschema.ForProject(r.deps.Index, r.deps.Vault, project); err == nil {
+			opts.SortOrder = dbschema.OptionOrderOf(schemas, opts.Sort)
+		}
+	}
+	hits, total, err := r.deps.Index.Query(opts)
 	if errors.Is(err, index.ErrBadQuery) {
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
 		return

@@ -159,8 +159,8 @@ func TestFrontmatterPatch_Schema(t *testing.T) {
 func TestFrontmatterPatch_ValuesAndYAML(t *testing.T) {
 	f := newFrontmatterFixture(t)
 	f.seedNote(t, "p/free.md", "---\ntitle: Free\nmeta:\n  a: 1\n---\nbody\n")
-	if r := f.doAuthRecorder(http.MethodPatch, "/api/v1/notes/p/free.md/frontmatter", `{"set":{"aliases":["a, b"]}}`, nil); r.code != http.StatusUnprocessableEntity {
-		t.Errorf("comma in a list item: status=%d, want 422 body=%s", r.code, r.body)
+	if r := f.doAuthRecorder(http.MethodPatch, "/api/v1/notes/p/free.md/frontmatter", `{"set":{"aliases":["#x"]}}`, nil); r.code != http.StatusUnprocessableEntity {
+		t.Errorf("list item with a leading #: status=%d, want 422 body=%s", r.code, r.body)
 	}
 	if r := f.doAuthRecorder(http.MethodPatch, "/api/v1/notes/p/free.md/frontmatter", `{"set":{"meta":"x"}}`, nil); r.code != http.StatusBadRequest {
 		t.Errorf("nested map: status=%d, want 400 body=%s", r.code, r.body)
@@ -171,6 +171,13 @@ func TestFrontmatterPatch_ValuesAndYAML(t *testing.T) {
 	}
 	if got := f.content(t, "p/free.md"); !strings.Contains(got, "meta:\n  a: 1\nnote: \"Iterazione 2: editor\"\n---") {
 		t.Errorf("free note content:\n%s", got)
+	}
+	// One reader (IMP-138): a list item keeps its comma.
+	if r := f.doAuthRecorder(http.MethodPatch, "/api/v1/notes/p/free.md/frontmatter", `{"set":{"aliases":["a, b","c"]}}`, nil); r.code != http.StatusOK {
+		t.Errorf("comma in a list item: status=%d body=%s", r.code, r.body)
+	}
+	if got := f.content(t, "p/free.md"); !strings.Contains(got, `aliases: ["a, b", c]`) {
+		t.Errorf("comma item content:\n%s", got)
 	}
 }
 

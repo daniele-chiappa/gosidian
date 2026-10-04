@@ -409,6 +409,8 @@
     "name_taken": "{name} esiste già: proposto {next}.",
     "create_invalid": "Riga non creata: {reason}",
     "create_forbidden": "Con il tuo accesso non si possono aggiungere righe a questo database.",
-    "create_failed": "La riga non è stata creata."
+    "create_failed": "La riga non è stata creata.",
+    "row_views": "Viste della riga",
+    "count_notes": "nota | note"
   }
 }

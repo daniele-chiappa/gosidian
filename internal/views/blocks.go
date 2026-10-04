@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"regexp"
+	"slices"
+	"sort"
 	"strings"
 )
 
@@ -121,13 +123,104 @@ func ThisFields(notePath string, fm map[string]any) map[string][]string {
 // with q in the context c. A view that fails to parse or run renders as a
 // one-line warning instead of breaking the note.
 func RenderNote(body []byte, keepSpec bool, c Context, q QueryFunc) ([]byte, string) {
-	return Expand(body, keepSpec, func(spec string) string {
+	out, hash := Expand(body, keepSpec, func(spec string) string {
 		r, err := compute(spec, c, q)
 		if err != nil {
 			return warning(err)
 		}
 		return r.Markdown()
 	})
+	out, vhash := ExpandValues(out, keepSpec, c, q)
+	return out, joinHashes(hash, vhash)
+}
+
+// joinHashes combines the hash of a note's views and of its values: "" when
+// it has neither.
+func joinHashes(views, values string) string {
+	switch {
+	case values == "":
+		return views
+	case views == "":
+		return values
+	}
+	sum := sha256.Sum256([]byte(views + values))
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+// RenderNoteWithin is RenderNote with the results of all the note's views
+// held to about budget bytes, the form of the bootstrap (IMP-136); budget
+// 0 means no limit. When they do not fit, each view gets a fair share, the
+// small ones whole, and a view longer than its share keeps the rows that
+// fit and says how to get them all. cut reports whether any view was cut.
+func RenderNoteWithin(body []byte, keepSpec bool, c Context, q QueryFunc, budget int) (out []byte, hash string, cut bool) {
+	if budget <= 0 {
+		out, hash = RenderNote(body, keepSpec, c, q)
+		return out, hash, false
+	}
+	type view struct {
+		r    *Result
+		text string
+	}
+	var vs []view
+	Expand(body, keepSpec, func(spec string) string {
+		r, err := compute(spec, c, q)
+		if err != nil {
+			vs = append(vs, view{text: warning(err)})
+		} else {
+			vs = append(vs, view{r: r, text: r.Markdown()})
+		}
+		return ""
+	})
+	sizes := make([]int, len(vs))
+	for i, v := range vs {
+		sizes[i] = len(v.text)
+	}
+	shares := fairShares(sizes, budget)
+	i := 0
+	out, hash = Expand(body, keepSpec, func(string) string {
+		v, share := vs[i], shares[i]
+		i++
+		if v.r == nil || len(v.text) <= share {
+			return v.text
+		}
+		cut = true
+		return v.r.MarkdownWithin(share)
+	})
+	// Values are a number each: they stay out of the budget.
+	out, vhash := ExpandValues(out, keepSpec, c, q)
+	return out, joinHashes(hash, vhash), cut
+}
+
+// fairShares splits budget among views of the given sizes: when they all
+// fit, each keeps its size; otherwise the smaller ones keep theirs and the
+// rest is split evenly among the larger ones.
+func fairShares(sizes []int, budget int) []int {
+	out := slices.Clone(sizes)
+	total := 0
+	for _, s := range sizes {
+		total += s
+	}
+	if total <= budget {
+		return out
+	}
+	idx := make([]int, len(sizes))
+	for i := range idx {
+		idx[i] = i
+	}
+	sort.SliceStable(idx, func(a, b int) bool { return sizes[idx[a]] < sizes[idx[b]] })
+	left := budget
+	for k, i := range idx {
+		share := left / (len(idx) - k)
+		if sizes[i] <= share {
+			left -= sizes[i]
+			continue
+		}
+		for _, j := range idx[k:] {
+			out[j] = share
+		}
+		break
+	}
+	return out
 }
 
 // RenderNoteData expands the view blocks of a note for the web UI, as
@@ -144,6 +237,7 @@ func RenderNoteData(body []byte, c Context, q QueryFunc) ([]byte, []Data) {
 		data = append(data, r.Data(c))
 		return r.Markdown()
 	})
+	out, _ = ExpandValues(out, false, c, q)
 	return out, data
 }
 

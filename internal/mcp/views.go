@@ -1,7 +1,9 @@
 package mcp
 
 import (
+	"bytes"
 	"fmt"
+	"path"
 	"sort"
 	"time"
 
@@ -43,12 +45,74 @@ func (s *Server) viewQuery(tok *auth.Token) views.QueryFunc {
 // section shows and what produces it. The second value hashes the results
 // ("" when the note has no views).
 func (s *Server) renderViews(tok *auth.Token, rel string, content []byte) ([]byte, string) {
-	c := views.Context{
-		This:   views.ThisFields(rel, parser.ParseFrontmatterFields(parser.FrontmatterRawForPath(rel, content))),
-		Today:  time.Now(),
-		Schema: s.viewSchema(tok),
+	out, hash, _ := s.renderViewsWithin(tok, rel, content, 0)
+	return out, hash
+}
+
+// renderViewsWithin is renderViews with the results held to about budget
+// bytes (0: no limit), as the bootstrap serves them (IMP-136); cut reports
+// a view cut to its share.
+func (s *Server) renderViewsWithin(tok *auth.Token, rel string, content []byte, budget int) ([]byte, string, bool) {
+	return views.RenderNoteWithin(content, true, s.viewContext(tok, rel, content), s.viewQuery(tok), budget)
+}
+
+// viewContext is the context of the views of the note at rel for the
+// token: this is the note, schemas and links within the token's scope.
+func (s *Server) viewContext(tok *auth.Token, rel string, content []byte) views.Context {
+	return views.Context{
+		This:    views.ThisFields(rel, parser.ParseFrontmatterFields(parser.FrontmatterRawForPath(rel, content))),
+		Today:   time.Now(),
+		Schema:  s.viewSchema(tok),
+		Resolve: s.viewResolve(tok),
 	}
-	return views.RenderNote(content, true, c, s.viewQuery(tok))
+}
+
+// viewResolve resolves a link target of a view to a note the token may
+// read, "" otherwise.
+func (s *Server) viewResolve(tok *auth.Token) func(target string) string {
+	filter := buildProjectsFilter(nil, tok.ProjectList())
+	return func(target string) string {
+		p := s.index.Resolve(target)
+		if p == "" || !tok.AllowsPath(p) || !filter.matches(p) || s.pathInHiddenProject(p) {
+			return ""
+		}
+		return p
+	}
+}
+
+// rowSchema returns the schema of the database whose row is the note at
+// rel, when it declares row views and the token may read it; nil otherwise.
+func (s *Server) rowSchema(tok *auth.Token, rel string) *dbschema.Schema {
+	schema := s.viewSchema(tok)(path.Dir(rel))
+	if schema == nil || !schema.Covers(rel) || len(schema.RowViews) == 0 {
+		return nil
+	}
+	return schema
+}
+
+// withRowViews appends the row views of the note at rel to content, as an
+// agent reads them (IMP-139): computed, between markers, after the body.
+// The bool reports whether there were any.
+func (s *Server) withRowViews(tok *auth.Token, rel string, note, content []byte) ([]byte, bool) {
+	schema := s.rowSchema(tok, rel)
+	if schema == nil {
+		return content, false
+	}
+	rs := views.ComputeRowViews(schema.RowViews, s.viewContext(tok, rel, note), s.viewQuery(tok))
+	out := bytes.TrimRight(views.StripRowViews(content), "\n")
+	return append(append(out, '\n'), views.RowViewsMarkdown(schema.Path, rs)...), true
+}
+
+// rowViewsHint is the hint of a read of a row without render_views: its
+// database declares row views, which only render_views computes. "" when
+// it declares none.
+func (s *Server) rowViewsHint(tok *auth.Token, rel, how string) string {
+	schema := s.rowSchema(tok, rel)
+	if schema == nil {
+		return ""
+	}
+	return fmt.Sprintf("%d row view(s) of %s not shown (what links to this row, and other views its database declares): %s to see them after the body",
+		len(schema.RowViews), schema.Path, how)
 }
 
 // viewSchema resolves the schema of the database whose rows are the notes
@@ -74,14 +138,20 @@ func outline(body []byte) []outlineHeading {
 	for i, h := range hs {
 		out[i] = outlineHeading{Level: h.Level, Text: h.Text, ID: h.ID}
 	}
-	blocks := views.FindBlocks(body)
+	var starts []int // of the view blocks and the inline values
+	for _, b := range views.FindBlocks(body) {
+		starts = append(starts, b.Start)
+	}
+	for _, v := range views.FindValues(body) {
+		starts = append(starts, v.Start)
+	}
 	offs := parser.HeadingOffsets(body)
-	if len(blocks) == 0 || len(offs) != len(out) {
+	if len(starts) == 0 || len(offs) != len(out) {
 		return out
 	}
-	for _, b := range blocks {
+	for _, st := range starts {
 		// The last heading before the block owns it.
-		if i := sort.SearchInts(offs, b.Start+1) - 1; i >= 0 {
+		if i := sort.SearchInts(offs, st+1) - 1; i >= 0 {
 			out[i].Views++
 		}
 	}
@@ -92,26 +162,32 @@ func outline(body []byte) []outlineHeading {
 // result (BUG-087): the text alone gives the spec and no rows. how says how
 // to get them. "" when content has no view blocks.
 func viewsHint(content []byte, how string) string {
-	n := len(views.FindBlocks(content))
-	if n == 0 {
+	n, v := len(views.FindBlocks(content)), len(views.FindValues(content))
+	switch {
+	case n == 0 && v == 0:
 		return ""
+	case v == 0:
+		return fmt.Sprintf("%d ```view block(s) here, not computed: %s to see their rows (as returned, the text is the file as stored, the form an edit needs)", n, how)
+	case n == 0:
+		return fmt.Sprintf("%d `=count(…)` value(s) here, not computed: %s to see the numbers (as returned, the text is the file as stored, the form an edit needs)", v, how)
 	}
-	return fmt.Sprintf("%d ```view block(s) here, not computed: %s to see their rows (as returned, the text is the file as stored, the form an edit needs)", n, how)
+	return fmt.Sprintf("%d ```view block(s) and %d `=count(…)` value(s) here, not computed: %s to see their rows and numbers (as returned, the text is the file as stored, the form an edit needs)", n, v, how)
 }
 
-// withRenderedViews computes the views of a bootstrap file in place and sets
-// its ViewsETag. ETag stays the file's own, which is what if_match on a
+// withRenderedViews computes the views of a bootstrap file in place, within
+// budget bytes (IMP-136), and sets its ViewsETag; the bool reports a view cut
+// to its share. ETag stays the file's own, which is what if_match on a
 // later write must carry; known_etags compares ViewsETag instead, so a file
 // whose views changed is never reported unchanged.
-func (s *Server) withRenderedViews(tok *auth.Token, f bootstrapFile) bootstrapFile {
+func (s *Server) withRenderedViews(tok *auth.Token, f bootstrapFile, budget int) (bootstrapFile, bool) {
 	if !f.Present || f.Content == "" {
-		return f
+		return f, false
 	}
-	out, hash := s.renderViews(tok, f.Path, []byte(f.Content))
+	out, hash, cut := s.renderViewsWithin(tok, f.Path, []byte(f.Content), budget)
 	if hash == "" {
-		return f
+		return f, false
 	}
 	f.Content = string(out)
 	f.ViewsETag = f.ETag + "+v" + hash
-	return f
+	return f, cut
 }

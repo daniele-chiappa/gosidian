@@ -215,8 +215,12 @@ type TrashConfig struct {
 // MCPConfig caps how aggressively an MCP client may mutate the vault.
 // Both fields are per-token. Zero values mean "use defaults".
 type MCPConfig struct {
-	WritePerMinute     int      `toml:"write_per_minute"`     // default 60
-	MaxNoteBytes       int64    `toml:"max_note_bytes"`       // default 1 MiB
+	WritePerMinute int   `toml:"write_per_minute"` // default 60
+	MaxNoteBytes   int64 `toml:"max_note_bytes"`   // default 1 MiB
+	// PackageMaxFiles and PackageMaxBytes cap a memory_ingest package
+	// (as: package, IMP-116): its files, and its size unpacked.
+	PackageMaxFiles    int      `toml:"package_max_files"`    // default 500
+	PackageMaxBytes    int64    `toml:"package_max_bytes"`    // default 20 MiB
 	AllowedUploadRoots []string `toml:"allowed_upload_roots"` // fs roots for source_path uploads
 	BridgeDir          string   `toml:"bridge_dir"`           // staging dir for bridge_filename uploads (auto-allowed root; IMP-059)
 	IngestURLAllowlist []string `toml:"ingest_url_allowlist"` // URL prefixes memory_ingest may fetch from; empty disables the url source (ADR-018)
@@ -330,6 +334,20 @@ func (c *Config) ApplyEnv() error {
 			return fmt.Errorf("GOSIDIAN_MCP_MAX_NOTE_BYTES: %w", err)
 		}
 		c.MCP.MaxNoteBytes = n
+	}
+	if v := os.Getenv("GOSIDIAN_MCP_PACKAGE_MAX_FILES"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("GOSIDIAN_MCP_PACKAGE_MAX_FILES: %w", err)
+		}
+		c.MCP.PackageMaxFiles = n
+	}
+	if v := os.Getenv("GOSIDIAN_MCP_PACKAGE_MAX_BYTES"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return fmt.Errorf("GOSIDIAN_MCP_PACKAGE_MAX_BYTES: %w", err)
+		}
+		c.MCP.PackageMaxBytes = n
 	}
 	if v := os.Getenv("GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS"); v != "" {
 		var roots []string
@@ -589,6 +607,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.MCP.WritePerMinute == 0 {
 		c.MCP.WritePerMinute = 60
+	}
+	if c.MCP.PackageMaxFiles == 0 {
+		c.MCP.PackageMaxFiles = 500
+	}
+	if c.MCP.PackageMaxBytes == 0 {
+		c.MCP.PackageMaxBytes = 20 << 20 // 20 MiB
 	}
 	if c.MCP.MaxNoteBytes == 0 {
 		c.MCP.MaxNoteBytes = 1 << 20 // 1 MiB

@@ -11,11 +11,17 @@
 //	  status: {type: select, required: true, options: [open, done]}
 //	  closed: {type: date}
 //	template: proj/templates/improvement
+//	row_views:
+//	  - title: Plans that implement it
+//	    from: proj/plans
+//	    where: [implements_imp = this.id]
 //
 // Each row is a note directly inside the source folder, with the values in
 // its own frontmatter. The optional template is the note a row made from the
-// web UI starts from. The schema is read with a YAML parser; the index keeps
-// its own frontmatter extraction, so nothing here changes what is indexed.
+// web UI starts from; the optional row_views are views every row shows
+// below its body, where `this` is the row (IMP-139). The schema is read with
+// a YAML parser; the index keeps its own frontmatter extraction, so nothing
+// here changes what is indexed.
 package dbschema
 
 import (
@@ -31,6 +37,8 @@ import (
 	"time"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/gosidian/gosidian/internal/parser"
 )
 
 // Field is one declared field of a database.
@@ -49,7 +57,22 @@ type Schema struct {
 	// declares none: a note of the same project, outside Source.
 	Template string  `json:"template,omitempty"`
 	Fields   []Field `json:"fields"` // in declaration order
+	// RowViews are the views every row shows below its body (IMP-139).
+	RowViews []RowView `json:"row_views,omitempty"`
 }
+
+// RowView is a view every row of a database shows below its body: a title
+// and a spec written as a ```view block's, in which `this` is the row
+// (`related contains this`, `implements_imp = this.id`).
+type RowView struct {
+	Title string `json:"title"`
+	// Spec is the view's YAML, the keys of the entry but title.
+	Spec string `json:"spec"`
+}
+
+// MaxRowViews caps the row views of a database: each one is a query every
+// time a row is read with its views.
+const MaxRowViews = 8
 
 // Types are the field types a schema may declare.
 var Types = []string{"text", "number", "date", "checkbox", "select", "multi-select", "url", "relation", "list"}
@@ -112,7 +135,53 @@ func Parse(notePath, frontmatter string) (*Schema, error) {
 		}
 		s.Fields = append(s.Fields, f)
 	}
+	rv, err := rowViews(valueOf(m, "row_views"))
+	if err != nil {
+		return nil, err
+	}
+	s.RowViews = rv
 	return s, nil
+}
+
+// rowViews reads the row_views key: a list of {title, from, …} entries. The
+// spec itself (from, where, sort…) is checked when the view is computed, and
+// by lint, as a ```view block is.
+func rowViews(n *yaml.Node) ([]RowView, error) {
+	if n == nil || n.Kind == yaml.ScalarNode && n.Tag == "!!null" {
+		return nil, nil
+	}
+	const shape = "`row_views` must be a list of views, each {title, from, where, …}"
+	if n.Kind != yaml.SequenceNode {
+		return nil, errors.New(shape)
+	}
+	if len(n.Content) > MaxRowViews {
+		return nil, fmt.Errorf("`row_views`: at most %d views, %d given", MaxRowViews, len(n.Content))
+	}
+	var out []RowView
+	for i, e := range n.Content {
+		if e.Kind != yaml.MappingNode {
+			return nil, fmt.Errorf("%s: entry %d is not a map", shape, i+1)
+		}
+		title := strings.TrimSpace(scalar(e, "title"))
+		if title == "" {
+			return nil, fmt.Errorf("row_views entry %d has no `title`", i+1)
+		}
+		if valueOf(e, "from") == nil {
+			return nil, fmt.Errorf("row view %q has no `from`: the folder whose notes it lists", title)
+		}
+		spec := &yaml.Node{Kind: yaml.MappingNode}
+		for k := 0; k+1 < len(e.Content); k += 2 {
+			if e.Content[k].Value != "title" {
+				spec.Content = append(spec.Content, e.Content[k], e.Content[k+1])
+			}
+		}
+		b, err := yaml.Marshal(spec)
+		if err != nil {
+			return nil, fmt.Errorf("row view %q: %w", title, err)
+		}
+		out = append(out, RowView{Title: title, Spec: string(b)})
+	}
+	return out, nil
 }
 
 // templatePath reads the template key: a vault path or a [[wikilink]] to a
@@ -193,6 +262,35 @@ func (s *Schema) Field(name string) (Field, bool) {
 	return Field{}, false
 }
 
+// OptionOrder returns the options of field when the schema declares it as a
+// select or multi-select: the order a sort by that field follows, rather
+// than the text of the values. Nil otherwise.
+func (s *Schema) OptionOrder(field string) []string {
+	if f, ok := s.Field(field); ok && (f.Type == "select" || f.Type == "multi-select") {
+		return f.Options
+	}
+	return nil
+}
+
+// OptionOrderOf returns the option order of field across the databases of a
+// project, for a query that is not bound to one database: the options when
+// every schema that declares the field declares it as a select with the same
+// options, nil when none does or they disagree.
+func OptionOrderOf(schemas []*Schema, field string) []string {
+	var out []string
+	for _, s := range schemas {
+		if _, declared := s.Field(field); !declared {
+			continue
+		}
+		o := s.OptionOrder(field)
+		if o == nil || out != nil && !slices.Equal(o, out) {
+			return nil
+		}
+		out = o
+	}
+	return out
+}
+
 // FieldNames lists the declared fields, in declaration order.
 func (s *Schema) FieldNames() []string {
 	out := make([]string, len(s.Fields))
@@ -212,11 +310,30 @@ var isoDate = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2}(\.\d
 
 // Validate checks a row's raw YAML frontmatter against the schema. A field
 // named `id` must also match the note's file name, the convention that keeps
-// a row's links short and stable.
+// a row's links short and stable. The values are read as the index reads
+// them (parser.FrontmatterEntries, IMP-138): as text, typed by the schema,
+// so `id: 007` is the file 007.md and a date stays its text.
 func (s *Schema) Validate(rel, frontmatter string) []Problem {
-	var values map[string]any
-	if err := yaml.Unmarshal([]byte(frontmatter), &values); err != nil {
+	var probe map[string]any
+	if err := yaml.Unmarshal([]byte(frontmatter), &probe); err != nil {
 		return []Problem{{Message: "frontmatter is not valid YAML: " + err.Error()}}
+	}
+	values := map[string]any{}
+	for _, e := range parser.FrontmatterEntries(frontmatter) {
+		switch e.Kind {
+		case parser.FMScalar:
+			values[e.Key] = e.Text
+		case parser.FMList:
+			items := make([]any, len(e.Items))
+			for i, it := range e.Items {
+				items[i] = it
+			}
+			values[e.Key] = items
+		case parser.FMMap:
+			values[e.Key] = e.Sub
+		default:
+			values[e.Key] = nil
+		}
 	}
 	var out []Problem
 	keys := make([]string, 0, len(values))
@@ -319,7 +436,7 @@ func checkValue(f Field, v any) string {
 		}
 		return fmt.Sprintf("%s: %v is not an ISO date (YYYY-MM-DD)", f.Name, v)
 	case "checkbox":
-		if _, ok := v.(bool); ok {
+		if _, ok := v.(bool); ok || v == "true" || v == "false" {
 			return ""
 		}
 		return fmt.Sprintf("%s: %v is not true or false", f.Name, v)

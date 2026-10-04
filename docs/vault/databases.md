@@ -90,6 +90,50 @@ any row without being declared. A field named `id` must match the note's
 file name, which keeps links to a row short and stable
 (`[[myproject/docs/improvements/IMP-127]]`).
 
+### Relations
+
+A `relation` field holds `[[wikilinks]]`, quoted in the frontmatter
+(`related: ["[[myproject/docs/bugs/BUG-089]]"]`). Like any wikilink in a
+frontmatter value it is a link: the note it points at lists the row in
+its backlinks, with the field's name, the graph draws it, and a rename
+rewrites it. A view finds the rows that point at a note with `related
+contains this` or `related contains [[note]]`, however the link is
+written ([views](views.md#relations)).
+
+### Row views
+
+`row_views` (optional) lists views that every row shows below its body,
+in which `this` is the row: what points at it, or anything else a view can
+list. Each entry has a `title` and the keys of a [view](views.md) block.
+
+```yaml
+row_views:
+  - title: Plans that implement it
+    from: myproject/plans
+    where: [implements_imp = this.id]
+    columns: [title, status]
+  - title: Everything that links here
+    from: [myproject/plans, myproject/docs/improvements]
+    where: [links contains this]
+    as: list
+```
+
+Nothing is written to the rows. A database declares at most 8 of them,
+and only those it declares show: there is no automatic one.
+
+- **Web UI** — under the body of a row, one section per view, which folds
+  and is left out when it lists nothing. A table or a board edits the
+  rows it lists, as in a note. `GET /api/v1/notes/<row>/row-views` serves
+  them: each with its `title`, the view as data (`view`, as `POST
+  /api/v1/preview` returns a note's views) and its rows as `html`.
+- **Agents** — `memory_get` and `memory_get_section` of a row with
+  `render_views: true` append them after the text, between
+  `gosidian:row-views` markers, each title in bold and its rows as a view
+  shows them. Without `render_views` the `hint` says how many there are.
+  They are not part of the bootstrap.
+- **Lint** — `database-field-invalid` reports a row view that would not
+  compute, on the database note.
+
 ## What checks the rows
 
 - **Lint** — the `database-field-invalid` rule (on by default, warning)
@@ -106,8 +150,9 @@ file name, which keeps links to a row short and stable
   it touches. A row that already breaks the schema elsewhere can still be
   edited one field at a time.
 - **Bootstrap** — `memory_bootstrap` lists the project's databases in
-  `databases`, each with its path, source folder, row count and fields,
-  so an agent knows the schema before it writes.
+  `databases`, each with its path, source folder, row count, fields and
+  `template` when it names one, so an agent knows the schema and the
+  model of a row before it writes.
 
 The index reads row frontmatter as it reads any note, so `memory_query`
 filters and sorts rows by their fields:
@@ -183,11 +228,13 @@ vault's notes are written.
   field, emptying or removing a required one, or an `id` that differs
   from the file name answers **422**, with the problems in
   `details.problems`.
-- A value is written only in a form that every reader of the vault reads
-  back unchanged. One that has none, such as a list item containing a
-  comma, answers **422**. A key whose current YAML is too complex to
-  edit line by line (a nested map, a multi-line value, an anchor, a key
-  written twice) answers **400**; edit the note as text instead.
+- A value is written only in a form the vault reads back unchanged. A
+  list item may hold a comma (it is quoted) when the note's frontmatter is
+  valid YAML; one that cannot be read back whole, such as an item starting
+  with `#` or with a quote, answers **422**. A key whose current YAML is
+  too complex to edit line by line (a nested map, a multi-line value, an
+  anchor, a key written twice) answers **400**; edit the note as text
+  instead.
 - The call needs write access to the project. It answers 200 with the
   note and its new `ETag`; an edit that changes nothing leaves the note
   and its etag as they were.

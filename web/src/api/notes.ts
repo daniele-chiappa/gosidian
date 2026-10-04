@@ -113,6 +113,25 @@ export async function getRowFields(path: string): Promise<RowFields> {
   return data
 }
 
+/** A row view (IMP-139): its title, the view as data, its rows as HTML. */
+export interface RowView {
+  title: string
+  view: import('./preview').ViewData
+  html: string
+}
+
+/** The row views of a note that is a row of a database; none otherwise. */
+export interface RowViews {
+  database?: string
+  views: RowView[]
+}
+
+/** GET /api/v1/notes/{path}/row-views — the views a row shows below its body. */
+export async function getRowViews(path: string): Promise<RowViews> {
+  const { data } = await client.get<RowViews>(`/notes/${encodeURIComponent(path)}/row-views`)
+  return data
+}
+
 /** What the form for a new row of a database starts from. */
 export interface NewRow {
   /** The suggested file name, without .md; "" when the rows are not numbered. */

@@ -172,7 +172,25 @@ const StubVersion = 3
 // the outline marks such sections with views:N (lite bootstrap included) and
 // the hint says so; render_views:true shows the rows, a read for an edit
 // goes without it.
-const DirectivesVersion = 17
+//
+// v18 (2026-10-03, IMP-127 iteration 2 phase 0): quote frontmatter values
+// holding ": ", a wikilink or a placeholder (notices and the lint rule
+// frontmatter-invalid-yaml say so, IMP-138); a database's template and
+// memory_query's from; hot_computed_oversize and hot_views_cut ask to narrow
+// the views of hot.md; the lite shape follows the prose, a cut view ends
+// with its query, memory_get_section takes an ID alone.
+//
+// v19 (2026-10-04, IMP-127 iteration 2 phase 2): relations — a field that
+// points at a note is a quoted wikilink and counts as a link (backlinks with
+// fields, graph); links contains [[note]] and related contains [[note]] in
+// memory_query; a row read with render_views shows its database's
+// row_views.
+//
+// v20 (2026-10-04, IMP-127 iteration 2 phase 3): several files at once go
+// through memory_ingest as: package (IMP-116), with dry_run first; a count
+// is a view as: count or a `=count(…)` value in the text, whose computed
+// form is never copied into the file.
+const DirectivesVersion = 20
 
 // AnchorVersion is the version of the agent-anchor template/format. It is
 // substituted into the `<!-- gosidian:anchor v=N ... -->` marker so the

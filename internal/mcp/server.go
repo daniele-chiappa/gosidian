@@ -101,15 +101,19 @@ type Server struct {
 	streams    context.Context
 	endStreams context.CancelFunc
 
-	vault              *vault.Vault
-	index              *index.Index
-	tokens             *auth.Store
-	projects           *projects.Store
-	trash              *trash.Bin // nil = memory_delete_project removes from disk
-	audit              *audit.Log
-	impl               *server.MCPServer
-	limiter            *writeLimiter
-	maxNoteBytes       int64
+	vault        *vault.Vault
+	index        *index.Index
+	tokens       *auth.Store
+	projects     *projects.Store
+	trash        *trash.Bin // nil = memory_delete_project removes from disk
+	audit        *audit.Log
+	impl         *server.MCPServer
+	limiter      *writeLimiter
+	maxNoteBytes int64
+	// packageMaxFiles and packageMaxBytes cap a memory_ingest package
+	// (IMP-116); SetPackageLimits overrides the defaults.
+	packageMaxFiles    int
+	packageMaxBytes    int64
 	allowedUploadRoots []string
 	bridgeDir          string
 	// events is optional. When wired, MCP write handlers (create,
@@ -363,6 +367,17 @@ func (s *Server) SetWriteLimits(perMinute int, maxNoteBytes int64) {
 	}
 }
 
+// SetPackageLimits configures the caps of a memory_ingest package: its
+// files, and its size unpacked. Zero keeps the defaults.
+func (s *Server) SetPackageLimits(maxFiles int, maxBytes int64) {
+	if maxFiles > 0 {
+		s.packageMaxFiles = maxFiles
+	}
+	if maxBytes > 0 {
+		s.packageMaxBytes = maxBytes
+	}
+}
+
 // SetAllowedUploadRoots configures the filesystem roots from which the
 // source_path upload parameter is allowed to read. The vault root is always
 // implicitly allowed and does not need to be listed.
@@ -466,12 +481,14 @@ var Version = "dev"
 // nil and non empty, Bearer-token auth is enforced on the SSE transport.
 func New(v *vault.Vault, idx *index.Index, tokens *auth.Store) *Server {
 	s := &Server{
-		vault:        v,
-		index:        idx,
-		tokens:       tokens,
-		limiter:      newWriteLimiter(60),
-		maxNoteBytes: 1 << 20,
-		nudges:       newNudgeTracker(),
+		vault:           v,
+		index:           idx,
+		tokens:          tokens,
+		limiter:         newWriteLimiter(60),
+		maxNoteBytes:    1 << 20,
+		packageMaxFiles: 500,
+		packageMaxBytes: 20 << 20,
+		nudges:          newNudgeTracker(),
 	}
 	s.streams, s.endStreams = context.WithCancel(context.Background())
 	// The self-improve nudge middleware is bound to s, so s must exist

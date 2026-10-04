@@ -8,6 +8,171 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.50.1] — 2026-10-04 — "relations, counts and packages"
+
+Databases in notes, second round: relations between notes, views that each
+row of a database shows, counts in views and in the text, a one-call import
+of a whole folder or `.zip`, and one way of reading frontmatter everywhere.
+Versions 2.47.0 to 2.50.0 were not published on their own; this release
+includes them. Pull the image and restart: the index gains a column and
+re-reads every note at the first start, a few seconds, and nothing needs
+migrating by hand. Two changes can show on an existing vault: frontmatter is
+now read as YAML, so an unquoted ` #` starts a comment (lint and the write
+notices point such values out), and wikilinks in frontmatter values now
+count as links, so some notes gain backlinks.
+
+### Added
+- **Count views and values in the text** — a view with `as:
+  count` shows how many notes it selects, and with `group_by` a number per
+  value (`**36** notes · priority: high 1 · medium 14 · low 21` for
+  agents, a large number in the web UI). Inside a sentence, an inline code
+  span `` `=count(<folder> where <condition> and …)` `` stands for the
+  number, with the conditions of a view: the web UI shows it, its
+  expression on hover; agents get `` 3 (`=count(…)`) ``. Values are computed
+  wherever views are (bootstrap, `render_views`, web UI), and reads that
+  leave them uncomputed say so in their `hint`. Written between two
+  backticks (`` `` `=count(…)` `` ``) the syntax stays text, to show it in
+  prose.
+- **Import a whole package** — `memory_ingest` with `as:
+  "package"` and `dest` imports a folder or a `.zip` in one call: from the
+  bridge dir, a server path, base64 data or a `transfer: "http"` upload.
+  `.md` and `.html` files become notes keeping their paths, other accepted
+  files attachments; relative links between markdown files become
+  wikilinks, links to attachments point at the vault file, and a note
+  without frontmatter gets a title and the project's tag. All or nothing:
+  a path outside the package refuses it, a note already there stops it
+  unless `overwrite: true`, a failed write takes back the others, and
+  `dry_run: true` shows the plan. One write of the rate limit, capped at
+  500 files and 20 MiB unpacked (`GOSIDIAN_MCP_PACKAGE_MAX_FILES`,
+  `GOSIDIAN_MCP_PACKAGE_MAX_BYTES`). Audit: an entry per note and an
+  `ingest_package` summary.
+- **Row views** — a database note can declare `row_views`:
+  views that every row shows below its body, in which `this` is the row
+  ("Plans that implement it", "Everything that links here"). In the web
+  UI they follow the note, one section per view, which folds and is left
+  out when it lists nothing; a table or a board edits the rows it lists.
+  `memory_get` and `memory_get_section` of a row with `render_views: true`
+  append them after the text, between markers; without it the `hint` says
+  how many there are. They are not part of the bootstrap. Lint
+  (`database-field-invalid`) reports a row view that would not compute.
+  New endpoint: `GET /api/v1/notes/<row>/row-views`.
+- **Relations in views and queries** — a condition whose value
+  is a note matches by link, however the link is written: `related
+  contains this` lists the notes whose `related` field links to the note
+  holding the view, `related contains [[p/x]]` those that link to `p/x`.
+  The pseudo-field `links` covers every link of a note, body and
+  frontmatter alike, so `links contains this` is a note's backlinks as a
+  view. `memory_query` and `POST /api/v1/query` take the same conditions;
+  a link to no note the reader can open is an error. A new row made from
+  such a view starts with the link.
+- **Frontmatter that is not valid YAML is flagged** — a write
+  through the MCP tools says so in `notices`, with the line of the note,
+  and the lint rule `frontmatter-invalid-yaml` (warning, on by default)
+  lists such notes. The index keeps reading them line by line; the
+  database schemas, read with a YAML parser, do not.
+- **Lint rule `broken-anchor`** —
+  reports a `[[note#Heading]]` or `[[#Heading]]` whose heading is not in
+  the note. A heading counts by its text, its anchor id, or an ID alone
+  (`ADR-010` for `## ADR-010 — …`), as `memory_get_section` finds it;
+  block references (`#^id`) are left out. On a real vault of about 1,250 notes it
+  found 39 links out of 286 anchors that name no heading.
+- **`template` in the bootstrap's `databases`** — a database
+  that names a row template shows it, so agents start a row from the same
+  model as the web UI's "New row".
+- **`memory_get_section` by ID** — the start of a heading is
+  enough when it names only one, such as `T-14` for `## T-14 — …`;
+  the response gives the full heading. Among several, the one of the
+  highest level wins when it is alone there, so `ADR-026` finds the ADR
+  rather than its addenda; otherwise, or when none matches, the error
+  lists the candidates instead of a bare "not found". The lint rule
+  `broken-anchor` matches headings the same way.
+- **`from` in `memory_query` and `POST /api/v1/query`** — a
+  folder, or a list, whose notes directly inside are queried: the rows of
+  a database, as the `from` of a view. With it `where` may be empty.
+- **Views of the bootstrap held to a budget** — the views of
+  `hot.md` and the other session files are held to about 8 KiB together;
+  a view past its share keeps the rows that fit and ends with the
+  `memory_query` that returns them all. `maintenance` adds
+  `hot_computed_size`, `hot_computed_oversize` (past 12 KiB) and
+  `hot_views_cut`, and asks for attention on them.
+- **Select fields sort by their options** — a view of a database,
+  and `memory_query` or `POST /api/v1/query` with a `project`, sort a
+  `select` field by the order of its options in the schema (`low`,
+  `medium`, `high`) instead of alphabetically; values outside the options
+  come after them, notes without the field last.
+
+### Changed
+- **One frontmatter reader** — a frontmatter that is valid YAML
+  is now read as YAML everywhere (index, views, tools, database schemas),
+  every value kept as the text written: the schema of a database gives the
+  types, so `id: 007` matches the file `007.md`. A frontmatter that is not
+  valid YAML falls back to the line reader used until now, so the note
+  stays readable. On a real vault of about 1,270 notes only four values read
+  differently, all for the reason below. Visible
+  changes: a ` #` in an unquoted value starts a YAML comment and cuts it
+  (lint and notices report such a value); `memory_get_frontmatter` and
+  `memory_search` with `include_frontmatter` return a list field as an
+  array instead of its text; an unquoted `[[wikilink]]` reads as the link;
+  a list item may hold a comma when written through
+  `PATCH …/frontmatter`. The index re-extracts every note at the first
+  start (`ContentVersion` 4).
+- **Wikilinks in frontmatter values are links** — `related:
+  "[[p/x]]"`, a list of them, or `origin: "[[p/y]]"` at the top level of
+  the frontmatter now count as links, as link properties do in Obsidian:
+  **backlinks and the graph show them**, so notes gain backlinks and fewer
+  are orphans; a rename rewrites them; `broken-wikilink` reports one that
+  resolves nowhere, naming its field. `memory_backlinks` and `GET
+  /api/v1/notes/<path>/backlinks` say in `fields` which frontmatter keys
+  a backlink comes from, `memory_outlinks` gives each link's `field`. The
+  index adds a column and re-extracts every note at the first start
+  (schema 4, `ContentVersion` 5).
+- **The automatic lite `hot.md` is judged on the text as written**
+  — the bootstrap in mode auto served `hot.md` as an outline
+  when its content with the views computed passed 16 KiB, so a growing
+  backlog took the tables out of the bootstrap. Only the written text
+  counts now; the views have their own budget.
+- **Directives v18** — quote a frontmatter value holding `: `, a
+  wikilink or a placeholder; start a database row from its `template`;
+  `memory_query` with `from` lists a database's rows; narrow the views of
+  `hot.md` when `maintenance` says they weigh; `memory_get_section` takes
+  an ID alone.
+- **Directives v19** — a field that points at a note is a quoted
+  wikilink, and counts as a link; `links contains [[note]]` and `related
+  contains [[note]]` in `memory_query`; a row read with `render_views`
+  shows its database's row views.
+- **Directives v20** — several files at once go through `memory_ingest`
+  `as: "package"`, with `dry_run` first, instead of a call per file; a
+  number is a count view or a `=count(…)` value, whose computed form is
+  never copied into the file.
+
+### Fixed
+- **Links inside HTML notes** — in the web UI a click on a link
+  of an HTML note, even `href="#part"`, navigated its sandboxed frame to
+  the app's own address, leaving a blank page or a 404: the frame resolves
+  relative links against the app. Now `#part` scrolls within the note, a
+  relative link opens the note it names in a window, and a link to an
+  attachment or an external site opens in a new tab; an image may name an
+  attachment by a relative path. The frame still has no network access
+  and no access to the app.
+- **Links to a file name showed as broken in the web UI** — a
+  wikilink to a note's file name, `[[T-12]]` for
+  `docs/tasks/T-12.md` whose title says more, rendered as
+  unresolved in the web UI, while backlinks, the graph and lint counted
+  it. The preview now resolves links as the index does, within what the
+  reader may see.
+- **A note with invalid YAML was called a database note** — a
+  write whose frontmatter was not valid YAML also got the notice "is a
+  database note but its schema does not parse", whatever the note was.
+  Such a write now gets the YAML notice only.
+
+### Notes
+- Documentation: `docs/vault/views.md` (relations, counts, values in the
+  text), `docs/vault/databases.md` (relations, row views),
+  `docs/vault/format.md` (how frontmatter is read, links in frontmatter and
+  in HTML notes), `docs/mcp/tools.md` (`memory_ingest` packages, link
+  conditions in `memory_query`, backlink fields), `docs/configuration.md`
+  (package limits).
+
 ## [2.46.0] — 2026-10-03 — "boards and new rows"
 
 The second half of database editing in the web UI: kanban boards whose

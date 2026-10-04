@@ -340,6 +340,8 @@
     "name_taken": "{name} gibt es schon: {next} wird vorgeschlagen.",
     "create_invalid": "Zeile nicht erstellt: {reason}",
     "create_forbidden": "Mit diesem Zugriff lassen sich dieser Datenbank keine Zeilen hinzufügen.",
-    "create_failed": "Die Zeile wurde nicht erstellt."
+    "create_failed": "Die Zeile wurde nicht erstellt.",
+    "row_views": "Zeilenansichten",
+    "count_notes": "Notiz | Notizen"
   }
 }

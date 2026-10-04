@@ -23,7 +23,7 @@ func (s *Server) registerAuditTools() {
 		mcp.WithString("since", mcp.Description("Lower bound on timestamp. Relative duration ('1h', '24h', '7d') or RFC3339. Empty = no lower bound.")),
 		mcp.WithString("until", mcp.Description("Upper bound on timestamp. Relative duration (ago) or RFC3339. Empty = no upper bound.")),
 		mcp.WithString("actor", mcp.Description("Exact match on actor (token name, possibly suffixed with @<correlation_id> for MCP sessions).")),
-		mcp.WithString("action", mcp.Description("Exact match on action. One of: create, update, append, delete, rename, create_project, delete_project, rename_project, upload_attachment, delete_attachment.")),
+		mcp.WithString("action", mcp.Description("Exact match on action. One of: create, update, append, delete, rename, create_project, delete_project, rename_project, upload_attachment, delete_attachment, ingest_package.")),
 		mcp.WithString("path_prefix", mcp.Description("Prefix match on the vault-relative path. Scoped tokens always prepend their project.")),
 		mcp.WithString("source", mcp.Description("Filter by source: 'http' (web UI) or 'mcp' (agent). Empty = both.")),
 		mcp.WithNumber("limit", mcp.Description("Max entries to return (default 50, max 500).")),

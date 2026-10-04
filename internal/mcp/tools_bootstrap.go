@@ -69,6 +69,15 @@ type bootstrapFile struct {
 // past 16 KiB loses its body in the payload (memory first, ADR-027).
 const autoLiteThreshold = 16 * 1024
 
+// bootstrapViewsBudget holds the computed views of a bootstrap file to about
+// this many bytes (IMP-136): past it each view keeps its share of rows and
+// says how to get the rest. The prose alone decides the lite shape.
+const bootstrapViewsBudget = 8 * 1024
+
+// hotComputedWarnBytes is where maintenance starts asking to narrow the
+// views of hot.md, short of the auto-lite threshold.
+const hotComputedWarnBytes = 12 * 1024
+
 type bootstrapStats struct {
 	NotesCount int                 `json:"notes_count"`
 	TopTags    []bootstrapTagCount `json:"top_tags"`
@@ -85,14 +94,21 @@ type bootstrapStats struct {
 // without the flag the tool also lists closed plans, so the two numbers are
 // not comparable.
 type bootstrapMaintenance struct {
-	HotSize         int64 `json:"hot_size"`
-	HotOversize     bool  `json:"hot_oversize"`
-	HotAgeDays      int   `json:"hot_age_days"`
-	LogSize         int64 `json:"log_size"`
-	BrokenLinks     int   `json:"broken_links"`
-	StaleCount      int   `json:"stale_count"`
-	StaleCutoffDays int   `json:"stale_cutoff_days"`
-	Attention       bool  `json:"attention"`
+	HotSize     int64 `json:"hot_size"`
+	HotOversize bool  `json:"hot_oversize"`
+	// HotComputedSize is hot.md with its views computed, when it has some
+	// (IMP-136); HotComputedOversize marks it past hotComputedWarnBytes, and
+	// HotViewsCut a view the bootstrap cut to its budget: narrow the views
+	// (filters, limit) rather than the prose.
+	HotComputedSize     int64 `json:"hot_computed_size,omitempty"`
+	HotComputedOversize bool  `json:"hot_computed_oversize,omitempty"`
+	HotViewsCut         bool  `json:"hot_views_cut,omitempty"`
+	HotAgeDays          int   `json:"hot_age_days"`
+	LogSize             int64 `json:"log_size"`
+	BrokenLinks         int   `json:"broken_links"`
+	StaleCount          int   `json:"stale_count"`
+	StaleCutoffDays     int   `json:"stale_cutoff_days"`
+	Attention           bool  `json:"attention"`
 }
 
 // maintenanceStaleCutoffDays is the digest's stale threshold. Fixed until the
@@ -290,14 +306,21 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 		}
 	}
 	var missing []string
+	var hotComputed int64
+	var hotViewsCut bool
 
 	for _, f := range conventionFiles {
 		full := path.Join(project, f.rel)
-		file := s.withRenderedViews(tok, s.loadBootstrapFile(full))
+		file := s.loadBootstrapFile(full)
+		written := len(file.Content) // the prose, before the views are computed
+		file, cut := s.withRenderedViews(tok, file, bootstrapViewsBudget)
+		if f.key == "hot_md" && file.ViewsETag != "" {
+			hotComputed, hotViewsCut = int64(len(file.Content)), cut
+		}
 		file = applyKnownEtag(file, knownEtags)
 		liteHot := mode == "lite"
 		if (mode == "" || mode == "auto") && f.key == "hot_md" &&
-			int64(len(file.Content)) > autoLiteThreshold {
+			int64(written) > autoLiteThreshold {
 			liteHot = true
 			file.AutoLite = true
 		}
@@ -459,7 +482,9 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 				m.LogSize = fi.Size()
 			}
 		}
-		m.Attention = m.HotOversize || m.BrokenLinks > 0
+		m.HotComputedSize, m.HotViewsCut = hotComputed, hotViewsCut
+		m.HotComputedOversize = hotComputed > hotComputedWarnBytes
+		m.Attention = m.HotOversize || m.HotComputedOversize || m.HotViewsCut || m.BrokenLinks > 0
 		payload["maintenance"] = m
 	}
 

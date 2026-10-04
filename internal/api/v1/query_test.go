@@ -90,3 +90,24 @@ func TestQuery_BadRequests(t *testing.T) {
 		t.Errorf("GET: status=%d, want 405", w.code)
 	}
 }
+
+// from keeps the notes directly inside a folder and lets where be empty;
+// a select of the project's database sorts by its options.
+func TestQuery_FromAndSelectOrder(t *testing.T) {
+	f := newNotesFixture(t)
+	f.seedNote(t, "alpha/db.md", "---\ntitle: DB\ntype: database\nsource: alpha/rows\nfields:\n  priority: {type: select, options: [low, medium, high]}\n---\n")
+	f.seedNote(t, "alpha/rows/a.md", "---\ntitle: A\npriority: high\n---\n")
+	f.seedNote(t, "alpha/rows/b.md", "---\ntitle: B\npriority: low\n---\n")
+	f.seedNote(t, "alpha/rows/sub/c.md", "---\ntitle: C\npriority: medium\n---\n")
+	w := f.doAuthRecorder(http.MethodPost, "/api/v1/query", `{"project":"alpha","from":["alpha/rows/"],"sort":"priority","order":"asc"}`, nil)
+	if w.code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.code, w.body)
+	}
+	out := decodeQuery(t, w.body)
+	if out.Total != 2 || out.Notes[0].Path != "alpha/rows/b.md" || out.Notes[1].Path != "alpha/rows/a.md" {
+		t.Errorf("from, sorted by options: %+v", out)
+	}
+	if w := f.doAuthRecorder(http.MethodPost, "/api/v1/query", `{"project":"alpha"}`, nil); w.code != http.StatusBadRequest {
+		t.Errorf("neither from nor where: %d", w.code)
+	}
+}

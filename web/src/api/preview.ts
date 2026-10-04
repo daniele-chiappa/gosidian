@@ -26,11 +26,19 @@ export interface ViewRow {
 }
 
 /** A computed view in the form the editors use (IMP-127 phase 5). */
+/** A group of a count view: the notes whose group_by field has value. */
+export interface ViewCount {
+  value: string
+  count: number
+}
+
 export interface ViewData {
-  as?: 'table' | 'list' | 'board'
+  as?: 'table' | 'list' | 'board' | 'count'
   columns?: ViewColumn[]
   group?: ViewColumn
   groups?: string[]
+  /** The groups of a count view with group_by. */
+  counts?: ViewCount[]
   rows?: ViewRow[]
   total: number
   database?: string

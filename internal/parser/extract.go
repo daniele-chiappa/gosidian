@@ -2,6 +2,7 @@ package parser
 
 import (
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -12,7 +13,8 @@ import (
 // markdown tables (where a literal | would otherwise terminate a cell).
 var wikiLinkRe = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
 
-// extractFrontmatterTags reads the YAML-ish `tags:` field from a
+// lineFrontmatterTags is the line reader's tags (see FrontmatterEntries for
+// the reader of record). It reads the YAML-ish `tags:` field from a
 // frontmatter block and returns the values. Accepts both inline list and
 // indented list syntax:
 //
@@ -25,16 +27,16 @@ var wikiLinkRe = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
 // Each value is trimmed and any leading '#' is stripped. Quotes (single or
 // double) around values are removed. We avoid a real YAML dependency since
 // only this one field matters and the spec is forgiving.
-func extractFrontmatterTags(fm string) []string {
+func lineFrontmatterTags(fm string) []string {
 	return extractFrontmatterListByRe(fm, frontTagsKeyRe)
 }
 
-// FrontmatterList extracts an arbitrary list-valued frontmatter field by
-// key, with the same forgiving inline/block parsing as the tags field
-// (see extractFrontmatterTags). Returns nil when the key is absent or has
+// lineFrontmatterList is the line reader's FrontmatterList: an arbitrary
+// list-valued frontmatter field by key, with the same forgiving inline/block
+// parsing as the tags field (see lineFrontmatterTags). Returns nil when the key is absent or has
 // no values. Used e.g. for `tag_vocabulary:` in memory/conventions.md
 // (per-project lint vocabulary, IMP-075).
-func FrontmatterList(fm, key string) []string {
+func lineFrontmatterList(fm, key string) []string {
 	re := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(key) + `:\s*(.*)$`)
 	return extractFrontmatterListByRe(fm, re)
 }
@@ -156,15 +158,17 @@ func BodyAfterFrontmatter(body []byte) string {
 	return string(body[loc[1]:])
 }
 
-// ParseFrontmatterFields extracts the common scalar fields and `tags` from a
-// raw frontmatter block (the string returned by ExtractFrontmatterRaw).
+// lineParseFrontmatterFields is the line reader's ParseFrontmatterFields,
+// used when the frontmatter is not valid YAML (IMP-138). It extracts the
+// common scalar fields and `tags` from a raw frontmatter block (the string
+// returned by ExtractFrontmatterRaw).
 //
 // Supported fields: title, description, type, status, updated, created,
 // tags (array). Any other top-level scalar key is also captured as a string.
 // Returns an empty map for empty input. This is a best-effort parser — it
 // does not depend on a real YAML library and handles the frontmatter style
 // used throughout gosidian.
-func ParseFrontmatterFields(raw string) map[string]any {
+func lineParseFrontmatterFields(raw string) map[string]any {
 	out := map[string]any{}
 	if strings.TrimSpace(raw) == "" {
 		return out
@@ -172,7 +176,7 @@ func ParseFrontmatterFields(raw string) map[string]any {
 
 	// Tags first (supports inline and block forms — delegates to the existing
 	// extractFrontmatterTags which already handles both).
-	if tags := extractFrontmatterTags(raw); len(tags) > 0 {
+	if tags := lineFrontmatterTags(raw); len(tags) > 0 {
 		out["tags"] = tags
 	}
 
@@ -205,7 +209,8 @@ func ParseFrontmatterFields(raw string) map[string]any {
 	return out
 }
 
-// ExtractFrontmatterBlock parses an optional indented nested block under
+// lineExtractFrontmatterBlock is the line reader's ExtractFrontmatterBlock.
+// It parses an optional indented nested block under
 // `key:` in a raw frontmatter string and returns its immediate sub-keys. A
 // scalar sub-value is returned as string; a sub-value in list form (inline
 // "[a, b]", CSV, or block "- x" lines) is returned as []string. Returns nil
@@ -220,7 +225,7 @@ func ParseFrontmatterFields(raw string) map[string]any {
 //	  model: sonnet
 //
 // → {"name":"frontend-engineer", "tools":["Read","Edit"], "model":"sonnet"}
-func ExtractFrontmatterBlock(raw, key string) map[string]any {
+func lineExtractFrontmatterBlock(raw, key string) map[string]any {
 	lines := strings.Split(raw, "\n")
 	prefix := key + ":"
 	out := map[string]any{}
@@ -392,6 +397,74 @@ func ExtractSection(body []byte, heading string) string {
 	return strings.Join(lines[startIdx:endIdx], "\n")
 }
 
+// headingSeps are what may follow an ID at the start of a heading, so the ID
+// alone names it: "BUG-014 — …", "OQ-006: …", "IMP-1 (…)".
+var headingSeps = []string{" — ", " – ", " - ", ": ", ":", " ("}
+
+// ResolveHeading finds the heading of body that heading names, for a reader
+// who may know only its start (IMP-130): the heading itself, matched as
+// ExtractSection does, or else the heading that starts with it followed by a
+// separator such as " — " or ":". When several start so, the one of the
+// highest level wins if no other shares that level ("ADR-026 — …" over its
+// "### ADR-026 — addendum"). With no such heading, or no single winner,
+// resolved is "" and candidates lists the headings to choose from: those
+// starting with it, or else up to five that contain it.
+func ResolveHeading(body []byte, heading string) (resolved string, candidates []string) {
+	src := string(body)
+	if m := frontmatterRe.FindStringSubmatch(src); m != nil {
+		src = src[len(m[0]):]
+	}
+	want := strings.ToLower(strings.TrimSpace(heading))
+	if want == "" {
+		return "", nil
+	}
+	lines := strings.Split(src, "\n")
+	fenced := fencedLines(lines)
+	var prefixed, containing []string
+	var levels []int // of prefixed
+	for i, line := range lines {
+		if fenced[i] {
+			continue
+		}
+		level, text := parseHeadingLine(line)
+		if level == 0 {
+			continue
+		}
+		lower := strings.ToLower(text)
+		if lower == want {
+			return text, nil
+		}
+		if rest, ok := strings.CutPrefix(lower, want); ok && hasSepPrefix(rest) {
+			prefixed = append(prefixed, text)
+			levels = append(levels, level)
+		} else if strings.Contains(lower, want) && len(containing) < 5 {
+			containing = append(containing, text)
+		}
+	}
+	if len(prefixed) > 0 {
+		top, at := slices.Min(levels), -1
+		for i, l := range levels {
+			if l == top {
+				if at >= 0 {
+					return "", prefixed // two at the highest level
+				}
+				at = i
+			}
+		}
+		return prefixed[at], nil
+	}
+	return "", containing
+}
+
+func hasSepPrefix(s string) bool {
+	for _, sep := range headingSeps {
+		if strings.HasPrefix(s, sep) {
+			return true
+		}
+	}
+	return false
+}
+
 // fencedLines marks the lines that sit inside a ``` or ~~~ code fence
 // (delimiters included): a "## …" line in there is content, not a heading.
 // The lines themselves are kept, so section offsets stay intact.
@@ -557,9 +630,9 @@ func Importance(raw string) int {
 	return min(max(n, 1), 5)
 }
 
-// HasFrontmatterKey reports whether raw frontmatter carries key as a
-// top-level entry, whatever its shape (block, inline scalar, or empty).
-func HasFrontmatterKey(raw, key string) bool {
+// lineHasFrontmatterKey is the line reader's HasFrontmatterKey: whether raw
+// frontmatter carries key as a top-level entry, whatever its shape.
+func lineHasFrontmatterKey(raw, key string) bool {
 	for _, line := range strings.Split(raw, "\n") {
 		if strings.HasPrefix(line, key+":") {
 			return true
@@ -568,9 +641,9 @@ func HasFrontmatterKey(raw, key string) bool {
 	return false
 }
 
-// frontmatterTitle returns the title key of raw frontmatter, unquoted like
-// any other scalar (BUG-089), or "" when there is none.
-func frontmatterTitle(raw string) string {
+// lineFrontmatterTitle is the line reader's title: the title key of raw
+// frontmatter, unquoted like any other scalar (BUG-089), or "".
+func lineFrontmatterTitle(raw string) string {
 	if tm := frontTitleRe.FindStringSubmatch(raw); tm != nil {
 		return unquoteScalar(strings.TrimSpace(tm[1]))
 	}

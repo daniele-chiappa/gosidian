@@ -56,6 +56,7 @@ Quando scopri qualcosa che sopravvive al task corrente:
 | Report/dashboard HTML self-contained | nota `.html` (es. `{{PROJECT}}/docs/`) | `memory_create` path `.html` (se `capabilities.html_notes`) |
 | Dati tabellari lunghi (audit, export CSV) | table note linkata dal report | `memory_ingest` del `.csv` + caption (se `capabilities.table_notes`) |
 | File binario (screenshot, PDF, zip) | attachment/media note del vault | `memory_ingest` (bridge dir, `source_path`, `url` o ticket `transfer:"http"`; **mai** base64 per file grandi) |
+| Più file insieme (una cartella, uno `.zip`, una guida con i suoi link) | una cartella del progetto | `memory_ingest` con `as: "package"` e `dest`, prima con `dry_run: true`: una chiamata per tutto, link relativi già wikilink, non una chiamata per file |
 | Fine task | `{{PROJECT}}/log.md` + `hot.md` | `memory_append` log, `memory_edit` hot |
 
 **Note database**: una nota con `type: database` (per esempio `{{PROJECT}}/docs/improvements.md`)
@@ -65,7 +66,22 @@ interroga il database, non una lista scritta a mano, e in `hot.md` non elencare 
 database: rimanda alla nota database. Nel frontmatter di una voce scrivi solo i campi dello schema della
 nota database (`fields`), senza inventarne altri: commit e dettagli vanno nel corpo. I database del
 progetto, con i loro campi, sono anche in `databases[]` del bootstrap; se una scrittura viola lo schema,
-il risultato del tool lo dice in `notices`: correggi subito con `memory_edit`.
+il risultato del tool lo dice in `notices`: correggi subito con `memory_edit`. Se il database ha un
+`template`, una voce nuova parte da quella nota, con `{{ID}}`, `{{TITLE}}`, `{{TODAY}}` e `{{PROJECT}}`
+sostituiti; `memory_query` con `from: <source>` elenca le righe del database. Per un numero, invece di
+una tabella, usa una vista `as: count` (con `group_by` per valore) o, nel testo,
+`` `=count(<cartella> where <condizione> and …)` ``.
+
+**Relazioni**: un campo che punta a un'altra nota si scrive come wikilink quotato
+(`related: ["[[{{PROJECT}}/docs/bugs/BUG-001]]"]`) e conta come un link: compare nei backlink (con il
+campo in `fields`) e nel grafo. Per sapere cosa è collegato a una nota bastano `memory_backlinks` e
+`memory_outlinks`; `memory_query` con `{field: links, op: contains, value: "[[nota]]"}` filtra chi la
+punta, e `related contains [[nota]]` chi la punta da quel campo. Se il database dichiara `row_views`,
+una riga letta con `render_views: true` le mostra dopo il corpo (il `hint` lo dice).
+
+**Frontmatter**: metti fra virgolette un valore che contiene `: `, un `[[wikilink]]` o un `{{segnaposto}}`
+(`title: "Plan: uno"`, `related: "[[{{PROJECT}}/nota]]"`): senza, non è YAML valido. Una scrittura con un
+frontmatter non valido lo dice in `notices`, e il lint lo segnala con `frontmatter-invalid-yaml`.
 
 **Cattura immediata**: bug/OQ/improvement si scrivono **quando emergono**,
 non a fine task — lasciarli come "side finding" in un plan outcome equivale
@@ -118,8 +134,10 @@ Status dei plan: `draft` → `in-progress` → `done` | `archived` (tag
 0. **Maintenance-check**: se il bootstrap ha servito `maintenance.attention:
    true` (hot.md oltre soglia e/o wikilink rotti), proponi il grooming
    relativo prima di chiudere — compatta/riscrivi `{{PROJECT}}/hot.md`,
-   ripara i link segnalati (`memory_lint` per l'elenco). `stale_count` è
-   contesto, non un obbligo.
+   ripara i link segnalati (`memory_lint` per l'elenco). Con
+   `hot_computed_oversize` o `hot_views_cut` sono le viste di hot.md a
+   pesare: restringile (filtri, `limit`) invece di tagliare la prosa.
+   `stale_count` è contesto, non un obbligo.
 1. **Skill-check** (procedura ≥2 volte? → crea la skill)
 2. Aggiorna `{{PROJECT}}/hot.md` **riscrivendo** le sezioni (focus, plan
    chiusi, recent decisions), non accodando: è la cache dello stato
@@ -129,6 +147,8 @@ Status dei plan: `draft` → `in-progress` → `done` | `archived` (tag
    Una sezione fatta da un blocco ` ```view ` si aggiorna da sola: non
    riscriverla e non copiare nel file il risultato calcolato (quello fra i
    marcatori `gosidian:view-result` che il bootstrap mostra sotto il blocco).
+   Lo stesso per un valore `` `=count(…)` ``, che il bootstrap mostra come
+   «N (`` `=count(…)` ``)»: nel file resta solo il codice.
 3. Append a `{{PROJECT}}/log.md` (entry tipizzata con data ISO: `bootstrap`,
    `plan-closed`, `adr`, `pattern`, `fix`, `discovery`, `ops`)
 4. Compila l'`Outcome` del plan se esisteva
@@ -166,11 +186,13 @@ dichiarativi. Non editare a mano il frontmatter di lifecycle.
   omesso) e `known_etags` (file invariati → `unchanged:true` senza body);
   sui progetti con anchors attivi anche `known_anchor_metas`
   (canonical → meta_version: item invariati senza `content`).
-  `mode` default è **auto**: hot.md oltre soglia arriva in forma lite
-  (frontmatter+outline, `auto_lite:true`) — le sezioni via
-  `memory_get_section`. Un'intestazione con `views: N` contiene viste:
-  leggi quella sezione con `render_views: true`, se no ne vedi solo la
-  specifica.
+  `mode` default è **auto**: hot.md oltre soglia (il testo scritto, non
+  le viste) arriva in forma lite (frontmatter+outline, `auto_lite:true`)
+  — le sezioni via `memory_get_section`, che accetta anche il solo ID
+  (`BUG-014` per `## BUG-014 — …`). Un'intestazione con `views: N`
+  contiene viste: leggi quella sezione con `render_views: true`, se no ne
+  vedi solo la specifica. Una vista tagliata per stare nel bootstrap
+  finisce con la `memory_query` che dà tutte le righe.
 - **Letture**: `memory_get` **tronca** i body oltre 24 KiB (outline + primo
   chunk + `truncated:true`): prendi la sezione che serve con
   `memory_get_section`, o `raw:true` solo se serve davvero tutto. Letture

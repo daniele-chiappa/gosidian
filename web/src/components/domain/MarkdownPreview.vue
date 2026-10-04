@@ -18,7 +18,9 @@
  * Views (IMP-127 phase 5): given the note's views as data (`views`, from
  * /api/v1/preview), a table view is shown by ViewTable, whose cells edit
  * the rows, and a board view by ViewBoard, whose cards move between columns;
- * a list view keeps the HTML the server rendered. Each view
+ * a count view shows its number with ViewCount, and a list view keeps the
+ * HTML the server rendered. A `=count(…)` value in the text arrives as a
+ * <span class="gosidian-count">, styled here. Each view
  * sits in its `<div class="gosidian-view" data-view="N">` placeholder.
  */
 import { computed, inject, ref } from 'vue'
@@ -28,6 +30,7 @@ import { planciaKey } from '@/composables/planciaKey'
 import type { ViewData } from '@/api/preview'
 import ViewTable from '@/components/views/ViewTable.vue'
 import ViewBoard from '@/components/views/ViewBoard.vue'
+import ViewCount from '@/components/views/ViewCount.vue'
 import { splitViews } from '@/components/views/segments'
 
 const props = defineProps<{ html: string; views?: ViewData[] }>()
@@ -49,7 +52,7 @@ const sanitized = computed(() =>
 const segments = computed(() => (props.views?.length ? splitViews(sanitized.value) : null))
 
 /** The view at a placeholder's index, when a component of kind `as` shows it. */
-function viewAs(index: number, as: 'table' | 'board'): ViewData | undefined {
+function viewAs(index: number, as: 'table' | 'board' | 'count'): ViewData | undefined {
   const v = props.views?.[index]
   return v && !v.error && v.as === as ? v : undefined
 }
@@ -75,7 +78,8 @@ function onClick(e: MouseEvent) {
   if (href.startsWith('/tags/')) {
     e.preventDefault()
     const tag = decodeURIComponent(href.slice('/tags/'.length).split('#')[0] ?? '')
-    if (tag) openWindow({ type: 'tags', key: planciaKey('tags', tag), title: `#${tag}`, props: { tag } })
+    if (tag)
+      openWindow({ type: 'tags', key: planciaKey('tags', tag), title: `#${tag}`, props: { tag } })
     return
   }
   if (href.startsWith('#')) {
@@ -97,13 +101,7 @@ function onClick(e: MouseEvent) {
 </script>
 
 <template>
-  <div
-    v-if="!segments"
-    ref="root"
-    :class="proseClass"
-    v-html="sanitized"
-    @click="onClick"
-  />
+  <div v-if="!segments" ref="root" :class="proseClass" v-html="sanitized" @click="onClick" />
   <div v-else ref="root" :class="proseClass" @click="onClick">
     <template v-for="(s, i) in segments" :key="s.kind === 'view' ? `view-${s.index}` : `html-${i}`">
       <div v-if="s.kind === 'html'" class="contents" v-html="s.html" />
@@ -113,12 +111,26 @@ function onClick(e: MouseEvent) {
       <div v-else-if="viewAs(s.index, 'board')" class="gosidian-view" :data-view="s.index">
         <ViewBoard :view="viewAs(s.index, 'board')!" />
       </div>
+      <div v-else-if="viewAs(s.index, 'count')" class="gosidian-view" :data-view="s.index">
+        <ViewCount :view="viewAs(s.index, 'count')!" />
+      </div>
       <div v-else class="gosidian-view" :data-view="s.index" v-html="s.html" />
     </template>
   </div>
 </template>
 
 <style scoped>
+/* A `=count(…)` value in the text: the number, its expression on hover. */
+:deep(.gosidian-count) {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+  border-bottom: 1px dotted currentColor;
+}
+:deep(.gosidian-count-error) {
+  font-weight: 400;
+  color: rgb(var(--color-danger));
+}
 /* The note's first and last blocks sit inside the segment wrappers, out of
    reach of the prose rules that drop their outer margins. */
 .contents:first-child > :deep(:first-child) {

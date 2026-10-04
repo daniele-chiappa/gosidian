@@ -23,6 +23,7 @@ import { isConcurrencyConflict, onApiEvent, type ConcurrencyConflictDetail } fro
 import { useSSE } from '@/composables/useSSE'
 import MarkdownPreview from '@/components/domain/MarkdownPreview.vue'
 import PropertiesPanel from '@/components/views/PropertiesPanel.vue'
+import RowViews from '@/components/views/RowViews.vue'
 import HTMLPreview from '@/components/domain/HTMLPreview.vue'
 import MediaPreview from '@/components/domain/MediaPreview.vue'
 import TablePreview from '@/components/domain/TablePreview.vue'
@@ -183,7 +184,7 @@ function onNoteEvent(p: { path?: string; etag?: string }) {
     void load()
     return
   }
-  if (previewHTML.value.includes('gosidian-view')) void refreshViews()
+  if (previewHTML.value.includes('gosidian-view') || previewHTML.value.includes('gosidian-count')) void refreshViews()
 }
 
 function enterEdit() {
@@ -506,7 +507,7 @@ watch(path, load)
         <p class="px-4 pt-2 text-xs text-text-muted font-mono">
           {{ note.path }} · html · etag {{ note.etag.slice(0, 12) }} · {{ note.size }} bytes
         </p>
-        <HTMLPreview :html="note.content" />
+        <HTMLPreview :html="note.content" :path="note.path" />
       </template>
       <!-- Image media note (ADR-013): image + rendered caption -->
       <MediaPreview
@@ -530,6 +531,8 @@ watch(path, load)
         <!-- A row of a database: its fields, editable (IMP-127 phase 5) -->
         <PropertiesPanel v-if="note" :path="note.path" :etag="note.etag" />
         <MarkdownPreview :html="previewHTML" :views="previewViews" />
+        <!-- A row of a database: the views its schema declares (IMP-139) -->
+        <RowViews v-if="note" :path="note.path" :etag="note.etag" />
       </article>
     </div>
 
@@ -554,7 +557,7 @@ watch(path, load)
         <CodeMirrorEditor v-model="draft" :project="project" placeholder="Markdown…" />
       </div>
       <div v-if="layout !== 'editor'" class="overflow-auto p-4 max-w-none">
-        <HTMLPreview v-if="isHtml" :html="draft" />
+        <HTMLPreview v-if="isHtml" :html="draft" :path="note.path" />
         <MarkdownPreview v-else :html="previewHTML" :views="previewViews" />
       </div>
     </div>

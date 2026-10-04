@@ -10,14 +10,16 @@
 //	columns: [id, title, priority]
 //	```
 //
-// and renders them as a markdown table, a list, or a board (as: board, with
-// group_by: a select or checkbox field whose values make the columns). A view is computed when the
+// and renders them as a markdown table, a list, a board (as: board, with
+// group_by: a select or checkbox field whose values make the columns), or a
+// count (as: count, optionally per value of group_by). A view is computed when the
 // note is read; the file keeps only the spec, so a note whose data changes
 // never needs rewriting. The caller runs the query with its own scope, so a
 // reader only ever sees rows it may read.
 package views
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path"
@@ -42,12 +44,17 @@ type Spec struct {
 	Desc    bool
 	Columns []string
 	Limit   int
-	As      string // "table", "list" or "board"
-	GroupBy string // the field whose values make the columns of a board
+	As      string // "table", "list", "board" or "count"
+	// GroupBy is the field whose values make the columns of a board, or
+	// the groups of a count.
+	GroupBy string
+	// SortOrder orders the sort field by the options of its select in the
+	// schema of the database the view lists; compute sets it.
+	SortOrder []string
 }
 
-// Context resolves the relative values a spec may use: this.<field>, the
-// fields of the note holding the view, and today±Nd.
+// Context resolves the relative values a spec may use: this, the note
+// holding the view, this.<field>, its fields, and today±Nd.
 type Context struct {
 	This  map[string][]string
 	Today time.Time
@@ -61,8 +68,22 @@ type Context struct {
 	CanWrite func(path string) bool
 	// Resolve returns the path of the note a wikilink target names, among
 	// those the reader may see, or "". It resolves the links in the field
-	// values of Data. Nil leaves them unresolved.
+	// values of Data and the notes a condition on relations names
+	// (related contains [[p/x]]). Nil leaves them unresolved: such a
+	// condition then works with this only.
 	Resolve func(target string) string
+}
+
+// resolveLink resolves a link target of a condition: the note holding the
+// view (this), or a note the reader may see.
+func (c Context) resolveLink(target string) string {
+	if p := c.This["path"]; len(p) > 0 && p[0] != "" && target == p[0] {
+		return p[0]
+	}
+	if c.Resolve != nil {
+		return c.Resolve(target)
+	}
+	return ""
 }
 
 // rawSpec is the YAML shape; where entries are a "field op value" string or
@@ -122,15 +143,15 @@ func Parse(src string, c Context) (*Spec, error) {
 	switch s.As {
 	case "":
 		s.As = "table"
-	case "table", "list", "board":
+	case "table", "list", "board", "count":
 	default:
-		return nil, fmt.Errorf("as: %q is not table, list or board", s.As)
+		return nil, fmt.Errorf("as: %q is not table, list, board or count", s.As)
 	}
 	switch {
 	case s.As == "board" && s.GroupBy == "":
 		return nil, errors.New("as: board needs group_by: the select or checkbox field whose values make the columns")
-	case s.As != "board" && s.GroupBy != "":
-		return nil, errors.New("group_by works only with as: board")
+	case s.As != "board" && s.As != "count" && s.GroupBy != "":
+		return nil, errors.New("group_by works only with as: board or as: count")
 	}
 	if len(s.Columns) == 0 {
 		s.Columns = append([]string{"title"}, withoutBuiltins(index.DefaultQueryFields(s.Where, s.Sort))...)
@@ -164,7 +185,11 @@ func parseCond(w any, c Context) (index.FieldCond, error) {
 			return index.FieldCond{}, fmt.Errorf("condition %q: %w", t, err)
 		}
 		cond.Values = vals
-		return fixOp(cond), nil
+		cond, err = linkCond(fixOp(cond), c)
+		if err != nil {
+			return index.FieldCond{}, fmt.Errorf("condition %q: %w", t, err)
+		}
+		return cond, nil
 	case map[string]any:
 		field, _ := t["field"].(string)
 		op, _ := t["op"].(string)
@@ -179,9 +204,20 @@ func parseCond(w any, c Context) (index.FieldCond, error) {
 		if err != nil {
 			return index.FieldCond{}, err
 		}
-		return fixOp(index.FieldCond{Field: field, Op: op, Values: vals}), nil
+		return linkCond(fixOp(index.FieldCond{Field: field, Op: op, Values: vals}), c)
 	}
 	return index.FieldCond{}, fmt.Errorf("condition %v: want a string or a {field, op, value} map", w)
+}
+
+// linkCond turns a condition on relations into a test on links (IMP-127
+// iteration 2): `related contains this`, `links contains this`,
+// `related = [[p/x]]`. See index.ResolveLinkConds.
+func linkCond(cond index.FieldCond, c Context) (index.FieldCond, error) {
+	out, err := index.ResolveLinkConds([]index.FieldCond{cond}, c.resolveLink)
+	if err != nil {
+		return index.FieldCond{}, errors.New(strings.TrimPrefix(err.Error(), index.ErrBadQuery.Error()+": "))
+	}
+	return out[0], nil
 }
 
 // fixOp turns an equality on a value that resolved to several (this.tags)
@@ -195,6 +231,9 @@ func fixOp(c index.FieldCond) index.FieldCond {
 
 func splitValue(v string) []string {
 	v = strings.TrimSpace(v)
+	if _, link := index.LinkTarget(v); link && !strings.HasPrefix(v, "[[[") {
+		return []string{v} // a [[wikilink]], not a list
+	}
 	if strings.HasPrefix(v, "[") && strings.HasSuffix(v, "]") {
 		var out []string
 		for _, p := range strings.Split(v[1:len(v)-1], ",") {
@@ -217,10 +256,19 @@ func unquote(s string) string {
 
 var todayRe = regexp.MustCompile(`^today(?:([+-])(\d+)d)?$`)
 
-// resolve expands this.<field> and today±Nd.
+// resolve expands this (as a link to the note holding the view),
+// this.<field> and today±Nd.
 func resolve(vals []string, c Context) ([]string, error) {
 	var out []string
 	for _, v := range vals {
+		if v == "this" {
+			p := c.This["path"]
+			if len(p) == 0 || p[0] == "" {
+				return nil, errors.New("this: the view is not in a saved note")
+			}
+			out = append(out, "[["+p[0]+"]]")
+			continue
+		}
 		if f, ok := strings.CutPrefix(v, "this."); ok {
 			got := c.This[f]
 			if len(got) == 0 {
@@ -276,14 +324,27 @@ type Result struct {
 	Schema *dbschema.Schema
 }
 
+// countRowsCap bounds the rows a count per group reads: the groups of a
+// count over more rows than this come from the first ones (the total stays
+// exact).
+const countRowsCap = 10000
+
 // Run computes a view.
 func Run(s *Spec, q QueryFunc) (*Result, error) {
 	fields := withoutBuiltins(s.Columns)
 	if s.GroupBy != "" && !slices.Contains(fields, s.GroupBy) {
 		fields = append(fields, s.GroupBy)
 	}
+	limit := s.Limit
+	if s.As == "count" {
+		// A count needs the total, and the group_by values of every row.
+		fields, limit = nil, 1
+		if s.GroupBy != "" {
+			fields, limit = []string{s.GroupBy}, countRowsCap
+		}
+	}
 	hits, total, err := q(index.QueryOptions{
-		Folders: s.From, Where: s.Where, Sort: s.Sort, Desc: s.Desc, Limit: s.Limit,
+		Folders: s.From, Where: s.Where, Sort: s.Sort, SortOrder: s.SortOrder, Desc: s.Desc, Limit: limit,
 		Fields: fields,
 	})
 	if err != nil {
@@ -299,13 +360,18 @@ func compute(spec string, c Context, q QueryFunc) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	var schema *dbschema.Schema
+	if c.Schema != nil && len(s.From) == 1 {
+		schema = c.Schema(s.From[0])
+	}
+	if schema != nil {
+		s.SortOrder = schema.OptionOrder(s.Sort)
+	}
 	r, err := Run(s, q)
 	if err != nil {
 		return nil, err
 	}
-	if c.Schema != nil && len(s.From) == 1 {
-		r.Schema = c.Schema(s.From[0])
-	}
+	r.Schema = schema
 	if s.As == "board" {
 		if _, err := r.Groups(); err != nil {
 			return nil, err
@@ -363,11 +429,93 @@ func (r *Result) Groups() ([]Group, error) {
 	return out, nil
 }
 
+// Count is the number of notes of a count view with a group_by value, ""
+// for the notes without one.
+type Count struct {
+	Value string `json:"value"`
+	Count int    `json:"count"`
+}
+
+// Counts splits the notes of a count by their group_by field: a note counts
+// once for each of its values (a list field), the groups in the order of the
+// field's options in the schema, then the other values alphabetically, then
+// the notes without a value. Groups with no notes are left out.
+func (r *Result) Counts() []Count {
+	field := r.Spec.GroupBy
+	if field == "" {
+		return nil
+	}
+	n := map[string]int{}
+	for _, h := range r.Hits {
+		vs := h.Fields[field]
+		if len(vs) == 0 {
+			n[""]++
+			continue
+		}
+		seen := map[string]bool{}
+		for _, v := range vs {
+			if !seen[v] {
+				seen[v] = true
+				n[v]++
+			}
+		}
+	}
+	var order []string
+	if r.Schema != nil {
+		order = r.Schema.OptionOrder(field)
+		if f, ok := r.Schema.Field(field); ok && f.Type == "checkbox" {
+			order = []string{"false", "true"}
+		}
+	}
+	var extra []string
+	for v := range n {
+		if v != "" && !slices.Contains(order, v) {
+			extra = append(extra, v)
+		}
+	}
+	sort.Strings(extra)
+	var out []Count
+	for _, v := range append(append(slices.Clone(order), extra...), "") {
+		if n[v] > 0 {
+			out = append(out, Count{Value: v, Count: n[v]})
+			delete(n, v) // an option listed twice counts once
+		}
+	}
+	return out
+}
+
+// countText is a count for agents: "**12** notes", then the groups.
+func (r *Result) countText() string {
+	unit := "notes"
+	if r.Total == 1 {
+		unit = "note"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "**%d** %s", r.Total, unit)
+	if cs := r.Counts(); len(cs) > 0 {
+		b.WriteString(" · " + r.Spec.GroupBy + ":")
+		for i, c := range cs {
+			if i > 0 {
+				b.WriteString(" ·")
+			}
+			name := c.Value
+			if name == "" {
+				name = "(no value)"
+			}
+			fmt.Fprintf(&b, " %s %d", tableSafe(name), c.Count)
+		}
+	}
+	return b.String()
+}
+
 // Markdown renders the result as a table or a list. Note links are
 // [[path\|title]], which the renderer turns into links before it reads the
 // table, so the same text serves agents and the web UI.
 func (r *Result) Markdown() string {
 	var b strings.Builder
+	if r.Spec.As == "count" {
+		return r.countText() + "\n"
+	}
 	if len(r.Hits) == 0 {
 		return "_No matching notes._\n"
 	}
@@ -427,6 +575,99 @@ func (r *Result) Markdown() string {
 		fmt.Fprintf(&b, "\n_Showing %d of %d notes._\n", len(r.Hits), r.Total)
 	}
 	return b.String()
+}
+
+// MarkdownWithin renders the result as Markdown in about budget bytes: the
+// rows that fit, then a line with how many notes are left out and the
+// memory_query that returns them all (IMP-136). budget <= 0 means no limit.
+func (r *Result) MarkdownWithin(budget int) string {
+	full := r.Markdown()
+	if budget <= 0 || len(full) <= budget {
+		return full
+	}
+	tail := func(shown int) string {
+		return fmt.Sprintf("\n_Showing %d of %d notes, cut to fit: all of them with %s._\n", shown, r.Total, r.QueryCall())
+	}
+	limit := budget - len(tail(len(r.Hits)))
+	table := r.Spec.As != "list" && r.Spec.As != "board"
+	var b strings.Builder
+	shown := 0
+	for i, l := range strings.SplitAfter(full, "\n") {
+		if strings.HasPrefix(l, "_Showing ") {
+			continue
+		}
+		row := strings.HasPrefix(l, "- ")
+		if table {
+			row = i >= 2 && strings.HasPrefix(l, "| ")
+		}
+		if b.Len()+len(l) > limit && (row || shown > 0) {
+			break
+		}
+		if row {
+			shown++
+		}
+		b.WriteString(l)
+	}
+	return strings.TrimRight(b.String(), "\n") + "\n" + tail(shown)
+}
+
+// QueryCall is the memory_query call that returns all the notes of the
+// view, with the fields it shows.
+func (r *Result) QueryCall() string {
+	type cond struct {
+		Field string `json:"field"`
+		Op    string `json:"op"`
+		Value any    `json:"value"`
+	}
+	type call struct {
+		Project string   `json:"project"`
+		From    any      `json:"from"`
+		Where   []cond   `json:"where,omitempty"`
+		Sort    string   `json:"sort,omitempty"`
+		Order   string   `json:"order,omitempty"`
+		Fields  []string `json:"fields,omitempty"`
+		Limit   int      `json:"limit"`
+	}
+	c := call{Project: strings.SplitN(r.Spec.From[0], "/", 2)[0], From: r.Spec.From[0], Sort: r.Spec.Sort}
+	if len(r.Spec.From) > 1 {
+		c.From = r.Spec.From
+	}
+	for _, w := range r.Spec.Where {
+		if w.Link {
+			links := make([]string, len(w.Values))
+			for i, p := range w.Values {
+				links[i] = linkTo(p)
+			}
+			w.Values = links
+		}
+		var v any = w.Values
+		switch {
+		case w.Op == index.OpExists && len(w.Values) == 1:
+			v = w.Values[0] == "true"
+		case w.Op != index.OpIn && len(w.Values) == 1:
+			v = w.Values[0]
+		}
+		c.Where = append(c.Where, cond{Field: w.Field, Op: w.Op, Value: v})
+	}
+	if c.Sort != "" {
+		c.Order = "asc"
+		if r.Spec.Desc {
+			c.Order = "desc"
+		}
+	}
+	c.Fields = withoutBuiltins(r.Spec.Columns)
+	if r.Spec.GroupBy != "" && !slices.Contains(c.Fields, r.Spec.GroupBy) {
+		c.Fields = append(c.Fields, r.Spec.GroupBy)
+	}
+	c.Limit = min(max(r.Total, 1), index.QueryMaxLimit)
+	b, _ := json.Marshal(c)
+	return "memory_query(" + string(b) + ")"
+}
+
+// linkTo is the [[wikilink]] that names the note at p: its path, without
+// .md (a .html note keeps its extension, which tells it from a .md namesake).
+func linkTo(p string) string {
+	return "[[" + strings.TrimSuffix(p, ".md") + "]]"
 }
 
 func link(h index.QueryHit) string {

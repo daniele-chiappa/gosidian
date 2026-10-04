@@ -1,6 +1,7 @@
 package views
 
 import (
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -331,5 +332,90 @@ func TestData_Defaults(t *testing.T) {
 	}
 	if d := (&Result{Spec: spec}).Data(c); d.Defaults != nil || d.Creatable {
 		t.Errorf("without a schema: %+v", d)
+	}
+}
+
+// A view of a database sorts a select by its options.
+func TestCompute_SortsSelectByOptions(t *testing.T) {
+	r, err := compute("from: p/docs/improvements\nsort: priority desc\ncolumns: [title, priority]", schemaContext(t), testIndex(t).Query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, h := range r.Hits {
+		got = append(got, h.FieldValues()["priority"].(string))
+	}
+	if !reflect.DeepEqual(got, []string{"high", "low", "low"}) {
+		t.Errorf("priorities = %v", got)
+	}
+	r, _ = compute("from: p/docs/improvements\nsort: priority asc\ncolumns: [title, priority]", schemaContext(t), testIndex(t).Query)
+	if p := r.Hits[len(r.Hits)-1].FieldValues()["priority"]; p != "high" {
+		t.Errorf("asc ends with %v, want high", p)
+	}
+}
+
+func TestFairShares(t *testing.T) {
+	for _, c := range []struct {
+		sizes  []int
+		budget int
+		want   []int
+	}{
+		{[]int{100, 200}, 1000, []int{100, 200}},            // all fit
+		{[]int{100, 5000, 300}, 1000, []int{100, 600, 300}}, // the small ones whole, the rest to the big one
+		{[]int{900, 900}, 1000, []int{500, 500}},            // two big ones split evenly
+	} {
+		if got := fairShares(c.sizes, c.budget); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("fairShares(%v, %d) = %v, want %v", c.sizes, c.budget, got, c.want)
+		}
+	}
+}
+
+// A view cut to its budget keeps whole rows and ends with how many notes
+// it leaves out and the memory_query that returns them all.
+func TestMarkdownWithin(t *testing.T) {
+	spec, err := Parse("from: p/docs/improvements\nwhere:\n  - status in [open, done]\n  - id exists\nsort: id asc\ncolumns: [title, status]", Context{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &Result{Spec: spec, Total: 5}
+	for i := 1; i <= 5; i++ {
+		r.Hits = append(r.Hits, index.QueryHit{
+			Path:   fmt.Sprintf("p/docs/improvements/IMP-%03d.md", i),
+			Title:  fmt.Sprintf("IMP-%03d — %s", i, strings.Repeat("long title ", 18)),
+			Fields: map[string][]string{"status": {"open"}},
+		})
+	}
+	full := r.Markdown()
+	if got := r.MarkdownWithin(len(full)); got != full {
+		t.Errorf("a view that fits is unchanged:\n%s", got)
+	}
+	cut := r.MarkdownWithin(900)
+	if len(cut) > 900 || strings.Count(cut, "\n| [[") != 2 || !strings.Contains(cut, "IMP-002") || strings.Contains(cut, "IMP-003") {
+		t.Errorf("want the first two rows within 900 bytes (%d):\n%s", len(cut), cut)
+	}
+	want := `_Showing 2 of 5 notes, cut to fit: all of them with memory_query({"project":"p","from":"p/docs/improvements",` +
+		`"where":[{"field":"status","op":"in","value":["open","done"]},{"field":"id","op":"exists","value":true}],` +
+		`"sort":"id","order":"asc","fields":["status"],"limit":5})._`
+	if !strings.Contains(cut, want) {
+		t.Errorf("tail line:\n%s\nwant\n%s", cut, want)
+	}
+	// A budget below the header keeps the header and no rows.
+	if tiny := r.MarkdownWithin(10); !strings.HasPrefix(tiny, "| title | status |") || !strings.Contains(tiny, "Showing 0 of 5") {
+		t.Errorf("tiny budget:\n%s", tiny)
+	}
+}
+
+// Within a budget, a small view of the note stays whole and the big one is
+// cut; without a budget nothing is.
+func TestRenderNoteWithin(t *testing.T) {
+	body := "# N\n\n```view\nfrom: p/docs/improvements\nsort: id asc\ncolumns: [title, status, created]\n```\n\n```view\nfrom: p/plans\nwhere:\n  - status = done\n```\n"
+	full, _ := RenderNote([]byte(body), true, schemaContext(t), testIndex(t).Query)
+	out, hash, cut := RenderNoteWithin([]byte(body), true, schemaContext(t), testIndex(t).Query, 0)
+	if cut || string(out) != string(full) || hash == "" {
+		t.Errorf("no budget: cut=%v", cut)
+	}
+	out, _, cut = RenderNoteWithin([]byte(body), true, schemaContext(t), testIndex(t).Query, 250)
+	if !cut || !strings.Contains(string(out), "cut to fit") || !strings.Contains(string(out), "Plan B") {
+		t.Errorf("budget 250: cut=%v\n%s", cut, out)
 	}
 }

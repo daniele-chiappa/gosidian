@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/gosidian/gosidian/internal/dbschema"
+	"github.com/gosidian/gosidian/internal/frontmatter"
 	"github.com/gosidian/gosidian/internal/parser"
 )
 
@@ -19,6 +20,24 @@ import (
 // listing the row until it is fixed.
 func (s *Server) noteSchemaProblems(ctx context.Context, rel string, content []byte) {
 	fm := parser.FrontmatterRawForPath(rel, content)
+	if strings.TrimSpace(fm) != "" {
+		if err := frontmatter.YAMLError(fm); err != nil {
+			// IMP-138: the index copes, line by line, but the schema reader
+			// and the readers to come do not; usually an unquoted ": " or
+			// [[wikilink]] in a value.
+			addCallNote(ctx, fmt.Sprintf(
+				"%s: the frontmatter is not valid YAML (%s). Quote a value that holds \": \", a [[wikilink]] or a {{placeholder}}, e.g. title: \"Plan: one\", related: \"[[p/note]]\".",
+				rel, err))
+			// The schema checks below read YAML too: they would only repeat
+			// it, and call any such note "a database note".
+			return
+		}
+		if cut := parser.CutByComment(fm); len(cut) > 0 {
+			addCallNote(ctx, fmt.Sprintf(
+				"%s: YAML reads a ' #' in a value as a comment and cuts it (%s). Quote the value when the # belongs to it, e.g. title: \"Alert #3\".",
+				rel, strings.Join(cut, "; ")))
+		}
+	}
 	if _, err := dbschema.Parse(rel, fm); err != nil && !errors.Is(err, dbschema.ErrNotDatabase) {
 		addCallNote(ctx, fmt.Sprintf("%s is a database note but its schema does not parse (%v): its rows go unchecked until it does.", rel, err))
 		return
@@ -42,10 +61,13 @@ func (s *Server) noteSchemaProblems(ctx context.Context, rel string, content []b
 
 // bootstrapDatabase is one entry of memory_bootstrap's `databases` list.
 type bootstrapDatabase struct {
-	Path   string           `json:"path"`
-	Source string           `json:"source"`
-	Rows   int              `json:"rows"`
-	Fields []dbschema.Field `json:"fields"`
+	Path   string `json:"path"`
+	Source string `json:"source"`
+	// Template is the note a new row starts from, when the database names
+	// one: the same model the web UI's new rows use.
+	Template string           `json:"template,omitempty"`
+	Rows     int              `json:"rows"`
+	Fields   []dbschema.Field `json:"fields"`
 }
 
 // bootstrapDatabases lists the database notes of a project with their
@@ -65,7 +87,7 @@ func (s *Server) bootstrapDatabases(project string) []bootstrapDatabase {
 				}
 			}
 		}
-		out = append(out, bootstrapDatabase{Path: sc.Path, Source: sc.Source, Rows: rows, Fields: sc.Fields})
+		out = append(out, bootstrapDatabase{Path: sc.Path, Source: sc.Source, Template: sc.Template, Rows: rows, Fields: sc.Fields})
 	}
 	return out
 }

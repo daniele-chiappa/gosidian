@@ -12,8 +12,10 @@
 // Baseline rules (v1.9):
 //
 //   - broken-wikilink (warning) — [[target]] that doesn't resolve
+//   - broken-anchor (warning)   — [[note#Heading]] whose heading is not there
 //   - orphan-note (info)        — note with no in/out links
 //   - frontmatter-missing (err) — note without YAML frontmatter
+//   - frontmatter-invalid-yaml (warning) — frontmatter that is not valid YAML
 //   - frontmatter-tag-unknown (warning) — tag outside the closed vocabulary
 //   - status-incoherent (warning) — plan in-progress but absent from hot.md
 //

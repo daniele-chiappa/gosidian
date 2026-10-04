@@ -490,6 +490,7 @@ func main() {
 	mcpServer := mcpsrv.New(v, idx, tokenStore)
 	mcpServer.SetAuditLog(auditLog)
 	mcpServer.SetWriteLimits(cfg.MCP.WritePerMinute, cfg.MCP.MaxNoteBytes)
+	mcpServer.SetPackageLimits(cfg.MCP.PackageMaxFiles, cfg.MCP.PackageMaxBytes)
 	mcpServer.SetAllowedUploadRoots(cfg.MCP.AllowedUploadRoots)
 	mcpServer.SetBridgeDir(cfg.MCP.BridgeDir)
 	if cfg.MCP.BridgeDir != "" {

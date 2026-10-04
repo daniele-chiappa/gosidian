@@ -183,3 +183,62 @@ func TestMCP_QueryInCoreProfile(t *testing.T) {
 		t.Error("memory_query must be in the core profile")
 	}
 }
+
+// A select of the project's databases sorts by its options, not its text;
+// without a project the text order stays.
+func TestMCP_QuerySortsSelectByOptions(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	ctx := context.Background()
+	for path, content := range map[string]string{
+		"alpha/docs/improvements.md":         "---\ntitle: Improvements\ntype: database\nsource: alpha/docs/improvements\nfields:\n  priority: {type: select, options: [low, medium, high]}\n---\n",
+		"alpha/docs/improvements/IMP-001.md": "---\ntitle: One\npriority: high\n---\n",
+		"alpha/docs/improvements/IMP-002.md": "---\ntitle: Two\npriority: low\n---\n",
+		"alpha/docs/improvements/IMP-003.md": "---\ntitle: Three\npriority: medium\n---\n",
+	} {
+		if res, _ := s.handleCreate(ctx, call(map[string]any{"path": path, "content": content})); res.IsError {
+			t.Fatalf("seed %s: %s", path, expectError(t, res))
+		}
+	}
+	titles := func(args map[string]any) []string {
+		var out []string
+		for _, n := range runQuery(t, s, ctx, args).Notes {
+			out = append(out, n.Title)
+		}
+		return out
+	}
+	args := map[string]any{"where": where(map[string]any{"field": "priority", "op": "exists", "value": true}), "sort": "priority", "order": "desc"}
+	if got := titles(args); !reflect.DeepEqual(got, []string{"Three", "Two", "One"}) {
+		t.Errorf("text order without a project: %v", got)
+	}
+	args["project"] = "alpha"
+	if got := titles(args); !reflect.DeepEqual(got, []string{"One", "Three", "Two"}) {
+		t.Errorf("option order with the project: %v", got)
+	}
+}
+
+// from keeps the notes directly inside the folders, and lets where be empty.
+func TestMCP_QueryFrom(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	seedQueryNotes(t, s)
+	ctx := context.Background()
+	out := runQuery(t, s, ctx, map[string]any{"from": "alpha/plans", "sort": "path"})
+	var paths []string
+	for _, n := range out.Notes {
+		paths = append(paths, n.Path)
+	}
+	if !reflect.DeepEqual(paths, []string{"alpha/plans/a.md", "alpha/plans/b.md", "alpha/plans/c.md"}) {
+		t.Errorf("from without where: %v", paths)
+	}
+	out = runQuery(t, s, ctx, map[string]any{"from": []any{"alpha/plans", "beta/plans/"},
+		"where": where(map[string]any{"field": "status", "value": "draft"}), "sort": "path"})
+	if out.Total != 3 {
+		t.Errorf("from two folders with where: total %d", out.Total)
+	}
+	// A client with a schema older than from sends the list as its JSON text.
+	if out := runQuery(t, s, ctx, map[string]any{"from": `["alpha/plans"]`, "sort": "path"}); out.Total != 3 {
+		t.Errorf("from as JSON text: total %d", out.Total)
+	}
+	if res, _ := s.handleQuery(ctx, call(map[string]any{})); !res.IsError {
+		t.Error("neither from nor where must fail")
+	}
+}

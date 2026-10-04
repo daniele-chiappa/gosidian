@@ -134,16 +134,9 @@ func parseForeignAgentFile(slug string, foreign []byte) foreignAgentFile {
 	if v, ok := fields["description"].(string); ok {
 		f.Desc = strings.TrimSpace(v)
 	}
-	if v, ok := fields["tools"].(string); ok && strings.TrimSpace(v) != "" {
-		// Both "a, b" and the YAML inline list "[a, b]" (Claude Code's own
-		// subagent format) are accepted; the brackets would otherwise nest.
-		v = strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(v), "["), "]")
-		for _, t := range strings.Split(v, ",") {
-			if t = strings.Trim(strings.TrimSpace(t), `"'`); t != "" {
-				f.Tools = append(f.Tools, t)
-			}
-		}
-	}
+	// Both "a, b" and the YAML inline list "[a, b]" (Claude Code's own
+	// subagent format) are accepted.
+	f.Tools = parser.FrontmatterList(raw, "tools")
 	f.Body = strings.TrimLeft(parser.BodyAfterFrontmatter(foreign), "\n")
 	return f
 }

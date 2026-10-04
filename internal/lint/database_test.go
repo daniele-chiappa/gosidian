@@ -62,3 +62,34 @@ func TestLint_StatusIncoherent_PlansListedByAView(t *testing.T) {
 		t.Errorf("want only Plan B (not listed by the view) flagged, got %+v", issues)
 	}
 }
+
+// Row views (IMP-139) that would not compute are reported on the database
+// note; a frontmatter link that resolves nowhere names its field.
+func TestLint_RowViewsAndFrontmatterLinks(t *testing.T) {
+	_, v, idx := newTestLinter(t)
+	seed(t, v, idx, "p/docs/improvements.md", strings.Replace(dbNote, "---\n\n# Backlog",
+		"row_views:\n  - title: Plans\n    from: p/plans\n    where: [implements contains this.id, links contains this]\n"+
+			"  - title: Broken\n    from: p/plans\n    where: [status = this.nope]\n  - title: Typo\n    from: p/plans\n    where: [status ~ open]\n---\n\n# Backlog", 1))
+	seed(t, v, idx, "p/plans/a.md", "---\ntitle: A\ntags: [p]\nrelated: \"[[p/missing]]\"\n---\n\nSee [[p/docs/improvements]].\n")
+
+	issues, err := New(v, idx).Run(context.Background(), "p", []string{"database-field-invalid", "broken-wikilink"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var msgs []string
+	for _, is := range issues {
+		msgs = append(msgs, is.File+": "+is.Message)
+	}
+	all := strings.Join(msgs, "\n")
+	for _, want := range []string{
+		`p/docs/improvements.md: row view "Typo" does not compute`,
+		`p/plans/a.md: wikilink target "p/missing" in frontmatter field "related" does not resolve to any note`,
+	} {
+		if !strings.Contains(all, want) {
+			t.Errorf("missing %q in:\n%s", want, all)
+		}
+	}
+	if strings.Contains(all, `"Plans"`) || len(issues) != 3 {
+		t.Errorf("want the two broken row views and the link, got:\n%s", all)
+	}
+}

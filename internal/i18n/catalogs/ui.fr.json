@@ -340,6 +340,8 @@
     "name_taken": "{name} existe déjà : {next} est proposé.",
     "create_invalid": "Ligne non créée : {reason}",
     "create_forbidden": "Cet accès ne permet pas d’ajouter des lignes à cette base de données.",
-    "create_failed": "La ligne n’a pas été créée."
+    "create_failed": "La ligne n’a pas été créée.",
+    "row_views": "Vues de la ligne",
+    "count_notes": "note | notes"
   }
 }

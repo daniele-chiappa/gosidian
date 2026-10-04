@@ -28,6 +28,8 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_GIT_TOKEN_ENV` | `git.token_env` | empty |
 | `GOSIDIAN_MCP_WRITE_PER_MINUTE` | `mcp.write_per_minute` | `60` |
 | `GOSIDIAN_MCP_MAX_NOTE_BYTES` | `mcp.max_note_bytes` | `1048576` (1 MiB) |
+| `GOSIDIAN_MCP_PACKAGE_MAX_FILES` | `mcp.package_max_files` | `500` (files of a `memory_ingest` package) |
+| `GOSIDIAN_MCP_PACKAGE_MAX_BYTES` | `mcp.package_max_bytes` | `20971520` (20 MiB, a package unpacked) |
 | `GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS` | `mcp.allowed_upload_roots` | empty (vault only) |
 | `GOSIDIAN_MCP_BRIDGE_DIR` | `mcp.bridge_dir` | empty (off; staging dir for cheap `bridge_filename` uploads, IMP-059) |
 | `GOSIDIAN_OAUTH_ENABLED` | `oauth.enabled` | `false` (embedded OAuth 2.1 authorization server for claude.ai / ChatGPT / Claude Code logins, see [Authentication](mcp/authentication.md#oauth-21-for-hosted-clients-claudeai-chatgpt-claude-code)) |

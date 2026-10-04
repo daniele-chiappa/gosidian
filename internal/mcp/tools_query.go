@@ -4,11 +4,13 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/gosidian/gosidian/internal/dbschema"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -20,13 +22,16 @@ func (s *Server) registerQueryTool() {
 			"(tag status:done → status = done), and `tags` is the tag list. "+
 			"Operators: eq, ne, in, exists, lt, lte, gt, gte, contains. ISO dates (YYYY-MM-DD) and numbers compare as such, text ignores case; "+
 			"ne and exists:false also match notes without the field. "+
+			"A value written as a [[wikilink]] matches by link, however the note writes it: related contains [[p/x]] finds the notes whose related field links to p/x, "+
+			"and the pseudo-field links covers every link, body and frontmatter alike (links contains [[p/x]]: what links to p/x). "+
 			"Returns path, title, modification time and the fields listed in `fields` (default: those used in where and sort), "+
 			"newest modification first unless `sort` names a field or path, title, modified. "+
 			"Use it for any question about status, type, dates, importance or other frontmatter instead of memory_notes_by_tag + memory_batch_get. "+
 			"Example — draft plans with importance ≥ 3 updated since September: where "+
 			`[{"field":"type","op":"eq","value":"plan"},{"field":"status","op":"eq","value":"draft"},{"field":"importance","op":"gte","value":3},{"field":"updated","op":"gte","value":"2026-09-01"}].`),
 		mcp.WithString("project", mcp.Description("Project (top-level folder) to query; empty = every project the token can read. A project outside the token's scope matches nothing.")),
-		mcp.WithArray("where", mcp.Required(), mcp.Description(fmt.Sprintf("Conditions, all required (max %d). Each: {field, op (default eq), value} — value is a string or number, a list for in, true/false for exists.", index.MaxQueryConds)),
+		mcp.WithArray("from", mcp.Description("Folders whose notes directly inside are queried, like the from of a view: the rows of a database note (its source folder). Optional; with from, where may be empty."), mcp.WithStringItems()),
+		mcp.WithArray("where", mcp.Description(fmt.Sprintf("Conditions, all required (max %d); required unless from is given. Each: {field, op (default eq), value} — value is a string or number, a list for in, true/false for exists.", index.MaxQueryConds)),
 			mcp.Items(map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -36,7 +41,7 @@ func (s *Server) registerQueryTool() {
 				},
 				"required": []string{"field"},
 			})),
-		mcp.WithString("sort", mcp.Description("Field to sort by, or path, title, modified (default: modified, newest first). Notes without the field come last.")),
+		mcp.WithString("sort", mcp.Description("Field to sort by, or path, title, modified (default: modified, newest first). Notes without the field come last. With project set, a select field of the project's databases sorts by its options (low, medium, high), not alphabetically.")),
 		mcp.WithString("order", mcp.Description("desc (default) or asc; path and title default to asc.")),
 		mcp.WithArray("fields", mcp.Description("Frontmatter fields to return for each note (default: the fields used in where and sort)."), mcp.WithStringItems()),
 		mcp.WithNumber("limit", mcp.Description(fmt.Sprintf("Max notes (default %d, max %d). `total` tells how many matched.", index.QueryDefaultLimit, index.QueryMaxLimit))),
@@ -56,9 +61,18 @@ func (s *Server) handleQuery(ctx context.Context, req mcp.CallToolRequest) (*mcp
 		return errRes, nil
 	}
 	args := req.GetArguments()
-	where, err := parseWhere(args["where"])
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+	from := queryFolders(args["from"])
+	var where []index.FieldCond
+	if len(from) == 0 || !isEmptyList(args["where"]) {
+		var err error
+		if where, err = parseWhere(args["where"]); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		// Conditions on relations match through the links table, the
+		// notes they name resolved within the token's scope.
+		if where, err = index.ResolveLinkConds(where, s.viewResolve(tok)); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 	}
 	sort := strings.TrimSpace(req.GetString("sort", ""))
 	desc, err := index.SortDesc(sort, req.GetString("order", ""))
@@ -80,9 +94,15 @@ func (s *Server) handleQuery(ctx context.Context, req mcp.CallToolRequest) (*mcp
 		requested = []string{project}
 	}
 	filter := buildProjectsFilter(requested, tok.ProjectList())
-	opts := index.QueryOptions{Exclude: s.hiddenProjects(), Where: where, Sort: sort, Desc: desc, Limit: limit, Fields: fields}
+	opts := index.QueryOptions{Exclude: s.hiddenProjects(), Folders: from, Where: where, Sort: sort, Desc: desc, Limit: limit, Fields: fields}
 	if filter.active {
 		opts.Projects = append([]string{}, filter.allowed...) // non-nil: empty matches nothing
+	}
+	if project != "" && len(opts.Projects) == 1 {
+		// A select of the project's databases sorts by its options (IMP-127).
+		if schemas, _, err := dbschema.ForProject(s.index, s.vault, project); err == nil {
+			opts.SortOrder = dbschema.OptionOrderOf(schemas, sort)
+		}
 	}
 	hits, total, err := s.index.Query(opts)
 	if errors.Is(err, index.ErrBadQuery) {
@@ -111,6 +131,41 @@ func (s *Server) handleQuery(ctx context.Context, req mcp.CallToolRequest) (*mcp
 }
 
 // parseWhere reads the where argument: a list of {field, op, value}.
+// queryFolders reads the from of a query: a folder or a list of them,
+// trimmed of slashes; nil when absent. A client still holding a schema from
+// before from existed sends a list as its JSON text, which is read as the
+// list.
+func queryFolders(raw any) []string {
+	if t, ok := raw.(string); ok && strings.HasPrefix(strings.TrimSpace(t), "[") {
+		var list []any
+		if json.Unmarshal([]byte(t), &list) == nil {
+			raw = list
+		}
+	}
+	var out []string
+	add := func(v any) {
+		if f, ok := v.(string); ok {
+			if f = strings.Trim(strings.TrimSpace(f), "/"); f != "" {
+				out = append(out, f)
+			}
+		}
+	}
+	switch t := raw.(type) {
+	case string:
+		add(t)
+	case []any:
+		for _, e := range t {
+			add(e)
+		}
+	}
+	return out
+}
+
+func isEmptyList(raw any) bool {
+	l, ok := raw.([]any)
+	return raw == nil || ok && len(l) == 0
+}
+
 func parseWhere(raw any) ([]index.FieldCond, error) {
 	list, ok := raw.([]any)
 	if !ok || len(list) == 0 {

@@ -9,15 +9,20 @@ import (
 type Backlink struct {
 	Path  string
 	Title string
+	// Fields are the frontmatter keys whose values link here (IMP-127
+	// iteration 2), sorted; nil when the links are in the body only.
+	Fields []string
 }
 
-// Backlinks returns notes that link to the given note path.
+// Backlinks returns notes that link to the given note path, from the body
+// or from a frontmatter value.
 func (i *Index) Backlinks(path string) ([]Backlink, error) {
 	rows, err := i.db.Query(`
-        SELECT DISTINCT n.path, n.title
+        SELECT n.path, n.title, COALESCE(GROUP_CONCAT(DISTINCT l.field), '')
         FROM links l
         JOIN notes n ON n.id = l.src_id
         WHERE l.target_path = ?
+        GROUP BY n.path, n.title
         ORDER BY n.path
     `, path)
 	if err != nil {
@@ -27,8 +32,14 @@ func (i *Index) Backlinks(path string) ([]Backlink, error) {
 	var out []Backlink
 	for rows.Next() {
 		var b Backlink
-		if err := rows.Scan(&b.Path, &b.Title); err != nil {
+		var fields string
+		if err := rows.Scan(&b.Path, &b.Title, &fields); err != nil {
 			return nil, err
+		}
+		if fields != "" {
+			// A field name has no comma (fieldKeyRe), GROUP_CONCAT's separator.
+			b.Fields = strings.Split(fields, ",")
+			sort.Strings(b.Fields)
 		}
 		out = append(out, b)
 	}
@@ -58,14 +69,18 @@ type Outlink struct {
 	Target     string
 	TargetPath string // empty if unresolved
 	Alias      string
+	Field      string // the frontmatter key of the link, "" in the body
 }
 
+// Outlinks returns the note's links in the order written: the frontmatter's
+// first, then the body's.
 func (i *Index) Outlinks(path string) ([]Outlink, error) {
 	rows, err := i.db.Query(`
-        SELECT l.target, COALESCE(l.target_path, ''), COALESCE(l.alias, '')
+        SELECT l.target, COALESCE(l.target_path, ''), COALESCE(l.alias, ''), COALESCE(l.field, '')
         FROM links l
         JOIN notes n ON n.id = l.src_id
         WHERE n.path = ?
+        ORDER BY l.field IS NULL, l.rowid
     `, path)
 	if err != nil {
 		return nil, err
@@ -74,7 +89,7 @@ func (i *Index) Outlinks(path string) ([]Outlink, error) {
 	var out []Outlink
 	for rows.Next() {
 		var o Outlink
-		if err := rows.Scan(&o.Target, &o.TargetPath, &o.Alias); err != nil {
+		if err := rows.Scan(&o.Target, &o.TargetPath, &o.Alias, &o.Field); err != nil {
 			return nil, err
 		}
 		out = append(out, o)

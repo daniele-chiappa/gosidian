@@ -211,3 +211,76 @@ func TestNextName(t *testing.T) {
 		}
 	}
 }
+
+func TestOptionOrderOf(t *testing.T) {
+	mk := func(fields string) *Schema {
+		s, err := Parse("p/db.md", "type: database\nsource: p/x\nfields:\n"+fields)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	imp := mk("  status: {type: select, options: [open, done]}\n  priority: {type: select, options: [low, high]}\n")
+	bug := mk("  status: {type: select, options: [open, done]}\n  severity: {type: select, options: [low, high]}\n")
+	odd := mk("  status: {type: select, options: [done, open]}\n  priority: {type: text}\n")
+	if got := OptionOrderOf([]*Schema{imp, bug}, "status"); strings.Join(got, ",") != "open,done" {
+		t.Errorf("same options in both: %v", got)
+	}
+	if got := OptionOrderOf([]*Schema{imp, bug}, "priority"); strings.Join(got, ",") != "low,high" {
+		t.Errorf("declared by one: %v", got)
+	}
+	if got := OptionOrderOf([]*Schema{imp, odd}, "status"); got != nil {
+		t.Errorf("options that disagree: %v", got)
+	}
+	if got := OptionOrderOf([]*Schema{imp, odd}, "priority"); got != nil {
+		t.Errorf("a select and a text: %v", got)
+	}
+	if got := OptionOrderOf([]*Schema{imp}, "missing"); got != nil {
+		t.Errorf("undeclared: %v", got)
+	}
+}
+
+// A row is read as the index reads it: as text typed by the schema, so an
+// id written 007 matches the file 007.md, which a YAML number would not.
+func TestValidate_ValuesAsText(t *testing.T) {
+	s, err := Parse("p/db.md", "type: database\nsource: p/rows\nfields:\n  id: {type: text}\n  done: {type: checkbox}\n  points: {type: number}\n  due: {type: date}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if probs := s.Validate("p/rows/007.md", "id: 007\ndone: true\npoints: 1.10\ndue: 2026-10-04\n"); len(probs) != 0 {
+		t.Errorf("problems = %+v", probs)
+	}
+	if probs := s.Validate("p/rows/008.md", "id: 008\ndone: yes\n"); len(probs) != 1 || probs[0].Field != "done" {
+		t.Errorf("yes is not a checkbox value: %+v", probs)
+	}
+}
+
+// row_views: each entry's title, and the rest as the spec of a view;
+// the shape is checked when the schema is read, the spec when it runs.
+func TestParse_RowViews(t *testing.T) {
+	s, err := Parse("p/docs/improvements.md", schemaFM+"\nrow_views:\n  - title: Plans\n    from: p/plans\n    where: [implements_imp contains this.id]\n  - {title: Links, from: p/plans, where: [links contains this], as: list}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.RowViews) != 2 || s.RowViews[0].Title != "Plans" || s.RowViews[1].Title != "Links" {
+		t.Fatalf("row views = %+v", s.RowViews)
+	}
+	if spec := s.RowViews[0].Spec; strings.Contains(spec, "title") || !strings.Contains(spec, "from: p/plans") || !strings.Contains(spec, "implements_imp contains this.id") {
+		t.Errorf("spec = %q", spec)
+	}
+	if s, err := Parse("p/docs/improvements.md", schemaFM+"\nrow_views:\n"); err != nil || s.RowViews != nil {
+		t.Errorf("an empty row_views: %+v, %v", s, err)
+	}
+	many := "\nrow_views:\n" + strings.Repeat("  - {title: x, from: p/plans}\n", MaxRowViews+1)
+	for name, extra := range map[string]string{
+		"not a list": "\nrow_views: {title: x}",
+		"not a map":  "\nrow_views: [x]",
+		"no title":   "\nrow_views:\n  - from: p/plans",
+		"no from":    "\nrow_views:\n  - title: x",
+		"too many":   many,
+	} {
+		if _, err := Parse("p/docs/improvements.md", schemaFM+extra); err == nil || !strings.Contains(err.Error(), "row") {
+			t.Errorf("%s: err = %v", name, err)
+		}
+	}
+}

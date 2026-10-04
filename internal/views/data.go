@@ -18,8 +18,10 @@ type Data struct {
 	// of its columns in order ("" for the notes without one).
 	Group  *Column  `json:"group,omitempty"`
 	Groups []string `json:"groups,omitempty"`
-	Rows   []Row    `json:"rows,omitempty"`
-	Total  int      `json:"total"`
+	// Counts are the groups of a count view (as: count with group_by).
+	Counts []Count `json:"counts,omitempty"`
+	Rows   []Row   `json:"rows,omitempty"`
+	Total  int     `json:"total"`
 	// Database and Source name the database the view lists, when it lists
 	// the rows of one.
 	Database string `json:"database,omitempty"`
@@ -75,6 +77,15 @@ func (r *Result) Data(c Context) Data {
 	for _, name := range r.Spec.Columns {
 		d.Columns = append(d.Columns, r.column(name))
 	}
+	if r.Spec.As == "count" {
+		d.Columns = nil // a count shows no rows
+		if r.Spec.GroupBy != "" {
+			g := r.column(r.Spec.GroupBy)
+			d.Group = &g
+			d.Counts = r.Counts()
+		}
+		return d
+	}
 	if r.Spec.As == "board" {
 		g := r.column(r.Spec.GroupBy)
 		d.Group = &g
@@ -129,11 +140,13 @@ func fieldLinks(h index.QueryHit, c Context) map[string][]Link {
 // defaults reads the values of a new row off the view's filters: for each
 // declared field (but id and title, which the row's name and title give)
 // the value of its first eq filter, or the first of an in filter, typed as
-// the schema declares it. A value the schema would refuse is left out.
+// the schema declares it; for a filter on a relation (related contains
+// this), the link to its note. A value the schema would refuse is left out.
 func (r *Result) defaults() map[string]any {
 	var out map[string]any
 	for _, w := range r.Spec.Where {
-		if w.Op != index.OpEq && w.Op != index.OpIn || len(w.Values) == 0 || w.Field == "id" || builtin[w.Field] {
+		link := w.Link && w.Op == index.OpContains
+		if w.Op != index.OpEq && w.Op != index.OpIn && !link || len(w.Values) == 0 || w.Field == "id" || builtin[w.Field] {
 			continue
 		}
 		f, ok := r.Schema.Field(w.Field)
@@ -141,6 +154,9 @@ func (r *Result) defaults() map[string]any {
 			continue
 		}
 		var v any = w.Values[0]
+		if w.Link {
+			v = linkTo(w.Values[0])
+		}
 		switch f.Type {
 		case "checkbox":
 			b, err := strconv.ParseBool(w.Values[0])
@@ -155,7 +171,7 @@ func (r *Result) defaults() map[string]any {
 			}
 			v = n
 		case "multi-select", "list":
-			v = []any{w.Values[0]}
+			v = []any{v}
 		}
 		if len(r.Schema.CheckEdit(r.Schema.Source+"/_.md", map[string]any{w.Field: v}, nil)) > 0 {
 			continue

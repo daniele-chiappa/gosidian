@@ -340,6 +340,8 @@
     "name_taken": "{name} ya existe: se propone {next}.",
     "create_invalid": "Fila no creada: {reason}",
     "create_forbidden": "Con este acceso no se pueden añadir filas a esta base de datos.",
-    "create_failed": "La fila no se ha creado."
+    "create_failed": "La fila no se ha creado.",
+    "row_views": "Vistas de la fila",
+    "count_notes": "nota | notas"
   }
 }

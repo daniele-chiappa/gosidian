@@ -3,11 +3,13 @@ package v1
 import (
 	"errors"
 	"net/http"
+	"path"
 	"regexp"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/dbschema"
@@ -325,6 +327,67 @@ func (r *Router) readRowFields(w http.ResponseWriter, req *http.Request, rel str
 	resp.Columns = d.Columns[:len(schema.Fields)]
 	if len(d.Rows) == 1 {
 		resp.Values, resp.Links, resp.Writable = d.Rows[0].Fields, d.Rows[0].Links, d.Rows[0].Writable
+	}
+	WriteJSON(w, http.StatusOK, resp)
+}
+
+// rowViewsResponse holds the row views of a note that is a row of a
+// database (IMP-139): the views its schema declares, computed with the note
+// as this. Views is empty for any other note.
+type rowViewsResponse struct {
+	Database string        `json:"database,omitempty"`
+	Views    []rowViewItem `json:"views"`
+}
+
+// rowViewItem is a row view: its title, the view as data (as POST /preview
+// returns a note's views) and its rows rendered as HTML, which the web UI
+// shows for a list.
+type rowViewItem struct {
+	Title string     `json:"title"`
+	View  views.Data `json:"view"`
+	HTML  string     `json:"html"`
+}
+
+// readRowViews answers GET /notes/{path}/row-views: the row views of the
+// note, when it is a row of a database the reader may see, computed with the
+// reader's scope.
+func (r *Router) readRowViews(w http.ResponseWriter, req *http.Request, rel string) {
+	p := principalFromContext(req)
+	if !r.canSee(p, rel) {
+		WriteError(w, http.StatusNotFound, CodeNotFound, "note not found")
+		return
+	}
+	note, err := r.deps.Vault.Load(rel)
+	if err != nil {
+		writeLoadError(w, err)
+		return
+	}
+	resp := rowViewsResponse{Views: []rowViewItem{}}
+	if r.deps.Index == nil {
+		WriteJSON(w, http.StatusOK, resp)
+		return
+	}
+	schema := r.viewSchema(p)(path.Dir(rel))
+	if schema == nil || !schema.Covers(rel) || len(schema.RowViews) == 0 {
+		WriteJSON(w, http.StatusOK, resp)
+		return
+	}
+	c := views.Context{
+		This:     views.ThisFields(rel, parser.ParseFrontmatterFields(parser.FrontmatterRawForPath(rel, note.Content))),
+		Today:    time.Now(),
+		Schema:   r.viewSchema(p),
+		CanWrite: r.viewCanWrite(p),
+		Resolve:  previewResolver{r: r, p: p}.Resolve,
+	}
+	resp.Database = schema.Path
+	for _, d := range views.RowViewsData(views.ComputeRowViews(schema.RowViews, c, r.viewQuery(p)), c) {
+		item := rowViewItem{Title: d.Title, View: d.View}
+		if r.deps.Renderer != nil {
+			if html, err := r.deps.Renderer.Render([]byte(d.Markdown), previewResolver{r: r, p: p}); err == nil {
+				item.HTML = html
+			}
+		}
+		resp.Views = append(resp.Views, item)
 	}
 	WriteJSON(w, http.StatusOK, resp)
 }

@@ -108,7 +108,7 @@ func (r *Router) handleNoteByPath(w http.ResponseWriter, req *http.Request) {
 // GETs, PATCH /frontmatter and POST /rows (a new row of a database note). Order matters only for documentation; the
 // loop matches by suffix regardless. New entries get a handler in
 // dispatchNoteSubroute below.
-var noteSubroutes = []string{"backlinks", "excerpt", "history", "frontmatter", "fields", "new-row", "rows"}
+var noteSubroutes = []string{"backlinks", "excerpt", "history", "frontmatter", "fields", "new-row", "rows", "row-views"}
 
 func (r *Router) dispatchNoteSubroute(w http.ResponseWriter, req *http.Request, notePath, sub string) {
 	switch sub {
@@ -142,6 +142,8 @@ func (r *Router) dispatchNoteSubroute(w http.ResponseWriter, req *http.Request, 
 		r.readRowFields(w, req, notePath)
 	case "new-row":
 		r.readNewRow(w, req, notePath)
+	case "row-views":
+		r.readRowViews(w, req, notePath)
 	default:
 		WriteError(w, http.StatusNotFound, CodeNotFound, "unknown note subroute")
 	}

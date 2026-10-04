@@ -128,6 +128,13 @@ func (pr previewResolver) Resolve(target string) string {
 			}
 		}
 	}
+	// The index's own resolution, by title or by file name: [[IMP-124]] for
+	// p/docs/improvements/IMP-124.md, whose title says more. Backlinks, graph
+	// and lint count such a link, so the preview must not show it dangling
+	// (BUG-090); a note the principal may not see stays dangling.
+	if p := r.deps.Index.Resolve(target); p != "" && r.canSee(pr.p, p) {
+		return p
+	}
 	// Fall back to a title scan via search — bounded result set. Resolve only to
 	// notes the principal may see, so a guest's preview of a public note renders
 	// private targets as dangling, not as live links.

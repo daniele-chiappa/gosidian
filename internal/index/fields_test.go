@@ -287,3 +287,36 @@ func TestOpen_MigratesV1Index(t *testing.T) {
 		t.Error("note_fields missing after migration")
 	}
 }
+
+// A select sorts by the position of its value among the options, not by
+// text; a value outside the options comes after them both ways, a note
+// without the field last; the limit applies after the sort.
+func TestQuery_SortOrder(t *testing.T) {
+	idx := openTest(t)
+	for path, prio := range map[string]string{"p/r/a.md": "high", "p/r/b.md": "low", "p/r/c.md": "medium", "p/r/d.md": "urgent", "p/r/e.md": ""} {
+		body := "---\ntitle: " + path + "\n"
+		if prio != "" {
+			body += "priority: " + prio + "\n"
+		}
+		body += "---\n"
+		if err := idx.Upsert(NoteDoc{Path: path, Title: path, Body: body, ModTime: 1, Size: int64(len(body))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	opts := QueryOptions{Folders: []string{"p/r"}, Sort: "priority", SortOrder: []string{"low", "medium", "high"}}
+	if got, _ := queryPaths(t, idx, opts); !reflect.DeepEqual(got, []string{"p/r/b.md", "p/r/c.md", "p/r/a.md", "p/r/d.md", "p/r/e.md"}) {
+		t.Errorf("asc = %v", got)
+	}
+	opts.Desc = true
+	if got, _ := queryPaths(t, idx, opts); !reflect.DeepEqual(got, []string{"p/r/a.md", "p/r/c.md", "p/r/b.md", "p/r/d.md", "p/r/e.md"}) {
+		t.Errorf("desc = %v", got)
+	}
+	opts.Limit = 1
+	if got, total := queryPaths(t, idx, opts); !reflect.DeepEqual(got, []string{"p/r/a.md"}) || total != 5 {
+		t.Errorf("limit 1 = %v (total %d)", got, total)
+	}
+	// Without an order, the text order of today.
+	if got, _ := queryPaths(t, idx, QueryOptions{Folders: []string{"p/r"}, Sort: "priority"}); !reflect.DeepEqual(got, []string{"p/r/a.md", "p/r/b.md", "p/r/c.md", "p/r/d.md", "p/r/e.md"}) {
+		t.Errorf("text order = %v", got)
+	}
+}

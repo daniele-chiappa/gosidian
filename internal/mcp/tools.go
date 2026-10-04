@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -129,7 +130,7 @@ func (s *Server) registerTools() {
 	s.impl.AddTool(mcp.NewTool("memory_get_section",
 		mcp.WithDescription("Read a single section of a note (heading + content up to the next heading of equal or higher level). Use when a note is long and you only need one section — much cheaper than memory_get on large files."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative path to the .md file.")),
-		mcp.WithString("heading", mcp.Required(), mcp.Description("The heading text to retrieve, without the leading '#'s. Match is case-insensitive.")),
+		mcp.WithString("heading", mcp.Required(), mcp.Description("The heading text to retrieve, without the leading '#'s. Match is case-insensitive. Its start is enough when it names one heading, such as an ID: \"BUG-014\" finds \"BUG-014 — …\"; the response's heading is the full one.")),
 		mcp.WithBoolean("render_views", mcp.Description("Also compute the note's ```view blocks: each block stays and its result follows it between gosidian:view-result markers. Off by default, so a note read to be edited comes back as it is on disk (the response's hint then says how many blocks were left uncomputed); never write the computed result back.")),
 	), s.handleGetSection)
 
@@ -220,12 +221,12 @@ func (s *Server) registerTools() {
 	), s.handleRenameProject)
 
 	s.impl.AddTool(mcp.NewTool("memory_backlinks",
-		mcp.WithDescription("List notes that reference (via wiki-link) the given note path."),
+		mcp.WithDescription("List notes that reference (via wiki-link) the given note path: from the body, or from a frontmatter value such as related: \"[[x]]\", whose keys `fields` names."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative path of the target note.")),
 	), s.handleBacklinks)
 
 	s.impl.AddTool(mcp.NewTool("memory_outlinks",
-		mcp.WithDescription("List wiki-links leaving the given note, with their resolved paths (if any). Pass include_cross_project=true to also flag links that point into a different top-level project via `cross_project: true` on each entry — scoped tokens always ignore this flag (they cannot see outside their project)."),
+		mcp.WithDescription("List wiki-links leaving the given note, with their resolved paths (if any); a link written in a frontmatter value carries its key in `field`. Pass include_cross_project=true to also flag links that point into a different top-level project via `cross_project: true` on each entry — scoped tokens always ignore this flag (they cannot see outside their project)."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative path of the source note.")),
 		mcp.WithBoolean("include_cross_project", mcp.Description("When true, each outlink carries `cross_project: true` if its resolved path is in a different top-level project. Default false.")),
 	), s.handleOutlinks)
@@ -618,8 +619,12 @@ func (s *Server) handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 		if out, hash := s.renderViews(tok, note.Path, note.Content); hash != "" {
 			nc.Content, nc.ViewsRendered = string(out), true
 		}
+		// A row of a database: its row views after the body (IMP-139).
+		if out, ok := s.withRowViews(tok, note.Path, note.Content, []byte(nc.Content)); ok {
+			nc.Content, nc.ViewsRendered = string(out), true
+		}
 	} else {
-		viewsNote = viewsHint(note.Content, "pass render_views:true")
+		viewsNote = joinHints(viewsHint(note.Content, "pass render_views:true"), s.rowViewsHint(tok, note.Path, "pass render_views:true"))
 	}
 
 	// Oversize guard: truncate the body (default threshold, or the caller's
@@ -720,22 +725,58 @@ func (s *Server) handleGetSection(ctx context.Context, req mcp.CallToolRequest) 
 			content = out
 		}
 	}
-	section := parser.ExtractSection(content, heading)
+	// The heading itself, or the one that starts with it, an ID alone such
+	// as "BUG-014" (IMP-130).
+	resolved, candidates := parser.ResolveHeading(content, heading)
+	if resolved == "" {
+		if len(candidates) > 0 {
+			return mcp.NewToolResultErrorf("heading %q not found in %q; headings that start with it or contain it: %s — pass one of them",
+				heading, path, quotedList(candidates)), nil
+		}
+		return mcp.NewToolResultErrorf("heading %q not found in %q; memory_get_outline lists the headings", heading, path), nil
+	}
+	section := parser.ExtractSection(content, resolved)
 	if section == "" {
 		return mcp.NewToolResultErrorf("heading %q not found in %q", heading, path), nil
 	}
+	if rendered {
+		// A row of a database: its row views after the section (IMP-139).
+		if withRows, ok := s.withRowViews(tok, note.Path, note.Content, []byte(section)); ok {
+			section = string(withRows)
+		}
+	}
 	out := map[string]any{
 		"path":    path,
-		"heading": heading,
+		"heading": resolved,
 		"content": section,
 		"etag":    note.ETag(),
 	}
 	if !rendered {
-		if hint := viewsHint([]byte(section), "pass render_views:true"); hint != "" {
+		if hint := joinHints(viewsHint([]byte(section), "pass render_views:true"), s.rowViewsHint(tok, note.Path, "pass render_views:true")); hint != "" {
 			out["hint"] = hint
 		}
 	}
 	return mcp.NewToolResultJSON(out)
+}
+
+// joinHints joins the non-empty hints with "; ".
+func joinHints(hints ...string) string {
+	var out []string
+	for _, h := range hints {
+		if h != "" {
+			out = append(out, h)
+		}
+	}
+	return strings.Join(out, "; ")
+}
+
+// quotedList joins items as "a", "b", "c".
+func quotedList(items []string) string {
+	q := make([]string, len(items))
+	for i, it := range items {
+		q[i] = strconv.Quote(it)
+	}
+	return strings.Join(q, ", ")
 }
 
 func (s *Server) handleCreate(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1305,20 +1346,30 @@ func (s *Server) handleBacklinks(ctx context.Context, req mcp.CallToolRequest) (
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("backlinks failed", err), nil
 	}
-	out := make([]noteRef, 0, len(bl))
+	out := make([]backlinkEntry, 0, len(bl))
 	for _, b := range bl {
 		if !tok.AllowsPath(b.Path) {
 			continue
 		}
-		out = append(out, noteRef{Path: b.Path, Title: b.Title})
+		out = append(out, backlinkEntry{Path: b.Path, Title: b.Title, Fields: b.Fields})
 	}
 	return mcp.NewToolResultJSON(map[string]any{"backlinks": out})
+}
+
+// backlinkEntry is a note that links to the one asked about; Fields are
+// the frontmatter keys whose values link there, absent when the links are
+// in the body only (IMP-127 iteration 2).
+type backlinkEntry struct {
+	Path   string   `json:"path"`
+	Title  string   `json:"title"`
+	Fields []string `json:"fields,omitempty"`
 }
 
 type outlinkEntry struct {
 	Target       string `json:"target"`
 	ResolvedPath string `json:"resolvedPath"`
 	Alias        string `json:"alias,omitempty"`
+	Field        string `json:"field,omitempty"`
 	CrossProject bool   `json:"cross_project,omitempty"`
 }
 
@@ -1349,6 +1400,7 @@ func (s *Server) handleOutlinks(ctx context.Context, req mcp.CallToolRequest) (*
 			Target:       o.Target,
 			ResolvedPath: o.TargetPath,
 			Alias:        o.Alias,
+			Field:        o.Field,
 		}
 		if crossProject && o.TargetPath != "" {
 			if tgt := topLevelProject(o.TargetPath); tgt != "" && tgt != srcProject {
@@ -1396,6 +1448,7 @@ func (s *Server) handleBatchGet(ctx context.Context, req mcp.CallToolRequest) (*
 		return mcp.NewToolResultErrorf("too many paths: %d (max 50)", len(paths)), nil
 	}
 	mode := strings.TrimSpace(req.GetString("mode", "content"))
+	rowHints := map[string]string{} // by folder
 	switch mode {
 	case "content", "outline", "frontmatter":
 		// ok
@@ -1434,7 +1487,12 @@ func (s *Server) handleBatchGet(ctx context.Context, req mcp.CallToolRequest) (*
 				entry.Truncated = true
 			}
 			entry.Content = body
-			entry.Hint = viewsHint(note.Content, "read it with memory_get and render_views:true")
+			// The row views hint is the same for every row of a folder.
+			dir := path.Dir(p)
+			if _, ok := rowHints[dir]; !ok {
+				rowHints[dir] = s.rowViewsHint(tok, p, "read it with memory_get and render_views:true")
+			}
+			entry.Hint = joinHints(viewsHint(note.Content, "read it with memory_get and render_views:true"), rowHints[dir])
 		}
 		out = append(out, entry)
 	}
