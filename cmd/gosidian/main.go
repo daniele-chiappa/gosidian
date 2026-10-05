@@ -236,6 +236,9 @@ func main() {
 		}
 	}
 	warnDanglingTokenOwners(tokenStore, webauthStore)
+	// Who created and last modified each note, from the audit log, as the
+	// fields created_by and modified_by of queries (IMP-127 iteration 3).
+	wireAuthors(idx, auditLog, tokenStore, webauthStore)
 
 	cfgPath := filepath.Join(hiddenDir, "config.toml")
 	cfg, err := config.Load(cfgPath)

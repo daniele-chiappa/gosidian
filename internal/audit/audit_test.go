@@ -1,7 +1,9 @@
 package audit
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -175,4 +177,47 @@ func TestTailFiltered_CombinedFilters(t *testing.T) {
 	if len(rows) != 1 || rows[0].Path != "projA/y.md" {
 		t.Errorf("combined filter failed: %+v", rows)
 	}
+}
+
+// OnWrite hooks see every entry written, after it is on disk; Each reads
+// the log back, oldest first, skipping a malformed line.
+func TestLog_OnWriteAndEach(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	l, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seen []string
+	l.OnWrite(func(e Entry) {
+		if data, err := os.ReadFile(path); err != nil || !strings.Contains(string(data), e.Path) {
+			t.Errorf("hook ran before the line was written: %v", err)
+		}
+		seen = append(seen, string(e.Action)+" "+e.Path)
+	})
+	_ = l.Write(Entry{Source: SourceMCP, Action: ActionCreate, Path: "p/a.md"})
+	if err := os.WriteFile(path, append(must(os.ReadFile(path)), []byte("not json\n")...), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	_ = l.Write(Entry{Source: SourceHTTP, Action: ActionUpdate, Path: "p/a.md"})
+	if strings.Join(seen, ",") != "create p/a.md,update p/a.md" {
+		t.Errorf("hooks saw %v", seen)
+	}
+	var read []string
+	if err := l.Each(func(e Entry) { read = append(read, string(e.Action)) }); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(read, ",") != "create,update" {
+		t.Errorf("Each read %v", read)
+	}
+	missing, _ := Open(filepath.Join(t.TempDir(), "none", "audit.jsonl"))
+	if err := missing.Each(func(Entry) { t.Error("an empty log has no entry") }); err != nil {
+		t.Errorf("a missing log is empty: %v", err)
+	}
+}
+
+func must(b []byte, err error) []byte {
+	if err != nil {
+		panic(err)
+	}
+	return b
 }

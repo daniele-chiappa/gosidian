@@ -13,11 +13,20 @@
  * Emits `title`/`dirty`/`close` to the window frame; History opens a sibling
  * window via the injected `openWindow`.
  */
-import { computed, defineAsyncComponent, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {
+  computed,
+  defineAsyncComponent,
+  inject,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useDebounceFn } from '@vueuse/core'
-import { Printer, Download, Copy, Check, GitBranch } from 'lucide-vue-next'
-import { getNote, updateNote, deleteNote, type Note } from '@/api/notes'
+import { Printer, Download, Copy, Check, GitBranch, Camera } from 'lucide-vue-next'
+import { getNote, updateNote, deleteNote, createSnapshot, type Note } from '@/api/notes'
 import { renderPreviewData, type ViewData } from '@/api/preview'
 import { isConcurrencyConflict, onApiEvent, type ConcurrencyConflictDetail } from '@/api/client'
 import { useSSE } from '@/composables/useSSE'
@@ -188,7 +197,8 @@ function onNoteEvent(p: { path?: string; etag?: string }) {
     void load()
     return
   }
-  if (previewHTML.value.includes('gosidian-view') || previewHTML.value.includes('gosidian-count')) void refreshViews()
+  if (previewHTML.value.includes('gosidian-view') || previewHTML.value.includes('gosidian-count'))
+    void refreshViews()
 }
 
 /** Scrolls to the heading the window was opened at, once it is rendered. */
@@ -356,6 +366,28 @@ async function downloadOriginal() {
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
+// A snapshot of the note as it reads now, opened in a window of its own
+// (IMP-127 iteration 3): its views, counts and embeds frozen.
+const snapshotting = ref(false)
+async function snapshot() {
+  if (!note.value || snapshotting.value) return
+  snapshotting.value = true
+  error.value = null
+  try {
+    const snap = await createSnapshot(note.value.path)
+    openWindow({
+      type: 'note',
+      key: planciaKey('note', snap.path),
+      title: (snap.path.split('/').pop() ?? snap.path).replace(/\.md$/, ''),
+      props: { path: snap.path },
+    })
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : t('note.snapshot_failed')
+  } finally {
+    snapshotting.value = false
+  }
+}
+
 function openHistory() {
   if (!note.value) return
   openWindow({
@@ -407,39 +439,49 @@ watch(path, load)
           class="px-2 py-1"
           :class="mode === 'view' ? 'bg-accent text-accent-fg' : 'hover:bg-surface-hover'"
           @click="enterView"
-        >View</button>
+        >
+          View
+        </button>
         <button
           v-if="access.canWrite(props.path)"
           type="button"
           class="px-2 py-1"
           :class="mode === 'edit' ? 'bg-accent text-accent-fg' : 'hover:bg-surface-hover'"
           @click="enterEdit"
-        >Edit</button>
+        >
+          Edit
+        </button>
       </div>
 
       <!-- Edit-only controls -->
       <template v-if="mode === 'edit'">
         <div class="inline-flex rounded border border-border overflow-hidden text-xs">
           <button
-            v-for="m in (['editor', 'split', 'stacked', 'preview'] as EditorLayout[])"
+            v-for="m in ['editor', 'split', 'stacked', 'preview'] as EditorLayout[]"
             :key="m"
             type="button"
             class="px-2 py-1"
             :class="layout === m ? 'bg-accent text-accent-fg' : 'hover:bg-surface-hover'"
             @click="layout = m"
-          >{{ m }}</button>
+          >
+            {{ m }}
+          </button>
         </div>
         <button
           type="button"
           class="text-xs px-2 py-1 rounded bg-accent text-accent-fg hover:bg-accent-hover disabled:opacity-50"
           :disabled="!dirty || saving"
           @click="save"
-        >{{ saving ? 'Saving…' : 'Save' }}</button>
+        >
+          {{ saving ? 'Saving…' : 'Save' }}
+        </button>
         <button
           type="button"
           class="text-xs px-2 py-1 rounded text-danger hover:bg-surface-hover"
           @click="destroy"
-        >Delete</button>
+        >
+          Delete
+        </button>
       </template>
 
       <button
@@ -473,14 +515,21 @@ watch(path, load)
         :aria-label="copied ? t('note.copied') : t('note.copy')"
         @click="copySource"
       >
-        <Check
-          v-if="copied"
-          class="h-3.5 w-3.5"
-        />
-        <Copy
-          v-else
-          class="h-3.5 w-3.5"
-        />
+        <Check v-if="copied" class="h-3.5 w-3.5" />
+        <Copy v-else class="h-3.5 w-3.5" />
+      </button>
+
+      <button
+        v-if="note && !isHtml && !isMedia && access.canWrite(props.path)"
+        type="button"
+        class="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text disabled:opacity-50"
+        :disabled="snapshotting"
+        :title="t('note.snapshot')"
+        :aria-label="t('note.snapshot')"
+        data-snapshot
+        @click="snapshot"
+      >
+        <Camera class="h-3.5 w-3.5" />
       </button>
 
       <button

@@ -51,6 +51,9 @@ type Spec struct {
 	// SortOrder orders the sort field by the options of its select in the
 	// schema of the database the view lists; compute sets it.
 	SortOrder []string
+	// Read lists fields the query reads without showing them: the fields of
+	// the row its rollups use (this.<field>); compute sets it.
+	Read []string
 }
 
 // Context resolves the relative values a spec may use: this, the note
@@ -72,6 +75,10 @@ type Context struct {
 	// (related contains [[p/x]]). Nil leaves them unresolved: such a
 	// condition then works with this only.
 	Resolve func(target string) string
+	// Load returns the raw content of a note the reader may open, for the
+	// embeds a note includes (![[note#Heading]], see ExpandEmbeds). Nil
+	// leaves the embeds as links.
+	Load func(path string) ([]byte, bool)
 }
 
 // resolveLink resolves a link target of a condition: the note holding the
@@ -256,6 +263,14 @@ func unquote(s string) string {
 
 var todayRe = regexp.MustCompile(`^today(?:([+-])(\d+)d)?$`)
 
+// noThisField is a this.<field> the note holding the view lacks. A rollup
+// reads it as no match: a row without the relation counts 0.
+type noThisField struct{ name string }
+
+func (e noThisField) Error() string {
+	return fmt.Sprintf("this.%s: this note has no %q field", e.name, e.name)
+}
+
 // resolve expands this (as a link to the note holding the view),
 // this.<field> and today±Nd.
 func resolve(vals []string, c Context) ([]string, error) {
@@ -272,7 +287,7 @@ func resolve(vals []string, c Context) ([]string, error) {
 		if f, ok := strings.CutPrefix(v, "this."); ok {
 			got := c.This[f]
 			if len(got) == 0 {
-				return nil, fmt.Errorf("this.%s: this note has no %q field", f, f)
+				return nil, noThisField{f}
 			}
 			out = append(out, got...)
 			continue
@@ -335,6 +350,11 @@ func Run(s *Spec, q QueryFunc) (*Result, error) {
 	if s.GroupBy != "" && !slices.Contains(fields, s.GroupBy) {
 		fields = append(fields, s.GroupBy)
 	}
+	for _, f := range s.Read {
+		if !slices.Contains(fields, f) {
+			fields = append(fields, f)
+		}
+	}
 	limit := s.Limit
 	if s.As == "count" {
 		// A count needs the total, and the group_by values of every row.
@@ -373,7 +393,7 @@ func compute(spec string, c Context, q QueryFunc) (*Result, error) {
 			s.Where = append(s.Where, index.FieldCond{Field: kv[0], Op: index.OpEq, Values: []string{kv[1]}})
 		}
 	}
-	r, err := Run(s, q)
+	r, err := RunWithRollups(s, schema, c, q)
 	if err != nil {
 		return nil, err
 	}

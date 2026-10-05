@@ -85,6 +85,7 @@ func (r *Router) handlePreview(w http.ResponseWriter, req *http.Request) {
 			Schema:   r.viewSchema(p),
 			CanWrite: r.viewCanWrite(p),
 			Resolve:  previewResolver{r: r, p: p}.Resolve,
+			Load:     r.viewLoad(p),
 		}
 		md, data = views.RenderNoteData(md, c, r.viewQuery(p))
 	}
@@ -189,6 +190,21 @@ func (r *Router) viewSchema(p authz.Principal) func(folder string) *dbschema.Sch
 func (r *Router) viewCanWrite(p authz.Principal) func(path string) bool {
 	return func(path string) bool {
 		return p.CanWrite() && strings.HasSuffix(strings.ToLower(path), ".md") && r.canWriteProject(p, projectOf(path))
+	}
+}
+
+// viewLoad reads a note the reader may open, for the embeds of a note
+// (![[note#Heading]]); false for any other.
+func (r *Router) viewLoad(p authz.Principal) func(path string) ([]byte, bool) {
+	return func(path string) ([]byte, bool) {
+		if !r.canSee(p, path) {
+			return nil, false
+		}
+		n, err := r.deps.Vault.Load(path)
+		if err != nil {
+			return nil, false
+		}
+		return n.Content, true
 	}
 }
 

@@ -88,6 +88,7 @@ the values given and the project's tag, over a heading.
 | `url` | an `http` or `https` URL |
 | `relation` | a `[[wikilink]]`, or a list of them |
 | `list` | a list |
+| `rollup` | nothing: it is computed when the row is read ([below](#rollups)) |
 
 `required: true` makes a field mandatory. `title` and `tags` may appear on
 any row without being declared. A field named `id` must match the note's
@@ -137,6 +138,59 @@ and only those it declares show: there is no automatic one.
   They are not part of the bootstrap.
 - **Lint** — `database-field-invalid` reports a row view that would not
   compute, on the database note.
+
+### Rollups
+
+A `rollup` field is computed for each row when it is read, and never
+written to it: a [view](views.md) spec in which `this` is the row, whose
+notes it counts, or sums, or reduces to their least or greatest value of
+one field.
+
+```yaml
+fields:
+  plans:
+    type: rollup
+    from: myproject/plans
+    where: [implements_imp contains this]
+  open_plans:
+    type: rollup
+    from: myproject/plans
+    where:
+      - implements_imp contains this
+      - status in [draft, in-progress]
+  effort:
+    type: rollup
+    from: myproject/plans
+    where: [implements_imp contains this]
+    calc: sum
+    of: estimate
+  first_due:
+    type: rollup
+    from: myproject/plans
+    where: [implements_imp contains this]
+    calc: min
+    of: due
+```
+
+- **`calc`**: `count` (the default), `sum`, `min` or `max`; the last three
+  read the field named by `of` in the notes the spec selects. `min` and
+  `max` compare numbers when every value is one, otherwise text, which
+  orders ISO dates too; with no value they give nothing. A sum counts the
+  numbers only.
+- **The other direction**: `path in this.implements_imp` selects the notes
+  the row's own relation points at; add `status = done` and the rollup
+  counts those of them that are done. A row without the relation counts 0.
+- **Where it shows**: as a column of a view (table, list, board), in
+  `memory_query` and `POST /api/v1/query` over the rows of the database
+  (`from` its source) when `fields` or `sort` names it, and read-only in
+  the web UI, in the table and the property panel. Each value is computed
+  with the reader's scope: a note the reader may not see does not count.
+- **Sorting**: a view or a query sorted by a rollup reads every row,
+  computes and sorts them, and keeps the limit; it reads at most 500 rows,
+  and asks to narrow the view beyond that. A `where` or a `group_by` on a
+  rollup is refused: filter on the fields it counts instead.
+- **Not written**: a row that writes a rollup field is reported by
+  `database-field-invalid`, and an edit that sets one is refused.
 
 ## What checks the rows
 

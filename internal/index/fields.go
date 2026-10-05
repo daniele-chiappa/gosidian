@@ -122,6 +122,12 @@ type FieldCond struct {
 // link to p/x, its backlinks as a query.
 const LinksField = "links"
 
+// PathField is the pseudo-field of a condition on the note's own path:
+// `path in this.implements_imp` keeps the notes a relation of the row points
+// at (IMP-127 iteration 3). Its values are [[wikilinks]] or vault paths; it
+// takes eq, ne and in.
+const PathField = "path"
+
 // LinkTarget returns the target of v when v is written as one [[wikilink]],
 // alias and heading dropped.
 func LinkTarget(v string) (string, bool) {
@@ -146,6 +152,14 @@ func ResolveLinkConds(where []FieldCond, resolve func(target string) string) ([]
 	out := make([]FieldCond, 0, len(where))
 	for _, c := range where {
 		field := strings.TrimSpace(c.Field)
+		if field == PathField && !c.Link {
+			pc, err := pathCond(c, resolve)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, pc)
+			continue
+		}
 		links := field == LinksField
 		targets := make([]string, 0, len(c.Values))
 		for _, v := range c.Values {
@@ -186,6 +200,44 @@ func ResolveLinkConds(where []FieldCond, resolve func(target string) string) ([]
 		out = append(out, FieldCond{Field: field, Op: op, Values: paths, Link: true})
 	}
 	return out, nil
+}
+
+// pathCond resolves a condition on the note's path: each value a [[wikilink]]
+// resolved with resolve, or a vault path as it is. A wikilink that names no
+// note is an error, as in a condition on links.
+func pathCond(c FieldCond, resolve func(target string) string) (FieldCond, error) {
+	op := strings.ToLower(strings.TrimSpace(c.Op))
+	if op == "" {
+		op = OpEq
+	}
+	switch op {
+	case OpEq, OpNe, OpIn:
+	default:
+		return FieldCond{}, fmt.Errorf("%w: %s on path: a condition on the path takes eq, ne or in", ErrBadQuery, op)
+	}
+	if len(c.Values) == 0 {
+		return FieldCond{}, fmt.Errorf("%w: %s on path needs a note: a [[wikilink]] or a path", ErrBadQuery, op)
+	}
+	paths := make([]string, 0, len(c.Values))
+	for _, v := range c.Values {
+		t, link := LinkTarget(v)
+		if !link {
+			paths = append(paths, strings.TrimSpace(v))
+			continue
+		}
+		p := ""
+		if resolve != nil {
+			p = resolve(t)
+		}
+		if p == "" {
+			return FieldCond{}, fmt.Errorf("%w: %s on path: [[%s]] names no note", ErrBadQuery, op, t)
+		}
+		paths = append(paths, p)
+	}
+	if op == OpEq && len(paths) > 1 {
+		op = OpIn
+	}
+	return FieldCond{Field: PathField, Op: op, Values: paths, Link: true}, nil
 }
 
 // QueryOptions selects notes by their frontmatter. Projects/Exclude scope the
@@ -342,6 +394,23 @@ func condSQL(c FieldCond) (string, []any, error) {
 	op := strings.ToLower(strings.TrimSpace(c.Op))
 	if op == "" {
 		op = OpEq
+	}
+	if field == PathField {
+		if len(c.Values) == 0 || op != OpIn && len(c.Values) > 1 {
+			return "", nil, fmt.Errorf("%w: %s on path takes one note (in takes several)", ErrBadQuery, op)
+		}
+		args := make([]any, len(c.Values))
+		for k, p := range c.Values {
+			args[k] = p
+		}
+		s := `n.path IN (` + placeholders(len(c.Values)) + `)`
+		switch op {
+		case OpEq, OpIn:
+			return s, args, nil
+		case OpNe:
+			return "NOT " + s, args, nil
+		}
+		return "", nil, fmt.Errorf("%w: %s on path: a condition on the path takes eq, ne or in", ErrBadQuery, op)
 	}
 	if c.Link {
 		return linkCondSQL(field, op, c.Values)

@@ -105,10 +105,11 @@ func (r *Router) handleNoteByPath(w http.ResponseWriter, req *http.Request) {
 }
 
 // noteSubroutes lists the suffixes routed off /notes/{path}/: read-only
-// GETs, PATCH /frontmatter and POST /rows (a new row of a database note). Order matters only for documentation; the
-// loop matches by suffix regardless. New entries get a handler in
-// dispatchNoteSubroute below.
-var noteSubroutes = []string{"backlinks", "excerpt", "history", "frontmatter", "fields", "new-row", "rows", "row-views"}
+// GETs, PATCH /frontmatter, POST /rows (a new row of a database note) and
+// POST /snapshot (the note frozen beside it). Order matters only for
+// documentation; the loop matches by suffix regardless. New entries get a
+// handler in dispatchNoteSubroute below.
+var noteSubroutes = []string{"backlinks", "excerpt", "history", "frontmatter", "fields", "new-row", "rows", "row-views", "snapshot"}
 
 func (r *Router) dispatchNoteSubroute(w http.ResponseWriter, req *http.Request, notePath, sub string) {
 	switch sub {
@@ -125,6 +126,13 @@ func (r *Router) dispatchNoteSubroute(w http.ResponseWriter, req *http.Request, 
 			return
 		}
 		r.createRow(w, req, notePath)
+		return
+	case "snapshot":
+		if req.Method != http.MethodPost {
+			WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
+			return
+		}
+		r.createSnapshot(w, req, notePath)
 		return
 	}
 	if req.Method != http.MethodGet {

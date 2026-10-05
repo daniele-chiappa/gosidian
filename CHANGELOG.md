@@ -8,6 +8,74 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.55.0] — 2026-10-05 — "rollups, embeds and snapshots"
+
+A database can compute a field for each row from other notes, every note
+knows who created and last modified it, a note can include a section of
+another one with its views, and a note can be frozen into a dated snapshot.
+Version 2.54.0 was not published on its own; this release includes it.
+Pull the image and restart: the index adds a table of the notes' authors
+and fills it from the audit log at the first start, nothing to migrate.
+
+### Added
+- **Rollups** — a database can declare a field of `type: rollup`,
+  computed for each row when it is read and never written: a view spec in
+  which `this` is the row (`from: myproject/plans`, `where:
+  [implements_imp contains this]`) whose notes it counts (`calc: count`,
+  the default) or reduces with `sum`, `min` or `max` over the field named
+  by `of`. It shows as a column of a view, in `memory_query` and `POST
+  /api/v1/query` over the rows of the database when `fields` or `sort`
+  names it, and read-only in the web UI's table and property panel, always
+  computed with the reader's scope. A view or a query sorted by a rollup
+  computes every row first, up to 500; a `where` or a `group_by` on one is
+  refused. A row that writes a rollup is reported by
+  `database-field-invalid`, and an edit that sets one is refused.
+- **Who created and modified a note** — `created_by` and `modified_by` are
+  fields of every note, read off the audit log: the token's name and its
+  account for an agent (`claude-cli (admin)`), the username for the web UI;
+  `created_at` and `modified_at` give the times, as dates. `memory_query`
+  and `POST /api/v1/query` take them in `fields`, `where` and `sort`, views
+  show them as columns, and the web UI's property panel says who created
+  and last modified a row. The index replays the audit log at every start
+  and follows its writes; a rename moves the authors, a delete drops them.
+  Only a creation the log holds names the creator: a note older than the
+  log has no `created_by`. A frontmatter field of the same name wins (a
+  handoff's own `created_by`), and writes outside gosidian (a `git pull`,
+  an editor) change no author.
+- **Conditions on the note's path** — `path in this.implements_imp` keeps
+  the notes a relation of the note holding the view points at, the other
+  direction of `implements_imp contains this`; `path = [[note]]` keeps that
+  note. In views, `memory_query` and `POST /api/v1/query`.
+- **Embeds** — a line made of `![[note#Heading]]` alone includes that
+  section of another note, `![[note]]` the whole note, as in Obsidian. The
+  views and values it includes are computed with `this` the note that
+  embeds them, so a section written once serves as a model. Only a markdown
+  note the reader may open is included, one level deep. The web UI shows
+  the included text under a head that links to its origin, its tables and
+  boards still editing their rows; agents get it with `render_views` and in
+  the bootstrap, between `gosidian:embed` markers, and a `hint` otherwise.
+- **Snapshots** — `memory_snapshot`, `POST /api/v1/notes/{path}/snapshot`
+  and a camera button in the web UI freeze a note as it reads now into a
+  dated note beside it, `<name>.snapshots/YYYY-MM-DD.md` (the time is added
+  for a second one the same day): its views as their rows, its values as
+  numbers with their expression kept as text, its embeds included, so the
+  snapshot never recomputes and the vault's history keeps what the views
+  showed. It has the note's title with the date, `type: snapshot`,
+  `source: [[note]]` and the project's tag only; the note itself does not
+  change.
+
+### Changed
+- **Directives v21** — a rollup is asked of `memory_query` (in `fields` or
+  `sort`) instead of counting backlinks row by row, and never written;
+  `created_by` and `modified_by` answer who wrote a note without
+  `memory_audit_tail`, and without them the creation is not in the audit
+  log: say so, do not guess.
+- **Directives v22** — a line of `![[note#Heading]]` embeds a section, its
+  views computed for the note that embeds it, and its included text is
+  never copied into the file; `memory_snapshot` freezes a note.
+- **Index schema 5** — a table of the notes' authors, filled at the first
+  start from the audit log.
+
 ## [2.53.0] — 2026-10-04 — "rows and tickets"
 
 A database note can keep as rows only the notes with given values, a link

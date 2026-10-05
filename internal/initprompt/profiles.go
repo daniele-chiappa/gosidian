@@ -190,7 +190,17 @@ const StubVersion = 3
 // through memory_ingest as: package (IMP-116), with dry_run first; a count
 // is a view as: count or a `=count(…)` value in the text, whose computed
 // form is never copied into the file.
-const DirectivesVersion = 20
+//
+// v21 (2026-10-04, IMP-127 iteration 3 phase 2): rollup fields are asked of
+// memory_query (fields, sort) instead of counting backlinks row by row, and
+// never written; created_by and modified_by come from the audit log as
+// fields of memory_query.
+//
+// v22 (2026-10-04, IMP-127 iteration 3 phase 3): a line of ![[note#Heading]]
+// embeds a section with its views computed for the embedding note, to reuse
+// a view instead of copying it; the embed markers are never copied into the
+// file; memory_snapshot freezes a note. created_at and modified_at.
+const DirectivesVersion = 22
 
 // AnchorVersion is the version of the agent-anchor template/format. It is
 // substituted into the `<!-- gosidian:anchor v=N ... -->` marker so the

@@ -8,6 +8,7 @@ import (
 
 	"github.com/gosidian/gosidian/internal/dbschema"
 	"github.com/gosidian/gosidian/internal/index"
+	"github.com/gosidian/gosidian/internal/views"
 )
 
 // queryRequest is the body of POST /api/v1/query: the same query as the MCP
@@ -104,7 +105,14 @@ func (r *Router) handleQuery(w http.ResponseWriter, req *http.Request) {
 			opts.SortOrder = dbschema.OptionOrderOf(schemas, opts.Sort)
 		}
 	}
-	hits, total, err := r.deps.Index.Query(opts)
+	// Over the rows of one database, its rollups are computed for the rows
+	// (IMP-127 iteration 3), with the reader's scope.
+	var schema *dbschema.Schema
+	if len(from) == 1 {
+		schema = r.viewSchema(p)(from[0])
+	}
+	vc := views.Context{Schema: r.viewSchema(p), Resolve: previewResolver{r: r, p: p}.Resolve}
+	hits, total, err := views.RollupQuery(opts, schema, vc, r.deps.Index.Query, r.viewQuery(p))
 	if errors.Is(err, index.ErrBadQuery) {
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
 		return

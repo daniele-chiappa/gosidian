@@ -21,7 +21,10 @@
  * a count view shows its number with ViewCount, and a list view keeps the
  * HTML the server rendered. A `=count(…)` value in the text arrives as a
  * <span class="gosidian-count">, styled here. Each view
- * sits in its `<div class="gosidian-view" data-view="N">` placeholder.
+ * sits in its `<div class="gosidian-view" data-view="N">` placeholder. An
+ * embed (`![[note#Heading]]`) arrives as the included text between a
+ * `.gosidian-embed-start` head, which links to its origin, and a
+ * `.gosidian-embed-end` rule.
  */
 import { computed, inject, ref } from 'vue'
 import DOMPurify from 'dompurify'
@@ -45,7 +48,7 @@ const proseClass =
 const sanitized = computed(() =>
   DOMPurify.sanitize(props.html, {
     ADD_TAGS: ['math', 'mfrac', 'mrow', 'msup', 'mn', 'mi'],
-    ADD_ATTR: ['class', 'data-preview-path', 'data-view', 'data-heading'],
+    ADD_ATTR: ['class', 'data-preview-path', 'data-view', 'data-heading', 'data-embed'],
   }),
 )
 
@@ -151,6 +154,23 @@ function onClick(e: MouseEvent) {
 :deep(.gosidian-count-error) {
   font-weight: 400;
   color: rgb(var(--color-danger));
+}
+/* An embed (![[note#Heading]]): the included text sits between a head that
+   links to its origin and a closing rule, siblings of the text so the views
+   it includes stay editable components. */
+:deep(.gosidian-embed-start) {
+  margin-top: 1.25em;
+  padding-top: 0.25em;
+  border-top: 1px dashed rgb(var(--color-text-muted) / 0.5);
+  font-size: 0.75rem;
+  color: rgb(var(--color-text-muted));
+}
+:deep(.gosidian-embed-start)::before {
+  content: '↪ ';
+}
+:deep(.gosidian-embed-end) {
+  margin-bottom: 1.25em;
+  border-top: 1px dashed rgb(var(--color-text-muted) / 0.5);
 }
 /* The note's first and last blocks sit inside the segment wrappers, out of
    reach of the prose rules that drop their outer margins. */

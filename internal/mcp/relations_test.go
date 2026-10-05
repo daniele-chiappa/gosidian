@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 )
@@ -111,5 +112,127 @@ func TestRelations_AgentTools(t *testing.T) {
 	decode(res, err, &got)
 	if strings.Contains(got.Hint, "row view") {
 		t.Errorf("not a row: hint %q", got.Hint)
+	}
+}
+
+// Rollups for agents (IMP-127 iteration 3): memory_query over the rows of a
+// database computes the rollups named in fields, sorts by one, and refuses
+// a condition on one; a write of a rollup into a row is flagged.
+func TestRollups_MemoryQuery(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	ctx := context.Background()
+	write := func(path, content string) *mcplib.CallToolResult {
+		t.Helper()
+		res, err := s.handleCreate(ctx, call(map[string]any{"path": path, "content": content}))
+		if err != nil || res.IsError {
+			t.Fatalf("create %s: %v %+v", path, err, res)
+		}
+		return res
+	}
+	write("p/docs/bugs.md", "---\ntitle: Bugs\ntags: [p, type:index]\ntype: database\nsource: p/docs/bugs\nfields:\n  id: {type: text}\n  status: {type: select, options: [open, done]}\n"+
+		"  fixes:\n    type: rollup\n    from: p/plans\n    where: [related contains this]\n---\n# Bugs\n")
+	write("p/docs/bugs/BUG-1.md", "---\ntitle: BUG-1\nid: BUG-1\nstatus: open\ntags: [p]\n---\n")
+	write("p/docs/bugs/BUG-2.md", "---\ntitle: BUG-2\nid: BUG-2\nstatus: open\ntags: [p]\n---\n")
+	write("p/plans/fix.md", "---\ntitle: Fix\nstatus: done\nrelated: [\"[[BUG-1]]\"]\ntags: [p]\n---\n")
+	write("p/plans/fix2.md", "---\ntitle: Fix again\nstatus: draft\nrelated: [\"[[BUG-1]]\", \"[[BUG-2]]\"]\ntags: [p]\n---\n")
+
+	out := runQuery(t, s, ctx, map[string]any{"from": "p/docs/bugs", "fields": []any{"id", "fixes"}, "sort": "fixes", "order": "desc"})
+	if out.Total != 2 || len(out.Notes) != 2 || out.Notes[0].Fields["fixes"] != "2" || out.Notes[1].Fields["fixes"] != "1" {
+		t.Errorf("query = %+v", out)
+	}
+	res, _ := s.handleQuery(ctx, call(map[string]any{"from": "p/docs/bugs", "where": []any{map[string]any{"field": "fixes", "op": "gt", "value": "1"}}}))
+	if msg := expectError(t, res); !strings.Contains(msg, "is a rollup") {
+		t.Errorf("where on a rollup: %s", msg)
+	}
+	req := call(map[string]any{"path": "p/docs/bugs/BUG-3.md", "content": "---\ntitle: BUG-3\nid: BUG-3\nstatus: open\nfixes: 4\ntags: [p]\n---\n"})
+	req.Params.Name = "memory_create"
+	res, err := callNotesMiddleware(s.handleCreate)(ctx, req)
+	if err != nil || res.IsError {
+		t.Fatalf("create: %v %+v", err, res)
+	}
+	if n := strings.Join(resultNotices(t, res), " "); !strings.Contains(n, "computed when the row is read") {
+		t.Errorf("a written rollup is flagged in notices: %q", n)
+	}
+}
+
+// Embeds for agents (IMP-127 iteration 3, phase 3): memory_get with
+// render_views includes the section between markers, its view computed for
+// the note that embeds it; without, the hint says so.
+func TestEmbeds_MemoryGet(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	ctx := context.Background()
+	for path, content := range map[string]string{
+		"p/templates/blocks.md": "---\ntitle: Blocks\ntags: [p]\n---\n\n# Blocks\n\n## Links here\n\n```view\nfrom: p/notes\nwhere: [links contains this]\nas: list\n```\n",
+		"p/notes/a.md":          "---\ntitle: A\ntags: [p]\n---\n\n# A\n\n![[p/templates/blocks#Links here]]\n",
+		"p/notes/b.md":          "---\ntitle: B\ntags: [p]\n---\n\nSee [[p/notes/a]].\n",
+	} {
+		if res, err := s.handleCreate(ctx, call(map[string]any{"path": path, "content": content})); err != nil || res.IsError {
+			t.Fatalf("create %s: %v %+v", path, err, res)
+		}
+	}
+	var got struct {
+		Content string `json:"content"`
+		Hint    string `json:"hint"`
+	}
+	res, _ := s.handleGet(ctx, call(map[string]any{"path": "p/notes/a.md"}))
+	if err := json.Unmarshal([]byte(resultText(t, res)), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got.Hint, "1 embed(s) here") || strings.Contains(got.Content, "gosidian:embed") {
+		t.Errorf("without render_views: %+v", got)
+	}
+	res, _ = s.handleGet(ctx, call(map[string]any{"path": "p/notes/a.md", "render_views": true}))
+	if err := json.Unmarshal([]byte(resultText(t, res)), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got.Content, "<!-- gosidian:embed — included from [[p/templates/blocks#Links here]]") || !strings.Contains(got.Content, "[[p/notes/b\\|B]]") {
+		t.Errorf("with render_views:\n%s", got.Content)
+	}
+}
+
+// memory_snapshot freezes a note beside it, the note unchanged; a second
+// one the same day adds the time; a non-markdown path is refused.
+func TestSnapshot_Tool(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	ctx := context.Background()
+	for path, content := range map[string]string{
+		"p/hot.md":     "---\ntitle: Hot\ntags: [p, type:index]\n---\n\n# Hot\n\nNotes: `=count(p/notes)`.\n\n```view\nfrom: p/notes\nas: list\n```\n",
+		"p/notes/a.md": "---\ntitle: A\ntags: [p]\n---\n\nA.\n",
+	} {
+		if res, err := s.handleCreate(ctx, call(map[string]any{"path": path, "content": content})); err != nil || res.IsError {
+			t.Fatalf("create %s: %v %+v", path, err, res)
+		}
+	}
+	before, _ := s.vault.Load("p/hot.md")
+	var out struct {
+		Path   string `json:"path"`
+		Views  int    `json:"views"`
+		Values int    `json:"values"`
+	}
+	res, _ := s.handleSnapshot(ctx, call(map[string]any{"path": "p/hot"}))
+	if err := json.Unmarshal([]byte(resultText(t, res)), &out); err != nil {
+		t.Fatal(err)
+	}
+	day := time.Now().UTC().Format("2006-01-02")
+	if out.Path != "p/hot.snapshots/"+day+".md" || out.Views != 1 || out.Values != 1 {
+		t.Fatalf("snapshot = %+v", out)
+	}
+	snap, err := s.vault.Load(out.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := string(snap.Content); !strings.Contains(c, "type: snapshot\n") || !strings.Contains(c, "Notes: 1 (`` `=count(p/notes)` ``).") || !strings.Contains(c, "[[p/notes/a\\|A]]") || strings.Contains(c, "```view") {
+		t.Errorf("snapshot:\n%s", c)
+	}
+	if after, _ := s.vault.Load("p/hot.md"); string(after.Content) != string(before.Content) {
+		t.Error("the note itself changed")
+	}
+	res, _ = s.handleSnapshot(ctx, call(map[string]any{"path": "p/hot.md"}))
+	if err := json.Unmarshal([]byte(resultText(t, res)), &out); err != nil || !strings.HasPrefix(out.Path, "p/hot.snapshots/"+day+"-") {
+		t.Errorf("second snapshot = %+v %v", out, err)
+	}
+	res, _ = s.handleSnapshot(ctx, call(map[string]any{"path": "p/attachments/x.png"}))
+	if msg := expectError(t, res); !strings.Contains(msg, "not a markdown note") {
+		t.Errorf("non-markdown: %s", msg)
 	}
 }

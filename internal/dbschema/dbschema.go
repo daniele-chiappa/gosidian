@@ -48,7 +48,34 @@ type Field struct {
 	Type     string   `json:"type"`
 	Options  []string `json:"options,omitempty"`
 	Required bool     `json:"required,omitempty"`
+	// Rollup defines a field of type rollup, computed when the row is read.
+	Rollup *Rollup `json:"rollup,omitempty"`
 }
+
+// Rollup is a field computed when a row is read, never written to it (IMP-127
+// iteration 3, phase 2): the notes a view spec selects, in which `this` is
+// the row, counted or aggregated over one of their fields.
+//
+//	open_bugs:
+//	  type: rollup
+//	  from: proj/docs/bugs
+//	  where: [related contains this, status in [open, in-progress]]
+//	  calc: count
+type Rollup struct {
+	// Spec is the view spec (from, where…), as a row view's.
+	Spec string `json:"spec"`
+	// Calc is count, sum, min or max.
+	Calc string `json:"calc"`
+	// Of is the field of the selected notes that sum, min and max read.
+	Of string `json:"of,omitempty"`
+}
+
+// RollupCalcs are the aggregations a rollup may use.
+var RollupCalcs = []string{"count", "sum", "min", "max"}
+
+// Computed reports a field computed when the row is read: a row never holds
+// it, and an edit may not set it.
+func (f Field) Computed() bool { return f.Type == "rollup" }
 
 // Schema is a parsed database note.
 type Schema struct {
@@ -81,7 +108,7 @@ type RowView struct {
 const MaxRowViews = 8
 
 // Types are the field types a schema may declare.
-var Types = []string{"text", "number", "date", "checkbox", "select", "multi-select", "url", "relation", "list"}
+var Types = []string{"text", "number", "date", "checkbox", "select", "multi-select", "url", "relation", "list", "rollup"}
 
 // implicitFields may appear on any row without being declared: every
 // gosidian note carries them (lint frontmatter-missing asks for both).
@@ -152,6 +179,13 @@ func Parse(notePath, frontmatter string) (*Schema, error) {
 		if (f.Type == "select" || f.Type == "multi-select") && len(f.Options) == 0 {
 			return nil, fmt.Errorf("field %q: a %s needs options", name, f.Type)
 		}
+		if f.Type == "rollup" {
+			r, err := rollup(name, def)
+			if err != nil {
+				return nil, err
+			}
+			f.Rollup, f.Required = r, false
+		}
 		s.Fields = append(s.Fields, f)
 	}
 	rv, err := rowViews(valueOf(m, "row_views"))
@@ -201,6 +235,39 @@ func rowViews(n *yaml.Node) ([]RowView, error) {
 		out = append(out, RowView{Title: title, Spec: string(b)})
 	}
 	return out, nil
+}
+
+// rollup reads the definition of a rollup field: calc (count by default),
+// of for the other calcs, and the rest as a view spec, which needs a from.
+// The spec itself is checked when the rollup is computed, as a row view's.
+func rollup(name string, def *yaml.Node) (*Rollup, error) {
+	r := &Rollup{Calc: strings.TrimSpace(scalar(def, "calc")), Of: strings.TrimSpace(scalar(def, "of"))}
+	if r.Calc == "" {
+		r.Calc = "count"
+	}
+	if !slices.Contains(RollupCalcs, r.Calc) {
+		return nil, fmt.Errorf("rollup %q: calc %q is not one of %s", name, r.Calc, strings.Join(RollupCalcs, ", "))
+	}
+	if r.Calc != "count" && r.Of == "" {
+		return nil, fmt.Errorf("rollup %q: calc %s needs `of`, the field of the notes it reads", name, r.Calc)
+	}
+	if valueOf(def, "from") == nil {
+		return nil, fmt.Errorf("rollup %q has no `from`: the folder of the notes it counts", name)
+	}
+	spec := &yaml.Node{Kind: yaml.MappingNode}
+	for k := 0; k+1 < len(def.Content); k += 2 {
+		switch def.Content[k].Value {
+		case "type", "calc", "of", "required", "options":
+		default:
+			spec.Content = append(spec.Content, def.Content[k], def.Content[k+1])
+		}
+	}
+	b, err := yaml.Marshal(spec)
+	if err != nil {
+		return nil, fmt.Errorf("rollup %q: %w", name, err)
+	}
+	r.Spec = string(b)
+	return r, nil
 }
 
 // templatePath reads the template key: a vault path or a [[wikilink]] to a
@@ -438,12 +505,16 @@ func (s *Schema) Validate(rel, frontmatter string) []Problem {
 			}
 			continue
 		}
+		if f.Computed() {
+			out = append(out, Problem{Field: k, Message: computedMessage(f)})
+			continue
+		}
 		if msg := checkValue(f, values[k]); msg != "" {
 			out = append(out, Problem{Field: k, Message: msg})
 		}
 	}
 	for _, f := range s.Fields {
-		if v, ok := values[f.Name]; f.Required && (!ok || v == nil || v == "") {
+		if v, ok := values[f.Name]; f.Required && !f.Computed() && (!ok || v == nil || v == "") {
 			out = append(out, Problem{Field: f.Name, Message: fmt.Sprintf("required field %q is missing", f.Name)})
 		}
 	}
@@ -478,6 +549,10 @@ func (s *Schema) CheckEdit(rel string, set map[string]any, unset []string) []Pro
 			}
 			continue
 		}
+		if f.Computed() {
+			out = append(out, Problem{Field: k, Message: computedMessage(f)})
+			continue
+		}
 		if f.Required && (v == nil || v == "") {
 			out = append(out, Problem{Field: k, Message: fmt.Sprintf("required field %q cannot be empty", k)})
 			continue
@@ -497,6 +572,11 @@ func (s *Schema) CheckEdit(rel string, set map[string]any, unset []string) []Pro
 		}
 	}
 	return out
+}
+
+// computedMessage says why a computed field is not written to a row.
+func computedMessage(f Field) string {
+	return fmt.Sprintf("field %q is a %s, computed when the row is read: it is not written in the row", f.Name, f.Type)
 }
 
 // checkValue returns why v is not a valid value of f, or "".

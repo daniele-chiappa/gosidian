@@ -85,7 +85,9 @@
     "copy": "Copia il sorgente della nota",
     "copied": "Copiato!",
     "history": "Cronologia",
-    "unsaved": "Modifiche non salvate"
+    "unsaved": "Modifiche non salvate",
+    "snapshot": "Istantanea: congela viste e conteggi in una nota datata",
+    "snapshot_failed": "Istantanea non riuscita"
   },
   "note_create": {
     "title": "Nuova nota",
@@ -411,6 +413,8 @@
     "create_forbidden": "Con il tuo accesso non si possono aggiungere righe a questo database.",
     "create_failed": "La riga non è stata creata.",
     "row_views": "Viste della riga",
-    "count_notes": "nota | note"
+    "count_notes": "nota | note",
+    "created_by": "Creata da {who}",
+    "modified_by": "Modificata da {who}"
   }
 }

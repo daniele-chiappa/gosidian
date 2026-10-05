@@ -116,6 +116,19 @@ a note naming it (and the likely intended argument, e.g. `Project` →
   frontmatter alike (a path works too) — what links to a note, filtered
   by folder or by field. A link to no note the token can read is an
   error. `eq`, `ne`, `in` and `contains` apply.
+  The pseudo-field `path` is the note itself: `{field: path, op: in,
+  value: ["[[p/docs/improvements/IMP-1]]"]}`. Over the rows of one
+  database (`from` its source), its [rollups](../vault/databases.md#rollups)
+  are computed when `fields` or `sort` names them. `created_by` and
+  `modified_by` are who created and last modified a note through gosidian,
+  from the audit log ("claude-cli (admin)" for a token and its account, a
+  username for the web UI), on every note whose frontmatter has no field
+  of that name: they filter, sort and come back like any field. A note
+  whose creation the log does not hold (older than the log, or created
+  outside gosidian) has no `created_by`: its `created` field, if any, still
+  says when. Writes outside gosidian (a `git pull`, an editor) change no
+  author. `created_at` and `modified_at` are the matching times, ISO
+  date-times that compare and sort as dates.
   One call replaces `memory_notes_by_tag`
   + `memory_batch_get(mode: frontmatter)` + filtering by hand
 - `memory_backlinks(path)`, `memory_outlinks(path,
@@ -259,6 +272,12 @@ from the caller's token identity and cannot be forged, while
 
 - `memory_compact(path, keep_last_n, archive_summary, dry_run?)` —
   shrink log-shaped notes safely
+- `memory_snapshot(path)` — freeze a note as it reads now into a dated
+  note beside it, `<name>.snapshots/YYYY-MM-DD.md`: views as their rows,
+  `=count(…)` values as numbers, embeds included, so it never recomputes;
+  `type: snapshot`, `source: [[note]]`. The note itself does not change.
+  Returns the path and how many views, values and embeds it froze
+  ([snapshots](../vault/views.md#snapshots)).
 - `memory_self_stats()` — token identity (including the multi-project
   scope list), `access` (every project the token reaches with its live
   level, `read` or `write`: a write-scoped token can still be read-only

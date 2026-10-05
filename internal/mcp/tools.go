@@ -273,6 +273,7 @@ func (s *Server) registerTools() {
 	s.registerSelfImproveTool()
 	s.registerGlobalCheckTool()
 	s.registerWaitTool()
+	s.registerSnapshotTool()
 }
 
 // ---- handlers ----
@@ -645,7 +646,8 @@ func (s *Server) handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 			nc.Content, nc.ViewsRendered = string(out), true
 		}
 	} else {
-		viewsNote = joinHints(viewsHint(note.Content, "pass render_views:true"), s.rowViewsHint(tok, note.Path, note.Content, "pass render_views:true"))
+		viewsNote = joinHints(joinHints(viewsHint(note.Content, "pass render_views:true"), s.embedsHint(tok, note.Path, note.Content, "pass render_views:true")),
+			s.rowViewsHint(tok, note.Path, note.Content, "pass render_views:true"))
 	}
 
 	// Oversize guard: truncate the body (default threshold, or the caller's
@@ -773,7 +775,8 @@ func (s *Server) handleGetSection(ctx context.Context, req mcp.CallToolRequest) 
 		"etag":    note.ETag(),
 	}
 	if !rendered {
-		if hint := joinHints(viewsHint([]byte(section), "pass render_views:true"), s.rowViewsHint(tok, note.Path, note.Content, "pass render_views:true")); hint != "" {
+		if hint := joinHints(joinHints(viewsHint([]byte(section), "pass render_views:true"), s.embedsHint(tok, note.Path, []byte(section), "pass render_views:true")),
+			s.rowViewsHint(tok, note.Path, note.Content, "pass render_views:true")); hint != "" {
 			out["hint"] = hint
 		}
 	}
@@ -1538,7 +1541,8 @@ func (s *Server) handleBatchGet(ctx context.Context, req mcp.CallToolRequest) (*
 			if sc != nil && len(sc.RowViews) > 0 && sc.IsRow(p, parser.FrontmatterRawForPath(p, note.Content)) {
 				rowHint = s.rowViewsHint(tok, p, note.Content, "read it with memory_get and render_views:true")
 			}
-			entry.Hint = joinHints(viewsHint(note.Content, "read it with memory_get and render_views:true"), rowHint)
+			entry.Hint = joinHints(joinHints(viewsHint(note.Content, "read it with memory_get and render_views:true"),
+				s.embedsHint(tok, p, note.Content, "read it with memory_get and render_views:true")), rowHint)
 		}
 		out = append(out, entry)
 	}

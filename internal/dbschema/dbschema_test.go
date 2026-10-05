@@ -312,3 +312,41 @@ func TestParse_RowsAndIsRow(t *testing.T) {
 		t.Error("rows must be a map")
 	}
 }
+
+// A rollup field is a view spec with calc and of: read into Rollup, never
+// required, and refused in a row and in an edit, since it is computed.
+func TestParse_Rollup(t *testing.T) {
+	fm := "type: database\nsource: p/docs/improvements\nfields:\n  id: {type: text}\n" +
+		"  plans:\n    type: rollup\n    required: true\n    from: p/plans\n    where:\n      - implements_imp contains this\n" +
+		"  effort:\n    type: rollup\n    from: p/plans\n    where: [implements_imp contains this]\n    calc: sum\n    of: estimate\n"
+	s, err := Parse("p/docs/improvements.md", fm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plans, _ := s.Field("plans")
+	if plans.Rollup == nil || plans.Rollup.Calc != "count" || plans.Required || !plans.Computed() ||
+		!strings.Contains(plans.Rollup.Spec, "from: p/plans") || strings.Contains(plans.Rollup.Spec, "type:") || strings.Contains(plans.Rollup.Spec, "required") {
+		t.Errorf("plans = %+v (%+v)", plans, plans.Rollup)
+	}
+	if effort, _ := s.Field("effort"); effort.Rollup.Calc != "sum" || effort.Rollup.Of != "estimate" || strings.Contains(effort.Rollup.Spec, "calc") {
+		t.Errorf("effort = %+v", effort.Rollup)
+	}
+	if ps := s.Validate("p/docs/improvements/IMP-1.md", "id: IMP-1\nplans: 3\n"); len(ps) != 1 || ps[0].Field != "plans" || !strings.Contains(ps[0].Message, "computed when the row is read") {
+		t.Errorf("validate = %+v", ps)
+	}
+	if ps := s.Validate("p/docs/improvements/IMP-1.md", "id: IMP-1\n"); len(ps) != 0 {
+		t.Errorf("a rollup is never required: %+v", ps)
+	}
+	if ps := s.CheckEdit("p/docs/improvements/IMP-1.md", map[string]any{"effort": 2.0}, nil); len(ps) != 1 || !strings.Contains(ps[0].Message, "is a rollup") {
+		t.Errorf("check edit = %+v", ps)
+	}
+	for body, msg := range map[string]string{
+		"  r:\n    type: rollup\n    where: [x = y]\n":               "has no `from`",
+		"  r:\n    type: rollup\n    from: p/plans\n    calc: avg\n": "calc \"avg\" is not one of count, sum, min, max",
+		"  r:\n    type: rollup\n    from: p/plans\n    calc: max\n": "calc max needs `of`",
+	} {
+		if _, err := Parse("p/x.md", "type: database\nsource: p/x\nfields:\n"+body); err == nil || !strings.Contains(err.Error(), msg) {
+			t.Errorf("%q: err = %v, want %q", body, err, msg)
+		}
+	}
+}

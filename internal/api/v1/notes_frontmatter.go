@@ -278,6 +278,10 @@ type rowFieldsResponse struct {
 	Values   map[string]any          `json:"values"`
 	Links    map[string][]views.Link `json:"links,omitempty"`
 	Writable bool                    `json:"writable"`
+	// CreatedBy and ModifiedBy are who created and last modified the note
+	// through gosidian, from the audit log (IMP-127 iteration 3).
+	CreatedBy  string `json:"created_by,omitempty"`
+	ModifiedBy string `json:"modified_by,omitempty"`
 }
 
 var frontmatterKeyRe = regexp.MustCompile(`(?m)^([a-zA-Z_][\w-]*):`)
@@ -317,19 +321,25 @@ func (r *Router) readRowFields(w http.ResponseWriter, req *http.Request, rel str
 			resp.Others = append(resp.Others, k)
 		}
 	}
-	hits, total, err := r.deps.Index.Query(index.QueryOptions{
+	// The rollups of the row are computed with the reader's scope (IMP-127
+	// iteration 3), and shown read-only.
+	vc := views.Context{Schema: r.viewSchema(p), CanWrite: r.viewCanWrite(p), Resolve: previewResolver{r: r, p: p}.Resolve}
+	hits, total, err := views.RollupQuery(index.QueryOptions{
 		Folders: []string{schema.Source}, Paths: []string{rel}, Fields: names, Limit: 1,
-	})
+	}, schema, vc, r.deps.Index.Query, r.viewQuery(p))
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, "query: "+err.Error())
 		return
 	}
 	res := &views.Result{Spec: &views.Spec{As: "table", Columns: names}, Hits: hits, Total: total, Schema: schema}
-	d := res.Data(views.Context{CanWrite: r.viewCanWrite(p), Resolve: previewResolver{r: r, p: p}.Resolve})
+	d := res.Data(vc)
 	resp.Database, resp.Source = d.Database, d.Source
 	resp.Columns = d.Columns[:len(schema.Fields)]
 	if len(d.Rows) == 1 {
 		resp.Values, resp.Links, resp.Writable = d.Rows[0].Fields, d.Rows[0].Links, d.Rows[0].Writable
+	}
+	if a, ok, err := r.deps.Index.AuthorOf(rel); err == nil && ok {
+		resp.CreatedBy, resp.ModifiedBy = a.CreatedBy, a.ModifiedBy
 	}
 	WriteJSON(w, http.StatusOK, resp)
 }

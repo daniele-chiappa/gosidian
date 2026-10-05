@@ -79,6 +79,20 @@ campo in `fields`) e nel grafo. Per sapere cosa è collegato a una nota bastano 
 punta, e `related contains [[nota]]` chi la punta da quel campo. Se il database dichiara `row_views`,
 una riga letta con `render_views: true` le mostra dopo il corpo (il `hint` lo dice).
 
+**Campi calcolati**: un campo `type: rollup` dello schema conta (o somma, o riduce a minimo e massimo)
+le note collegate a ogni riga, e si calcola alla lettura: chiedilo in `fields` di `memory_query` con
+`from: <source>`, o ordina per lui, invece di contare a mano i backlink riga per riga; non scriverlo
+mai nella riga. `created_by` e `modified_by` dicono chi ha creato e modificato per ultimo una nota
+passando da gosidian (dall'audit): si leggono, filtrano e ordinano come campi in `memory_query`, senza
+`memory_audit_tail` (`created_at` e `modified_at` danno l'ora). Senza `created_by` la creazione non è
+nell'audit: dillo, non indovinare.
+
+**Embed e istantanee**: una riga fatta solo di `![[nota#Titolo]]` (o `![[nota]]`) include quella
+sezione, con le sue viste calcolate per la nota che la include: per riusare una vista scrivila una volta
+e includila, invece di copiarla. Letta con `render_views: true` l'inclusione arriva fra marcatori
+`gosidian:embed`, da non copiare mai nel file. Per conservare cosa mostrano le viste di una nota in un
+momento, `memory_snapshot` la congela in `<nome>.snapshots/AAAA-MM-GG.md`.
+
 **Frontmatter**: metti fra virgolette un valore che contiene `: `, un `[[wikilink]]` o un `{{segnaposto}}`
 (`title: "Plan: uno"`, `related: "[[{{PROJECT}}/nota]]"`): senza, non è YAML valido. Una scrittura con un
 frontmatter non valido lo dice in `notices`, e il lint lo segnala con `frontmatter-invalid-yaml`.

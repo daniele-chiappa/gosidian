@@ -342,6 +342,8 @@
     "create_forbidden": "Cet accès ne permet pas d’ajouter des lignes à cette base de données.",
     "create_failed": "La ligne n’a pas été créée.",
     "row_views": "Vues de la ligne",
-    "count_notes": "note | notes"
+    "count_notes": "note | notes",
+    "created_by": "Créée par {who}",
+    "modified_by": "Modifiée par {who}"
   }
 }

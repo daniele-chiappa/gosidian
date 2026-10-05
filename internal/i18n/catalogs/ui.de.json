@@ -342,6 +342,8 @@
     "create_forbidden": "Mit diesem Zugriff lassen sich dieser Datenbank keine Zeilen hinzufügen.",
     "create_failed": "Die Zeile wurde nicht erstellt.",
     "row_views": "Zeilenansichten",
-    "count_notes": "Notiz | Notizen"
+    "count_notes": "Notiz | Notizen",
+    "created_by": "Erstellt von {who}",
+    "modified_by": "Geändert von {who}"
   }
 }

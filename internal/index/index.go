@@ -65,8 +65,9 @@ func Open(path string) (*Index, error) {
 // notes.importance; v2 (IMP-099) adds note_fields, which the boot scan fills
 // like every other table; v3 (IMP-104) adds notes.hash and the meta table, so
 // the boot scan can skip the notes whose content has not changed; v4
-// (IMP-127 iteration 2) adds links.field, the frontmatter key of a link.
-const schemaVersion = 4
+// (IMP-127 iteration 2) adds links.field, the frontmatter key of a link; v5
+// (IMP-127 iteration 3) adds the authors table.
+const schemaVersion = 5
 
 // ContentVersion identifies what an upsert extracts from a note: links,
 // tags, title, importance, note_fields and the FTS columns. Bump it whenever
@@ -426,6 +427,10 @@ func (i *Index) upsertLocked(n NoteDoc, resolve bool) (int64, error) {
 			id, f.key, f.value, f.num, f.date, f.source); err != nil {
 			return 0, err
 		}
+	}
+	// Who created and last modified it, from the audit log (authors.go).
+	if err := syncAuthorFields(tx, n.Path); err != nil {
+		return 0, err
 	}
 
 	if _, err := tx.Exec(

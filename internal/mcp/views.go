@@ -64,7 +64,35 @@ func (s *Server) viewContext(tok *auth.Token, rel string, content []byte) views.
 		Today:   time.Now(),
 		Schema:  s.viewSchema(tok),
 		Resolve: s.viewResolve(tok),
+		Load:    s.viewLoad(tok),
 	}
+}
+
+// viewLoad reads a note the token may read, for the embeds of a note
+// (![[note#Heading]]); false for any other.
+func (s *Server) viewLoad(tok *auth.Token) func(p string) ([]byte, bool) {
+	filter := buildProjectsFilter(nil, tok.ProjectList())
+	return func(p string) ([]byte, bool) {
+		if !tok.AllowsPath(p) || !filter.matches(p) || s.pathInHiddenProject(p) {
+			return nil, false
+		}
+		n, err := s.vault.Load(p)
+		if err != nil {
+			return nil, false
+		}
+		return n.Content, true
+	}
+}
+
+// embedsHint is the hint of a read that returns embeds (![[note#Heading]])
+// without the text they include. "" when content includes none for the
+// token.
+func (s *Server) embedsHint(tok *auth.Token, rel string, content []byte, how string) string {
+	n := views.CountEmbeds(content, s.viewContext(tok, rel, content))
+	if n == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d embed(s) here (![[note#Heading]]), not included: %s to see the text they include, its views computed for this note", n, how)
 }
 
 // viewResolve resolves a link target of a view to a note the token may

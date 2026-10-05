@@ -105,6 +105,9 @@ export interface RowFields {
   values: Record<string, string | string[]>
   links?: Record<string, import('./preview').ViewLink[]>
   writable: boolean
+  /** Who created and last modified the note through gosidian (audit log). */
+  created_by?: string
+  modified_by?: string
 }
 
 /** GET /api/v1/notes/{path}/fields — a row's fields, for the property panel. */
@@ -163,5 +166,24 @@ export interface CreateRowBody {
  */
 export async function createRow(database: string, body: CreateRowBody): Promise<Note> {
   const { data } = await client.post<Note>(`/notes/${encodeURIComponent(database)}/rows`, body)
+  return data
+}
+
+/** The result of a snapshot: the new note and what it froze. */
+export interface Snapshot {
+  path: string
+  source: string
+  views: number
+  values: number
+  embeds: number
+}
+
+/**
+ * POST /api/v1/notes/{path}/snapshot — the note frozen as it reads now
+ * (views as their rows, counts as numbers, embeds included) in a dated note
+ * beside it, `<name>.snapshots/YYYY-MM-DD.md`. The note itself does not change.
+ */
+export async function createSnapshot(path: string): Promise<Snapshot> {
+  const { data } = await client.post<Snapshot>(`/notes/${encodeURIComponent(path)}/snapshot`)
   return data
 }

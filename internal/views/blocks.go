@@ -123,6 +123,7 @@ func ThisFields(notePath string, fm map[string]any) map[string][]string {
 // with q in the context c. A view that fails to parse or run renders as a
 // one-line warning instead of breaking the note.
 func RenderNote(body []byte, keepSpec bool, c Context, q QueryFunc) ([]byte, string) {
+	body, ehash := ExpandEmbeds(body, keepSpec, c)
 	out, hash := Expand(body, keepSpec, func(spec string) string {
 		r, err := compute(spec, c, q)
 		if err != nil {
@@ -131,7 +132,7 @@ func RenderNote(body []byte, keepSpec bool, c Context, q QueryFunc) ([]byte, str
 		return r.Markdown()
 	})
 	out, vhash := ExpandValues(out, keepSpec, c, q)
-	return out, joinHashes(hash, vhash)
+	return out, joinHashes(joinHashes(hash, vhash), ehash)
 }
 
 // joinHashes combines the hash of a note's views and of its values: "" when
@@ -157,6 +158,7 @@ func RenderNoteWithin(body []byte, keepSpec bool, c Context, q QueryFunc, budget
 		out, hash = RenderNote(body, keepSpec, c, q)
 		return out, hash, false
 	}
+	body, ehash := ExpandEmbeds(body, keepSpec, c)
 	type view struct {
 		r    *Result
 		text string
@@ -188,7 +190,7 @@ func RenderNoteWithin(body []byte, keepSpec bool, c Context, q QueryFunc, budget
 	})
 	// Values are a number each: they stay out of the budget.
 	out, vhash := ExpandValues(out, keepSpec, c, q)
-	return out, joinHashes(hash, vhash), cut
+	return out, joinHashes(joinHashes(hash, vhash), ehash), cut
 }
 
 // fairShares splits budget among views of the given sizes: when they all
@@ -227,6 +229,7 @@ func fairShares(sizes []int, budget int) []int {
 // RenderNote without the spec, and returns the views in the form the
 // editors use, in the order of their data-view index.
 func RenderNoteData(body []byte, c Context, q QueryFunc) ([]byte, []Data) {
+	body, _ = ExpandEmbeds(body, false, c)
 	var data []Data
 	out, _ := Expand(body, false, func(spec string) string {
 		r, err := compute(spec, c, q)

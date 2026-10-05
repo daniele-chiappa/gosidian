@@ -98,11 +98,58 @@ heading):
 - `links` is a pseudo-field for every link of a note, body and frontmatter
   alike: `links contains this` lists what links to the note, its
   backlinks as a view. It is not a column.
+- `path` is the note itself: `path in this.implements_imp` keeps the notes
+  the `implements_imp` field of the note holding the view points at, the
+  other direction of a relation; `path = [[note]]` keeps that one note.
+  It takes `=`, `!=` and `in`.
 
 A value written as a `[[wikilink]]` must name a note the reader can open,
 or the view says so. In YAML write it in a block list (`- related contains
 [[note]]`) or quoted: inside `[ … ]` the brackets start a list. A
-database can give every row such views with [`row_views`](databases.md#row-views).
+database can give every row such views with [`row_views`](databases.md#row-views),
+and count or sum what a row's relations reach with [rollups](databases.md#rollups).
+
+## Embeds
+
+A line made of `![[note#Heading]]` alone includes that section of another
+note, `![[note]]` the whole note, as in Obsidian, so the same text works
+there. The views and values it includes are computed with `this` the note
+that embeds them: a section such as "What links here" (`links contains
+this`) written once serves as a model in many notes. To list from the
+other note, write its path in the view instead of `this`.
+
+- Only a markdown note the reader may open is included; an image embed
+  stays an image, a note the reader cannot open stays a link.
+- One level: an embed inside the included text is shown as a link, and so
+  is a note that embeds itself. A heading the note does not have shows a
+  warning; the heading is found as `memory_get_section` finds it (its
+  text, or an ID at its start).
+- **Web UI** — the included text follows a small head that links to its
+  origin and ends with a rule; the tables and boards it includes edit
+  their rows as in the note itself.
+- **Agents** — with `render_views` (`memory_get`, `memory_get_section`)
+  and in the bootstrap, the embed line stays and the included text follows
+  it between `gosidian:embed` markers, never to be copied into the file.
+  Without, the `hint` says how many embeds were left out.
+
+## Snapshots
+
+A snapshot freezes a note as it reads now: `memory_snapshot(path)`, `POST
+/api/v1/notes/{path}/snapshot`, or the camera button of a note in the web
+UI. It writes a dated note beside it, `<folder>/<name>.snapshots/
+YYYY-MM-DD.md` (with the time for a second one the same day), and the note
+itself does not change.
+
+- **What it holds**: the note's text with each view replaced by its rows,
+  each value by its number (its expression kept as text, between double
+  backticks) and its embeds included, so the snapshot never recomputes;
+  above it, a line that says what it is a snapshot of and when.
+- **Frontmatter**: `type: snapshot`, `source: "[[note]]"`, `date` and the
+  project's tag only, so the snapshot of a plan is no plan. It sits in a
+  subfolder, out of the rows of a database and of a view of the folder.
+- The vault's git keeps the series: what a backlog view showed each week,
+  say. A snapshot links to what its views listed, so those notes count it
+  among their backlinks.
 
 ## Values in the text
 

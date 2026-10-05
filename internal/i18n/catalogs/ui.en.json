@@ -85,7 +85,9 @@
     "copy": "Copy note source",
     "copied": "Copied!",
     "history": "History",
-    "unsaved": "Unsaved changes"
+    "unsaved": "Unsaved changes",
+    "snapshot": "Snapshot: freeze views and counts into a dated note",
+    "snapshot_failed": "Snapshot failed"
   },
   "note_create": {
     "title": "New note",
@@ -411,6 +413,8 @@
     "create_forbidden": "Rows cannot be added to this database with your access.",
     "create_failed": "The row was not created.",
     "row_views": "Row views",
-    "count_notes": "note | notes"
+    "count_notes": "note | notes",
+    "created_by": "Created by {who}",
+    "modified_by": "Modified by {who}"
   }
 }

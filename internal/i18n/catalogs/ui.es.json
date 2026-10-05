@@ -342,6 +342,8 @@
     "create_forbidden": "Con este acceso no se pueden añadir filas a esta base de datos.",
     "create_failed": "La fila no se ha creado.",
     "row_views": "Vistas de la fila",
-    "count_notes": "nota | notas"
+    "count_notes": "nota | notas",
+    "created_by": "Creada por {who}",
+    "modified_by": "Modificada por {who}"
   }
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/gosidian/gosidian/internal/dbschema"
 	"github.com/gosidian/gosidian/internal/index"
+	"github.com/gosidian/gosidian/internal/views"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -20,6 +21,7 @@ func (s *Server) registerQueryTool() {
 		mcp.WithDescription("Find notes by their frontmatter, like a Dataview filter: every condition in `where` must hold. "+
 			"A field is a frontmatter key (a list matches element by element); a namespaced tag counts as a field when the note has no field of that name "+
 			"(tag status:done → status = done), and `tags` is the tag list. "+
+			"created_by and modified_by are who created and last modified the note through gosidian (audit log), usable as fields; over the rows of a database (from its source) its rollup fields are computed when fields or sort names them. "+
 			"Operators: eq, ne, in, exists, lt, lte, gt, gte, contains. ISO dates (YYYY-MM-DD) and numbers compare as such, text ignores case; "+
 			"ne and exists:false also match notes without the field. "+
 			"A value written as a [[wikilink]] matches by link, however the note writes it: related contains [[p/x]] finds the notes whose related field links to p/x, "+
@@ -104,7 +106,14 @@ func (s *Server) handleQuery(ctx context.Context, req mcp.CallToolRequest) (*mcp
 			opts.SortOrder = dbschema.OptionOrderOf(schemas, sort)
 		}
 	}
-	hits, total, err := s.index.Query(opts)
+	// Over the rows of one database, its rollups are computed for the rows
+	// (IMP-127 iteration 3), within the token's scope.
+	var schema *dbschema.Schema
+	if len(from) == 1 {
+		schema = s.viewSchema(tok)(from[0])
+	}
+	vc := views.Context{Schema: s.viewSchema(tok), Resolve: s.viewResolve(tok)}
+	hits, total, err := views.RollupQuery(opts, schema, vc, s.index.Query, s.viewQuery(tok))
 	if errors.Is(err, index.ErrBadQuery) {
 		return mcp.NewToolResultError(err.Error()), nil
 	}

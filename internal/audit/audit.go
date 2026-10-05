@@ -18,6 +18,7 @@
 package audit
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -125,6 +126,47 @@ type Entry struct {
 type Log struct {
 	path string
 	mu   sync.Mutex
+	// hooks run after each entry is written (OnWrite).
+	hooksMu sync.RWMutex
+	hooks   []func(Entry)
+}
+
+// OnWrite registers fn to run after every entry written to the log, with
+// the entry as written: the index keeps the authors of the notes with it
+// (IMP-127 iteration 3). Hooks run on the writer's goroutine, after the
+// line is on disk, and must be quick.
+func (l *Log) OnWrite(fn func(Entry)) {
+	if l == nil || fn == nil {
+		return
+	}
+	l.hooksMu.Lock()
+	l.hooks = append(l.hooks, fn)
+	l.hooksMu.Unlock()
+}
+
+// Each reads the whole log, oldest first, and calls fn with every entry it
+// can parse; a malformed line is skipped. A missing log is empty.
+func (l *Log) Each(fn func(Entry)) error {
+	if l == nil {
+		return nil
+	}
+	f, err := os.Open(l.path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		var e Entry
+		if json.Unmarshal(sc.Bytes(), &e) == nil {
+			fn(e)
+		}
+	}
+	return sc.Err()
 }
 
 // Open prepares the audit log file. The directory is created if missing. A
@@ -136,17 +178,33 @@ func Open(path string) (*Log, error) {
 	return &Log{path: path}, nil
 }
 
-// Write appends an entry. Best-effort: errors are returned but callers are
-// free to ignore them — failing to audit must never block the user request.
-// Named return so the deferred close can promote a flush error to the caller
-// when the write itself succeeded (CodeQL go/unhandled-writable-file-close).
-func (l *Log) Write(e Entry) (err error) {
+// Write appends an entry, then runs the OnWrite hooks. Best-effort: errors
+// are returned but callers are free to ignore them — failing to audit must
+// never block the user request.
+func (l *Log) Write(e Entry) error {
 	if l == nil {
 		return nil
 	}
 	if e.TS.IsZero() {
 		e.TS = time.Now().UTC()
 	}
+	if err := l.write(e); err != nil {
+		return err
+	}
+	// After the lock and the close: a hook may take other locks (the index).
+	l.hooksMu.RLock()
+	hooks := l.hooks
+	l.hooksMu.RUnlock()
+	for _, h := range hooks {
+		h(e)
+	}
+	return nil
+}
+
+// write appends one line under the lock. Named return so the deferred
+// close can promote a flush error to the caller when the write itself
+// succeeded (CodeQL go/unhandled-writable-file-close).
+func (l *Log) write(e Entry) (err error) {
 	data, err := json.Marshal(&e)
 	if err != nil {
 		return err

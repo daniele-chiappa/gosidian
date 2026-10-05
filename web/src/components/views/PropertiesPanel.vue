@@ -63,6 +63,16 @@ const seenOf = (col: ViewColumn): FieldValue => {
 }
 const others = computed<ViewColumn[]>(() => (data.value?.others ?? []).map((name) => ({ name })))
 
+// Who created and last modified the note, from the audit log.
+const authors = computed(() =>
+  [
+    data.value?.created_by ? t('views.created_by', { who: data.value.created_by }) : '',
+    data.value?.modified_by ? t('views.modified_by', { who: data.value.modified_by }) : '',
+  ]
+    .filter(Boolean)
+    .join(' · '),
+)
+
 const databaseTitle = computed(() =>
   (data.value?.database?.split('/').pop() ?? '').replace(/\.md$/, ''),
 )
@@ -198,6 +208,7 @@ const noteHref = (path: string) => '/notes/' + path.split('/').map(encodeURIComp
         </dd>
       </template>
     </dl>
+    <p v-if="authors" class="mb-0 mt-2 text-xs text-text-muted" data-authors>{{ authors }}</p>
     <template v-if="others.length">
       <p class="mb-1 mt-3 text-xs text-text-muted">{{ t('views.not_declared') }}</p>
       <dl class="m-0 grid grid-cols-[minmax(7rem,max-content)_1fr] items-baseline gap-x-4 gap-y-1">

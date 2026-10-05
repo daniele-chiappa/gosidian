@@ -60,3 +60,16 @@ CREATE TABLE IF NOT EXISTS note_fields (
 );
 CREATE INDEX IF NOT EXISTS note_fields_key ON note_fields(key, value);
 CREATE INDEX IF NOT EXISTS note_fields_note ON note_fields(note_id);
+
+-- Who created and last modified each note through gosidian (v5, IMP-127
+-- iteration 3): replayed from the audit log at every start and kept current
+-- by its writes. The values reach queries as note_fields rows of source
+-- audit (created_by, modified_by) on the notes whose frontmatter has no such
+-- field.
+CREATE TABLE IF NOT EXISTS authors (
+    path        TEXT PRIMARY KEY,
+    created_by  TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT '',
+    modified_by TEXT NOT NULL DEFAULT '',
+    modified_at TEXT NOT NULL DEFAULT ''
+);
