@@ -43,8 +43,8 @@ func (s *Server) registerQueryTool() {
 				},
 				"required": []string{"field"},
 			})),
-		mcp.WithString("sort", mcp.Description("Field to sort by, or path, title, modified (default: modified, newest first). Notes without the field come last. With project set, a select field of the project's databases sorts by its options (low, medium, high), not alphabetically.")),
-		mcp.WithString("order", mcp.Description("desc (default) or asc; path and title default to asc.")),
+		mcp.WithString("sort", mcp.Description(fmt.Sprintf("Field to sort by, or path, title, modified (default: modified, newest first); up to %d keys separated by commas, each with its own asc or desc, the next key ordering the ties of the one before: \"plans desc, id asc\". Notes without the field come last; the path breaks the last ties. With project set, a select field of the project's databases sorts by its options (low, medium, high), not alphabetically.", index.MaxSortKeys))),
+		mcp.WithString("order", mcp.Description("desc (default) or asc, for the sort keys without their own; path and title default to asc.")),
 		mcp.WithArray("fields", mcp.Description("Frontmatter fields to return for each note (default: the fields used in where and sort)."), mcp.WithStringItems()),
 		mcp.WithNumber("limit", mcp.Description(fmt.Sprintf("Max notes (default %d, max %d). `total` tells how many matched.", index.QueryDefaultLimit, index.QueryMaxLimit))),
 	), s.handleQuery)
@@ -77,7 +77,7 @@ func (s *Server) handleQuery(ctx context.Context, req mcp.CallToolRequest) (*mcp
 		}
 	}
 	sort := strings.TrimSpace(req.GetString("sort", ""))
-	desc, err := index.SortDesc(sort, req.GetString("order", ""))
+	keys, err := index.ParseSort(sort, req.GetString("order", ""))
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -96,14 +96,15 @@ func (s *Server) handleQuery(ctx context.Context, req mcp.CallToolRequest) (*mcp
 		requested = []string{project}
 	}
 	filter := buildProjectsFilter(requested, tok.ProjectList())
-	opts := index.QueryOptions{Exclude: s.hiddenProjects(), Folders: from, Where: where, Sort: sort, Desc: desc, Limit: limit, Fields: fields}
+	opts := index.QueryOptions{Exclude: s.hiddenProjects(), Folders: from, Where: where, Limit: limit, Fields: fields}
+	opts.SetSortKeys(keys)
 	if filter.active {
 		opts.Projects = append([]string{}, filter.allowed...) // non-nil: empty matches nothing
 	}
 	if project != "" && len(opts.Projects) == 1 {
 		// A select of the project's databases sorts by its options (IMP-127).
 		if schemas, _, err := dbschema.ForProject(s.index, s.vault, project); err == nil {
-			opts.SortOrder = dbschema.OptionOrderOf(schemas, sort)
+			opts.SetSortKeys(dbschema.WithOptionOrder(schemas, opts.SortKeys()))
 		}
 	}
 	// Over the rows of one database, its rollups are computed for the rows

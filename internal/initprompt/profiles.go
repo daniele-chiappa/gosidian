@@ -206,7 +206,10 @@ const StubVersion = 3
 // when the user asks and tried with memory_automations (as_of) first; the
 // bootstrap's pending_handoffs, the automation's alerts among them, dealt
 // with before the rest.
-const DirectivesVersion = 23
+//
+// v24 (2026-10-05, IMP-143): sort takes several keys separated by commas,
+// for the ties of a rollup, instead of reordering the result by hand.
+const DirectivesVersion = 24
 
 // AnchorVersion is the version of the agent-anchor template/format. It is
 // substituted into the `<!-- gosidian:anchor v=N ... -->` marker so the

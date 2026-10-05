@@ -140,6 +140,23 @@ Line start:
 	}
 }
 
+// A hex color code is not a tag, whatever its case and length among 3, 4,
+// 6 and 8 (IMP-145); a longer or a non-hex word is.
+func TestExtract_ColorsAreNotTags(t *testing.T) {
+	body := []byte("Brand #AC1F24, text #fff on #F5F6F7, overlay (#c0392b80) and #FFFF; palette #FAFAFA/#EFEFEF/#333.\n" +
+		"Tags #topic, #cafebabe1, #fffa0/x, #decaf and #bad-word stay.\n")
+	_, tags, _ := Extract(body)
+	want := []string{"topic", "cafebabe1", "fffa0/x", "decaf", "bad-word"}
+	if !reflect.DeepEqual(tags, want) {
+		t.Errorf("tags mismatch:\ngot  %v\nwant %v", tags, want)
+	}
+	for tag, want := range map[string]bool{"fff": true, "FAFAFA/": true, "abc//": false, "AC1F24": true, "c0392b80": true, "abcd": true, "ab": false, "abcde": false, "abcdefg": false, "fffg": false, "": false} {
+		if got := IsColorTag(tag); got != want {
+			t.Errorf("IsColorTag(%q) = %v", tag, got)
+		}
+	}
+}
+
 // A value is quoted only when it opens and closes with the same quote: a
 // title that merely ends with a quoted phrase keeps both quotes (BUG-089).
 func TestParseFrontmatterFields_Quotes(t *testing.T) {

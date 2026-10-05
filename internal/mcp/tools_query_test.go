@@ -214,6 +214,23 @@ func TestMCP_QuerySortsSelectByOptions(t *testing.T) {
 	if got := titles(args); !reflect.DeepEqual(got, []string{"One", "Three", "Two"}) {
 		t.Errorf("option order with the project: %v", got)
 	}
+	// A second key orders the ties of the first, each key with its options
+	// (IMP-143); order is the direction of the keys without their own.
+	if res, _ := s.handleCreate(ctx, call(map[string]any{"path": "alpha/docs/improvements/IMP-004.md", "content": "---\ntitle: Four\npriority: high\n---\n"})); res.IsError {
+		t.Fatal(expectError(t, res))
+	}
+	args["sort"] = "priority, title asc"
+	if got := titles(args); !reflect.DeepEqual(got, []string{"Four", "One", "Three", "Two"}) {
+		t.Errorf("priority, then title: %v", got)
+	}
+	args["sort"], args["order"] = "priority desc, title", "asc"
+	if got := titles(args); !reflect.DeepEqual(got, []string{"Four", "One", "Three", "Two"}) {
+		t.Errorf("order for the keys without one: %v", got)
+	}
+	args["sort"] = "priority desc, title, path, modified, id"
+	if res, _ := s.handleQuery(ctx, call(args)); !strings.Contains(expectError(t, res), "at most 4 keys") {
+		t.Errorf("five keys accepted")
+	}
 }
 
 // from keeps the notes directly inside the folders, and lets where be empty.

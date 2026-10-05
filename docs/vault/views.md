@@ -25,7 +25,7 @@ view stays a readable code block.
 |---|---|
 | `from` | the folder whose notes the view lists (or a list of folders); only notes **directly** inside it, the rows of a [database note](databases.md) |
 | `where` | conditions, all required: a `"field op value"` string or a `{field, op, value}` map as in `memory_query` |
-| `sort` | a field, or `path`, `title`, `modified`, optionally followed by `asc` or `desc`. A select field of the database the view lists sorts by its options (`low`, `medium`, `high`), not alphabetically |
+| `sort` | a field, or `path`, `title`, `modified`, optionally followed by `asc` or `desc` (default `desc`, `asc` for `path` and `title`). Up to four keys, as a list (`sort: [status asc, priority desc]`) or separated by commas (`sort: plans desc, id asc`): each key orders the notes the one before leaves tied, and the path breaks the last ties. A select field of the database the view lists sorts by its options (`low`, `medium`, `high`), not alphabetically |
 | `columns` | what to show; `title` links to the note, `path` and `modified` come from the note itself, anything else from its frontmatter. Default: `title` plus the fields used in `where` and `sort` |
 | `limit` | rows to show (default 50, max 500); a note under the table says when more match |
 | `as` | `table` (default), `list`, `board`, or `count` |
@@ -179,12 +179,13 @@ edited in Obsidian.
 | `or:` of folders, or of one field equal to several values | several folders, `in` |
 | `not:`, a leading `!` | the opposite condition (`=` and `!=`, `<` and `>=`, `exists` and `!exists`) |
 | `order` | `columns`, with `file.name` as `title`, `file.mtime` as `modified`, `file.ctime` as `created_at`; the title comes first |
-| the first `sort` key, `limit` | `sort`, `limit` |
+| the `sort` keys, `limit` | `sort`, `limit` |
 | `type: table`, `type: list` | `as: table`, `as: list` |
 
 Left out, each with its warning: formulas, summaries, display names,
-grouping, the keys of `sort` after the first, the other view types (cards
-show as a table), and filters that name dates relative to now, the file's
+grouping, a `sort` key without an equivalent and the keys after it (they
+would order other ties), keys beyond the fourth, the other view types
+(cards show as a table), and filters that name dates relative to now, the file's
 name or a formula. A filter left out widens the view, and the warning says
 so. `file.hasLink(this)` names the base itself, and gosidian does not
 follow links to a base, so its view lists nothing. `file.ext == "md"`,

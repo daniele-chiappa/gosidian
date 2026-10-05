@@ -37,6 +37,7 @@ import RowViews from '@/components/views/RowViews.vue'
 import HTMLPreview from '@/components/domain/HTMLPreview.vue'
 import MediaPreview from '@/components/domain/MediaPreview.vue'
 import TablePreview from '@/components/domain/TablePreview.vue'
+import CanvasPreview from '@/components/domain/CanvasPreview.vue'
 import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
 import { planciaKey } from '@/composables/planciaKey'
 import { useAccessStore } from '@/stores/access'
@@ -91,9 +92,7 @@ let copiedTimer: ReturnType<typeof setTimeout> | null = null
 // Read by default; honour an explicit edit intent (legacy /notes/:path/edit
 // deep-link) only when the user may write.
 const mode = ref<Mode>(
-  props.mode === 'edit' &&
-    access.canWrite(props.path) &&
-    !props.path.toLowerCase().endsWith('.base')
+  props.mode === 'edit' && access.canWrite(props.path) && !/\.(base|canvas)$/i.test(props.path)
     ? 'edit'
     : 'view',
 )
@@ -114,6 +113,13 @@ const isTable = computed(() => note.value?.kind === 'table')
 const isBase = computed(
   () => note.value?.kind === 'base' || path.value.toLowerCase().endsWith('.base'),
 )
+// An Obsidian canvas (IMP-144): read-only, its cards drawn where the file
+// puts them; its JSON comes as source.
+const isCanvas = computed(
+  () => note.value?.kind === 'canvas' || path.value.toLowerCase().endsWith('.canvas'),
+)
+// A base or a canvas: shown, never edited here.
+const isReadOnlyFile = computed(() => isBase.value || isCanvas.value)
 const project = computed(() => {
   const parts = path.value.split('/')
   return parts.length > 1 ? parts[0] : undefined
@@ -149,8 +155,9 @@ async function load() {
     draft.value = fetched.content
     recents.record(fetched.path, fetched.title || fetched.path)
     emit('title', fetched.title || fetched.path)
-    // HTML notes bypass the markdown renderer; the iframe shows raw content.
-    if (isHtml.value) {
+    // HTML notes bypass the markdown renderer; the iframe shows raw content,
+    // and a canvas draws its cards, rendered by the server.
+    if (isHtml.value || isCanvas.value) {
       previewHTML.value = ''
       previewViews.value = []
     } else {
@@ -306,7 +313,7 @@ async function destroy() {
 // `draft` always holds the current source: the saved content in view mode and
 // the live edits in edit mode.
 async function copySource() {
-  const text = isBase.value ? (note.value?.source ?? '') : draft.value
+  const text = isReadOnlyFile.value ? (note.value?.source ?? '') : draft.value
   try {
     await navigator.clipboard.writeText(text)
   } catch {
@@ -361,8 +368,9 @@ async function downloadOriginal() {
   // (server ?inline). The stored note keeps the lightweight reference for MCP
   // reads/editing. Falls back to the in-memory content if the fetch fails.
   let content = note.value.content
-  if (isBase.value) {
-    // A base downloads as the YAML it is, not its views translated.
+  if (isReadOnlyFile.value) {
+    // A base or a canvas downloads as the file it is (YAML, JSON), not as
+    // what gosidian shows of it.
     content = note.value.source ?? ''
   } else {
     try {
@@ -459,7 +467,7 @@ watch(path, load)
           View
         </button>
         <button
-          v-if="access.canWrite(props.path) && !isBase"
+          v-if="access.canWrite(props.path) && !isReadOnlyFile"
           type="button"
           class="px-2 py-1"
           :class="mode === 'edit' ? 'bg-accent text-accent-fg' : 'hover:bg-surface-hover'"
@@ -501,7 +509,7 @@ watch(path, load)
       </template>
 
       <button
-        v-if="note && mode === 'view' && !isHtml && !isMedia"
+        v-if="note && mode === 'view' && !isHtml && !isMedia && !isCanvas"
         type="button"
         class="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text"
         :title="t('note.print')"
@@ -536,7 +544,7 @@ watch(path, load)
       </button>
 
       <button
-        v-if="note && !isHtml && !isMedia && !isBase && access.canWrite(props.path)"
+        v-if="note && !isHtml && !isMedia && !isReadOnlyFile && access.canWrite(props.path)"
         type="button"
         class="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text disabled:opacity-50"
         :disabled="snapshotting"
@@ -607,6 +615,14 @@ watch(path, load)
         :caption-html="previewHTML"
         :note-path="note.path"
       />
+      <!-- An Obsidian canvas (IMP-144): its cards on a plane, full-bleed -->
+      <div v-else-if="isCanvas && note" class="flex h-full flex-col">
+        <p class="px-4 py-1 text-xs text-text-muted font-mono">
+          {{ note.path }} · etag {{ note.etag.slice(0, 12) }} · {{ note.size }} bytes ·
+          {{ t('note.canvas_readonly') }}
+        </p>
+        <CanvasPreview v-if="note.canvas" class="flex-1" :canvas="note.canvas" />
+      </div>
       <!-- CSV table note (ADR-016): paginated table + rendered caption -->
       <TablePreview
         v-else-if="isTable && note && note.media"

@@ -115,6 +115,28 @@ func parseWikiLinkInner(content string) (target, alias string) {
 // Must be preceded by start-of-line or whitespace.
 var tagRe = regexp.MustCompile(`(^|[\s>(])#([\p{L}_][\p{L}\p{N}_\-/]*)`)
 
+// IsColorTag reports whether an inline #tag is a hex color code, such as
+// #AC1F24 or #fff: a word of 3, 4, 6 or 8 hex digits is never a tag
+// (IMP-145), nor is one followed by a slash, as in a list of colors
+// (#FAFAFA/#EFEFEF). Obsidian makes a tag of those starting with a letter;
+// here they are colors, in the text of a note and in the tags it is listed
+// by.
+func IsColorTag(tag string) bool {
+	tag = strings.TrimSuffix(tag, "/")
+	switch len(tag) {
+	case 3, 4, 6, 8:
+	default:
+		return false
+	}
+	for i := 0; i < len(tag); i++ {
+		c := tag[i]
+		if !('0' <= c && c <= '9' || 'a' <= c && c <= 'f' || 'A' <= c && c <= 'F') {
+			return false
+		}
+	}
+	return true
+}
+
 // frontmatter: lines between --- / --- at top
 var frontmatterRe = regexp.MustCompile(`(?s)\A---\r?\n(.*?)\r?\n---\r?\n`)
 var frontTitleRe = regexp.MustCompile(`(?m)^title:[ \t]*(.*)$`)
@@ -558,6 +580,9 @@ func Extract(body []byte) (links []WikiLinkRef, tags []string, title string) {
 	}
 	for _, m := range tagRe.FindAllStringSubmatch(stripped, -1) {
 		t := m[2]
+		if IsColorTag(t) {
+			continue
+		}
 		if _, ok := seen[t]; ok {
 			continue
 		}

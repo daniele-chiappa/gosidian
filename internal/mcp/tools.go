@@ -139,8 +139,8 @@ func (s *Server) registerTools() {
 
 	s.impl.AddTool(mcp.NewTool("memory_get",
 		mcp.WithDescription("Read a note by its vault-relative path (e.g. 'project/note.md'). Oversize guard: when the body exceeds 24 KiB (and raw is not set) the response is truncated — frontmatter + heading outline + the first chunk, with truncated:true, the full size, and the note's real etag (if_match still works). Fetch just the section you need via memory_get_section, or pass raw:true only when you really need the whole body. To get a large note onto your own disk without spending context tokens, GET the HTTP /download endpoint instead (your MCP base URL plus /download?path=<path>, bearer token), or pass transfer:\"http\" for a single-use URL that needs no bearer — see bootstrap capabilities. An Obsidian base ('project/books.base') reads as a note too, read-only: kind \"base\", its views translated into ```view blocks (render_views computes them), what has no equivalent in a warning, and its YAML in source."),
-		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative path to the .md file.")),
-		mcp.WithBoolean("raw", mcp.Description("Bypass the oversize guard and return the full body regardless of size.")),
+		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative path to the .md file; an Obsidian .base or .canvas reads too, read-only, with kind base or canvas.")),
+		mcp.WithBoolean("raw", mcp.Description("Bypass the oversize guard and return the full body regardless of size; for a .canvas, also its JSON in source.")),
 		mcp.WithNumber("max_bytes", mcp.Description("Explicit body cap in bytes — truncates even below the default threshold. Ignored when raw:true.")),
 		mcp.WithBoolean("render_views", mcp.Description("Also compute the note's ```view blocks: each block stays and its result follows it between gosidian:view-result markers. Off by default, so a note read to be edited comes back as it is on disk (the response's hint then says how many blocks were left uncomputed); never write the computed result back.")),
 		mcp.WithString("transfer", mcp.Description("\"http\": instead of the body, a single-use URL (5 min) to GET the note's raw bytes with no Authorization header, plus its etag and size. For a body you want on your own disk without spending context tokens when you cannot read your bearer for /download (a cautious client blocks reading it from its config).")),
@@ -576,10 +576,11 @@ type noteContent struct {
 	// ViewsRendered says Content carries computed views (render_views), so
 	// it is not the file as stored; ETag is still the stored file's.
 	ViewsRendered bool            `json:"views_rendered,omitempty"`
-	Kind          string          `json:"kind,omitempty"`  // "image" for a resolved media note (ADR-013), "base" for an Obsidian base; empty otherwise
+	Kind          string          `json:"kind,omitempty"`  // "image" for a resolved media note (ADR-013), "base" for an Obsidian base, "canvas" for an Obsidian canvas; empty otherwise
 	Media         *vault.MediaRef `json:"media,omitempty"` // resolved image payload when Kind=="image"
 	// Source is an Obsidian base's YAML as written (Kind "base"); Content
-	// is then its views translated (IMP-118).
+	// is then its views translated (IMP-118). For a canvas (Kind "canvas",
+	// IMP-144), its JSON, with raw:true.
 	Source string `json:"source,omitempty"`
 	// Oversize-guard fields (plan 20260706-token-economy-round2): set only
 	// when the body was truncated. ETag always stamps the FULL note, so
@@ -626,6 +627,9 @@ func (s *Server) handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	}
 	if vault.IsBaseFile(path) {
 		return s.getBase(tok, path, req.GetBool("render_views", false)), nil
+	}
+	if vault.IsCanvasFile(path) {
+		return s.getCanvas(tok, path, req.GetBool("raw", false)), nil
 	}
 	note, err := s.vault.Load(path)
 	if err != nil {
@@ -1797,6 +1801,9 @@ func readNoteError(path string, err error) *mcp.CallToolResult {
 func writeNoteError(rel string, err error) *mcp.CallToolResult {
 	if errors.Is(err, vault.ErrNotNote) && vault.IsBaseFile(rel) {
 		return mcp.NewToolResultErrorf("%q is an Obsidian base, read-only in gosidian: memory_get shows its views; it is edited in Obsidian", rel)
+	}
+	if errors.Is(err, vault.ErrNotNote) && vault.IsCanvasFile(rel) {
+		return mcp.NewToolResultErrorf("%q is an Obsidian canvas, read-only in gosidian: memory_get shows its cards as text; it is edited in Obsidian", rel)
 	}
 	if errors.Is(err, vault.ErrNotNote) {
 		return mcp.NewToolResultErrorf("%q is not a note (.md, or .html when html notes are enabled) — files go through memory_ingest (bridge_filename, source_path, transfer:\"http\") or memory_upload_attachment", rel)

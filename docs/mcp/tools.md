@@ -85,7 +85,13 @@ a note naming it (and the likely intended argument, e.g. `Project` →
   Obsidian `.base` file reads as a read-only note, `kind: "base"`: its
   views translated into view blocks (computed with `render_views`), a
   warning for what has no equivalent, its YAML in `source`; no tool
-  writes it ([views](../vault/views.md#obsidian-bases)).
+  writes it ([views](../vault/views.md#obsidian-bases)). An Obsidian
+  `.canvas` reads as one too, `kind: "canvas"`: its cards as text, in
+  their groups and in reading order (text cards quoted, file cards as
+  wikilinks to the notes the token may read, web links), then its
+  connections (`A → B: label`); its JSON in `source` with `raw:true`
+  only, since it is mostly coordinates
+  ([compatibility](../vault/obsidian-compat.md#obsidian-canvases)).
   `memory_get_section` takes the start of a heading when it names only
   one, such as an ID (`BUG-014` for `## BUG-014 — …`), and answers with
   the full heading; among several, the one of the highest level wins
@@ -112,8 +118,12 @@ a note naming it (and the likely intended argument, e.g. `Project` →
   ignores case; `ne` and `exists: false` also match notes without the
   field. Each note comes back with its path, title, modification time
   and the fields asked for (default: those used to filter and sort),
-  plus `total` and `truncated`. With `project`, a `select` field of the
-  project's databases sorts by its options rather than alphabetically.
+  plus `total` and `truncated`. `sort` is a field (or `path`, `title`,
+  `modified`), or up to four keys separated by commas, each with its own
+  `asc` or `desc` (`"plans desc, id asc"`): a key orders the ties of the
+  one before; `order` is the direction of the keys without one. With
+  `project`, a `select` field of the project's databases sorts by its
+  options rather than alphabetically.
   `from` (a folder or a list) keeps the notes directly inside it, the
   rows of a database, as the `from` of a view does; with it `where` may
   be empty. A value written as a `[[wikilink]]` matches by link, however

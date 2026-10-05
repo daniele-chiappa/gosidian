@@ -187,7 +187,10 @@ fields:
   with the reader's scope: a note the reader may not see does not count.
 - **Sorting**: a view or a query sorted by a rollup reads every row,
   computes and sorts them, and keeps the limit; it reads at most 500 rows,
-  and asks to narrow the view beyond that. A `where` or a `group_by` on a
+  and asks to narrow the view beyond that. The rollup can be one key of
+  several (`sort: plans desc, open_plans desc, id asc`), first or to
+  break the ties of a field: every key is then sorted with it, the same
+  way the index sorts. A `where` or a `group_by` on a
   rollup is refused: filter on the fields it counts instead.
 - **One database at a time**: a rollup is computed over the rows of its
   database, so a query over several folders (`from: [a, b]`) that names

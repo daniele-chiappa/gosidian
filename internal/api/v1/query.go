@@ -79,7 +79,7 @@ func (r *Router) handleQuery(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
 		return
 	}
-	desc, err := index.SortDesc(body.Sort, body.Order)
+	keys, err := index.ParseSort(body.Sort, body.Order)
 	if err != nil {
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
 		return
@@ -96,13 +96,14 @@ func (r *Router) handleQuery(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	opts := index.QueryOptions{
-		Projects: scope, Folders: from, Where: where, Sort: strings.TrimSpace(body.Sort), Desc: desc,
+		Projects: scope, Folders: from, Where: where,
 		Limit: index.ClampQueryLimit(body.Limit), Fields: fields,
 	}
+	opts.SetSortKeys(keys)
 	if project := strings.TrimSpace(body.Project); project != "" && len(scope) == 1 && scope[0] == project {
 		// A select of the project's databases sorts by its options (IMP-127).
 		if schemas, _, err := dbschema.ForProject(r.deps.Index, r.deps.Vault, project); err == nil {
-			opts.SortOrder = dbschema.OptionOrderOf(schemas, opts.Sort)
+			opts.SetSortKeys(dbschema.WithOptionOrder(schemas, opts.SortKeys()))
 		}
 	}
 	// Over the rows of one database, its rollups are computed for the rows

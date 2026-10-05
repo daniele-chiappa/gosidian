@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/gosidian/gosidian/internal/index"
 )
 
 // Obsidian bases (IMP-118, IMP-127 iteration 3, phase 5): a .base file is
@@ -143,22 +145,29 @@ func translateBaseView(project string, global any, v rawBaseView) BaseView {
 		warn("summaries have no equivalent: they are left out")
 	}
 
-	if len(v.Sort) > 0 {
-		k := v.Sort[0]
-		if f, ok := baseColumn(k.Property); ok {
-			spec.Sort = f + " " + strings.ToLower(strings.TrimSpace(k.Direction))
-			spec.Sort = strings.TrimSpace(spec.Sort)
-		} else {
-			warn("sorting by %s has no equivalent: the view keeps its default order", k.Property)
-		}
-		if len(v.Sort) > 1 {
+	// The sort keys in turn (IMP-143), up to the first without an
+	// equivalent: a key after it would order other ties than in the base.
+	var keys []string
+	for i, k := range v.Sort {
+		f, ok := baseColumn(k.Property)
+		if !ok || i == index.MaxSortKeys {
 			var rest []string
-			for _, k := range v.Sort[1:] {
+			for _, k := range v.Sort[i:] {
 				rest = append(rest, k.Property)
 			}
-			warn("only the first sort key is kept: %s ignored", strings.Join(rest, ", "))
+			switch {
+			case !ok && i == 0:
+				warn("sorting by %s has no equivalent: the view keeps its default order", k.Property)
+			case !ok:
+				warn("sorting by %s has no equivalent: the sort stops before it (%s ignored)", k.Property, strings.Join(rest, ", "))
+			default:
+				warn("a sort has at most %d keys: %s ignored", index.MaxSortKeys, strings.Join(rest, ", "))
+			}
+			break
 		}
+		keys = append(keys, strings.TrimSpace(f+" "+strings.ToLower(strings.TrimSpace(k.Direction))))
 	}
+	spec.Sort = strings.Join(keys, ", ")
 
 	seen := map[string]bool{}
 	for _, p := range v.Order {

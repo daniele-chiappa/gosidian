@@ -31,14 +31,17 @@ type noteResponse struct {
 	Title   string          `json:"title"`
 	Content string          `json:"content"`
 	Format  string          `json:"format"`          // "markdown" | "html" — drives the SPA's renderer choice
-	Kind    string          `json:"kind,omitempty"`  // "image" for a resolved media note (ADR-013), "base" for an Obsidian base; empty otherwise
+	Kind    string          `json:"kind,omitempty"`  // "image" for a resolved media note (ADR-013), "base" for an Obsidian base, "canvas" for an Obsidian canvas; empty otherwise
 	Media   *vault.MediaRef `json:"media,omitempty"` // resolved image payload when Kind=="image"
 	// Source is the YAML of an Obsidian base as written, when Kind is
-	// "base": Content is then its views translated (IMP-118).
-	Source  string `json:"source,omitempty"`
-	ETag    string `json:"etag"`
-	Size    int64  `json:"size"`
-	ModTime string `json:"mod_time"`
+	// "base": Content is then its views translated (IMP-118); or the JSON
+	// of an Obsidian canvas, when Kind is "canvas" (IMP-144).
+	Source string `json:"source,omitempty"`
+	// Canvas is a canvas's cards as the web UI draws them.
+	Canvas  *canvasData `json:"canvas,omitempty"`
+	ETag    string      `json:"etag"`
+	Size    int64       `json:"size"`
+	ModTime string      `json:"mod_time"`
 }
 
 type createNoteRequest struct {
@@ -305,6 +308,10 @@ func (r *Router) readNote(w http.ResponseWriter, req *http.Request, rel string) 
 		r.readBase(w, req, rel)
 		return
 	}
+	if vault.IsCanvasFile(rel) {
+		r.readCanvas(w, req, rel)
+		return
+	}
 	note, err := r.deps.Vault.Load(rel)
 	if err != nil {
 		writeLoadError(w, err)
@@ -337,11 +344,7 @@ func (r *Router) readNote(w http.ResponseWriter, req *http.Request, rel string) 
 func (r *Router) readBase(w http.ResponseWriter, req *http.Request, rel string) {
 	b, err := r.deps.Vault.LoadBase(rel)
 	if err != nil {
-		if errors.Is(err, vault.ErrNotBase) {
-			WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
-			return
-		}
-		writeLoadError(w, err)
+		writeReadOnlyLoadError(w, err)
 		return
 	}
 	etag := quoteETag(b.ETag())
@@ -361,6 +364,16 @@ func (r *Router) readBase(w http.ResponseWriter, req *http.Request, rel string) 
 		Size:    b.Size,
 		ModTime: b.ModTime.UTC().Format(rfc3339Z),
 	})
+}
+
+// writeReadOnlyLoadError answers a failed read of a base or a canvas: one
+// too large is a bad request, any other error as for a note.
+func writeReadOnlyLoadError(w http.ResponseWriter, err error) {
+	if errors.Is(err, vault.ErrNotBase) || errors.Is(err, vault.ErrNotCanvas) {
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
+		return
+	}
+	writeLoadError(w, err)
 }
 
 // updateNote handles PUT /notes/{path...} with optimistic locking via

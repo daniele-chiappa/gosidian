@@ -170,6 +170,23 @@ func TestRollups_SortAndRefusals(t *testing.T) {
 	if got := cellsOf(r, "first_due"); got != "IMP-1=2026-10-10 IMP-2=2026-10-20 IMP-3=" {
 		t.Errorf("sorted by date, empty last: %s", got)
 	}
+	// A rollup after a field: the field orders, by the options of its
+	// select (open, done), and the rollup breaks its ties, though the view
+	// does not show the field (IMP-143).
+	r, err = compute("from: p/docs/improvements\nsort: [status asc, plans asc]\ncolumns: [title, plans]", c, idx.Query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cellsOf(r, "plans"); got != "IMP-2=1 IMP-1=3 IMP-3=0" {
+		t.Errorf("status, then plans: %s", got)
+	}
+	r, err = compute("from: p/docs/improvements\nsort: open_plans desc, effort asc, id\nlimit: 2\ncolumns: [title, open_plans]", c, idx.Query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cellsOf(r, "open_plans"); got != "IMP-1=2 IMP-2=1" || r.Total != 3 {
+		t.Errorf("open_plans, then effort: %s (total %d)", got, r.Total)
+	}
 	for spec, msg := range map[string]string{
 		"from: p/docs/improvements\nwhere: [plans > 1]":              "is a rollup",
 		"from: p/docs/improvements\nas: count\ngroup_by: open_plans": "is a rollup",

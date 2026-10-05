@@ -98,6 +98,17 @@ func TestRenderer_Tag(t *testing.T) {
 	}
 }
 
+// A hex color renders as text, not as a link to a tag (IMP-145).
+func TestRenderer_ColorIsNotTag(t *testing.T) {
+	out, err := NewRenderer().Render([]byte("Brand #AC1F24 and #brand"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, `/tags/AC1F24`) || !strings.Contains(out, "Brand #AC1F24 and") || !strings.Contains(out, `href="/tags/brand"`) {
+		t.Errorf("render: %s", out)
+	}
+}
+
 func TestRenderer_BlockReference(t *testing.T) {
 	r := NewRenderer()
 	resolver := ResolverFunc(func(target string) string {

@@ -72,6 +72,38 @@ func TestRun_FolderWhereSort(t *testing.T) {
 	}
 }
 
+// sort is a key, keys separated by commas or a list of keys, each ordering
+// the ties of the one before; the memory_query of the view says them all
+// (IMP-143).
+func TestRun_MultiKeySort(t *testing.T) {
+	idx := testIndex(t)
+	for _, spec := range []string{
+		"from: p/docs/improvements\nsort: status desc, priority asc, id",
+		"from: p/docs/improvements\nsort: [status desc, priority asc, id]",
+		"from: p/docs/improvements\nsort:\n  - status desc\n  - priority asc\n  - id",
+	} {
+		r := run(t, idx, spec, Context{})
+		if got := ids(r); got != "IMP-001,IMP-003,IMP-002" {
+			t.Errorf("%q = %s", spec, got)
+		}
+		if strings.Join(r.Spec.Columns, ",") != "title,status,priority,id" {
+			t.Errorf("default columns = %v", r.Spec.Columns)
+		}
+		if q := r.QueryCall(); !strings.Contains(q, `"sort":"status desc, priority asc, id desc"`) || strings.Contains(q, `"order"`) {
+			t.Errorf("query call: %s", q)
+		}
+	}
+	for spec, msg := range map[string]string{
+		"from: p\nsort: a, b, c, d, e": "at most 4 keys",
+		"from: p\nsort: [a up]":        "order is asc or desc",
+		"from: p\nsort: {a: 1}":        "is not a key or a list of keys",
+	} {
+		if _, err := Parse(spec, Context{}); err == nil || !strings.Contains(err.Error(), msg) {
+			t.Errorf("%q: err = %v, want %q", spec, err, msg)
+		}
+	}
+}
+
 func TestRun_This(t *testing.T) {
 	idx := testIndex(t)
 	this := ThisFields("p/docs/improvements/IMP-001.md", map[string]any{"id": "IMP-001"})

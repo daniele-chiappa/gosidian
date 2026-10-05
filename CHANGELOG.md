@@ -8,6 +8,52 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.58.0] — 2026-10-05 — "canvases and sorts"
+
+Obsidian's `.canvas` files show read-only, a sort can have several keys,
+and a hex color in a note's text is no longer a tag. Pull the image and
+restart, nothing to migrate: at the first start the index re-extracts
+every note (content version 7), which drops the color tags. A note that
+used such a word as a tag on purpose (`#cafe`, `#bad`) keeps it by
+writing it in its frontmatter.
+
+### Added
+- **Obsidian canvases, read-only** — a `.canvas` file (JSON Canvas 1.0)
+  shows in the tree and opens in the web UI as its cards on a plane,
+  where the file puts them: text cards rendered as markdown, file cards
+  with the start of their note (or the section a `#Heading` subpath
+  names) and a title that opens it, images, web links, groups behind the
+  cards they hold, and the connections as curves with their arrows,
+  colors and labels. The plane moves with a drag of the background and
+  zooms with Ctrl + wheel, a pinch or the buttons, which also fit the
+  whole canvas. `memory_get` reads a canvas with `kind: "canvas"`: its
+  cards as text, in their groups and in reading order, the notes of its
+  file cards as wikilinks to those the token may read, its connections
+  as `A → B: label` lines, and its JSON in `source` with `raw: true`. No
+  tool writes a canvas, and it stays out of the index: the notes it holds
+  get no backlink from it. A card of a note the reader may not see shows
+  only its path.
+- **A sort of several keys** — `sort` takes up to four keys, each
+  ordering the ties of the one before and with its own `asc` or `desc`:
+  in a view as a list (`sort: [status asc, priority desc]`) or separated
+  by commas (`sort: plans desc, id asc`), in `memory_query`, `POST
+  /api/v1/query` and the web UI's Query window as the comma form, `order`
+  giving the direction of the keys without one. A select field sorts by
+  its options in any key. A rollup can be any of the keys: the rows are
+  then sorted on all of them, the same way the index sorts. A `.base`
+  keeps every sort key that has an equivalent, instead of the first one
+  only.
+
+### Changed
+- **Directives v23 → v24** — to break the ties of a rollup, a `sort` of
+  several keys rather than reordering the result by hand.
+- **A hex color is not a tag** — `#AC1F24`, `#fff` or `#c0392b80` in a
+  note's text made a tag, listed with the others and rendered as a link.
+  A word of 3, 4, 6 or 8 hex digits is now a color, never a tag, also
+  when a slash follows it in a list of colors (`#FAFAFA/#EFEFEF`).
+  Obsidian makes a tag of such a word when it starts with a letter: see
+  the compatibility page.
+
 ## [2.57.0] — 2026-10-05 — "bases and automations"
 
 Obsidian's `.base` files show as read-only views, and a database note can

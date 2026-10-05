@@ -47,7 +47,7 @@ func baseViews(t *testing.T, rel, src string) *Base {
 }
 
 // Each view of a base becomes a view block: the folder from, the filters
-// where, order the columns, the first sort key, the limit; what has no
+// where, order the columns, the sort keys, the limit; what has no
 // equivalent is a warning, not a guess.
 func TestTranslateBase(t *testing.T) {
 	b := baseViews(t, "p/books.base", booksBase)
@@ -58,8 +58,8 @@ func TestTranslateBase(t *testing.T) {
 		name, spec string
 		warns      []string
 	}{
-		{"Reading", "from: p/Books\nwhere:\n    - status != done\nsort: year desc\ncolumns:\n    - title\n    - author\n    - status\nlimit: 20\n",
-			[]string{"only the first sort key is kept: file.name ignored", "the column formula.ppu has no equivalent"}},
+		{"Reading", "from: p/Books\nwhere:\n    - status != done\nsort: year desc, title asc\ncolumns:\n    - title\n    - author\n    - status\nlimit: 20\n",
+			[]string{"the column formula.ppu has no equivalent"}},
 		{"Shelf", "from: p/Books\nwhere:\n    - status != done\n    - tags in [novel, essay]\n",
 			[]string{"a cards view has no equivalent: shown as a table"}},
 		{"Linked", "from: p/Books\nwhere:\n    - status != done\n    - links contains this\n    - status exists\nas: list\n",
@@ -81,6 +81,26 @@ func TestTranslateBase(t *testing.T) {
 		}
 		if _, err := Parse(v.Spec, Context{This: ThisFields("p/books.base", nil)}); err != nil {
 			t.Errorf("view %d does not parse: %v\n%s", i, err, v.Spec)
+		}
+	}
+}
+
+// The sort keeps its keys up to the first without an equivalent, and at
+// most four (IMP-143).
+func TestTranslateBase_Sort(t *testing.T) {
+	key := func(p, d string) string { return "      - property: " + p + "\n        direction: " + d + "\n" }
+	for _, tc := range []struct{ keys, sort, warn string }{
+		{key("note.year", "DESC") + key("formula.x", "ASC") + key("file.name", "ASC"), "sort: year desc\n", "the sort stops before it (formula.x, file.name ignored)"},
+		{key("formula.x", "ASC") + key("file.name", "ASC"), "", "sorting by formula.x has no equivalent: the view keeps its default order"},
+		{key("a", "ASC") + key("b", "DESC") + key("c", "ASC") + key("d", "ASC") + key("e", "ASC"), "sort: a asc, b desc, c asc, d asc\n", "at most 4 keys: e ignored"},
+	} {
+		src := "views:\n  - type: table\n    name: V\n    sort:\n" + tc.keys
+		v := baseViews(t, "p/x.base", src).Views[0]
+		if tc.sort != "" && !strings.Contains(v.Spec, tc.sort) || tc.sort == "" && strings.Contains(v.Spec, "sort:") {
+			t.Errorf("spec:\n%s\nwant %q", v.Spec, tc.sort)
+		}
+		if len(v.Warnings) != 1 || !strings.Contains(v.Warnings[0], tc.warn) {
+			t.Errorf("warnings = %q, want %q", v.Warnings, tc.warn)
 		}
 	}
 }

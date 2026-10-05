@@ -56,8 +56,9 @@ the MCP `memory_query` tool, for people. Each row is a condition
 `exists`, `lt`/`lte`/`gt`/`gte`, `contains`), and every condition must
 hold. A namespaced tag counts as a field when the note has none
 (`status:done` → `status = done`), `tags` is the tag list, ISO dates and
-numbers compare as such. Optional: a project, a sort field with its
-order, the fields to show (by default those of the conditions). Results
+numbers compare as such. Optional: a project, a sort (one field, or
+several separated by commas, each with its own `asc` or `desc`) with its
+default order, the fields to show (by default those of the conditions). Results
 are a table; a title opens the note. The whole query lives in the URL,
 so it survives a reload and can be shared as a link. The backend is
 `POST /api/v1/query`, scoped to the projects the account can read.

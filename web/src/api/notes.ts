@@ -24,10 +24,58 @@ export interface Note {
   etag: string
   size: number
   mod_time: string
-  kind?: 'image' | 'table' | 'base'
+  kind?: 'image' | 'table' | 'base' | 'canvas'
   media?: MediaRef
-  /** The YAML of an Obsidian base as written, when kind is 'base'. */
+  /** The YAML of an Obsidian base, or the JSON of a canvas, as written. */
   source?: string
+  /** An Obsidian canvas's cards, as the server resolved them (IMP-144). */
+  canvas?: CanvasData
+}
+
+/**
+ * A card of an Obsidian canvas (JSON Canvas 1.0), with what the server
+ * resolved for the reader: a text card's markdown as HTML, the note a file
+ * card opens (with the start of it as HTML) or the image it shows, and the
+ * group that holds it.
+ */
+export interface CanvasCard {
+  id: string
+  type: 'text' | 'file' | 'link' | 'group' | string
+  x: number
+  y: number
+  width: number
+  height: number
+  /** A preset from '1' (red) to '6' (purple), or a hex color. */
+  color?: string
+  text?: string
+  file?: string
+  subpath?: string
+  url?: string
+  label?: string
+  html?: string
+  path?: string
+  title?: string
+  image?: string
+  parent?: string
+}
+
+export interface CanvasEdge {
+  id: string
+  fromNode: string
+  fromSide?: 'top' | 'right' | 'bottom' | 'left'
+  fromEnd?: 'none' | 'arrow'
+  toNode: string
+  toSide?: 'top' | 'right' | 'bottom' | 'left'
+  toEnd?: 'none' | 'arrow'
+  color?: string
+  label?: string
+}
+
+export interface CanvasData {
+  nodes: CanvasCard[]
+  edges: CanvasEdge[]
+  /** Why the canvas cannot be drawn, when its JSON does not parse. */
+  error?: string
 }
 
 export interface ListResponse {

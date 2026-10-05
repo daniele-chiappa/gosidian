@@ -39,6 +39,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/parser"
 )
 
@@ -444,6 +445,15 @@ func OptionOrderOf(schemas []*Schema, field string) []string {
 		out = o
 	}
 	return out
+}
+
+// WithOptionOrder sets the Order of each key to the options of its select
+// field, as OptionOrderOf finds them in schemas.
+func WithOptionOrder(schemas []*Schema, keys []index.SortKey) []index.SortKey {
+	for i := range keys {
+		keys[i].Order = OptionOrderOf(schemas, keys[i].Field)
+	}
+	return keys
 }
 
 // FieldNames lists the declared fields, in declaration order.

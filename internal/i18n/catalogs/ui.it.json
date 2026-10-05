@@ -89,7 +89,9 @@
     "snapshot": "Istantanea: congela viste e conteggi in una nota datata",
     "snapshot_failed": "Istantanea non riuscita",
     "base_readonly": "base di Obsidian, in sola lettura",
-    "base_source": "YAML della base (Obsidian)"
+    "base_source": "YAML della base (Obsidian)",
+    "canvas_readonly": "canvas di Obsidian, in sola lettura",
+    "canvas_source": "JSON del canvas (Obsidian)"
   },
   "note_create": {
     "title": "Nuova nota",
@@ -382,6 +384,15 @@
     "redirecting": "Ti riporto all'applicazione…",
     "error_missing": "Questa richiesta di autorizzazione è sconosciuta o scaduta. Ricomincia dall'applicazione.",
     "error_generic": "Qualcosa è andato storto. Riprova dall'applicazione."
+  },
+  "canvas": {
+    "zoom_in": "Ingrandisci",
+    "zoom_out": "Rimpicciolisci",
+    "fit": "Adatta alla finestra",
+    "missing": "nota non trovata o non visibile",
+    "error": "Questo canvas non si può mostrare: {msg}",
+    "empty": "Il canvas è vuoto.",
+    "help": "Trascina per spostarti; rotella per scorrere, Ctrl + rotella per lo zoom"
   },
   "views": {
     "no_rows": "Nessuna nota corrispondente.",

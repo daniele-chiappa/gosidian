@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -243,7 +245,8 @@ func pathCond(c FieldCond, resolve func(target string) string) (FieldCond, error
 // QueryOptions selects notes by their frontmatter. Projects/Exclude scope the
 // query like SearchOptions (nil Projects = every project, empty = none).
 // Sort is a field name or one of path, title, modified (the default,
-// newest first); Fields lists the fields whose values each hit carries.
+// newest first), and ThenBy the keys that order the notes Sort leaves tied;
+// Fields lists the fields whose values each hit carries.
 type QueryOptions struct {
 	Projects []string
 	Exclude  []string
@@ -259,8 +262,103 @@ type QueryOptions struct {
 	// not listed come after the listed ones, notes without the field last.
 	SortOrder []string
 	Desc      bool
-	Limit     int
-	Fields    []string
+	// ThenBy are the keys after Sort (IMP-143), at most MaxSortKeys-1.
+	ThenBy []SortKey
+	Limit  int
+	Fields []string
+}
+
+// SortKey is one key of a sort: a field or path, title, modified; its
+// direction; and Order, the options of a select field it ranks by, like
+// QueryOptions.SortOrder.
+type SortKey struct {
+	Field string
+	Desc  bool
+	Order []string
+}
+
+// MaxSortKeys bounds the keys of one sort.
+const MaxSortKeys = 4
+
+// SortKeys returns the keys of the sort, Sort first; nil for the default
+// (modified, newest first).
+func (o QueryOptions) SortKeys() []SortKey {
+	if strings.TrimSpace(o.Sort) == "" && len(o.ThenBy) == 0 {
+		return nil
+	}
+	return append([]SortKey{{Field: strings.TrimSpace(o.Sort), Desc: o.Desc, Order: o.SortOrder}}, o.ThenBy...)
+}
+
+// SetSortKeys sets the sort to keys, the first in Sort, Desc and SortOrder.
+func (o *QueryOptions) SetSortKeys(keys []SortKey) {
+	o.Sort, o.Desc, o.SortOrder, o.ThenBy = "", false, nil, nil
+	if len(keys) == 0 {
+		return
+	}
+	o.Sort, o.Desc, o.SortOrder = keys[0].Field, keys[0].Desc, keys[0].Order
+	o.ThenBy = keys[1:]
+}
+
+// ParseSort reads a sort of one or more keys separated by commas, each a
+// field with an optional asc or desc: "plans desc, id". order is the
+// direction of the keys without one, as SortDesc resolves it. An empty sort
+// is nil, the default.
+func ParseSort(sort, order string) ([]SortKey, error) {
+	if _, err := SortDesc("", order); err != nil {
+		return nil, err
+	}
+	sort = strings.TrimSpace(sort)
+	if sort == "" {
+		return nil, nil
+	}
+	parts := strings.Split(sort, ",")
+	if len(parts) > MaxSortKeys {
+		return nil, fmt.Errorf("%w: sort: at most %d keys, got %d", ErrBadQuery, MaxSortKeys, len(parts))
+	}
+	keys := make([]SortKey, 0, len(parts))
+	for _, part := range parts {
+		words := strings.Fields(part)
+		switch {
+		case len(words) == 0:
+			return nil, fmt.Errorf("%w: sort: %q has an empty key", ErrBadQuery, sort)
+		case len(words) > 2:
+			return nil, fmt.Errorf("%w: sort: %q: a key is a field, then asc or desc", ErrBadQuery, strings.TrimSpace(part))
+		}
+		dir := order
+		if len(words) == 2 {
+			dir = words[1]
+		}
+		desc, err := SortDesc(words[0], dir)
+		if err != nil {
+			return nil, fmt.Errorf("sort: %q: %w", strings.TrimSpace(part), err)
+		}
+		keys = append(keys, SortKey{Field: words[0], Desc: desc})
+	}
+	return keys, nil
+}
+
+// SortString writes keys back as a sort, each with its direction.
+func SortString(keys []SortKey) string {
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		dir := "asc"
+		if k.Desc {
+			dir = "desc"
+		}
+		parts[i] = k.Field + " " + dir
+	}
+	return strings.Join(parts, ", ")
+}
+
+// SortFields names the fields of a sort, builtins included, in its order.
+func SortFields(sort string) []string {
+	var out []string
+	for _, part := range strings.Split(sort, ",") {
+		if words := strings.Fields(part); len(words) > 0 {
+			out = append(out, words[0])
+		}
+	}
+	return out
 }
 
 // QueryHit is one matching note, with the requested fields' values in
@@ -319,7 +417,10 @@ func (i *Index) Query(opts QueryOptions) ([]QueryHit, int, error) {
 		return nil, 0, nil
 	}
 
-	order, sortArgs := sortSQL(opts.Sort, opts.Desc, opts.SortOrder)
+	if len(opts.ThenBy) >= MaxSortKeys {
+		return nil, 0, fmt.Errorf("%w: sort: at most %d keys", ErrBadQuery, MaxSortKeys)
+	}
+	order, sortArgs := sortSQL(opts.SortKeys())
 	limit := opts.Limit
 	if limit <= 0 {
 		limit = 50
@@ -526,34 +627,56 @@ func valueCmp(sym, v string) (string, any) {
 	return "f.value " + sym + " ? COLLATE NOCASE", v
 }
 
-// sortSQL is the ORDER BY for a sort field: modified (default, newest
-// first), path, title, or a frontmatter field — notes without it last, then
-// by date, number or text. With order, a field sorts by the position of its
-// value in order instead, the values not listed after the listed ones.
-func sortSQL(field string, desc bool, order []string) (string, []any) {
+// sortSQL is the ORDER BY of a sort: modified (the default, newest first)
+// when keys is empty, then each key in turn and the path last.
+func sortSQL(keys []SortKey) (string, []any) {
+	if len(keys) == 0 {
+		return "n.mtime DESC, n.path", nil
+	}
+	var terms []string
+	var args []any
+	for _, k := range keys {
+		t, a := sortTerm(k)
+		terms = append(terms, t)
+		args = append(args, a...)
+		if strings.TrimSpace(k.Field) == "path" {
+			// The path is unique: nothing after it can order a tie.
+			return strings.Join(terms, ", "), args
+		}
+	}
+	return strings.Join(append(terms, "n.path"), ", "), args
+}
+
+// sortTerm is the ORDER BY of one key: modified, path, title, or a
+// frontmatter field — notes without it last, then by date, number or text.
+// With Order, a field sorts by the position of its value in Order instead,
+// the values not listed after the listed ones.
+func sortTerm(k SortKey) (string, []any) {
 	dir := "ASC"
-	if desc {
+	if k.Desc {
 		dir = "DESC"
 	}
-	switch field = strings.TrimSpace(field); field {
-	case "":
-		return "n.mtime DESC, n.path", nil
-	case "modified":
-		return "n.mtime " + dir + ", n.path", nil
+	field := strings.TrimSpace(k.Field)
+	switch field {
+	case "", "modified":
+		if field == "" {
+			dir = "DESC"
+		}
+		return "n.mtime " + dir, nil
 	case "path":
 		return "n.path " + dir, nil
 	case "title":
-		return "n.title COLLATE NOCASE " + dir + ", n.path", nil
+		return "n.title COLLATE NOCASE " + dir, nil
 	}
 	agg := "MIN"
-	if desc {
+	if k.Desc {
 		agg = "MAX"
 	}
 	col := func(c string) string {
 		return "(SELECT " + agg + "(f." + c + ") FROM note_fields f WHERE f.note_id = n.id AND f.key = ?)"
 	}
 	missing := "(SELECT COUNT(*) FROM note_fields f WHERE f.note_id = n.id AND f.key = ?) = 0"
-	if field != "" && len(order) > 0 {
+	if order := k.Order; len(order) > 0 {
 		// rank is the position of the value in order, len(order) when it is
 		// not listed; unlisted values go after the listed ones either way.
 		rank := "CASE f.value" + strings.Repeat(" WHEN ? THEN ?", len(order)) + " ELSE ? END"
@@ -571,11 +694,129 @@ func sortSQL(field string, desc bool, order []string) (string, []any) {
 		args = append(args, rankArgs...)
 		args = append(args, field, field)
 		return missing + ", " + unlisted + ", (SELECT " + agg + "(" + rank + ") FROM note_fields f WHERE f.note_id = n.id AND f.key = ?) " + dir + ", " +
-			col("value") + " COLLATE NOCASE " + dir + ", n.path", args
+			col("value") + " COLLATE NOCASE " + dir, args
 	}
 	return missing + ", " + col("date") + " " + dir + ", " + col("num") + " " + dir + ", " +
-			col("value") + " COLLATE NOCASE " + dir + ", n.path",
+			col("value") + " COLLATE NOCASE " + dir,
 		[]any{field, field, field, field}
+}
+
+// SortHits orders hits by keys as Query would, on the values they carry:
+// the caller fetched every field the keys name (a rollup's computed value
+// among them). Values compare as numbers when both are, otherwise as text
+// without case, so ISO dates in time order; a field's lowest value counts
+// ascending and its highest descending, the notes without it last, and the
+// path breaks the ties.
+func SortHits(hits []QueryHit, keys []SortKey) {
+	if len(keys) == 0 {
+		keys = []SortKey{{Field: "modified", Desc: true}}
+	}
+	sort.SliceStable(hits, func(i, j int) bool {
+		for _, k := range keys {
+			if c := compareHits(hits[i], hits[j], k); c != 0 {
+				return c < 0
+			}
+		}
+		return hits[i].Path < hits[j].Path
+	})
+}
+
+// compareHits compares a and b on one key, its direction applied.
+func compareHits(a, b QueryHit, k SortKey) int {
+	sign := 1
+	if k.Desc {
+		sign = -1
+	}
+	switch field := strings.TrimSpace(k.Field); field {
+	case "", "modified":
+		if field == "" {
+			sign = -1
+		}
+		return sign * cmpInt(a.ModTime, b.ModTime)
+	case "path":
+		return sign * strings.Compare(a.Path, b.Path)
+	case "title":
+		return sign * strings.Compare(strings.ToLower(a.Title), strings.ToLower(b.Title))
+	}
+	va, vb := a.Fields[k.Field], b.Fields[k.Field]
+	switch {
+	case len(va) == 0 && len(vb) == 0:
+		return 0
+	case len(va) == 0:
+		return 1
+	case len(vb) == 0:
+		return -1
+	}
+	if len(k.Order) > 0 {
+		// As in SQL: a note with a listed value first, then by rank.
+		ra, rb := rankOf(va, k.Order, k.Desc), rankOf(vb, k.Order, k.Desc)
+		la, lb := ra < len(k.Order), rb < len(k.Order)
+		if la != lb {
+			if la {
+				return -1
+			}
+			return 1
+		}
+		if c := sign * cmpInt(int64(ra), int64(rb)); c != 0 {
+			return c
+		}
+	}
+	return sign * compareValues(pickValue(va, k.Desc), pickValue(vb, k.Desc))
+}
+
+// rankOf is the rank of a note's values in order: the lowest ascending, the
+// highest descending, len(order) for a value not listed.
+func rankOf(vs, order []string, desc bool) int {
+	best := -1
+	for _, v := range vs {
+		r := slices.Index(order, v)
+		if r < 0 {
+			r = len(order)
+		}
+		if best < 0 || desc && r > best || !desc && r < best {
+			best = r
+		}
+	}
+	return best
+}
+
+// pickValue is the value of a list a sort reads: the lowest ascending, the
+// highest descending.
+func pickValue(vs []string, desc bool) string {
+	best := vs[0]
+	for _, v := range vs[1:] {
+		if c := compareValues(v, best); desc && c > 0 || !desc && c < 0 {
+			best = v
+		}
+	}
+	return best
+}
+
+// compareValues compares two field values: as numbers when both are, else
+// as text without case.
+func compareValues(a, b string) int {
+	na, errA := strconv.ParseFloat(a, 64)
+	nb, errB := strconv.ParseFloat(b, 64)
+	if errA == nil && errB == nil {
+		switch {
+		case na < nb:
+			return -1
+		case na > nb:
+			return 1
+		}
+		return 0
+	}
+	return strings.Compare(strings.ToLower(a), strings.ToLower(b))
+}
+
+func cmpInt(a, b int64) int {
+	switch {
+	case a < b:
+		return -1
+	case a > b:
+		return 1
+	}
+	return 0
 }
 
 // Request helpers shared by the MCP tool and the REST endpoint, so both read
@@ -667,10 +908,12 @@ func DefaultQueryFields(where []FieldCond, sort string) []string {
 		}
 		add(c.Field)
 	}
-	switch strings.TrimSpace(sort) {
-	case "", "path", "title", "modified":
-	default:
-		add(sort)
+	for _, f := range SortFields(sort) {
+		switch f {
+		case "path", "title", "modified":
+		default:
+			add(f)
+		}
 	}
 	return out
 }

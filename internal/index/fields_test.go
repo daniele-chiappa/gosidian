@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -318,5 +319,123 @@ func TestQuery_SortOrder(t *testing.T) {
 	// Without an order, the text order of today.
 	if got, _ := queryPaths(t, idx, QueryOptions{Folders: []string{"p/r"}, Sort: "priority"}); !reflect.DeepEqual(got, []string{"p/r/a.md", "p/r/b.md", "p/r/c.md", "p/r/d.md", "p/r/e.md"}) {
 		t.Errorf("text order = %v", got)
+	}
+}
+
+// multiKeyIndex: rows with a status, a select priority, an estimate, some
+// without a field.
+func multiKeyIndex(t *testing.T) *Index {
+	t.Helper()
+	idx := openTest(t)
+	for path, fm := range map[string]string{
+		"p/r/a.md": "status: open\npriority: low\nestimate: 10\n",
+		"p/r/b.md": "status: open\npriority: high\nestimate: 9\n",
+		"p/r/c.md": "status: done\npriority: high\nestimate: 2\n",
+		"p/r/d.md": "status: open\nestimate: 9\n",
+		"p/r/e.md": "priority: low\n",
+		"p/r/f.md": "status: open\npriority: [low, high]\nestimate: 9\n",
+	} {
+		body := "---\ntitle: " + path + "\n" + fm + "---\n"
+		if err := idx.Upsert(NoteDoc{Path: path, Title: path, Body: body, ModTime: 1, Size: int64(len(body))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return idx
+}
+
+// Each key orders the ties of the one before, a select by its options, the
+// notes without a key's field last within the ties; a path key ends the
+// sort (IMP-143).
+func TestQuery_MultiKeySort(t *testing.T) {
+	idx := multiKeyIndex(t)
+	prio := []string{"low", "medium", "high"}
+	for _, tc := range []struct {
+		keys []SortKey
+		want string
+	}{
+		{[]SortKey{{Field: "status"}, {Field: "priority", Desc: true, Order: prio}}, "c f b a d e"},
+		{[]SortKey{{Field: "status", Desc: true}, {Field: "estimate"}, {Field: "path", Desc: true}}, "f d b a c e"},
+		{[]SortKey{{Field: "estimate", Desc: true}, {Field: "priority", Order: prio}}, "a f b d c e"},
+		{[]SortKey{{Field: "path", Desc: true}, {Field: "status"}}, "f e d c b a"},
+	} {
+		opts := QueryOptions{Folders: []string{"p/r"}}
+		opts.SetSortKeys(tc.keys)
+		got, _ := queryPaths(t, idx, opts)
+		if g := strings.ReplaceAll(strings.ReplaceAll(strings.Join(got, " "), "p/r/", ""), ".md", ""); g != tc.want {
+			t.Errorf("%s = %s, want %s", SortString(tc.keys), g, tc.want)
+		}
+	}
+	opts := QueryOptions{Folders: []string{"p/r"}, Sort: "status", ThenBy: make([]SortKey, MaxSortKeys)}
+	if _, _, err := idx.Query(opts); !errors.Is(err, ErrBadQuery) {
+		t.Errorf("%d keys: %v", MaxSortKeys+1, err)
+	}
+}
+
+// SortHits orders hits as the query does, on the values they carry: the
+// sort of the rows by a rollup (IMP-143).
+func TestSortHits_AsQuery(t *testing.T) {
+	idx := multiKeyIndex(t)
+	prio := []string{"low", "medium", "high"}
+	for _, keys := range [][]SortKey{
+		nil,
+		{{Field: "status"}, {Field: "priority", Desc: true, Order: prio}},
+		{{Field: "status", Desc: true}, {Field: "estimate"}, {Field: "path", Desc: true}},
+		{{Field: "estimate", Desc: true}, {Field: "priority", Order: prio}},
+		{{Field: "priority", Desc: true}, {Field: "title"}},
+		{{Field: "priority"}, {Field: "estimate", Desc: true}},
+	} {
+		opts := QueryOptions{Folders: []string{"p/r"}, Fields: []string{"status", "priority", "estimate"}}
+		opts.SetSortKeys(keys)
+		want, _, err := idx.Query(opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := slices.Clone(want)
+		slices.Reverse(got)
+		SortHits(got, keys)
+		for i := range got {
+			if got[i].Path != want[i].Path {
+				t.Errorf("%s: SortHits %v, query %v", SortString(keys), hitPaths(got), hitPaths(want))
+				break
+			}
+		}
+	}
+}
+
+func hitPaths(hits []QueryHit) []string {
+	out := make([]string, len(hits))
+	for i, h := range hits {
+		out[i] = h.Path
+	}
+	return out
+}
+
+func TestParseSort(t *testing.T) {
+	for _, tc := range []struct{ sort, order, want string }{
+		{"", "", ""},
+		{"plans", "", "plans desc"},
+		{"plans desc, id", "", "plans desc, id desc"},
+		{" title , path desc ", "", "title asc, path desc"},
+		{"a, b desc", "asc", "a asc, b desc"},
+		{"a asc,b,c DESC,title", "", "a asc, b desc, c desc, title asc"},
+	} {
+		keys, err := ParseSort(tc.sort, tc.order)
+		if err != nil || SortString(keys) != tc.want {
+			t.Errorf("ParseSort(%q, %q) = %q %v, want %q", tc.sort, tc.order, SortString(keys), err, tc.want)
+		}
+	}
+	for _, tc := range []struct{ sort, order, msg string }{
+		{"a, , b", "", "an empty key"},
+		{"a b c", "", "a key is a field, then asc or desc"},
+		{"a sideways", "", "order is asc or desc"},
+		{"a, b, c, d, e", "", "at most 4 keys"},
+		{"", "up", "order is asc or desc"},
+	} {
+		if _, err := ParseSort(tc.sort, tc.order); !errors.Is(err, ErrBadQuery) || !strings.Contains(err.Error(), tc.msg) {
+			t.Errorf("ParseSort(%q, %q) err = %v, want %q", tc.sort, tc.order, err, tc.msg)
+		}
+	}
+	if got := DefaultQueryFields(nil, "plans desc, title, id asc"); !slices.Equal(got, []string{"plans", "id"}) {
+		t.Errorf("default fields = %v", got)
 	}
 }

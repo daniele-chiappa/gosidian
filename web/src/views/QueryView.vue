@@ -89,6 +89,13 @@ function cell(n: QueryNote, k: string): string {
   return Array.isArray(v) ? v.join(', ') : String(v ?? '')
 }
 
+/** The fields of a sort of one or more keys: "plans desc, id" → plans, id. */
+const sortFields = (s: string) =>
+  s
+    .split(',')
+    .map((k) => k.trim().split(/\s+/)[0] ?? '')
+    .filter(Boolean)
+
 /** Short values (dates, statuses, numbers) stay on one line. */
 const cellClass = (v: string) => (v.length <= 24 ? 'whitespace-nowrap' : '')
 
@@ -129,7 +136,7 @@ async function run() {
       fields: fields.length ? fields : undefined,
       limit: LIMIT,
     })
-    const asked = fields.length ? fields : [...where.map((c) => c.field), sort.value.trim()]
+    const asked = fields.length ? fields : [...where.map((c) => c.field), ...sortFields(sort.value)]
     shownFields.value = asked.filter(
       (f, i) => f && !['modified', 'path', 'title'].includes(f) && asked.indexOf(f) === i,
     )
@@ -294,7 +301,8 @@ onMounted(async () => {
             v-model="sort"
             list="query-sort"
             placeholder="modified"
-            class="w-36 rounded bg-bg-elevated border border-border px-2 py-1 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-accent"
+            title="One or more keys separated by commas, each with its own asc or desc: status asc, priority desc"
+            class="w-56 rounded bg-bg-elevated border border-border px-2 py-1 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-accent"
           >
           <select
             v-model="order"

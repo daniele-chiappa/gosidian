@@ -110,4 +110,14 @@ func TestQuery_FromAndSelectOrder(t *testing.T) {
 	if w := f.doAuthRecorder(http.MethodPost, "/api/v1/query", `{"project":"alpha"}`, nil); w.code != http.StatusBadRequest {
 		t.Errorf("neither from nor where: %d", w.code)
 	}
+	// Several keys, as memory_query takes them (IMP-143).
+	f.seedNote(t, "alpha/rows/d.md", "---\ntitle: D\npriority: high\n---\n")
+	w = f.doAuthRecorder(http.MethodPost, "/api/v1/query", `{"project":"alpha","from":["alpha/rows"],"sort":"priority desc, title desc"}`, nil)
+	out = decodeQuery(t, w.body)
+	if w.code != http.StatusOK || len(out.Notes) != 3 || out.Notes[0].Path != "alpha/rows/d.md" || out.Notes[1].Path != "alpha/rows/a.md" || out.Notes[2].Path != "alpha/rows/b.md" {
+		t.Errorf("priority, then title: %s", w.body)
+	}
+	if w := f.doAuthRecorder(http.MethodPost, "/api/v1/query", `{"from":["alpha/rows"],"sort":"priority sideways"}`, nil); w.code != http.StatusBadRequest {
+		t.Errorf("a bad key: %d", w.code)
+	}
 }

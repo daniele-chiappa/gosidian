@@ -30,6 +30,12 @@ var extractionDigests = map[int]string{
 	// The body's links dump as before, so without the fmlink rows the
 	// digest is still the one of 4.
 	5: "e53f97b421217f141c235fb8f684764e173dcebe2727fb3ad2b39f72fba18717",
+	// 6: a hex color code is not a tag (IMP-145); the corpus gained a note
+	// with colors and with tags of their look that are not colors.
+	6: "ca9060ccb40ea22719d12d265005a2a8b13b1b21d8f6ee7bdeb3b836d64066d3",
+	// 7: a color followed by a slash is a color too (#FAFAFA/#EFEFEF,
+	// IMP-145); the corpus gained such a list.
+	7: "3637b94e7932d7766cf23201dcd41e0755559311fb6e5f2bc594b54d75538378",
 }
 
 // goldenCorpus covers every extracted row kind: title from frontmatter and
@@ -40,13 +46,15 @@ var extractionDigests = map[int]string{
 // (IMP-138): an unquoted [[wikilink]], a comma inside a quoted list item, a
 // trailing comment, a block scalar, a number kept as text; and relations,
 // links in frontmatter values (a list with an alias, a link in inline code
-// and one in a nested map, which are not links).
+// and one in a nested map, which are not links); and hex colors, which are
+// not tags (IMP-145).
 var goldenCorpus = []NoteDoc{
 	{Path: "p/plan.md", Title: "plan", Body: "---\ntitle: The plan\ntags: [p, type:plan, status:draft]\nimportance: 4\nupdated: 2026-09-28\nimplements_imp:\n  - IMP-104\n  - IMP-099\nratio: 0.5\nsubtitle: Sync v1.12 \"Agent workflow\"\n---\n\n# Heading\n\nSee [[p/bugs#BUG-065|the bug]], [[#Heading]], [[Other Note]] and ![[img.webp]].\n\nInline #topic/sub and #todo.\n"},
 	{Path: "p/bugs.md", Title: "bugs", Body: "# Bug tracker\n\n## BUG-065\n\nNo frontmatter, [[p/plan]] back.\n"},
 	{Path: "p/sync.md", Title: "sync", Body: "---\ntitle: Sync v1.12 \"Agent workflow\"\n---\n\nBody.\n"},
 	{Path: "p/reader.md", Title: "reader", Body: "---\ntitle: Reader cases\ntags: [p, type:doc]\nrelated: [[p/plan]]\naliases: [\"a, b\", c]\nstatus: open # a comment\nsummary: |\n  two\n  lines\ncode: 007\n---\n\nBody.\n"},
 	{Path: "p/relations.md", Title: "relations", Body: "---\ntitle: Relations\ntags: [p, type:doc]\nrelated: [\"[[p/plan|The plan]]\", \"[[p/bugs#BUG-065]]\"]\norigin: \"[[p/sync]]\"\ndescription: \"a `[[p/plan]]` sample\"\nharness:\n  link: \"[[p/reader]]\"\n---\n\nBody with [[p/plan]].\n"},
+	{Path: "p/brand.md", Title: "brand", Body: "# Brand\n\nRed #AC1F24, white #fff, #topic/brand and #cafebabe1; palette #FAFAFA/#EFEFEF.\n"},
 	{Path: "p/report.html", Title: "report", Body: "<!--\n---\ntitle: Report\ntags: [p, type:doc]\n---\n-->\n<html><body><h1>Report</h1><p>Links <a href=\"x\">out</a> and [[p/plan]].</p></body></html>\n"},
 }
 

@@ -82,7 +82,8 @@ una riga letta con `render_views: true` le mostra dopo il corpo (il `hint` lo di
 **Campi calcolati**: un campo `type: rollup` dello schema conta (o somma, o riduce a minimo e massimo)
 le note collegate a ogni riga, e si calcola alla lettura: chiedilo in `fields` di `memory_query` con
 `from: <source>`, o ordina per lui, invece di contare a mano i backlink riga per riga; non scriverlo
-mai nella riga. `created_by` e `modified_by` dicono chi ha creato e modificato per ultimo una nota
+mai nella riga. Per i pari merito, `sort` prende più chiavi separate da virgole, ognuna col suo verso
+(`sort: "plans desc, open_plans desc, id asc"`): non riordinare a mano il risultato. `created_by` e `modified_by` dicono chi ha creato e modificato per ultimo una nota
 passando da gosidian (dall'audit): si leggono, filtrano e ordinano come campi in `memory_query`, senza
 `memory_audit_tail` (`created_at` e `modified_at` danno l'ora). Senza `created_by` la creazione non è
 nell'audit: dillo, non indovinare.

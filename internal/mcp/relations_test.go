@@ -143,6 +143,12 @@ func TestRollups_MemoryQuery(t *testing.T) {
 	if out.Total != 2 || len(out.Notes) != 2 || out.Notes[0].Fields["fixes"] != float64(2) || out.Notes[1].Fields["fixes"] != float64(1) {
 		t.Errorf("query = %+v", out)
 	}
+	// Several keys, a rollup among them: status ties, fixes orders the tie;
+	// the field read for the sort stays out of the response (IMP-143).
+	out = runQuery(t, s, ctx, map[string]any{"from": "p/docs/bugs", "fields": []any{"fixes"}, "sort": "status asc, fixes asc"})
+	if len(out.Notes) != 2 || out.Notes[0].Path != "p/docs/bugs/BUG-2.md" || out.Notes[1].Path != "p/docs/bugs/BUG-1.md" || out.Notes[0].Fields["status"] != nil {
+		t.Errorf("status, then fixes = %+v", out)
+	}
 	res, _ := s.handleQuery(ctx, call(map[string]any{"from": "p/docs/bugs", "where": []any{map[string]any{"field": "fixes", "op": "gt", "value": "1"}}}))
 	if msg := expectError(t, res); !strings.Contains(msg, "is a rollup") {
 		t.Errorf("where on a rollup: %s", msg)

@@ -149,6 +149,9 @@ func (r *Renderer) Render(body []byte, resolver Resolver) (string, error) {
 			m := tagRe.FindStringSubmatch(match)
 			prefix := m[1]
 			tag := m[2]
+			if IsColorTag(tag) {
+				return match
+			}
 			return prefix + `<a class="tag" href="/tags/` + url.PathEscape(tag) + `">#` + stdhtml.EscapeString(tag) + `</a>`
 		})
 		return segment

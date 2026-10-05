@@ -89,7 +89,9 @@
     "snapshot": "Snapshot: freeze views and counts into a dated note",
     "snapshot_failed": "Snapshot failed",
     "base_readonly": "Obsidian base, read-only",
-    "base_source": "Base YAML (Obsidian)"
+    "base_source": "Base YAML (Obsidian)",
+    "canvas_readonly": "Obsidian canvas, read-only",
+    "canvas_source": "Canvas JSON (Obsidian)"
   },
   "note_create": {
     "title": "New note",
@@ -382,6 +384,15 @@
     "redirecting": "Sending you back to the application…",
     "error_missing": "This authorization request is unknown or has expired. Start again from the application.",
     "error_generic": "Something went wrong. Try again from the application."
+  },
+  "canvas": {
+    "zoom_in": "Zoom in",
+    "zoom_out": "Zoom out",
+    "fit": "Fit to window",
+    "missing": "note not found or not visible",
+    "error": "This canvas cannot be shown: {msg}",
+    "empty": "The canvas is empty.",
+    "help": "Drag to move around; wheel to scroll, Ctrl + wheel to zoom"
   },
   "views": {
     "no_rows": "No matching notes.",

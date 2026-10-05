@@ -6,7 +6,6 @@ import (
 	"path"
 	"regexp"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -174,46 +173,23 @@ func formatNumber(n float64) string {
 	return strconv.FormatFloat(n, 'f', -1, 64)
 }
 
-// sortByRollup orders hits by the value of the rollup field, as a sort by a
-// field does: numbers as numbers when both are, otherwise text; the notes
-// without a value last, whatever the direction.
-func sortByRollup(hits []index.QueryHit, field string, desc bool) {
-	val := func(h index.QueryHit) (string, bool) {
-		if v := h.Fields[field]; len(v) > 0 {
-			return v[0], true
-		}
-		return "", false
+// sortFields names the fields of keys, in their order.
+func sortFields(keys []index.SortKey) []string {
+	out := make([]string, len(keys))
+	for i, k := range keys {
+		out[i] = k.Field
 	}
-	sort.SliceStable(hits, func(i, j int) bool {
-		a, okA := val(hits[i])
-		b, okB := val(hits[j])
-		if !okA || !okB {
-			return okA && !okB
-		}
-		cmp := 0
-		na, errA := strconv.ParseFloat(a, 64)
-		nb, errB := strconv.ParseFloat(b, 64)
-		switch {
-		case errA == nil && errB == nil:
-			cmp = compareFloat(na, nb)
-		default:
-			cmp = strings.Compare(strings.ToLower(a), strings.ToLower(b))
-		}
-		if desc {
-			return cmp > 0
-		}
-		return cmp < 0
-	})
+	return out
 }
 
-func compareFloat(a, b float64) int {
-	switch {
-	case a < b:
-		return -1
-	case a > b:
-		return 1
+// rollupKey is the first key of keys that is a rollup of schema, or "".
+func rollupKey(schema *dbschema.Schema, keys []index.SortKey) string {
+	for _, k := range keys {
+		if len(RollupFields(schema, k.Field)) > 0 {
+			return k.Field
+		}
 	}
-	return 0
+	return ""
 }
 
 // RunWithRollups runs s like Run, then computes the rollups of schema it
@@ -230,31 +206,35 @@ func RunWithRollups(s *Spec, schema *dbschema.Schema, c Context, q QueryFunc) (*
 	if len(RollupFields(schema, s.GroupBy)) > 0 {
 		return nil, fmt.Errorf("group_by: %q is a rollup, computed when the rows are read; a board or a count groups by a field of the rows", s.GroupBy)
 	}
-	names := append(slices.Clone(s.Columns), s.Sort)
+	keys := s.SortKeys()
+	names := append(slices.Clone(s.Columns), sortFields(keys)...)
 	fs := RollupFields(schema, names...)
 	if len(fs) == 0 || s.As == "count" {
 		return Run(s, q)
 	}
 	s.Read = append(s.Read, ThisFieldsOf(fs)...)
-	byRollup := len(RollupFields(schema, s.Sort)) > 0
+	byRollup := rollupKey(schema, keys)
 	run := s
-	if byRollup {
+	if byRollup != "" {
+		// Every key is sorted here, on the values the rows carry: the
+		// fields of the other keys are read too.
 		cp := *s
-		cp.Sort, cp.SortOrder, cp.Limit = "", nil, MaxRollupSortRows
+		cp.Sort, cp.SortOrder, cp.ThenBy, cp.Limit = "", nil, nil, MaxRollupSortRows
+		cp.Read = append(slices.Clone(s.Read), withoutBuiltins(sortFields(keys))...)
 		run = &cp
 	}
 	r, err := Run(run, q)
 	if err != nil {
 		return nil, err
 	}
-	if byRollup && r.Total > MaxRollupSortRows {
-		return nil, fmt.Errorf("sort: %q is a rollup, and a sort by a rollup reads at most %d rows; this view selects %d: narrow it with where", s.Sort, MaxRollupSortRows, r.Total)
+	if byRollup != "" && r.Total > MaxRollupSortRows {
+		return nil, fmt.Errorf("sort: %q is a rollup, and a sort by a rollup reads at most %d rows; this view selects %d: narrow it with where", byRollup, MaxRollupSortRows, r.Total)
 	}
 	if err := ComputeRollups(r.Hits, fs, c, q); err != nil {
 		return nil, err
 	}
-	if byRollup {
-		sortByRollup(r.Hits, s.Sort, s.Desc)
+	if byRollup != "" {
+		index.SortHits(r.Hits, keys)
 		if len(r.Hits) > s.Limit {
 			r.Hits = r.Hits[:s.Limit]
 		}
@@ -271,7 +251,8 @@ func RunWithRollups(s *Spec, schema *dbschema.Schema, c Context, q QueryFunc) (*
 // did not ask for are left out of the hits. A condition on a rollup is an
 // index.ErrBadQuery.
 func RollupQuery(opts index.QueryOptions, schema *dbschema.Schema, c Context, main, q QueryFunc) ([]index.QueryHit, int, error) {
-	fs := RollupFields(schema, append(slices.Clone(opts.Fields), opts.Sort)...)
+	keys := opts.SortKeys()
+	fs := RollupFields(schema, append(slices.Clone(opts.Fields), sortFields(keys)...)...)
 	for _, w := range opts.Where {
 		if len(RollupFields(schema, w.Field)) > 0 {
 			return nil, 0, fmt.Errorf("%w: %q is a rollup, computed when the rows are read: filter on the fields it counts, or sort by it", index.ErrBadQuery, w.Field)
@@ -282,28 +263,36 @@ func RollupQuery(opts index.QueryOptions, schema *dbschema.Schema, c Context, ma
 	}
 	run := opts
 	var extra []string
-	for _, f := range ThisFieldsOf(fs) {
+	read := func(f string) {
 		if !slices.Contains(run.Fields, f) {
 			run.Fields = append(slices.Clone(run.Fields), f)
 			extra = append(extra, f)
 		}
 	}
-	byRollup := len(RollupFields(schema, opts.Sort)) > 0
-	if byRollup {
-		run.Sort, run.SortOrder, run.Limit = "", nil, MaxRollupSortRows
+	for _, f := range ThisFieldsOf(fs) {
+		read(f)
+	}
+	byRollup := rollupKey(schema, keys)
+	if byRollup != "" {
+		// Every key is sorted here, on the values the rows carry.
+		for _, f := range withoutBuiltins(sortFields(keys)) {
+			read(f)
+		}
+		run.SetSortKeys(nil)
+		run.Limit = MaxRollupSortRows
 	}
 	hits, total, err := main(run)
 	if err != nil {
 		return nil, 0, err
 	}
-	if byRollup && total > MaxRollupSortRows {
-		return nil, 0, fmt.Errorf("%w: sort: %q is a rollup, and a sort by a rollup reads at most %d rows; this query selects %d: narrow it with where", index.ErrBadQuery, opts.Sort, MaxRollupSortRows, total)
+	if byRollup != "" && total > MaxRollupSortRows {
+		return nil, 0, fmt.Errorf("%w: sort: %q is a rollup, and a sort by a rollup reads at most %d rows; this query selects %d: narrow it with where", index.ErrBadQuery, byRollup, MaxRollupSortRows, total)
 	}
 	if err := ComputeRollups(hits, fs, c, q); err != nil {
 		return nil, 0, err
 	}
-	if byRollup {
-		sortByRollup(hits, opts.Sort, opts.Desc)
+	if byRollup != "" {
+		index.SortHits(hits, keys)
 		if opts.Limit > 0 && len(hits) > opts.Limit {
 			hits = hits[:opts.Limit]
 		}
@@ -324,7 +313,7 @@ func RollupsAcross(folders []string, schemaOf func(string) *dbschema.Schema, opt
 	if len(folders) < 2 || schemaOf == nil {
 		return nil
 	}
-	names := append(slices.Clone(opts.Fields), opts.Sort)
+	names := append(slices.Clone(opts.Fields), sortFields(opts.SortKeys())...)
 	for _, w := range opts.Where {
 		names = append(names, w.Field)
 	}

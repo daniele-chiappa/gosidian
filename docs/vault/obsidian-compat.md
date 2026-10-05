@@ -37,8 +37,9 @@ backlinks appear — without editing a single file.
   equivalent (formulas, summaries, cards…): see
   [views](views.md#obsidian-bases). gosidian never writes them, and a
   ```` ```base ```` block inside a note stays a code block.
-- **`.canvas` files** (Obsidian Canvas) — JSON, not markdown. Ignored
-  by gosidian (left on disk untouched).
+- **`.canvas` files** (Obsidian Canvas) — shown read-only: see
+  [Obsidian canvases](#obsidian-canvases) below. gosidian never writes
+  them.
 - **`.obsidian/` folder** (workspace / config / plugins) — ignored
   entirely by gosidian.
 - **Plugin content**:
@@ -50,9 +51,13 @@ backlinks appear — without editing a single file.
   - **Templater** — likewise preserved as template source.
   - **Excalidraw** `.excalidraw.md` — file is valid markdown so it's
     indexed, but the graphical layer isn't rendered.
-- **Inline tags `#topic/sub`** — the vault used here prefers
-  frontmatter tags. Inline tags work in Obsidian but gosidian's
-  `memory_list_tags` reads from frontmatter only.
+- **Inline tags `#topic/sub`** — indexed like the frontmatter ones,
+  with one difference: a word of 3, 4, 6 or 8 hex digits (`#AC1F24`,
+  `#fff`, `#c0392b80`, also in a list such as `#FAFAFA/#EFEFEF`) is a
+  color in gosidian, never a tag, while
+  Obsidian makes a tag of it when it starts with a letter. A note that
+  needs such a tag puts it in its frontmatter (`tags: [cafe]`), which
+  is always a tag.
 
 ### gosidian → Obsidian (things gosidian has that Obsidian ignores)
 
@@ -73,6 +78,26 @@ backlinks appear — without editing a single file.
   sees the files as plain files.
 - **Audit log / metrics / web UI / MCP** — zero on the Obsidian side.
   Server-only features.
+
+## Obsidian canvases
+
+A `.canvas` file (JSON Canvas 1.0) shows in gosidian as a read-only
+note: the tree lists it, and the web UI draws its cards where the file
+puts them — text cards rendered as markdown, file cards with the start of
+their note (or the section a `#Heading` subpath names) and a title that
+opens it, images, web links, groups behind the cards they hold, and the
+connections as curves with their arrows, colors and labels. Drag the
+background to move around, Ctrl + wheel (or a pinch) zooms, the buttons
+zoom and fit the canvas. `memory_get` reads it for agents with
+`kind: "canvas"`: its cards as text, the notes of its file cards as
+wikilinks, its connections as `A → B: label` lines, and with `raw:true`
+its JSON in `source`.
+
+What gosidian leaves to Obsidian: editing (no tool and no window writes
+a canvas), a group's background image, and the index — a canvas does
+not count as a link to the notes it holds, so they show no backlink from
+it, and it is not in the graph or the search. A card of a note the
+reader may not see shows only its path.
 
 ## Simultaneous use
 

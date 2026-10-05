@@ -69,11 +69,12 @@ func (r *Router) handleTree(w http.ResponseWriter, req *http.Request) {
 		}
 		paths = append(paths, n.Path)
 	}
-	// Obsidian bases are no notes, so the index does not hold them: they
-	// are read off the vault, read-only (IMP-118).
+	// Obsidian bases and canvases are no notes, so the index does not hold
+	// them: they are read off the vault, read-only (IMP-118, IMP-144).
 	if r.deps.Vault != nil {
 		bases, _ := r.deps.Vault.ListBases(project)
-		for _, b := range bases {
+		canvases, _ := r.deps.Vault.ListCanvases(project)
+		for _, b := range append(bases, canvases...) {
 			if r.canSee(p, b) {
 				paths = append(paths, b)
 			}
@@ -144,6 +145,9 @@ func buildAPITree(paths []string, inProgress map[string]bool) *apiTreeNode {
 func classifyAPIKind(path string) string {
 	if vault.IsBaseFile(path) {
 		return "base"
+	}
+	if vault.IsCanvasFile(path) {
+		return "canvas"
 	}
 	lower := strings.ToLower(path)
 	base := path

@@ -27,12 +27,26 @@ func IsBaseFile(name string) bool {
 
 // LoadBase reads the .base file at rel: Content holds its YAML as written.
 func (v *Vault) LoadBase(rel string) (*Note, error) {
+	return v.loadReadOnly(rel, IsBaseFile, MaxBaseBytes, ErrNotBase)
+}
+
+// ListBases returns the paths of the .base files of the vault, or of the
+// project when one is given, sorted, with the filters of List: hidden
+// folders and files are skipped. A project that does not exist has none.
+func (v *Vault) ListBases(project string) ([]string, error) {
+	return v.listFiles(project, IsBaseFile)
+}
+
+// loadReadOnly reads a file of the vault that gosidian shows without
+// writing it (a base, a canvas): is tells its kind by name, max caps its
+// size, and notKind is the error for a path of another kind.
+func (v *Vault) loadReadOnly(rel string, is func(string) bool, max int64, notKind error) (*Note, error) {
 	r, err := v.Rel(rel)
 	if err != nil {
 		return nil, err
 	}
-	if !IsBaseFile(r) {
-		return nil, fmt.Errorf("%w: %q", ErrNotBase, r)
+	if !is(r) {
+		return nil, fmt.Errorf("%w: %q", notKind, r)
 	}
 	full := filepath.Join(v.Root, filepath.FromSlash(r))
 	st, err := os.Stat(full)
@@ -42,8 +56,8 @@ func (v *Vault) LoadBase(rel string) (*Note, error) {
 	if !st.Mode().IsRegular() {
 		return nil, fs.ErrNotExist
 	}
-	if st.Size() > MaxBaseBytes {
-		return nil, fmt.Errorf("%w: %q is %d bytes, over %d", ErrNotBase, r, st.Size(), MaxBaseBytes)
+	if st.Size() > max {
+		return nil, fmt.Errorf("%w: %q is %d bytes, over %d", notKind, r, st.Size(), max)
 	}
 	data, err := os.ReadFile(full)
 	if err != nil {
@@ -58,10 +72,9 @@ func (v *Vault) LoadBase(rel string) (*Note, error) {
 	}, nil
 }
 
-// ListBases returns the paths of the .base files of the vault, or of the
-// project when one is given, sorted, with the filters of List: hidden
-// folders and files are skipped. A project that does not exist has none.
-func (v *Vault) ListBases(project string) ([]string, error) {
+// listFiles returns the paths of the files of the vault, or of the project
+// when one is given, that is accepts, sorted, with the filters of List.
+func (v *Vault) listFiles(project string, is func(string) bool) ([]string, error) {
 	root := v.Root
 	if project != "" {
 		r, err := v.Rel(project)
@@ -85,7 +98,7 @@ func (v *Vault) ListBases(project string) ([]string, error) {
 			}
 			return nil
 		}
-		if isHidden(d.Name()) || !IsBaseFile(d.Name()) || !d.Type().IsRegular() {
+		if isHidden(d.Name()) || !is(d.Name()) || !d.Type().IsRegular() {
 			return nil
 		}
 		rel, err := filepath.Rel(v.Root, path)

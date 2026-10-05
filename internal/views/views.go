@@ -51,6 +51,9 @@ type Spec struct {
 	// SortOrder orders the sort field by the options of its select in the
 	// schema of the database the view lists; compute sets it.
 	SortOrder []string
+	// ThenBy are the sort's keys after Sort (IMP-143); compute sets their
+	// Order like SortOrder.
+	ThenBy []index.SortKey
 	// Read lists fields the query reads without showing them: the fields of
 	// the row its rollups use (this.<field>); compute sets it.
 	Read []string
@@ -81,6 +84,20 @@ type Context struct {
 	Load func(path string) ([]byte, bool)
 }
 
+// SortKeys returns the keys of the view's sort, Sort first; nil for the
+// default.
+func (s *Spec) SortKeys() []index.SortKey {
+	o := index.QueryOptions{Sort: s.Sort, Desc: s.Desc, SortOrder: s.SortOrder, ThenBy: s.ThenBy}
+	return o.SortKeys()
+}
+
+// setSortKeys sets the view's sort to keys.
+func (s *Spec) setSortKeys(keys []index.SortKey) {
+	var o index.QueryOptions
+	o.SetSortKeys(keys)
+	s.Sort, s.Desc, s.SortOrder, s.ThenBy = o.Sort, o.Desc, o.SortOrder, o.ThenBy
+}
+
 // resolveLink resolves a link target of a condition: the note holding the
 // view (this), or a note the reader may see.
 func (c Context) resolveLink(target string) string {
@@ -98,7 +115,7 @@ func (c Context) resolveLink(target string) string {
 type rawSpec struct {
 	From    any      `yaml:"from"`
 	Where   []any    `yaml:"where"`
-	Sort    string   `yaml:"sort"`
+	Sort    any      `yaml:"sort"`
 	Columns []string `yaml:"columns"`
 	Limit   int      `yaml:"limit"`
 	As      string   `yaml:"as"`
@@ -136,13 +153,27 @@ func Parse(src string, c Context) (*Spec, error) {
 	if len(s.Where) > index.MaxQueryConds {
 		return nil, fmt.Errorf("at most %d conditions", index.MaxQueryConds)
 	}
-	sortField, order, _ := strings.Cut(strings.TrimSpace(r.Sort), " ")
-	s.Sort = sortField
-	desc, err := index.SortDesc(sortField, strings.TrimSpace(order))
+	// sort is one key, keys separated by commas, or a list of keys, each a
+	// field with an optional asc or desc (IMP-143).
+	var sortSrc string
+	switch t := r.Sort.(type) {
+	case nil:
+	case string:
+		sortSrc = t
+	case []any:
+		parts := make([]string, len(t))
+		for i, e := range t {
+			parts[i] = fmt.Sprint(e)
+		}
+		sortSrc = strings.Join(parts, ", ")
+	default:
+		return nil, fmt.Errorf("sort: %v is not a key or a list of keys (status desc, title)", t)
+	}
+	keys, err := index.ParseSort(sortSrc, "")
 	if err != nil {
 		return nil, err
 	}
-	s.Desc = desc
+	s.setSortKeys(keys)
 	s.Limit = index.ClampQueryLimit(r.Limit)
 	if r.Limit <= 0 {
 		s.Limit = index.QueryDefaultLimit
@@ -161,7 +192,7 @@ func Parse(src string, c Context) (*Spec, error) {
 		return nil, errors.New("group_by works only with as: board or as: count")
 	}
 	if len(s.Columns) == 0 {
-		s.Columns = append([]string{"title"}, withoutBuiltins(index.DefaultQueryFields(s.Where, s.Sort))...)
+		s.Columns = append([]string{"title"}, withoutBuiltins(index.DefaultQueryFields(s.Where, index.SortString(s.SortKeys())))...)
 	}
 	return s, nil
 }
@@ -364,7 +395,7 @@ func Run(s *Spec, q QueryFunc) (*Result, error) {
 		}
 	}
 	hits, total, err := q(index.QueryOptions{
-		Folders: s.From, Where: s.Where, Sort: s.Sort, SortOrder: s.SortOrder, Desc: s.Desc, Limit: limit,
+		Folders: s.From, Where: s.Where, Sort: s.Sort, SortOrder: s.SortOrder, Desc: s.Desc, ThenBy: s.ThenBy, Limit: limit,
 		Fields: fields,
 	})
 	if err != nil {
@@ -386,6 +417,9 @@ func compute(spec string, c Context, q QueryFunc) (*Result, error) {
 	}
 	if schema != nil {
 		s.SortOrder = schema.OptionOrder(s.Sort)
+		for i := range s.ThenBy {
+			s.ThenBy[i].Order = schema.OptionOrder(s.ThenBy[i].Field)
+		}
 		// The rows of the database only (rows: {type: plan}): a view of the
 		// folder leaves out its index and other notes, and a new row made
 		// from it starts with those values.
@@ -675,7 +709,10 @@ func (r *Result) QueryCall() string {
 		}
 		c.Where = append(c.Where, cond{Field: w.Field, Op: w.Op, Value: v})
 	}
-	if c.Sort != "" {
+	switch {
+	case len(r.Spec.ThenBy) > 0:
+		c.Sort = index.SortString(r.Spec.SortKeys())
+	case c.Sort != "":
 		c.Order = "asc"
 		if r.Spec.Desc {
 			c.Order = "desc"
