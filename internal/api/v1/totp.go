@@ -185,8 +185,14 @@ func (r *Router) handleTOTPRecoveryCodes(w http.ResponseWriter, req *http.Reques
 	WriteJSON(w, http.StatusOK, totpRecoveryCodesResponse{RecoveryCodes: codes})
 }
 
+type totpDisenrollRequest struct {
+	Password string `json:"password"`
+}
+
 // handleTOTPDisenroll removes the user's TOTP secret and recovery codes,
-// unless their effective policy requires it (403). DELETE /api/v1/totp.
+// unless their effective policy requires it (403). DELETE /api/v1/totp with
+// the current password in the body (IMP-088): the session alone must not
+// be enough to take the second factor away.
 func (r *Router) handleTOTPDisenroll(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodDelete {
 		WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
@@ -205,6 +211,14 @@ func (r *Router) handleTOTPDisenroll(w http.ResponseWriter, req *http.Request) {
 	// the required-policy check needs the per-user TOTPPolicy.
 	if full, ok := r.deps.Auth.WebAuth.UserByID(user.ID); ok && r.deps.Auth.WebAuth.TOTPRequired(full) {
 		WriteError(w, http.StatusForbidden, CodeAuthForbidden, "TOTP is required for your account and cannot be removed")
+		return
+	}
+	var body totpDisenrollRequest
+	if err := DecodeJSON(req, &body); err != nil {
+		WriteError(w, http.StatusBadRequest, CodeValidationRequired, "the current password is required in the body: {\"password\": \"…\"}")
+		return
+	}
+	if !r.confirmPassword(w, user, body.Password) {
 		return
 	}
 	if err := r.deps.Auth.WebAuth.ResetTOTP(user.ID); err != nil {

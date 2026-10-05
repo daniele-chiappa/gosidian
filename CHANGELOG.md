@@ -8,6 +8,68 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.59.0] — 2026-10-05 — "passwords"
+
+An account can change its password, the owner can reset one, and the
+actions a stolen session could abuse ask for the password first. The web
+UI's live updates no longer put the session token in a URL. Pull the
+image and restart, nothing to migrate. API clients that remove two-factor
+or create tokens must now send the account's password (see Security).
+
+### Added
+- **Changing a password** — **Settings → Password** changes your own
+  with the current one (`POST /api/v1/me/password`, at least 8
+  characters and different from the current one), and signs your other
+  web sessions out; the one you are using stays open. MCP tokens are
+  separate credentials and keep working.
+- **The owner resets a password** — **Admin → Users → Reset password**
+  sets a temporary password for another local account (`POST
+  /api/v1/admin/users/{id}/password`, with the owner's own password) and
+  signs that account's web sessions out (its MCP tokens stay: revoke
+  them from Admin → Tokens if the account was compromised). The list
+  marks the accounts that still have to change it.
+- **A first password of one's own** — an account the owner creates, or
+  whose password the owner resets, chooses its own password at the next
+  login, before anything else: the web UI shows only the change, and the
+  API answers every other route with 403 `auth.password_change_required`
+  (`GET /api/v1/me` reports `password_change_required`). Accounts created
+  before this release, and accounts that sign up from an invite, are
+  not asked. LDAP accounts keep the directory's password and change it
+  there.
+
+### Security
+- **Sensitive actions ask for the password** — a stolen session token
+  alone could remove two-factor or create an MCP token that outlives the
+  logout. Removing two-factor (`DELETE /api/v1/totp`), changing or
+  resetting a password, and creating an MCP token (personal, `POST
+  /api/v1/me/tokens`, or from Admin → Tokens, `POST /api/v1/admin/tokens`)
+  now need the current password in the request body, `password` (LDAP
+  accounts: the directory's). A wrong one answers 403, never 401, and
+  counts against the account's limiter like a failed login. **API
+  clients that remove two-factor or create tokens must send
+  `password`.** The audit log records `password_change` and
+  `password_reset`.
+- **The session token leaves the URL of the event stream** — the web UI
+  opened `/api/v1/events?token=<session>`, and every reverse proxy that
+  logs full request lines kept the token. The stream now reads the
+  session from an `HttpOnly` cookie, `gosidian_events`, scoped to that
+  path only, like the attachments cookie: set at login, re-issued by any
+  authenticated call, cleared at logout. The deployment guide adds advice
+  on keeping credentials out of access logs.
+
+### Deprecated
+- **`?token=` on `/api/v1/events`** — still accepted for one release,
+  for tabs opened before the update, with a warning in the log the first
+  time it is used; it will be removed.
+
+### Fixed
+- **`memory_delete` goes through the trash** — with the trash on, a note
+  deleted by an agent was removed from disk, while the same note deleted
+  from the web UI went to the trash, so an agent's deletion could not be
+  undone. The note now goes to the trash (`trash_id` in the result) and
+  is restored from the web UI; without the trash it is removed, as
+  before.
+
 ## [2.58.0] — 2026-10-05 — "canvases and sorts"
 
 Obsidian's `.canvas` files show read-only, a sort can have several keys,

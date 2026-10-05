@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { getSettings, updateSettings, type Settings } from '@/api/settings'
+import { apiErrorMessage } from '@/api/client'
+import PasswordChange from '@/components/domain/PasswordChange.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useUIStore, type LocaleCode, type ThemePreset } from '@/stores/ui'
 import TotpEnroll from '@/components/domain/TotpEnroll.vue'
@@ -10,19 +13,35 @@ import { disenrollTOTP, regenerateRecoveryCodes } from '@/api/totp'
 
 const auth = useAuthStore()
 const ui = useUIStore()
+const { t } = useI18n()
+
+// The account's own password (IMP-063); an LDAP account's is the directory's.
+const isLdap = computed(() => auth.user?.auth_source === 'ldap')
+const passwordNotice = ref<string | null>(null)
+function onPasswordChanged() {
+  passwordNotice.value = t('password.changed')
+}
 
 const totpError = ref<string | null>(null)
 function onTotpEnrolled(codeCount: number) {
   auth.setEnrolled(true)
   auth.setRecoveryCodesRemaining(codeCount)
 }
+// Removing the second factor asks for the password (IMP-088): a stolen
+// session alone must not take it away.
+const disableOpen = ref(false)
+const disablePassword = ref('')
 async function disableTotp() {
+  if (!disablePassword.value) return
   totpError.value = null
   try {
-    await disenrollTOTP()
+    await disenrollTOTP(disablePassword.value)
     auth.setEnrolled(false)
+    disableOpen.value = false
   } catch (e) {
-    totpError.value = e instanceof Error ? e.message : 'Failed to disable two-factor'
+    totpError.value = apiErrorMessage(e, 'Failed to disable two-factor')
+  } finally {
+    disablePassword.value = ''
   }
 }
 
@@ -188,6 +207,25 @@ onMounted(load)
       Server settings are read-only for your role; your own two-factor setup and MCP tokens below are yours to change.
     </p>
 
+    <fieldset
+      v-if="!auth.isAnonymous"
+      class="rounded border border-border bg-surface p-4 space-y-3 mb-6"
+      data-password-section
+    >
+      <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">
+        {{ t('password.section') }}
+      </legend>
+      <p v-if="isLdap" class="text-sm text-text-muted">
+        {{ t('password.ldap') }}
+      </p>
+      <template v-else>
+        <PasswordChange @done="onPasswordChanged" />
+        <p v-if="passwordNotice" class="text-sm text-success">
+          {{ passwordNotice }}
+        </p>
+      </template>
+    </fieldset>
+
     <fieldset class="rounded border border-border bg-surface p-4 space-y-3 mb-6">
       <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">Two-factor (TOTP)</legend>
       <label v-if="auth.isOwner" class="block text-sm">
@@ -250,10 +288,34 @@ onMounted(load)
           </div>
         </template>
         <button
+          v-if="!disableOpen"
           type="button"
           class="rounded border border-border px-3 py-2 text-sm hover:bg-surface-hover"
-          @click="disableTotp"
-        >Disable two-factor</button>
+          @click="disableOpen = true"
+        >Disable two-factor…</button>
+        <div v-else class="flex flex-wrap items-end gap-2" data-totp-disable>
+          <label class="block text-sm">
+            <span class="text-text-muted">{{ t('password.confirm_action') }}</span>
+            <input
+              v-model="disablePassword"
+              type="password"
+              autocomplete="current-password"
+              class="mt-1 w-56 rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+              @keyup.enter="disableTotp"
+            />
+          </label>
+          <button
+            type="button"
+            :disabled="!disablePassword"
+            class="rounded bg-danger text-white px-3 py-2 text-sm disabled:opacity-60"
+            @click="disableTotp"
+          >Disable two-factor</button>
+          <button
+            type="button"
+            class="rounded border border-border px-3 py-2 text-sm hover:bg-surface-hover"
+            @click="disableOpen = false; disablePassword = ''"
+          >Cancel</button>
+        </div>
         <p v-if="totpError" class="text-sm text-danger">{{ totpError }}</p>
       </template>
       <TotpEnroll v-else @done="onTotpEnrolled" />

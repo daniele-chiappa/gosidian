@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import { apiErrorMessage } from '@/api/client'
 import {
   listMCPTokens,
   createMCPToken,
@@ -19,11 +20,14 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 const fresh = ref<MCPTokenCreated | null>(null)
 
-const draft = reactive<{ name: string; project: string; scopes: string; ttl_ms: number }>({
+const draft = reactive<{ name: string; project: string; scopes: string; ttl_ms: number; password: string }>({
   name: '',
   project: '',
   scopes: 'read,write',
   ttl_ms: 0,
+  // A token outlives the session that mints it: the owner's password
+  // confirms it (IMP-088).
+  password: '',
 })
 
 async function load() {
@@ -47,19 +51,22 @@ async function load() {
 }
 
 async function create() {
-  if (!draft.name.trim()) return
+  if (!draft.name.trim() || !draft.password) return
   try {
     fresh.value = await createMCPToken({
       name: draft.name.trim(),
       project: draft.project.trim() || undefined,
       scopes: draft.scopes.split(',').map((s) => s.trim()).filter(Boolean),
       ttl_ms: draft.ttl_ms || undefined,
+      password: draft.password,
     })
     draft.name = ''
     draft.project = ''
     await load()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Create failed'
+    error.value = apiErrorMessage(e, 'Create failed')
+  } finally {
+    draft.password = ''
   }
 }
 
@@ -119,7 +126,7 @@ onMounted(load)
   </div>
 
   <form
-    class="grid grid-cols-1 md:grid-cols-5 gap-3 mb-6"
+    class="grid grid-cols-1 md:grid-cols-6 gap-3 mb-6"
     @submit.prevent="create"
   >
     <input
@@ -138,6 +145,15 @@ onMounted(load)
       v-model.trim="draft.scopes"
       type="text"
       placeholder="scopes csv"
+      class="rounded bg-bg-elevated border border-border px-3 py-2"
+    />
+    <input
+      v-model="draft.password"
+      type="password"
+      autocomplete="current-password"
+      placeholder="your password, to confirm"
+      aria-label="Your password, to confirm"
+      data-token-password
       class="rounded bg-bg-elevated border border-border px-3 py-2"
     />
     <button

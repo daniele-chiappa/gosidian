@@ -123,6 +123,15 @@ func (d *AuthDeps) requireAuth(next http.Handler) http.Handler {
 				"two-factor enrolment required before accessing this resource")
 			return
 		}
+		// The same for a password the owner chose (IMP-063): the account
+		// sets its own before anything else. The enrolment gate lets the
+		// change through, so an account that owes both changes the
+		// password first, then enrols.
+		if user.MustChangePassword && !passwordChangeExemptPath(r.URL.Path) {
+			WriteError(w, http.StatusForbidden, CodeAuthPasswordChangeRequired,
+				"password change required: set your own password first")
+			return
+		}
 		ru := &RequestUser{
 			ID:         user.ID,
 			Username:   user.Username,
@@ -135,6 +144,10 @@ func (d *AuthDeps) requireAuth(next http.Handler) http.Handler {
 		// their first request instead of at the next login.
 		if c, err := r.Cookie(filesCookieName); err != nil || c.Value != token {
 			http.SetCookie(w, filesCookie(token, webauth.IsSecureRequest(r), spaTok.HardExpiry))
+		}
+		// The same for the event stream's cookie (IMP-090).
+		if c, err := r.Cookie(eventsCookieName); err != nil || c.Value != token {
+			http.SetCookie(w, eventsCookie(token, webauth.IsSecureRequest(r), spaTok.HardExpiry))
 		}
 		ctx := context.WithValue(r.Context(), ctxKeyUser, ru)
 		ctx = context.WithValue(ctx, ctxKeyToken, token)
@@ -149,7 +162,18 @@ func (d *AuthDeps) requireAuth(next http.Handler) http.Handler {
 // gated until a secret is enrolled. See requireAuth / BUG-020.
 func enrollmentExemptPath(p string) bool {
 	switch p {
-	case "/api/v1/totp/enroll", "/api/v1/totp/confirm", "/api/v1/refresh", "/api/v1/logout", "/api/v1/me":
+	case "/api/v1/totp/enroll", "/api/v1/totp/confirm", "/api/v1/refresh", "/api/v1/logout", "/api/v1/me", "/api/v1/me/password":
+		return true
+	}
+	return false
+}
+
+// passwordChangeExemptPath reports whether path stays reachable for an
+// account that must change a password the owner chose: the change itself
+// and the session lifecycle. See requireAuth / IMP-063.
+func passwordChangeExemptPath(p string) bool {
+	switch p {
+	case "/api/v1/me/password", "/api/v1/refresh", "/api/v1/logout", "/api/v1/me":
 		return true
 	}
 	return false

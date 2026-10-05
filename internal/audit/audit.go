@@ -93,6 +93,10 @@ const (
 	ActionTOTPRecoveryUsed  Action = "totp_recovery_used"
 	ActionTOTPRecoveryRegen Action = "totp_recovery_regen"
 	ActionTOTPReset         Action = "totp_reset"
+	// ActionPasswordChange is an account changing its own password;
+	// ActionPasswordReset the owner setting another's, temporary (IMP-063).
+	ActionPasswordChange Action = "password_change"
+	ActionPasswordReset  Action = "password_reset"
 
 	// OAuth 2.1 authorization server (IMP-092): a client registered itself,
 	// a user consented (a grant token was minted), a grant renewed its

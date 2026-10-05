@@ -156,6 +156,40 @@ username and password, and is created as a **member** (the owner can
 change the role afterwards). Invites are consumed on signup and stored
 alongside accounts in `auth.json`.
 
+## Passwords
+
+- **Changing your own**: **Settings → Password**, with the current one
+  (`POST /api/v1/me/password`). Your other web sessions are signed out,
+  the current one stays; MCP tokens are separate credentials and keep
+  working. An LDAP account's password is the directory's, changed there.
+- **Set by the owner**: an account created from **Admin → Users** gets
+  the password the owner typed, and **Reset password** next to an
+  account sets a new temporary one, confirmed with the owner's own
+  password (`POST /api/v1/admin/users/{id}/password`, audited as
+  `password_reset`). Either way the account must choose its own before
+  anything else: the web UI shows only the change, and the API answers
+  every other route with 403 `auth.password_change_required`. A reset
+  also signs the account's web sessions out. Accounts that sign up from
+  an invite chose their password themselves and are not asked.
+- **The owner, locked out**: `gosidian user setup --username <owner>`
+  at the console sets the owner's password in place.
+
+### Confirming sensitive actions
+
+A stolen session token must not be enough to lock the account's owner
+out or to keep a way in after a logout. These actions ask for the
+current password in their body (an LDAP account's is checked with a
+bind):
+
+- changing the password, and resetting another account's;
+- removing two-factor (`DELETE /api/v1/totp`);
+- creating an MCP token, personal or from **Admin → Tokens**: a token
+  outlives the session that mints it.
+
+Regenerating the recovery codes asks for a current TOTP code instead. A
+wrong password answers 403, never 401, and counts against the account's
+limiter like a failed login.
+
 ## Two-factor authentication (TOTP)
 
 TOTP (RFC 6238, any authenticator app) is governed by a **global mode**
@@ -231,7 +265,9 @@ Two limiters guard the login, sharing the `login_max_failures` /
 exclusively by "right password, wrong code" attempts, so a stranger
 spraying wrong passwords cannot lock anyone out, while a distributed
 guess at the 6-digit code is capped per account. A wrong TOTP on the
-recovery-code regeneration counts too.
+recovery-code regeneration counts too, and so does a wrong password
+confirming a sensitive action (see [Confirming sensitive
+actions](#confirming-sensitive-actions)).
 
 ## LDAP / Active Directory login
 

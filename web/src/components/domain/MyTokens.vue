@@ -7,13 +7,19 @@
  * visible now.
  */
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { listMyTokens, createMyToken, revokeMyToken, type TokenMode } from '@/api/me'
+import { apiErrorMessage } from '@/api/client'
 import type { MCPToken, MCPTokenCreated } from '@/api/admin'
 import { useAuthStore } from '@/stores/auth'
 import { useAccessStore } from '@/stores/access'
 
 const auth = useAuthStore()
 const access = useAccessStore()
+const { t: tr } = useI18n()
+// A token outlives the session that mints it: creating one asks for the
+// password (IMP-088).
+const password = ref('')
 const tokens = ref<MCPToken[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -45,7 +51,7 @@ async function load() {
 }
 
 async function create() {
-  if (!draft.name.trim()) return
+  if (!draft.name.trim() || !password.value) return
   if (draft.mode === 'custom' && draft.projects.length === 0) {
     error.value = 'Pick at least one project for a custom token.'
     return
@@ -60,13 +66,15 @@ async function create() {
       scopes: draft.write && canWrite.value ? ['read', 'write'] : ['read'],
       tool_profile: draft.profile || undefined,
       ttl_ms: draft.ttlDays > 0 ? draft.ttlDays * 24 * 3600 * 1000 : undefined,
+      password: password.value,
     })
     draft.name = ''
     draft.projects = []
     await load()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Create failed'
+    error.value = apiErrorMessage(e, 'Create failed')
   } finally {
+    password.value = ''
     busy.value = false
   }
 }
@@ -155,10 +163,21 @@ onMounted(() => {
         <span class="text-text-muted text-xs">Expires in days (0 = never)</span>
         <input v-model.number="draft.ttlDays" type="number" min="0" class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2" />
       </label>
+      <label class="text-sm sm:col-span-2">
+        <span class="text-text-muted text-xs">{{ tr('password.confirm_action') }}</span>
+        <input
+          v-model="password"
+          type="password"
+          autocomplete="current-password"
+          required
+          data-token-password
+          class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+        />
+      </label>
       <div class="sm:col-span-2">
         <button
           type="submit"
-          :disabled="busy || !draft.name"
+          :disabled="busy || !draft.name || !password"
           class="rounded bg-accent text-accent-fg px-3 py-2 text-sm hover:bg-accent-hover disabled:opacity-60"
         >+ Create token</button>
       </div>

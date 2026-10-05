@@ -174,7 +174,9 @@ a note naming it (and the likely intended argument, e.g. `Project` →
 - `memory_append(path, content)`
 - `memory_edit(path, old_string, new_string, replace_all?)` — surgical
   in-place edit
-- `memory_delete(path)`
+- `memory_delete(path)` — with the server's trash on, the note goes to
+  the trash (`trash_id` in the result) and is restored from the web UI's
+  trash, as one deleted there; without it, it is removed
 - `memory_rename_note(from, to)`, `memory_move_note(from, to_project)`
 - `memory_ask(project, question, urgency?, context?)` — append a
   structured `### OQ-NNN` block to `<project>/docs/open-questions.md`

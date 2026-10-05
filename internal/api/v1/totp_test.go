@@ -65,8 +65,18 @@ func TestTOTPEnrollConfirmDisenroll(t *testing.T) {
 		t.Error("secret or recovery codes not persisted after confirm")
 	}
 
-	// Disenroll (optional + not required) → 204, secret and codes cleared.
-	if rec := f.doAuthRecorder(http.MethodDelete, "/api/v1/totp", "", nil); rec.code != http.StatusNoContent {
+	// Disenroll (optional + not required) asks for the password (IMP-088):
+	// none or a wrong one keeps the secret; the right one → 204, cleared.
+	if rec := f.doAuthRecorder(http.MethodDelete, "/api/v1/totp", "", nil); rec.code != http.StatusBadRequest {
+		t.Errorf("disenroll without password = %d want 400", rec.code)
+	}
+	if rec := f.doAuthRecorder(http.MethodDelete, "/api/v1/totp", `{"password":"wrong-password"}`, nil); rec.code != http.StatusForbidden {
+		t.Errorf("disenroll with a wrong password = %d want 403", rec.code)
+	}
+	if u, ok := f.webauth.UserByID(f.owner.ID); !ok || u.TOTPSec == "" {
+		t.Fatal("a refused disenroll cleared the secret")
+	}
+	if rec := f.doAuthRecorder(http.MethodDelete, "/api/v1/totp", `{"password":"`+f.password+`"}`, nil); rec.code != http.StatusNoContent {
 		t.Fatalf("disenroll status %d: %s", rec.code, rec.body)
 	}
 	if u, ok := f.webauth.UserByID(f.owner.ID); ok && (u.TOTPSec != "" || len(u.RecoveryCodes) != 0) {

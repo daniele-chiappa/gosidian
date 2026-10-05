@@ -26,6 +26,10 @@ type adminUserView struct {
 	TOTPEnrolled bool   `json:"totp_enrolled"`
 	CreatedAt    string `json:"created_at"`
 	DisabledAt   string `json:"disabled_at,omitempty"`
+	// AuthSource is "ldap" for an account whose password the directory owns;
+	// MustChangePassword marks a password the owner chose, not yet changed.
+	AuthSource         string `json:"auth_source,omitempty"`
+	MustChangePassword bool   `json:"must_change_password,omitempty"`
 	// Restricted accounts ignore project visibility and see only their
 	// grants; CanCreateProjects is the member capability of creating
 	// projects; PersonalProject is the account's own project when it exists.
@@ -48,14 +52,16 @@ type adminUserView struct {
 
 func toAdminUserView(u webauth.User) adminUserView {
 	uv := adminUserView{
-		ID:                u.ID,
-		Username:          u.Username,
-		Role:              string(u.Role),
-		TOTPPolicy:        u.TOTPPolicy,
-		TOTPEnrolled:      u.TOTPSec != "",
-		CreatedAt:         u.CreatedAt.UTC().Format(rfc3339Z),
-		Restricted:        u.Restricted,
-		CanCreateProjects: u.CanCreateProjects(),
+		ID:                 u.ID,
+		Username:           u.Username,
+		Role:               string(u.Role),
+		TOTPPolicy:         u.TOTPPolicy,
+		TOTPEnrolled:       u.TOTPSec != "",
+		CreatedAt:          u.CreatedAt.UTC().Format(rfc3339Z),
+		Restricted:         u.Restricted,
+		CanCreateProjects:  u.CanCreateProjects(),
+		AuthSource:         u.AuthSource,
+		MustChangePassword: u.MustChangePassword,
 	}
 	if u.DisabledAt != nil {
 		uv.DisabledAt = u.DisabledAt.UTC().Format(rfc3339Z)
@@ -201,6 +207,12 @@ func (r *Router) createUser(w http.ResponseWriter, req *http.Request) {
 	if archived != nil {
 		personal, movedProject, projectWarning = r.reclaimPersonalProject(req, actor, *archived, *user)
 	}
+	// The owner chose the password, and knows it: the account sets its own
+	// at its first login (IMP-063).
+	if err := r.deps.Auth.WebAuth.SetMustChangePassword(user.ID, true); err != nil {
+		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
+		return
+	}
 	if policy != webauth.TOTPInherit {
 		if err := r.deps.Auth.WebAuth.SetTOTPPolicy(user.ID, policy); err != nil {
 			WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
@@ -249,8 +261,8 @@ func (r *Router) handleAdminUserItem(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	id, sub, _ := strings.Cut(strings.TrimSuffix(strings.TrimPrefix(req.URL.Path, "/api/v1/admin/users/"), "/"), "/")
-	if id == "" || (sub != "" && sub != "totp" && sub != "access" && sub != "personal-project") {
-		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "expected /api/v1/admin/users/{id}[/totp|/access|/personal-project]")
+	if id == "" || (sub != "" && sub != "totp" && sub != "access" && sub != "personal-project" && sub != "password") {
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "expected /api/v1/admin/users/{id}[/totp|/access|/personal-project|/password]")
 		return
 	}
 	if sub == "access" || sub == "personal-project" {
@@ -267,6 +279,14 @@ func (r *Router) handleAdminUserItem(w http.ResponseWriter, req *http.Request) {
 		default:
 			WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
 		}
+		return
+	}
+	if sub == "password" {
+		if req.Method != http.MethodPost {
+			WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
+			return
+		}
+		r.resetUserPassword(w, req, id)
 		return
 	}
 	if sub == "totp" {

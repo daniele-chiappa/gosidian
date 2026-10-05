@@ -44,6 +44,13 @@ describe('useSSE reconnect', () => {
     vi.useRealTimers()
   })
 
+  it('keeps the session token out of the URL (IMP-090)', () => {
+    useSSE()
+    expect(last().url).toMatch(/^\/api\/v1\/events\?topics=/)
+    expect(last().url).not.toContain('tok-1')
+    expect(last().url).not.toContain('token=')
+  })
+
   it('leaves a network error to the browser', () => {
     useSSE()
     expect(FakeEventSource.instances).toHaveLength(1)

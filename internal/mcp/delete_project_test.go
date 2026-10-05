@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gosidian/gosidian/internal/auth"
@@ -83,5 +84,69 @@ func TestMCP_DeleteProject_TrashAccessAndTokens(t *testing.T) {
 	resultText(t, mustCall(s.handleCreateProject(ctx, call(map[string]any{"name": "Work"}))))
 	if _, ok := ps.MemberLevel("Work", "u1"); ok {
 		t.Error("the deleted project's grant reached the new one")
+	}
+}
+
+// memory_delete takes the web UI's path too: with the trash on, the note
+// goes there and comes back with its content; without it, it is removed
+// (BUG-097). It used to remove the note from disk whatever the server's
+// trash, so a note an agent deleted could not be restored.
+func TestMCP_DeleteNote_Trash(t *testing.T) {
+	s, _, dir := newTestServer(t)
+	ctx := context.Background()
+	for _, p := range []string{"p/a.md", "p/b.md"} {
+		resultText(t, mustCall(s.handleCreate(ctx, call(map[string]any{"path": p, "content": "# " + p + "\n\nbody\n"}))))
+	}
+
+	// Without the trash: gone, and no trash_id.
+	var out struct {
+		Deleted bool   `json:"deleted"`
+		Path    string `json:"path"`
+		TrashID string `json:"trash_id"`
+	}
+	if err := json.Unmarshal([]byte(resultText(t, mustCall(s.handleDelete(ctx, call(map[string]any{"path": "p/a.md"}))))), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !out.Deleted || out.TrashID != "" {
+		t.Errorf("without trash = %+v", out)
+	}
+	if _, err := s.vault.Load("p/a.md"); err == nil {
+		t.Error("p/a.md still on disk")
+	}
+
+	// With the trash: in the trash, out of the vault and the index, and
+	// restored with its content.
+	bin := trash.New(dir, -1)
+	s.SetTrash(bin)
+	if err := json.Unmarshal([]byte(resultText(t, mustCall(s.handleDelete(ctx, call(map[string]any{"path": "p/b.md"}))))), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !out.Deleted || out.Path != "p/b.md" || out.TrashID == "" {
+		t.Fatalf("with trash = %+v", out)
+	}
+	if _, err := s.vault.Load("p/b.md"); err == nil {
+		t.Error("p/b.md still in the vault")
+	}
+	if n, _ := s.index.Note("p/b.md"); n != nil {
+		t.Error("p/b.md still in the index")
+	}
+	entries, err := bin.List()
+	if err != nil || len(entries) != 1 || entries[0].ID != out.TrashID || entries[0].OriginPath != "p/b.md" {
+		t.Fatalf("trash = %+v %v", entries, err)
+	}
+	if _, _, err := bin.Restore(out.TrashID); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.vault.Load("p/b.md"); err != nil || !strings.Contains(string(n.Content), "body") {
+		t.Errorf("restored: %v", err)
+	}
+
+	// A note that is not there is an error, and nothing reaches the trash.
+	res := mustCall(s.handleDelete(ctx, call(map[string]any{"path": "p/none.md"})))
+	if !res.IsError {
+		t.Errorf("missing note: %+v", res)
+	}
+	if entries, _ := bin.List(); len(entries) != 0 {
+		t.Errorf("trash after the restore and a missing note = %+v", entries)
 	}
 }

@@ -362,6 +362,31 @@ func (s *SpaTokenStore) RevokeByUser(userID string) int {
 	return revoked
 }
 
+// RevokeByUserExcept removes every token of userID but the one whose
+// plaintext is keep: the other sessions of an account that just changed
+// its password (IMP-063). Returns the count revoked.
+func (s *SpaTokenStore) RevokeByUserExcept(userID, keep string) int {
+	sum := sha256.Sum256([]byte(keep))
+	keepHash := hex.EncodeToString(sum[:])
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reloadIfStale()
+	out := s.tokens[:0]
+	revoked := 0
+	for _, t := range s.tokens {
+		if t.UserID == userID && t.Hash != keepHash {
+			revoked++
+			continue
+		}
+		out = append(out, t)
+	}
+	s.tokens = out
+	if revoked > 0 {
+		_ = s.save()
+	}
+	return revoked
+}
+
 // PruneExpired removes hard-expired or sliding-expired tokens from the
 // store. Returns the count removed.
 func (s *SpaTokenStore) PruneExpired() error {

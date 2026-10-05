@@ -73,13 +73,24 @@ Push failures surface in `/healthz` (`git_sync.healthy=false` with
 Git sync changes apply on the **next server restart**, not
 immediately — a boot-time invariant.
 
+## Password
+
+The **Password** panel changes your own password: the current one, the
+new one twice (at least 8 characters). Your other web sessions are
+signed out; MCP tokens keep working. An account whose password the owner
+set (created or reset from **Admin → Users**) gets the same form as a
+full-screen step before anything else. LDAP accounts change their
+password in the directory. See [Authentication &
+roles](authentication.md#passwords).
+
 ## Two-factor (TOTP)
 
 The **Two-factor** panel lets any user enroll a TOTP authenticator
 (scan the QR code, then confirm a code to activate). The confirmation
 hands out **8 single-use recovery codes**, shown once; the panel then
 tracks how many are left and can **regenerate** the set on request
-(a current TOTP code is asked for). Owners additionally get a **global
+(a current TOTP code is asked for). Removing two-factor asks for your
+password. Owners additionally get a **global
 TOTP mode** (`off` / `optional` / `required`) here, while per-user
 overrides — and the **Reset** that clears a locked-out user's second
 factor — live in **Admin → Users**. Full policy semantics, including how
@@ -108,7 +119,8 @@ Shown to every signed-in account except the owner (who uses
 **Admin → Tokens**). Create tokens for MCP clients in *inherit* mode
 (follows your access as it changes) or *custom* mode (a subset of the
 projects you see now), read-only or read + write where you may write,
-optionally with the `core` tool profile and an expiry; revoke them, and
+optionally with the `core` tool profile and an expiry — creating one asks
+for your password, since a token outlives the session; revoke them, and
 the OAuth logins listed alongside. A token never exceeds your own access:
 the server narrows it on every request. See
 [Authentication & roles](authentication.md#your-own-mcp-tokens).

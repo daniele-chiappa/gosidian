@@ -14,6 +14,7 @@ import TopBar from './TopBar.vue'
 import Sidebar from './Sidebar.vue'
 import CommandPalette from './CommandPalette.vue'
 import TotpEnroll from '@/components/domain/TotpEnroll.vue'
+import PasswordChange from '@/components/domain/PasswordChange.vue'
 import { windowRegistry } from '@/components/plancia/windowRegistry'
 import { windowTone } from '@/components/plancia/windowModules'
 import { codec, planciaKey } from '@/composables/planciaKey'
@@ -174,8 +175,25 @@ function openSettings(): void {
 
     <!-- Forced TOTP enrolment interstitial: blocks the app when the user's
          effective policy requires two-factor but no secret is enrolled. -->
+    <!-- A password the owner chose (IMP-063): the account sets its own
+         first; an enrolment it also owes comes after. -->
     <div
-      v-if="auth.enrollmentRequired"
+      v-if="auth.passwordChangeRequired"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-bg/95 p-4"
+      data-password-interstitial
+    >
+      <div class="w-full max-w-md rounded-lg bg-surface p-6 ring-1 ring-border shadow">
+        <h2 class="text-lg font-semibold mb-1">
+          {{ t('password.interstitial_title') }}
+        </h2>
+        <p class="text-sm text-text-muted mb-4">
+          {{ t('password.interstitial_desc') }}
+        </p>
+        <PasswordChange @done="auth.clearPasswordChange()" />
+      </div>
+    </div>
+    <div
+      v-else-if="auth.enrollmentRequired"
       class="fixed inset-0 z-50 flex items-center justify-center bg-bg/95 p-4"
     >
       <div class="w-full max-w-md rounded-lg bg-surface p-6 ring-1 ring-border shadow">

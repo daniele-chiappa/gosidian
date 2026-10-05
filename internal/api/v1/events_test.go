@@ -3,6 +3,8 @@ package v1
 import (
 	"bufio"
 	"context"
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -194,5 +196,76 @@ func waitSubscribers(t *testing.T, hub *events.Hub, n int) {
 			t.Fatalf("subscriber did not register: have %d, want %d", hub.SubCount(), n)
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// The stream takes the session from the gosidian_events cookie, so the
+// token never reaches a URL (IMP-090); ?token= still works for a tab opened
+// before the cookie existed.
+func TestEvents_Cookie(t *testing.T) {
+	srv, f := startEventsServer(t)
+	open := func(url string, cookie string) int {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		if cookie != "" {
+			req.AddCookie(&http.Cookie{Name: eventsCookieName, Value: cookie})
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		return res.StatusCode
+	}
+	if got := open(srv.URL+"/api/v1/events?topics=tree", f.bearer); got != http.StatusOK {
+		t.Errorf("cookie: status=%d", got)
+	}
+	if got := open(srv.URL+"/api/v1/events?topics=tree", "gsp_bogus"); got != http.StatusUnauthorized {
+		t.Errorf("bogus cookie: status=%d", got)
+	}
+	if got := open(srv.URL+"/api/v1/events?token="+f.bearer+"&topics=tree", ""); got != http.StatusOK {
+		t.Errorf("deprecated ?token=: status=%d", got)
+	}
+}
+
+// Login sets the events cookie next to the attachments one, an API call
+// re-issues it, logout clears it (IMP-090).
+func TestEvents_CookieLifecycle(t *testing.T) {
+	f := newNotesFixture(t)
+	w := f.request(http.MethodPost, "/api/v1/login",
+		fmt.Sprintf(`{"username":%q,"password":%q}`, f.username, f.password), nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("login: status=%d body=%s", w.Code, w.Body.String())
+	}
+	var login struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &login); err != nil {
+		t.Fatal(err)
+	}
+	var ev *http.Cookie
+	for _, c := range w.Result().Cookies() {
+		if c.Name == eventsCookieName {
+			ev = c
+		}
+	}
+	if ev == nil || ev.Value != login.Token || !ev.HttpOnly || ev.Path != "/api/v1/events" || ev.SameSite != http.SameSiteLaxMode || ev.Expires.IsZero() || ev.Secure {
+		t.Fatalf("events cookie: %+v (set-cookie %v)", ev, w.Header().Values("Set-Cookie"))
+	}
+	me := f.request(http.MethodGet, "/api/v1/me", "", map[string]string{"Authorization": "Bearer " + login.Token})
+	if !strings.Contains(strings.Join(me.Header().Values("Set-Cookie"), ";"), eventsCookieName+"=") {
+		t.Errorf("/me should re-issue the events cookie: %v", me.Header().Values("Set-Cookie"))
+	}
+	lo := f.request(http.MethodPost, "/api/v1/logout", "", map[string]string{"Authorization": "Bearer " + login.Token})
+	cleared := false
+	for _, c := range lo.Result().Cookies() {
+		if c.Name == eventsCookieName && c.MaxAge < 0 {
+			cleared = true
+		}
+	}
+	if lo.Code != http.StatusNoContent || !cleared {
+		t.Errorf("logout: status=%d set-cookie=%v", lo.Code, lo.Header().Values("Set-Cookie"))
 	}
 }

@@ -30,6 +30,9 @@ type loginResponse struct {
 	// TOTP but no secret is enrolled yet — the SPA forces the enrolment
 	// interstitial before granting access.
 	TOTPEnrollmentRequired bool `json:"totp_enrollment_required,omitempty"`
+	// PasswordChangeRequired is true when the password is one the owner
+	// chose: the SPA asks for a new one before granting access (IMP-063).
+	PasswordChangeRequired bool `json:"password_change_required,omitempty"`
 	// RecoveryCodeUsed is true when this login consumed a recovery code
 	// instead of a TOTP; the SPA nudges the user to regenerate the set.
 	RecoveryCodeUsed bool `json:"recovery_code_used,omitempty"`
@@ -52,6 +55,12 @@ type userView struct {
 	// RecoveryCodesRemaining counts the unused recovery codes; omitted when
 	// not enrolled, so the SPA can tell "none left" from "not applicable".
 	RecoveryCodesRemaining *int `json:"recovery_codes_remaining,omitempty"`
+	// AuthSource is "ldap" for an account whose password the directory
+	// owns: the SPA offers no password change there.
+	AuthSource string `json:"auth_source,omitempty"`
+	// PasswordChangeRequired is true while the password is one the owner
+	// chose (IMP-063): the SPA forces the change before anything else.
+	PasswordChangeRequired bool `json:"password_change_required,omitempty"`
 }
 
 // recoveryRemaining projects the recovery-code counter for userView.
@@ -163,7 +172,7 @@ func (r *Router) handleLogin(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	r.setFilesCookie(w, req, plain, tok.HardExpiry)
+	r.setSessionCookies(w, req, plain, tok.HardExpiry)
 	WriteJSON(w, http.StatusOK, loginResponse{
 		Token:      plain,
 		ExpiresAt:  tok.ExpiresAt.UTC().Format(rfc3339Z),
@@ -174,8 +183,11 @@ func (r *Router) handleLogin(w http.ResponseWriter, req *http.Request) {
 			Role:                   string(user.Role),
 			TOTPEnrolled:           user.TOTPSec != "",
 			RecoveryCodesRemaining: recoveryRemaining(user),
+			AuthSource:             user.AuthSource,
+			PasswordChangeRequired: user.MustChangePassword,
 		},
 		TOTPEnrollmentRequired: r.deps.Auth.WebAuth.TOTPEnrollmentRequired(user),
+		PasswordChangeRequired: user.MustChangePassword,
 		RecoveryCodeUsed:       res.RecoveryCodeUsed,
 	})
 }
@@ -201,7 +213,7 @@ func (r *Router) handleLogout(w http.ResponseWriter, req *http.Request) {
 			Action: audit.ActionSpaTokenRevoke,
 		})
 	}
-	http.SetCookie(w, clearFilesCookie(webauth.IsSecureRequest(req)))
+	clearSessionCookies(w, req)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -217,19 +229,14 @@ func (r *Router) handleMe(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusUnauthorized, CodeAuthTokenInvalid, "no user in context")
 		return
 	}
-	enrolled := false
-	var remaining *int
+	view := userView{ID: u.ID, Username: u.Username, Role: string(u.Role)}
 	if full, ok := r.deps.Auth.WebAuth.UserByID(u.ID); ok {
-		enrolled = full.TOTPSec != ""
-		remaining = recoveryRemaining(full)
+		view.TOTPEnrolled = full.TOTPSec != ""
+		view.RecoveryCodesRemaining = recoveryRemaining(full)
+		view.AuthSource = full.AuthSource
+		view.PasswordChangeRequired = full.MustChangePassword
 	}
-	WriteJSON(w, http.StatusOK, userView{
-		ID:                     u.ID,
-		Username:               u.Username,
-		Role:                   string(u.Role),
-		TOTPEnrolled:           enrolled,
-		RecoveryCodesRemaining: remaining,
-	})
+	WriteJSON(w, http.StatusOK, view)
 }
 
 // handleRefresh extends the sliding TTL of the current token without

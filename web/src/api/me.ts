@@ -14,6 +14,9 @@ export interface CreateMyTokenRequest {
   scopes?: ('read' | 'write')[]
   ttl_ms?: number
   tool_profile?: '' | 'full' | 'core'
+  /** The account's current password (IMP-088): a token outlives the
+   *  session that mints it. */
+  password: string
 }
 
 interface ListResp<T> {

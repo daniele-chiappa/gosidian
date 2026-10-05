@@ -86,6 +86,14 @@ func TestPersonalProject_Provisioning(t *testing.T) {
 		t.Fatalf("create user = %d (%s)", rec.code, rec.body)
 	}
 	nora, _ := f.webauth.UserByID(jsonField(t, rec.body, "id"))
+	// The owner chose nora's password: she changes it first (IMP-063), and
+	// this test is about her project, so it is cleared here.
+	if !nora.MustChangePassword {
+		t.Error("an account the owner created must change its password at the first login")
+	}
+	if err := f.webauth.SetMustChangePassword(nora.ID, false); err != nil {
+		t.Fatal(err)
+	}
 	if !f.router.projectExists("nora") || f.projects.Visibility("nora") != projects.VisibilityPrivate {
 		t.Fatalf("personal project missing or not private: exists=%v vis=%s", f.router.projectExists("nora"), f.projects.Visibility("nora"))
 	}
@@ -176,7 +184,7 @@ func TestMeTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rec := f.request(http.MethodPost, "/api/v1/me/tokens", `{"name":"laptop","scopes":["read","write"]}`, hdr)
+	rec := f.request(http.MethodPost, "/api/v1/me/tokens", `{"name":"laptop","scopes":["read","write"],"password":"quinn-pass-1234"}`, hdr)
 	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"token":"`) || !strings.Contains(rec.Body.String(), `"owner_user_id":"`+u.ID+`"`) {
 		t.Fatalf("inherit token = %d (%s)", rec.Code, rec.Body.String())
 	}
@@ -185,13 +193,13 @@ func TestMeTokens(t *testing.T) {
 	}
 	inheritID := jsonField(t, rec.Body.String()[strings.Index(rec.Body.String(), `"record"`):], "id")
 
-	if rec := f.request(http.MethodPost, "/api/v1/me/tokens", `{"name":"bad","mode":"custom","projects":["Beta"]}`, hdr); rec.Code != http.StatusForbidden {
+	if rec := f.request(http.MethodPost, "/api/v1/me/tokens", `{"name":"bad","mode":"custom","projects":["Beta"],"password":"quinn-pass-1234"}`, hdr); rec.Code != http.StatusForbidden {
 		t.Errorf("custom with an invisible project = %d want 403", rec.Code)
 	}
 	if rec := f.request(http.MethodPost, "/api/v1/me/tokens", `{"name":"empty","mode":"custom"}`, hdr); rec.Code != http.StatusBadRequest {
 		t.Errorf("custom without projects = %d want 400", rec.Code)
 	}
-	if rec := f.request(http.MethodPost, "/api/v1/me/tokens", `{"name":"alpha-only","mode":"custom","projects":["Alpha"],"tool_profile":"core"}`, hdr); rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"projects":["Alpha"]`) || !strings.Contains(rec.Body.String(), `"tool_profile":"core"`) {
+	if rec := f.request(http.MethodPost, "/api/v1/me/tokens", `{"name":"alpha-only","mode":"custom","projects":["Alpha"],"tool_profile":"core","password":"quinn-pass-1234"}`, hdr); rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), `"projects":["Alpha"]`) || !strings.Contains(rec.Body.String(), `"tool_profile":"core"`) {
 		t.Errorf("custom token = %d (%s)", rec.Code, rec.Body.String())
 	}
 	if rec := f.request(http.MethodPost, "/api/v1/me/tokens", `{"name":"x","mode":"weird"}`, hdr); rec.Code != http.StatusBadRequest {
@@ -228,10 +236,10 @@ func TestMeTokens(t *testing.T) {
 	}
 	gb, _, _ := f.spaTokens.Create(g.ID, "test")
 	ghdr := map[string]string{"Authorization": "Bearer " + gb}
-	if rec := f.request(http.MethodPost, "/api/v1/me/tokens", `{"name":"g","scopes":["write"]}`, ghdr); rec.Code != http.StatusForbidden {
+	if rec := f.request(http.MethodPost, "/api/v1/me/tokens", `{"name":"g","scopes":["write"],"password":"gale-pass-1234"}`, ghdr); rec.Code != http.StatusForbidden {
 		t.Errorf("guest write token = %d want 403", rec.Code)
 	}
-	if rec := f.request(http.MethodPost, "/api/v1/me/tokens", `{"name":"g"}`, ghdr); rec.Code != http.StatusCreated {
+	if rec := f.request(http.MethodPost, "/api/v1/me/tokens", `{"name":"g","password":"gale-pass-1234"}`, ghdr); rec.Code != http.StatusCreated {
 		t.Errorf("guest read token = %d (%s)", rec.Code, rec.Body.String())
 	}
 }

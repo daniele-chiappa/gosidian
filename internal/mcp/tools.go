@@ -207,7 +207,7 @@ func (s *Server) registerTools() {
 	), s.handleEdit)
 
 	s.impl.AddTool(mcp.NewTool("memory_delete",
-		mcp.WithDescription("Delete a note from the vault and the index."),
+		mcp.WithDescription("Delete a note from the vault and the index. With the server's trash on (trash_id in the result) the note can be restored from the web UI's trash, as one deleted there; otherwise it is gone."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative path of the note to delete.")),
 	), s.handleDelete)
 
@@ -1160,7 +1160,19 @@ func (s *Server) handleDelete(ctx context.Context, req mcp.CallToolRequest) (*mc
 	}
 	unlock := s.vault.LockPath(rel)
 	defer unlock()
-	if err := s.vault.Delete(rel); err != nil {
+	// With the trash on, a note goes there as one deleted from the web UI
+	// does, and can be restored (BUG-097); without it, it is removed.
+	out := map[string]any{"deleted": true, "path": rel}
+	if s.trash != nil {
+		if _, err := s.vault.Load(rel); err != nil {
+			return mcp.NewToolResultErrorFromErr("delete failed", err), nil
+		}
+		id, err := s.trash.DiscardNote(rel)
+		if err != nil {
+			return mcp.NewToolResultErrorFromErr("trash failed", err), nil
+		}
+		out["trash_id"] = id
+	} else if err := s.vault.Delete(rel); err != nil {
 		return mcp.NewToolResultErrorFromErr("delete failed", err), nil
 	}
 	if err := s.index.Delete(rel); err != nil {
@@ -1168,7 +1180,7 @@ func (s *Server) handleDelete(ctx context.Context, req mcp.CallToolRequest) (*mc
 	}
 	s.auditWrite(ctx, audit.ActionDelete, rel, "", 0)
 	s.publishNoteChange("delete", rel, "", true)
-	return mcp.NewToolResultJSON(map[string]any{"deleted": true, "path": rel})
+	return mcp.NewToolResultJSON(out)
 }
 
 func (s *Server) handleCreateProject(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

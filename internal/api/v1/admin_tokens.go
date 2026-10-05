@@ -42,6 +42,9 @@ type createMCPTokenRequest struct {
 	Scopes      []string `json:"scopes"`
 	TTLMS       int64    `json:"ttl_ms,omitempty"`
 	ToolProfile string   `json:"tool_profile,omitempty"` // "" | "full" | "core" (worker subset)
+	// Password is the owner's current one (IMP-088), as for a personal
+	// token: a token outlives the session that mints it.
+	Password string `json:"password,omitempty"`
 }
 
 // updateMCPTokenRequest is the PATCH body for an existing token. Fields are
@@ -203,6 +206,9 @@ func (r *Router) createMCPToken(w http.ResponseWriter, req *http.Request) {
 	projects := body.Projects
 	if len(projects) == 0 && body.Project != "" {
 		projects = []string{body.Project}
+	}
+	if !r.confirmPassword(w, user, body.Password) {
+		return
 	}
 	plain, tok, err := r.deps.Auth.MCPTokens.Create(body.Name, projects, body.Scopes, ttl, user.ID)
 	if err != nil {

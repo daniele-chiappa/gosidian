@@ -41,11 +41,22 @@ func clearFilesCookie(secure bool) *http.Cookie {
 	}
 }
 
-// setFilesCookie issues the attachment cookie at login. Every later
-// authenticated API call re-issues it through requireAuth when the browser
-// lacks it (self-healing for sessions persisted before the cookie existed).
-func (r *Router) setFilesCookie(w http.ResponseWriter, req *http.Request, token string, hardExpiry time.Time) {
-	http.SetCookie(w, filesCookie(token, webauth.IsSecureRequest(req), hardExpiry))
+// setSessionCookies issues the cookies that carry the session where an
+// Authorization header cannot go — attachments (gosidian_files) and the
+// event stream (gosidian_events) — at login. Every later authenticated API
+// call re-issues them through requireAuth when the browser lacks them
+// (self-healing for sessions persisted before a cookie existed).
+func (r *Router) setSessionCookies(w http.ResponseWriter, req *http.Request, token string, hardExpiry time.Time) {
+	secure := webauth.IsSecureRequest(req)
+	http.SetCookie(w, filesCookie(token, secure, hardExpiry))
+	http.SetCookie(w, eventsCookie(token, secure, hardExpiry))
+}
+
+// clearSessionCookies removes both at logout.
+func clearSessionCookies(w http.ResponseWriter, req *http.Request) {
+	secure := webauth.IsSecureRequest(req)
+	http.SetCookie(w, clearFilesCookie(secure))
+	http.SetCookie(w, clearEventsCookie(secure))
 }
 
 // VaultFileAuthorizer returns the gate the server consults for /vault-files/

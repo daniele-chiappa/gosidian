@@ -76,8 +76,10 @@ function connect(token: string, topics: SSETopic[]) {
   }
   sharedToken = token
   status.value = 'connecting'
+  // The session rides on the HttpOnly gosidian_events cookie the server set
+  // at login, never on the URL, which proxy access logs keep (IMP-090);
+  // the token only tells a change of session apart.
   const params = new URLSearchParams()
-  params.set('token', token)
   // Subscribe to the full known topic set (union with the caller's request)
   // so every consumer's .on() is served by the single shared connection.
   const subscribed = Array.from(new Set<SSETopic>([...topics, ...ALL_TOPICS]))

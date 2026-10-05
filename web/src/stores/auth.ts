@@ -20,6 +20,8 @@ export interface User {
   totp_enrolled?: boolean
   /** Unused recovery codes; absent when two-factor is not enrolled. */
   recovery_codes_remaining?: number
+  /** "ldap" when the directory owns the password: no change here. */
+  auth_source?: string
 }
 
 interface AuthState {
@@ -30,6 +32,10 @@ interface AuthState {
   /** Set when login reports the effective policy mandates TOTP but no secret
    *  is enrolled yet — the AppShell forces the enrolment interstitial. */
   enrollmentRequired: boolean
+  /** Set while the password is one the owner chose (an account created or
+   *  reset from Admin): the AppShell forces the change before anything else
+   *  (IMP-063). */
+  passwordChangeRequired: boolean
   /** Set when the login consumed a recovery code instead of a TOTP: the
    *  AppShell shows a one-time notice until dismissed (persisted, so a reload
    *  does not swallow it). */
@@ -46,6 +52,7 @@ interface LoginResponse {
   hard_expiry: string
   user: User
   totp_enrollment_required?: boolean
+  password_change_required?: boolean
   recovery_code_used?: boolean
 }
 
@@ -81,6 +88,7 @@ export const useAuthStore = defineStore('auth', {
     hardExpiry: '',
     user: null,
     enrollmentRequired: false,
+    passwordChangeRequired: false,
     recoveryCodeUsed: false,
     openMode: false,
   }),
@@ -106,12 +114,23 @@ export const useAuthStore = defineStore('auth', {
       this.hardExpiry = data.hard_expiry
       this.user = data.user
       this.enrollmentRequired = Boolean(data.totp_enrollment_required)
+      this.passwordChangeRequired = Boolean(data.password_change_required)
       this.recoveryCodeUsed = Boolean(data.recovery_code_used)
       this.openMode = false // a real session supersedes any anonymous open-mode state
     },
 
     clearEnrollment() {
       this.enrollmentRequired = false
+    },
+
+    /** Raise the password-change screen: called by the API client on a 403
+     *  auth.password_change_required. */
+    requirePasswordChange() {
+      this.passwordChangeRequired = true
+    },
+
+    clearPasswordChange() {
+      this.passwordChangeRequired = false
     },
 
     dismissRecoveryNotice() {
@@ -159,6 +178,7 @@ export const useAuthStore = defineStore('auth', {
       this.hardExpiry = ''
       this.user = null
       this.enrollmentRequired = false
+      this.passwordChangeRequired = false
       this.recoveryCodeUsed = false
       this.openMode = false
     },
@@ -173,6 +193,7 @@ export const useAuthStore = defineStore('auth', {
       this.hardExpiry = ''
       this.user = { id: 'anonymous', username: 'guest', role: 'guest' }
       this.enrollmentRequired = false
+      this.passwordChangeRequired = false
       this.recoveryCodeUsed = false
       this.openMode = true
     },
@@ -181,6 +202,14 @@ export const useAuthStore = defineStore('auth', {
   persist: {
     key: 'gosidian.auth',
     storage: localStorage,
-    paths: ['token', 'expiresAt', 'hardExpiry', 'user', 'enrollmentRequired', 'recoveryCodeUsed'],
+    paths: [
+      'token',
+      'expiresAt',
+      'hardExpiry',
+      'user',
+      'enrollmentRequired',
+      'passwordChangeRequired',
+      'recoveryCodeUsed',
+    ],
   },
 })

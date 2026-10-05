@@ -51,15 +51,19 @@ const (
 	// valid, but every route outside the enrolment flow is refused with this
 	// code so the SPA can surface the enrolment interstitial. See BUG-020.
 	CodeAuthEnrollmentRequired = "auth.enrollment_required"
-	CodeValidationRequired     = "validation.required_field"
-	CodeValidationFormat       = "validation.invalid_format"
-	CodeNotFound               = "resource.not_found"
-	CodeConflict               = "resource.conflict"
-	CodeMethodNotAllowed       = "request.method_not_allowed"
-	CodeRateLimit              = "request.rate_limited"
-	CodeConcurrencyEtag        = "concurrency.etag_mismatch"
-	CodeServerInternal         = "server.internal_error"
-	CodeServerUnavailable      = "server.unavailable"
+	// CodeAuthPasswordChangeRequired gates an account whose password the
+	// owner chose (created or reset from Admin): every route but the change
+	// itself is refused until it sets its own (IMP-063).
+	CodeAuthPasswordChangeRequired = "auth.password_change_required"
+	CodeValidationRequired         = "validation.required_field"
+	CodeValidationFormat           = "validation.invalid_format"
+	CodeNotFound                   = "resource.not_found"
+	CodeConflict                   = "resource.conflict"
+	CodeMethodNotAllowed           = "request.method_not_allowed"
+	CodeRateLimit                  = "request.rate_limited"
+	CodeConcurrencyEtag            = "concurrency.etag_mismatch"
+	CodeServerInternal             = "server.internal_error"
+	CodeServerUnavailable          = "server.unavailable"
 )
 
 // WriteError writes a JSON ErrorResponse with the given HTTP status.

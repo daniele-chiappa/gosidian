@@ -25,7 +25,7 @@ func TestAdminTokens_ListEmpty(t *testing.T) {
 
 func TestAdminTokens_CreateAndList(t *testing.T) {
 	f := newAdminFixture(t)
-	body := `{"name":"agent-a","scopes":["read","write"],"project":"alpha"}`
+	body := `{"name":"agent-a","scopes":["read","write"],"project":"alpha","password":"supersecret"}`
 	w := f.doAuthRecorder(http.MethodPost, "/api/v1/admin/tokens", body, nil)
 	if w.code != http.StatusCreated {
 		t.Fatalf("status=%d body=%s", w.code, w.body)
@@ -71,7 +71,7 @@ func TestAdminTokens_CreateRejectsMissingName(t *testing.T) {
 
 func TestAdminTokens_Revoke(t *testing.T) {
 	f := newAdminFixture(t)
-	body := `{"name":"target","scopes":["read"]}`
+	body := `{"name":"target","scopes":["read"],"password":"supersecret"}`
 	w := f.doAuthRecorder(http.MethodPost, "/api/v1/admin/tokens", body, nil)
 	var resp mcpTokenCreatedResponse
 	_ = json.Unmarshal([]byte(w.body), &resp)
@@ -99,7 +99,7 @@ func TestAdminTokens_RevokeNotFound(t *testing.T) {
 // without recreating it. New tokens default to opt-out.
 func TestAdminTokens_OptInToggle(t *testing.T) {
 	f := newAdminFixture(t)
-	w := f.doAuthRecorder(http.MethodPost, "/api/v1/admin/tokens", `{"name":"enrol-me","scopes":["read"]}`, nil)
+	w := f.doAuthRecorder(http.MethodPost, "/api/v1/admin/tokens", `{"name":"enrol-me","scopes":["read"],"password":"supersecret"}`, nil)
 	var resp mcpTokenCreatedResponse
 	_ = json.Unmarshal([]byte(w.body), &resp)
 	id := resp.Record.ID
@@ -135,9 +135,12 @@ func TestAdminTokens_OptInToggle(t *testing.T) {
 
 func TestAdminTokens_OptInRejectsEmptyBody(t *testing.T) {
 	f := newAdminFixture(t)
-	w := f.doAuthRecorder(http.MethodPost, "/api/v1/admin/tokens", `{"name":"x","scopes":["read"]}`, nil)
+	w := f.doAuthRecorder(http.MethodPost, "/api/v1/admin/tokens", `{"name":"x","scopes":["read"],"password":"supersecret"}`, nil)
 	var resp mcpTokenCreatedResponse
 	_ = json.Unmarshal([]byte(w.body), &resp)
+	if resp.Record.ID == "" {
+		t.Fatalf("create: %s", w.body)
+	}
 	wp := f.doAuthRecorder(http.MethodPatch, "/api/v1/admin/tokens/"+resp.Record.ID, `{}`, nil)
 	if wp.code != http.StatusBadRequest {
 		t.Errorf("empty patch status=%d, want 400", wp.code)
@@ -306,7 +309,7 @@ func TestAdminAudit_TailRecent(t *testing.T) {
 	f := newAdminFixture(t)
 	// Generate some audit entries by exercising the create-token
 	// path; these touch ActionTokenCreate.
-	body := `{"name":"observed","scopes":["read"]}`
+	body := `{"name":"observed","scopes":["read"],"password":"supersecret"}`
 	if w := f.doAuthRecorder(http.MethodPost, "/api/v1/admin/tokens", body, nil); w.code != http.StatusCreated {
 		t.Fatalf("setup token create failed: %s", w.body)
 	}
@@ -323,7 +326,7 @@ func TestAdminAudit_FilterByAction(t *testing.T) {
 	f := newAdminFixture(t)
 	// Two distinct audit-emitting actions.
 	_ = f.doAuthRecorder(http.MethodPost, "/api/v1/admin/tokens",
-		`{"name":"a","scopes":["read"]}`, nil)
+		`{"name":"a","scopes":["read"],"password":"supersecret"}`, nil)
 	_ = f.doAuthRecorder(http.MethodPost, "/api/v1/admin/invites", `{}`, nil)
 	w := f.doAuthRecorder(http.MethodGet, "/api/v1/admin/audit?action=token_create", "", nil)
 	if w.code != http.StatusOK {

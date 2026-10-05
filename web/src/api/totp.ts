@@ -46,7 +46,8 @@ export async function regenerateRecoveryCodes(code: string): Promise<string[]> {
 }
 
 /** Remove the current user's TOTP secret and recovery codes (403 if the
- *  policy requires it). */
-export async function disenrollTOTP(): Promise<void> {
-  await client.delete('/totp')
+ *  policy requires it). Needs the current password: a stolen session alone
+ *  must not take the second factor away (IMP-088). */
+export async function disenrollTOTP(password: string): Promise<void> {
+  await client.delete('/totp', { data: { password } })
 }

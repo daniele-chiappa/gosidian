@@ -30,6 +30,9 @@ export interface CreateMCPTokenRequest {
   project?: string
   scopes: string[]
   ttl_ms?: number
+  /** The owner's current password (IMP-088): a token outlives the session
+   *  that mints it. */
+  password: string
 }
 
 export interface SpaToken {
@@ -50,6 +53,10 @@ export interface AdminUser {
   totp_enrolled?: boolean
   created_at: string
   disabled_at?: string
+  /** "ldap" when the directory owns the password. */
+  auth_source?: string
+  /** A password the owner chose, not yet changed by the account (IMP-063). */
+  must_change_password?: boolean
   /** Restricted accounts ignore visibility and see only their grants. */
   restricted: boolean
   can_create_projects: boolean

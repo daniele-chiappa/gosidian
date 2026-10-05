@@ -28,6 +28,9 @@ type meTokenRequest struct {
 	Scopes      []string `json:"scopes,omitempty"` // read (default) | write
 	TTLMS       int64    `json:"ttl_ms,omitempty"`
 	ToolProfile string   `json:"tool_profile,omitempty"`
+	// Password is the account's current one (IMP-088): a token outlives the
+	// session that mints it, so a stolen session alone must not mint one.
+	Password string `json:"password,omitempty"`
 }
 
 const (
@@ -133,6 +136,9 @@ func (r *Router) createMeToken(w http.ResponseWriter, req *http.Request, user *R
 	var ttl time.Duration
 	if body.TTLMS > 0 {
 		ttl = time.Duration(body.TTLMS) * time.Millisecond
+	}
+	if !r.confirmPassword(w, user, body.Password) {
+		return
 	}
 	plain, tok, err := r.deps.Auth.MCPTokens.Create(body.Name, projects, scopes, ttl, user.ID)
 	if err != nil {

@@ -108,7 +108,14 @@ matter for MCP:
 - **Buffering.** gosidian answers `/mcp` and `/mcp/sse` with
   `X-Accel-Buffering: no`, so nginx-style proxies pass the SSE stream
   through even with `proxy_buffering on`. Keep `proxy_read_timeout` at
-  60 s or more: `memory_wait_changes` may hold a request for up to 55 s. If you have the legacy
+  60 s or more: `memory_wait_changes` may hold a request for up to 55 s.
+- **Credentials and access logs.** The web UI never puts its session
+  token in a URL: the live-update stream `/api/v1/events` reads it from
+  an `HttpOnly` cookie scoped to that path. Clients from before v2.59
+  still send it as `?token=`, accepted for one release. If your proxy
+  logs full request lines (nginx's default `$request`, Nginx Proxy
+  Manager's `proxy` format), keep the access logs private, or log the
+  path without the query string. If you have the legacy
 standalone listener enabled (`GOSIDIAN_MCP_ADDR` set), you can
 optionally publish it under a separate hostname:
 

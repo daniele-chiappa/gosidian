@@ -3,8 +3,10 @@ package v1
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gosidian/gosidian/internal/authz"
@@ -18,11 +20,62 @@ import (
 // belt-and-suspenders, but operators run varied stacks behind us.
 const sseHeartbeatInterval = 30 * time.Second
 
+// eventsCookieName carries the SPA session token to /api/v1/events
+// (IMP-090). EventSource cannot set an Authorization header, and the token
+// used to ride on the query string, where every reverse proxy's access log
+// kept it. It now travels as an HttpOnly cookie scoped to the events path
+// only, like gosidian_files for /vault-files/ (ADR-022): issued at login,
+// re-issued by requireAuth, cleared at logout. The path is one read-only
+// GET, so the cookie opens no CSRF exposure on the rest of the API.
+const eventsCookieName = "gosidian_events"
+
+func eventsCookie(token string, secure bool, expires time.Time) *http.Cookie {
+	return &http.Cookie{
+		Name:     eventsCookieName,
+		Value:    token,
+		Path:     "/api/v1/events",
+		Expires:  expires,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   secure,
+	}
+}
+
+func clearEventsCookie(secure bool) *http.Cookie {
+	return &http.Cookie{
+		Name:     eventsCookieName,
+		Value:    "",
+		Path:     "/api/v1/events",
+		MaxAge:   -1,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   secure,
+	}
+}
+
+// queryTokenWarn logs once that a client still sends ?token=.
+var queryTokenWarn sync.Once
+
+// eventsToken returns the session token of an events request: the cookie,
+// else the deprecated ?token= of a SPA tab opened before the cookie
+// existed (kept for one release, IMP-090).
+func eventsToken(req *http.Request) string {
+	if c, err := req.Cookie(eventsCookieName); err == nil && strings.TrimSpace(c.Value) != "" {
+		return strings.TrimSpace(c.Value)
+	}
+	token := strings.TrimSpace(req.URL.Query().Get("token"))
+	if token != "" {
+		queryTokenWarn.Do(func() {
+			log.Printf("events: a client sent its session token as ?token= (deprecated, IMP-090): reload the web UI; the query string reaches proxy access logs")
+		})
+	}
+	return token
+}
+
 // handleEvents implements GET /api/v1/events as a Server-Sent Events
-// stream. EventSource cannot ship custom headers so the Bearer token
-// rides on the query string (?token=...). The token is validated
-// against the SpaTokenStore exactly like a normal /api/v1/* request;
-// the only difference is the location.
+// stream. EventSource cannot ship custom headers, so the session token
+// comes from the gosidian_events cookie (eventsToken). It is validated
+// against the SpaTokenStore exactly like a normal /api/v1/* request.
 //
 // Topic filter: ?topics=tree,note,sidebar — comma-separated whitelist
 // from internal/server/events.Topic. Empty = subscribe to all.
@@ -45,9 +98,9 @@ func (r *Router) handleEvents(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	token := strings.TrimSpace(req.URL.Query().Get("token"))
+	token := eventsToken(req)
 	if token == "" {
-		WriteError(w, http.StatusUnauthorized, CodeAuthTokenInvalid, "token query param required")
+		WriteError(w, http.StatusUnauthorized, CodeAuthTokenInvalid, "no session: the gosidian_events cookie is missing (log in again)")
 		return
 	}
 	spaTok, err := r.deps.Auth.SpaAuth.Validate(token)
@@ -72,6 +125,10 @@ func (r *Router) handleEvents(w http.ResponseWriter, req *http.Request) {
 	// See BUG-020.
 	if r.deps.Auth.WebAuth.TOTPEnrollmentRequired(user) {
 		WriteError(w, http.StatusForbidden, CodeAuthEnrollmentRequired, "two-factor enrolment required before accessing this resource")
+		return
+	}
+	if user.MustChangePassword {
+		WriteError(w, http.StatusForbidden, CodeAuthPasswordChangeRequired, "password change required: set your own password first")
 		return
 	}
 

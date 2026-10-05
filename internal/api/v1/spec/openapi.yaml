@@ -417,17 +417,30 @@ paths:
       summary: |
         Server-Sent Events stream for live updates.
 
-        EventSource cannot send custom headers, so the Bearer token
-        travels in the `token` query parameter; everything else mirrors
-        a normal authenticated request. Reconnect with `Last-Event-ID`
-        is supported but no historical events are replayed; the SPA
-        refetches affected resources via REST after reconnect.
+        EventSource cannot send custom headers, so the session travels in
+        the `gosidian_events` cookie (HttpOnly, path `/api/v1/events`)
+        that login sets and every authenticated call re-issues; everything
+        else mirrors a normal authenticated request. Reconnect with
+        `Last-Event-ID` is supported but no historical events are
+        replayed; the SPA refetches affected resources via REST after
+        reconnect.
       parameters:
-        - in: query
-          name: token
-          required: true
+        - in: cookie
+          name: gosidian_events
+          required: false
           schema:
             type: string
+          description: The SPA session token, set by POST /api/v1/login.
+        - in: query
+          name: token
+          required: false
+          deprecated: true
+          schema:
+            type: string
+          description: |
+            The SPA session token, for clients from before the cookie
+            (accepted for one release). It reaches proxy access logs: do
+            not use it.
         - in: query
           name: topics
           required: false
@@ -459,6 +472,42 @@ paths:
                 $ref: "#/components/schemas/User"
         "401":
           $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/me/password:
+    post:
+      tags: [auth]
+      summary: Change the caller's own password.
+      description: >-
+        Local accounts only (an LDAP account's password is the directory's).
+        The other web sessions of the account are closed, the current one
+        stays; MCP tokens stay. It clears the obligation to change a password
+        the owner chose (403 auth.password_change_required on every other
+        route until then).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              properties:
+                current_password: { type: string }
+                new_password: { type: string, minLength: 8 }
+      responses:
+        "200":
+          description: Changed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sessions_closed: { type: integer }
+        "400":
+          description: Missing field, too short, same as the current one, or an LDAP account.
+        "403":
+          description: Wrong current password.
+        "429":
+          description: Too many wrong passwords.
 
   /api/v1/totp/enroll:
     post:
@@ -540,11 +589,26 @@ paths:
     delete:
       tags: [auth]
       summary: Remove the caller's TOTP secret and recovery codes.
+      description: >-
+        Needs the current password: a stolen session alone must not take the
+        second factor away. A wrong password answers 403 and counts against
+        the account's limiter like a failed login.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: { type: string }
       responses:
         "204":
           description: Removed.
+        "400":
+          description: The password is missing.
         "403":
-          description: The effective policy requires two-factor for this account.
+          description: The effective policy requires two-factor for this account, or the password is wrong.
           content:
             application/json:
               schema:
@@ -761,6 +825,41 @@ paths:
       responses:
         "501":
           $ref: "#/components/responses/NotImplemented"
+
+  /api/v1/admin/users/{id}/password:
+    post:
+      tags: [admin]
+      summary: Set another account's password, temporary (owner-only).
+      description: >-
+        Confirmed with the owner's own password. The account must change it
+        at its next request (password_change_required), and its web sessions
+        are closed. Audited as password_reset. The owner changes its own
+        password with /api/v1/me/password.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password, owner_password]
+              properties:
+                password: { type: string, minLength: 8 }
+                owner_password: { type: string }
+      responses:
+        "200":
+          description: Reset.
+        "400":
+          description: Too short, the owner's own account, a disabled or an LDAP account.
+        "403":
+          description: Wrong owner password, or not the owner.
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /api/v1/admin/users/{id}/totp:
     delete:

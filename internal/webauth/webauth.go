@@ -119,6 +119,10 @@ type User struct {
 	// auto-provisioned on first LDAP login (no local password hash).
 	AuthSource string `json:"auth_source,omitempty"`
 	Role       Role   `json:"role"`
+	// MustChangePassword marks a password the owner chose (an account
+	// created or reset from Admin): until the account sets its own, every
+	// route but the change itself is refused (IMP-063).
+	MustChangePassword bool `json:"must_change_password,omitempty"`
 	// Restricted makes the account ignore project visibility: it sees only
 	// the projects it holds a grant on, directly or through a team (like a
 	// Gitea "restricted user"). Set on every account created from v2.32 on;
@@ -438,7 +442,8 @@ func (s *Store) Setup(username, password string, withTOTP bool, issuer string) (
 			return "", fmt.Errorf("account %q exists with role %s, not owner", username, cur.Role)
 		}
 		cur.Hash = u.Hash
-		cur.DisabledAt = nil // a reset owner must be able to sign in
+		cur.MustChangePassword = false // the owner chose it at the console
+		cur.DisabledAt = nil           // a reset owner must be able to sign in
 		if withTOTP {
 			cur.TOTPSec = u.TOTPSec
 			cur.RecoveryCodes = nil
@@ -475,8 +480,8 @@ func newOwner(username, password string, withTOTP bool, issuer string) (User, st
 	if username == "" {
 		return User{}, "", errors.New("username required")
 	}
-	if len(password) < 8 {
-		return User{}, "", errors.New("password must be at least 8 characters")
+	if err := validatePassword(password); err != nil {
+		return User{}, "", err
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), hashCost)
 	if err != nil {
@@ -835,8 +840,8 @@ func newLocalUser(username, password string, role Role) (User, error) {
 	if username == "" {
 		return User{}, errors.New("username required")
 	}
-	if len(password) < 8 {
-		return User{}, errors.New("password must be at least 8 characters")
+	if err := validatePassword(password); err != nil {
+		return User{}, err
 	}
 	if !role.Valid() {
 		return User{}, fmt.Errorf("unknown role %q", role)

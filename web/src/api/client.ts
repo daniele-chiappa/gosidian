@@ -79,6 +79,13 @@ client.interceptors.response.use(
       return Promise.reject(err)
     }
 
+    if (status === 403 && code === 'auth.password_change_required') {
+      // The owner chose this account's password (IMP-063): every route but
+      // the change is refused until the account sets its own.
+      const auth = useAuthStore()
+      auth.requirePasswordChange()
+    }
+
     if (status === 403 && code === 'auth.enrollment_required') {
       // The server gates every non-enrolment route until the user enrols a TOTP
       // secret (BUG-020). Raise the interstitial so the SPA mirrors the server
@@ -101,6 +108,15 @@ client.interceptors.response.use(
     return Promise.reject(err)
   },
 )
+
+/** The server's message of a failed API call, else fallback. */
+export function apiErrorMessage(e: unknown, fallback: string): string {
+  if (axios.isAxiosError(e)) {
+    const data = e.response?.data as { error?: { message?: string } } | undefined
+    if (data?.error?.message) return data.error.message
+  }
+  return e instanceof Error && e.message ? e.message : fallback
+}
 
 /**
  * True for the 412 that `note.concurrency-conflict` already announced, so a

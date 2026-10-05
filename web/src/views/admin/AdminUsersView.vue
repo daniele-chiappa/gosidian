@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { resetUserPassword } from '@/api/password'
+import { apiErrorMessage } from '@/api/client'
 import {
   listUsers,
   disableUser,
@@ -15,6 +18,41 @@ import {
 import { getUserAccess, VISIBILITY_LABEL, roleLabel, type AccessProject } from '@/api/access'
 
 const users = ref<AdminUser[]>([])
+const { t } = useI18n()
+
+// --- Reset password (IMP-063): a temporary password the account changes at
+// its next request, confirmed with the owner's own (IMP-088). ---
+const resetFor = ref<string | null>(null)
+const resetPassword = ref('')
+const resetOwnerPassword = ref('')
+const resetBusy = ref(false)
+const resetError = ref<string | null>(null)
+const resetNotice = ref<string | null>(null)
+function openReset(u: AdminUser) {
+  resetFor.value = resetFor.value === u.id ? null : u.id
+  resetPassword.value = ''
+  resetOwnerPassword.value = ''
+  resetError.value = null
+}
+function generateResetPassword() {
+  resetPassword.value = strongPassword()
+}
+async function submitReset(u: AdminUser) {
+  if (resetPassword.value.length < 8 || !resetOwnerPassword.value || resetBusy.value) return
+  resetBusy.value = true
+  resetError.value = null
+  try {
+    await resetUserPassword(u.id, resetPassword.value, resetOwnerPassword.value)
+    resetNotice.value = t('password.reset_done', { user: u.username })
+    resetFor.value = null
+    await load()
+  } catch (e) {
+    resetError.value = apiErrorMessage(e, t('password.reset_failed'))
+  } finally {
+    resetOwnerPassword.value = ''
+    resetBusy.value = false
+  }
+}
 
 // --- "View as" access preview: one expanded row at a time, fetched on demand ---
 const expanded = ref<string | null>(null)
@@ -104,15 +142,18 @@ function resetCreate() {
 
 // Strong password generated client-side via the Web Crypto API. The alphabet
 // drops visually ambiguous characters (0/O, 1/l/I) since the admin has to read
-// it out or paste it — there is no self-service change yet (IMP-063).
-function generatePassword() {
+// it out or paste it; the account replaces it at its first sign-in (IMP-063).
+function strongPassword(): string {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%*-_'
   const len = 20
   const buf = new Uint32Array(len)
   crypto.getRandomValues(buf)
   let out = ''
   for (const n of buf) out += alphabet.charAt(n % alphabet.length)
-  newUser.password = out
+  return out
+}
+function generatePassword() {
+  newUser.password = strongPassword()
   showPassword.value = true
   copied.value = false
 }
@@ -264,6 +305,7 @@ onMounted(load)
 
       <p v-if="created && !showCreate" class="mt-2 text-xs text-success">
         User “{{ created }}” created. Share the password securely — it can't be recovered later.
+        {{ t('password.created_hint') }}
         <template v-if="createdArchived">
           The disabled account that had this username is kept as “{{ createdArchived }}”.
         </template>
@@ -369,6 +411,7 @@ onMounted(load)
       </form>
     </section>
 
+    <p v-if="resetNotice" class="text-xs text-success" data-reset-notice>{{ resetNotice }}</p>
     <p v-if="loading" class="text-text-muted">Loading…</p>
     <p v-else-if="error" class="text-danger">{{ error }}</p>
 
@@ -480,14 +523,66 @@ onMounted(load)
               class="text-xs text-warning"
             >disabled {{ u.disabled_at }}</span>
             <span v-else class="text-xs text-success">active</span>
+            <span
+              v-if="u.must_change_password && !u.disabled_at"
+              class="ml-1 text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded border border-warning text-warning"
+            >{{ t('password.must_change') }}</span>
           </td>
-          <td class="py-2 px-3 text-right">
+          <td class="py-2 px-3 text-right whitespace-nowrap">
+            <button
+              v-if="!u.disabled_at && u.role !== 'owner' && u.auth_source !== 'ldap'"
+              type="button"
+              class="text-xs px-2 py-1 rounded hover:bg-surface-hover"
+              :data-reset-password="u.username"
+              @click="openReset(u)"
+            >{{ t('password.reset_title') }}</button>
             <button
               v-if="!u.disabled_at && u.role !== 'owner'"
               type="button"
               class="text-xs px-2 py-1 rounded text-danger hover:bg-surface-hover"
               @click="disable(u)"
             >Disable</button>
+          </td>
+        </tr>
+        <!-- Reset password: temporary, confirmed with the owner's own -->
+        <tr v-if="resetFor === u.id" class="bg-bg-elevated/40">
+          <td colspan="8" class="px-3 py-2">
+            <form class="flex flex-wrap items-end gap-2" data-reset-form @submit.prevent="submitReset(u)">
+              <label class="block text-xs">
+                <span class="text-text-muted">{{ t('password.reset_new') }}</span>
+                <span class="mt-1 flex gap-1">
+                  <input
+                    v-model="resetPassword"
+                    type="text"
+                    autocomplete="off"
+                    name="temporary-password"
+                    class="w-56 rounded bg-bg-elevated border border-border px-2 py-1 font-mono"
+                  />
+                  <button
+                    type="button"
+                    class="rounded border border-border px-2 py-1 hover:bg-surface-hover"
+                    title="Generate a strong password"
+                    @click="generateResetPassword"
+                  >⟳</button>
+                </span>
+              </label>
+              <label class="block text-xs">
+                <span class="text-text-muted">{{ t('password.reset_owner') }}</span>
+                <input
+                  v-model="resetOwnerPassword"
+                  type="password"
+                  autocomplete="current-password"
+                  name="owner-password"
+                  class="mt-1 w-56 rounded bg-bg-elevated border border-border px-2 py-1"
+                />
+              </label>
+              <button
+                type="submit"
+                :disabled="resetBusy || resetPassword.length < 8 || !resetOwnerPassword"
+                class="rounded bg-accent text-accent-fg px-3 py-1 text-xs hover:bg-accent-hover disabled:opacity-60"
+              >{{ t('password.reset_submit') }}</button>
+              <p v-if="resetError" class="text-xs text-danger">{{ resetError }}</p>
+            </form>
           </td>
         </tr>
         <!-- "View as": what this account sees and why -->
