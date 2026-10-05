@@ -86,7 +86,7 @@ const columns = computed<string[]>(() => shownFields.value)
 
 function cell(n: QueryNote, k: string): string {
   const v = n.fields?.[k]
-  return Array.isArray(v) ? v.join(', ') : (v ?? '')
+  return Array.isArray(v) ? v.join(', ') : String(v ?? '')
 }
 
 /** Short values (dates, statuses, numbers) stay on one line. */

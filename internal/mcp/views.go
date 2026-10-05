@@ -175,13 +175,19 @@ func outline(body []byte) []outlineHeading {
 		starts = append(starts, v.Start)
 	}
 	offs := parser.HeadingOffsets(body)
-	if len(starts) == 0 || len(offs) != len(out) {
+	embeds := views.EmbedOffsets(body)
+	if len(starts)+len(embeds) == 0 || len(offs) != len(out) {
 		return out
 	}
+	// The last heading before a block, or an embed, owns it.
 	for _, st := range starts {
-		// The last heading before the block owns it.
 		if i := sort.SearchInts(offs, st+1) - 1; i >= 0 {
 			out[i].Views++
+		}
+	}
+	for _, st := range embeds {
+		if i := sort.SearchInts(offs, st+1) - 1; i >= 0 {
+			out[i].Embeds++
 		}
 	}
 	return out

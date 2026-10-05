@@ -24,8 +24,8 @@ export interface QueryNote {
   title: string
   /** RFC 3339, UTC. */
   modified: string
-  /** A single value as a string, a list as an array. */
-  fields?: Record<string, string | string[]>
+  /** A single value as a string, a list as an array, a rollup as a number. */
+  fields?: Record<string, string | number | string[]>
 }
 
 export interface QueryResponse {

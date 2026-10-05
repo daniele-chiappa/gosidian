@@ -90,7 +90,13 @@ let copiedTimer: ReturnType<typeof setTimeout> | null = null
 
 // Read by default; honour an explicit edit intent (legacy /notes/:path/edit
 // deep-link) only when the user may write.
-const mode = ref<Mode>(props.mode === 'edit' && access.canWrite(props.path) ? 'edit' : 'view')
+const mode = ref<Mode>(
+  props.mode === 'edit' &&
+    access.canWrite(props.path) &&
+    !props.path.toLowerCase().endsWith('.base')
+    ? 'edit'
+    : 'view',
+)
 
 const path = computed(() => props.path)
 // HTML notes (.html) render through the sandboxed iframe (HTMLPreview) instead
@@ -103,6 +109,11 @@ const isMedia = computed(() => note.value?.kind === 'image')
 // CSV table notes (ADR-016): same overlay mechanism, kind='table' + a media
 // ref pointing at the .csv attachment; rendered as a paginated table.
 const isTable = computed(() => note.value?.kind === 'table')
+// An Obsidian base (IMP-118): read-only, its views translated by the server
+// into view blocks that render like any other; its YAML comes as source.
+const isBase = computed(
+  () => note.value?.kind === 'base' || path.value.toLowerCase().endsWith('.base'),
+)
 const project = computed(() => {
   const parts = path.value.split('/')
   return parts.length > 1 ? parts[0] : undefined
@@ -295,7 +306,7 @@ async function destroy() {
 // `draft` always holds the current source: the saved content in view mode and
 // the live edits in edit mode.
 async function copySource() {
-  const text = draft.value
+  const text = isBase.value ? (note.value?.source ?? '') : draft.value
   try {
     await navigator.clipboard.writeText(text)
   } catch {
@@ -350,10 +361,15 @@ async function downloadOriginal() {
   // (server ?inline). The stored note keeps the lightweight reference for MCP
   // reads/editing. Falls back to the in-memory content if the fetch fails.
   let content = note.value.content
-  try {
-    content = (await getNote(note.value.path, { inline: true })).content
-  } catch {
-    /* keep the raw content already loaded */
+  if (isBase.value) {
+    // A base downloads as the YAML it is, not its views translated.
+    content = note.value.source ?? ''
+  } else {
+    try {
+      content = (await getNote(note.value.path, { inline: true })).content
+    } catch {
+      /* keep the raw content already loaded */
+    }
   }
   const blob = new Blob([content], { type: `${mime};charset=utf-8` })
   const url = URL.createObjectURL(blob)
@@ -443,7 +459,7 @@ watch(path, load)
           View
         </button>
         <button
-          v-if="access.canWrite(props.path)"
+          v-if="access.canWrite(props.path) && !isBase"
           type="button"
           class="px-2 py-1"
           :class="mode === 'edit' ? 'bg-accent text-accent-fg' : 'hover:bg-surface-hover'"
@@ -520,7 +536,7 @@ watch(path, load)
       </button>
 
       <button
-        v-if="note && !isHtml && !isMedia && access.canWrite(props.path)"
+        v-if="note && !isHtml && !isMedia && !isBase && access.canWrite(props.path)"
         type="button"
         class="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text disabled:opacity-50"
         :disabled="snapshotting"
@@ -602,12 +618,20 @@ watch(path, load)
       <article v-else ref="articleEl" class="p-6 max-w-3xl mx-auto">
         <p v-if="note" class="text-xs text-text-muted font-mono mb-6">
           {{ note.path }} · etag {{ note.etag.slice(0, 12) }} · {{ note.size }} bytes
+          <template v-if="isBase"> · {{ t('note.base_readonly') }}</template>
         </p>
         <!-- A row of a database: its fields, editable (IMP-127 phase 5) -->
-        <PropertiesPanel v-if="note" :path="note.path" :etag="note.etag" />
+        <PropertiesPanel v-if="note && !isBase" :path="note.path" :etag="note.etag" />
         <MarkdownPreview :html="previewHTML" :views="previewViews" />
         <!-- A row of a database: the views its schema declares (IMP-139) -->
-        <RowViews v-if="note" :path="note.path" :etag="note.etag" />
+        <RowViews v-if="note && !isBase" :path="note.path" :etag="note.etag" />
+        <!-- An Obsidian base: the YAML its views were translated from -->
+        <details v-if="isBase && note?.source" class="mt-8 text-xs" data-base-source>
+          <summary class="cursor-pointer text-text-muted">{{ t('note.base_source') }}</summary>
+          <pre class="mt-2 overflow-auto rounded bg-surface-hover p-3 font-mono">{{
+            note.source
+          }}</pre>
+        </details>
       </article>
     </div>
 

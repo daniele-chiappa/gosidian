@@ -28,6 +28,9 @@ a note naming it (and the likely intended argument, e.g. `Project` →
   returns them all.
   `access` (`read` | `write`) says whether the token may write in the
   project.
+  `pending_handoffs` lists the project's handoffs waiting to be claimed,
+  newest first (up to 10, with their count), the alerts of its
+  [automations](../vault/databases.md#automations) among them.
   A project with the `lean_read_bootstrap` flag gives tokens that cannot
   write to it only the reading sections of the directives
   (`directives_scope: "read"`) — fewer tokens, less context; off by
@@ -78,7 +81,11 @@ a note naming it (and the likely intended argument, e.g. `Project` →
   outline + first chunk, `truncated:true`, full `size`, a hint) so an
   append-only log can't flood the caller's context; `raw:true`
   bypasses it, `max_bytes` caps even below the threshold. The `etag`
-  always stamps the full note, so `if_match` works unchanged.
+  always stamps the full note, so `if_match` works unchanged. An
+  Obsidian `.base` file reads as a read-only note, `kind: "base"`: its
+  views translated into view blocks (computed with `render_views`), a
+  warning for what has no equivalent, its YAML in `source`; no tool
+  writes it ([views](../vault/views.md#obsidian-bases)).
   `memory_get_section` takes the start of a heading when it names only
   one, such as an ID (`BUG-014` for `## BUG-014 — …`), and answers with
   the full heading; among several, the one of the highest level wins
@@ -278,6 +285,14 @@ from the caller's token identity and cannot be forged, while
   `type: snapshot`, `source: [[note]]`. The note itself does not change.
   Returns the path and how many views, values and embeds it froze
   ([snapshots](../vault/views.md#snapshots)).
+- `memory_automations(project, as_of?, run?)` — the automations of the
+  project's database notes and a dry run of them at `as_of` (a date or a
+  datetime, default now) with nothing written: each rule with its trigger
+  and action, whether it fires, the rows it would hand off or the slot it
+  would fire, when it acts next, the rows coming later with their day,
+  those already handed off, the rules that do not parse and the last runs.
+  `run: true` runs the rules now (write access to the project)
+  ([automations](../vault/databases.md#automations)).
 - `memory_self_stats()` — token identity (including the multi-project
   scope list), `access` (every project the token reaches with its live
   level, `read` or `write`: a write-scoped token can still be read-only

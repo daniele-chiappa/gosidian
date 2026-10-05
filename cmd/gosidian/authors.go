@@ -63,6 +63,9 @@ type authorNames struct {
 }
 
 func (n *authorNames) of(e audit.Entry) string {
+	if e.Source == audit.SourceAutomation {
+		return "automation"
+	}
 	if e.Source == audit.SourceHTTP {
 		if e.Actor != "" {
 			return e.Actor

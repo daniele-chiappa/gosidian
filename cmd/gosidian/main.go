@@ -17,6 +17,7 @@ import (
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/gosidian/gosidian/internal/authz"
+	"github.com/gosidian/gosidian/internal/automation"
 	"github.com/gosidian/gosidian/internal/config"
 	"github.com/gosidian/gosidian/internal/gitsync"
 	"github.com/gosidian/gosidian/internal/i18n"
@@ -507,6 +508,26 @@ func main() {
 	}
 	mcpServer.SetProjects(projectsStore)
 	mcpServer.SetTrash(trashBin)
+	// The automations of database notes (IMP-127 iteration 3): after the
+	// scan, so the first run sees every row.
+	if cfg.Automations.Enabled {
+		loc := time.Local
+		if tz := cfg.Automations.Timezone; tz != "" {
+			l, err := time.LoadLocation(tz)
+			if err != nil {
+				log.Fatalf("automations.timezone: %v", err)
+			}
+			loc = l
+		}
+		engine, err := automation.New(mcpServer.AutomationHost(), automation.NewStore(filepath.Join(sdir, "automations.json")), loc, slog.Default())
+		if err != nil {
+			log.Printf("automations: %v; off until it is fixed", err)
+		} else {
+			mcpServer.SetAutomations(engine)
+			go engine.Start(ctx, cfg.Automations.Interval)
+			log.Printf("automations: enabled (every %s, time zone %s, state %s)", cfg.Automations.Interval, loc, filepath.Join(sdir, "automations.json"))
+		}
+	}
 	// A token owned by a web account is narrowed on every request to what
 	// that account may currently read and write (BUG-055): the resolver maps
 	// the token's owner id to its live role; a disabled account fails closed.

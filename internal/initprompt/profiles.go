@@ -200,7 +200,13 @@ const StubVersion = 3
 // embeds a section with its views computed for the embedding note, to reuse
 // a view instead of copying it; the embed markers are never copied into the
 // file; memory_snapshot freezes a note. created_at and modified_at.
-const DirectivesVersion = 22
+//
+// v23 (2026-10-05, IMP-127 iteration 3 phase 4): due only for a real
+// deadline, never estimated; automations: in a database note, written only
+// when the user asks and tried with memory_automations (as_of) first; the
+// bootstrap's pending_handoffs, the automation's alerts among them, dealt
+// with before the rest.
+const DirectivesVersion = 23
 
 // AnchorVersion is the version of the agent-anchor template/format. It is
 // substituted into the `<!-- gosidian:anchor v=N ... -->` marker so the

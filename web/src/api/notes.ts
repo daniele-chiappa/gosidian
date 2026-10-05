@@ -24,8 +24,10 @@ export interface Note {
   etag: string
   size: number
   mod_time: string
-  kind?: 'image' | 'table'
+  kind?: 'image' | 'table' | 'base'
   media?: MediaRef
+  /** The YAML of an Obsidian base as written, when kind is 'base'. */
+  source?: string
 }
 
 export interface ListResponse {

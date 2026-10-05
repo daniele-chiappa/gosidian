@@ -34,6 +34,7 @@ func TestAuthorEvent(t *testing.T) {
 		{audit.Entry{TS: ts, Source: audit.SourceMCP, Token: tok.ID, Actor: "claude-cli@1a2b3c4d", Action: audit.ActionRename, Path: "p/a.md", To: "p/b.md"}, "claude-cli (admin)", true},
 		{audit.Entry{TS: ts, Source: audit.SourceMCP, Token: tok.ID, Action: audit.ActionUploadAttachment, Path: "p/attachments/x.png"}, "", false},
 		{audit.Entry{TS: ts, Source: audit.SourceHTTP, Actor: "daniele", Action: audit.ActionTokenCreate, Path: "abcd"}, "", false},
+		{audit.Entry{TS: ts, Source: audit.SourceAutomation, Actor: "automation", Action: audit.ActionCreate, Path: "p/handoffs/h.md"}, "automation", true},
 	} {
 		ev, ok := authorEvent(tc.e, names)
 		if ok != tc.ok || ok && (ev.By != tc.want || ev.Action != string(tc.e.Action) || ev.Path != tc.e.Path || ev.To != tc.e.To || !ev.TS.Equal(ts)) {

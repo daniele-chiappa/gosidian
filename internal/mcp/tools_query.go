@@ -111,6 +111,8 @@ func (s *Server) handleQuery(ctx context.Context, req mcp.CallToolRequest) (*mcp
 	var schema *dbschema.Schema
 	if len(from) == 1 {
 		schema = s.viewSchema(tok)(from[0])
+	} else if err := views.RollupsAcross(from, s.viewSchema(tok), opts); err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
 	}
 	vc := views.Context{Schema: s.viewSchema(tok), Resolve: s.viewResolve(tok)}
 	hits, total, err := views.RollupQuery(opts, schema, vc, s.index.Query, s.viewQuery(tok))
@@ -129,7 +131,7 @@ func (s *Server) handleQuery(ctx context.Context, req mcp.CallToolRequest) (*mcp
 			continue
 		}
 		out = append(out, queryNote{Path: h.Path, Title: h.Title,
-			Modified: time.Unix(h.ModTime, 0).UTC().Format(time.RFC3339), Fields: h.FieldValues()})
+			Modified: time.Unix(h.ModTime, 0).UTC().Format(time.RFC3339), Fields: views.NumberRollups(h.FieldValues(), schema)})
 	}
 	return mcp.NewToolResultJSON(map[string]any{
 		"notes":     out,

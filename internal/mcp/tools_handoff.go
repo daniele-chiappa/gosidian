@@ -187,9 +187,19 @@ func (s *Server) handlePendingHandoffs(ctx context.Context, req mcp.CallToolRequ
 		return mcp.NewToolResultErrorf("unknown status %q (expected pending, claimed, done, rejected, or all)", statusFilter), nil
 	}
 
-	notes, err := s.index.NotesByTag("type:handoff")
+	out, err := s.listHandoffs(tok, project, forAgent, statusFilter)
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("handoff lookup failed", err), nil
+	}
+	return mcp.NewToolResultJSON(map[string]any{"handoffs": out})
+}
+
+// listHandoffs returns the handoffs of project the token may read, with a
+// status (or "all") and, when forAgent is set, addressed to that agent.
+func (s *Server) listHandoffs(tok *auth.Token, project, forAgent, statusFilter string) ([]handoffEntry, error) {
+	notes, err := s.index.NotesByTag("type:handoff")
+	if err != nil {
+		return nil, err
 	}
 	out := make([]handoffEntry, 0)
 	prefix := project + "/handoffs/"
@@ -228,7 +238,7 @@ func (s *Server) handlePendingHandoffs(ctx context.Context, req mcp.CallToolRequ
 			Summary:     truncateExcerpt(parser.ExtractSection(note.Content, "Summary"), 300),
 		})
 	}
-	return mcp.NewToolResultJSON(map[string]any{"handoffs": out})
+	return out, nil
 }
 
 func (s *Server) handleClaimHandoff(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

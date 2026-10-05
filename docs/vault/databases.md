@@ -189,8 +189,72 @@ fields:
   computes and sorts them, and keeps the limit; it reads at most 500 rows,
   and asks to narrow the view beyond that. A `where` or a `group_by` on a
   rollup is refused: filter on the fields it counts instead.
+- **One database at a time**: a rollup is computed over the rows of its
+  database, so a query over several folders (`from: [a, b]`) that names
+  one in `where`, `fields` or `sort` is refused, and says which folder to
+  query alone. In `memory_query` and `POST /api/v1/query` a rollup's value
+  is a number.
 - **Not written**: a row that writes a rollup field is reported by
   `database-field-invalid`, and an edit that sets one is refused.
+
+## Automations
+
+A database note can declare rules that act at a time, under
+`automations:`. They never act on a write, so no rule can set another
+off.
+
+```yaml
+automations:
+  - name: Deadlines near
+    due: due              # a date field of the rows
+    before: 3             # days ahead; 0 (the default) is the day itself
+    where:
+      - status in [open, in-progress]
+    handoff: myproject-dev
+    message: Look at these before the end of the week.
+  - name: Monday backlog
+    every: monday 09:00   # a day of the week, or "day 09:00" for each day
+    snapshot: hot         # a note of the project
+  - name: Weekly review
+    every: friday 16:00
+    handoff: myproject-dev
+    message: Review the open bugs.
+```
+
+- **When**: a `due` rule watches a date field of the rows. A row comes
+  in on the day its date is `before` days away, or later, so a row
+  already past its date comes in too, and the rule acts once for it. It
+  acts again for that row only if the date changes. An `every` rule acts
+  once per slot, from the first slot after the server first saw it; a
+  slot missed while the server was down acts once, at the next run.
+  Italian day names work too (`lunedì 09:00`).
+- **What**: `handoff` writes a handoff note to that agent in the
+  project's `handoffs/` folder, from `automation`: for a `due` rule it
+  lists the rows that came in, each with its date and how far it is
+  (`in 3 days`, `today`, `2 days late`), all in one handoff per run.
+  `snapshot` freezes the note as [`memory_snapshot`](views.md#snapshots)
+  does.
+- **Where**: the rules read and write as the server's own identity,
+  `automation`, inside the project of the database note only. Their views
+  and snapshots see what that project holds. The audit log names
+  `automation` as the author, and `created_by` says so.
+- **Seen by the agents**: `memory_bootstrap` lists the project's pending
+  handoffs in `pending_handoffs`, the automation's among them, and the
+  directives ask agents to deal with them first.
+- **Tried before trusted**: `memory_automations(project, as_of?)` is a dry
+  run. It writes nothing and answers "what would fire on 2026-12-01?":
+  each rule, whether it fires at `as_of`, the rows it would hand off or
+  the slot it would fire, when it acts next, the rows to come with their
+  day, those already handed off, and the last runs. `run: true` runs the
+  project's rules now.
+- **Checked**: `database-field-invalid` reports a rule that does not
+  parse, a `due` that is not a date field, a `where` that does not
+  compute and a `snapshot` note that does not exist. The engine skips such
+  a rule and keeps the others.
+- **Run**: every 5 minutes (`automations.interval`), with the days and
+  times in `automations.timezone`
+  ([configuration](../configuration.md)). What they did is kept in
+  `automations.json` in the state directory.
 
 ## What checks the rows
 

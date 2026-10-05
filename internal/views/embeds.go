@@ -170,6 +170,40 @@ func isImageTarget(target string) bool {
 	return true
 }
 
+// EmbedOffsets returns the byte offsets of the lines of body that may
+// embed a note: ![[target]] alone on its line, outside a fence, whose
+// target is no image. Nothing is resolved, so it needs no reader: an
+// outline uses it to say which sections include another note's text.
+func EmbedOffsets(body []byte) []int {
+	if !bytes.Contains(body, []byte("![[")) {
+		return nil
+	}
+	var out []int
+	var fence string
+	off := 0
+	for _, line := range strings.SplitAfter(string(body), "\n") {
+		start := off
+		off += len(line)
+		line = strings.TrimRight(line, "\r\n")
+		if m := fenceRe.FindStringSubmatch(line); m != nil {
+			switch {
+			case fence == "":
+				fence = m[1]
+			case m[2] == "" && strings.HasPrefix(m[1], fence[:1]) && len(m[1]) >= len(fence):
+				fence = ""
+			}
+			continue
+		}
+		if fence != "" {
+			continue
+		}
+		if m := embedLineRe.FindStringSubmatch(line); m != nil && !isImageTarget(m[1]) {
+			out = append(out, start)
+		}
+	}
+	return out
+}
+
 // CountEmbeds counts the embeds of body that ExpandEmbeds would include for
 // the reader c describes: what a read without render_views leaves out.
 func CountEmbeds(body []byte, c Context) int {

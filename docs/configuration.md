@@ -39,6 +39,9 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_OAUTH_ALLOWED_REDIRECT_HOSTS` | `oauth.allowed_redirect_hosts` | empty (any HTTPS redirect host; loopback always allowed). `oauth.client_max` (`1000`) and `oauth.client_idle_ttl` (`2160h`) bound the registered clients, config file only |
 | `GOSIDIAN_MCP_DISABLE_DNS_REBINDING_PROTECTION` | `mcp.disable_dns_rebinding_protection` | `false` (both MCP endpoints, `/mcp` and `/mcp/sse`, answer 403 to a request that arrived on a loopback-bound connection with a non-localhost `Host` header; Docker and LAN listeners never trip it — set `true` only for a same-host reverse proxy that forwards over `127.0.0.1` while keeping the public `Host`, or make the proxy send `Host: localhost`) |
 | `GOSIDIAN_INGEST_URL_ALLOWLIST` | `mcp.ingest_url_allowlist` | empty (off; comma-separated absolute `http(s)` URLs the `memory_ingest` `url` source may fetch from — each entry is matched structurally on scheme, host, port and path segment (never as a text prefix, so `https://api.example.com` does not admit `https://api.example.com.evil/`); the allowlist is the SSRF boundary and also gates every redirect hop) |
+| `GOSIDIAN_AUTOMATIONS_ENABLED` | `automations.enabled` | `true` (the rules of database notes, [automations](vault/databases.md#automations); a rule acts only where a database note declares it) |
+| `GOSIDIAN_AUTOMATIONS_INTERVAL` | `automations.interval` | `5m` (how often the rules run) |
+| `GOSIDIAN_AUTOMATIONS_TIMEZONE` | `automations.timezone` | empty (the server's local zone; an IANA zone such as `Europe/Rome` for the days and times of the rules) |
 | `GOSIDIAN_TRASH_ENABLED` | `trash.enabled` | `false` |
 | `GOSIDIAN_TRASH_RETENTION` | `trash.retention` | `720h` |
 | `GOSIDIAN_THEME_PRESET` | `theme.preset` | `midnight-luxury` |

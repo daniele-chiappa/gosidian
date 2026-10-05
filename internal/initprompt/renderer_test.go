@@ -429,8 +429,8 @@ func TestStubVersion_PinnedToContent(t *testing.T) {
 }
 
 func TestDirectivesVersion_PinnedToContent(t *testing.T) {
-	assertPinned(t, sharedDirectivesTemplate, DirectivesVersion, 22,
-		"d13bbfbf62ee66a1c5218f84af08a163d2f7142877da5a3d6390911d701d23a9")
+	assertPinned(t, sharedDirectivesTemplate, DirectivesVersion, 23,
+		"fd786d17a86b7cb0c3a3c9640cd9590df16cb3678e417e08d374b9613acb76e1")
 }
 
 func assertPinned(t *testing.T, asset string, gotVersion, wantVersion int, wantHash string) {

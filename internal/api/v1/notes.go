@@ -11,6 +11,7 @@ import (
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/server/events"
 	"github.com/gosidian/gosidian/internal/vault"
+	"github.com/gosidian/gosidian/internal/views"
 )
 
 // noteSummary is the lightweight projection returned by list endpoints.
@@ -30,11 +31,14 @@ type noteResponse struct {
 	Title   string          `json:"title"`
 	Content string          `json:"content"`
 	Format  string          `json:"format"`          // "markdown" | "html" — drives the SPA's renderer choice
-	Kind    string          `json:"kind,omitempty"`  // "image" for a resolved media note (ADR-013); empty otherwise
+	Kind    string          `json:"kind,omitempty"`  // "image" for a resolved media note (ADR-013), "base" for an Obsidian base; empty otherwise
 	Media   *vault.MediaRef `json:"media,omitempty"` // resolved image payload when Kind=="image"
-	ETag    string          `json:"etag"`
-	Size    int64           `json:"size"`
-	ModTime string          `json:"mod_time"`
+	// Source is the YAML of an Obsidian base as written, when Kind is
+	// "base": Content is then its views translated (IMP-118).
+	Source  string `json:"source,omitempty"`
+	ETag    string `json:"etag"`
+	Size    int64  `json:"size"`
+	ModTime string `json:"mod_time"`
 }
 
 type createNoteRequest struct {
@@ -297,6 +301,10 @@ func (r *Router) readNote(w http.ResponseWriter, req *http.Request, rel string) 
 		WriteError(w, http.StatusNotFound, CodeNotFound, "note not found")
 		return
 	}
+	if vault.IsBaseFile(rel) {
+		r.readBase(w, req, rel)
+		return
+	}
 	note, err := r.deps.Vault.Load(rel)
 	if err != nil {
 		writeLoadError(w, err)
@@ -321,6 +329,38 @@ func (r *Router) readNote(w http.ResponseWriter, req *http.Request, rel string) 
 		return
 	}
 	WriteJSON(w, http.StatusOK, r.toNoteResponse(note))
+}
+
+// readBase serves an Obsidian base as a read-only note: its views
+// translated into view blocks, which the SPA renders like any other, and
+// its YAML as written (IMP-118).
+func (r *Router) readBase(w http.ResponseWriter, req *http.Request, rel string) {
+	b, err := r.deps.Vault.LoadBase(rel)
+	if err != nil {
+		if errors.Is(err, vault.ErrNotBase) {
+			WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
+			return
+		}
+		writeLoadError(w, err)
+		return
+	}
+	etag := quoteETag(b.ETag())
+	w.Header().Set("ETag", etag)
+	if match := req.Header.Get("If-None-Match"); match != "" && match == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	WriteJSON(w, http.StatusOK, noteResponse{
+		Path:    b.Path,
+		Title:   b.Title,
+		Content: string(views.BaseMarkdown(b.Path, b.Content)),
+		Format:  "markdown",
+		Kind:    "base",
+		Source:  string(b.Content),
+		ETag:    b.ETag(),
+		Size:    b.Size,
+		ModTime: b.ModTime.UTC().Format(rfc3339Z),
+	})
 }
 
 // updateNote handles PUT /notes/{path...} with optimistic locking via

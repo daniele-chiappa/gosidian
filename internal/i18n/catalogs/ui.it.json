@@ -87,7 +87,9 @@
     "history": "Cronologia",
     "unsaved": "Modifiche non salvate",
     "snapshot": "Istantanea: congela viste e conteggi in una nota datata",
-    "snapshot_failed": "Istantanea non riuscita"
+    "snapshot_failed": "Istantanea non riuscita",
+    "base_readonly": "base di Obsidian, in sola lettura",
+    "base_source": "YAML della base (Obsidian)"
   },
   "note_create": {
     "title": "Nuova nota",

@@ -2,13 +2,16 @@ package lint
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/gosidian/gosidian/internal/attach"
+	"github.com/gosidian/gosidian/internal/automation"
 	"github.com/gosidian/gosidian/internal/dbschema"
 	"github.com/gosidian/gosidian/internal/frontmatter"
 	"github.com/gosidian/gosidian/internal/index"
@@ -58,6 +61,7 @@ func checkDatabaseFields(_ context.Context, l *Linter, project string) ([]Issue,
 	}
 	for _, s := range schemas {
 		issues = append(issues, checkRowViews(l, s)...)
+		issues = append(issues, checkAutomations(l, s)...)
 	}
 	if len(schemas) == 0 {
 		return issues, nil
@@ -108,6 +112,55 @@ func checkRowViews(l *Linter, s *dbschema.Schema) []Issue {
 				Message:  fmt.Sprintf("row view %q does not compute: %v", rv.Title, err),
 				FixHint:  "write each row view as a ```view spec (from, where, sort, columns, as) plus its title; `this` is the row",
 			})
+		}
+	}
+	return issues
+}
+
+// checkAutomations reports the automations of a database note that would
+// not run (IMP-127 iteration 3): a rule that does not parse, a due field
+// that is not a date of the schema, a where that does not compute, a note
+// to snapshot that does not exist. The engine skips such a rule; lint says
+// why.
+func checkAutomations(l *Linter, s *dbschema.Schema) []Issue {
+	note, err := l.vault.Load(s.Path)
+	if err != nil {
+		return nil
+	}
+	rules, errs := automation.Parse(s.Path, parser.FrontmatterRawForPath(s.Path, note.Content))
+	var issues []Issue
+	add := func(msg string) {
+		issues = append(issues, Issue{
+			Severity: SeverityWarning,
+			File:     s.Path,
+			Rule:     "database-field-invalid",
+			Message:  msg,
+			FixHint:  "a rule has a name, due (a date field) with before and where, or every (\"monday 09:00\"), and handoff (an agent) or snapshot (a note of the project)",
+		})
+	}
+	for _, err := range errs {
+		if !errors.Is(err, automation.ErrNone) {
+			add(err.Error())
+		}
+	}
+	c := views.Context{This: views.ThisFields(s.Path, nil), Resolve: l.index.Resolve}
+	for _, r := range rules {
+		if r.Due != "" {
+			if f, ok := s.Field(r.Due); !ok || f.Type != "date" {
+				add(fmt.Sprintf("automations: rule %q: due %q is not a date field of the database", r.Name, r.Due))
+			}
+			spec := "from: " + s.Source + "\nwhere:\n"
+			for _, w := range r.Where {
+				spec += "  - " + strconv.Quote(w) + "\n"
+			}
+			if _, err := views.Parse(spec, c); err != nil && len(r.Where) > 0 {
+				add(fmt.Sprintf("automations: rule %q: where does not compute: %v", r.Name, err))
+			}
+		}
+		if r.Snapshot != "" {
+			if _, err := l.vault.Load(r.Snapshot); err != nil {
+				add(fmt.Sprintf("automations: rule %q: the note to snapshot, %s, does not exist", r.Name, r.Snapshot))
+			}
 		}
 	}
 	return issues
@@ -825,12 +878,24 @@ func checkStatusIncoherent(ctx context.Context, l *Linter, project string) ([]Is
 	// A plan listed by a ```view block of hot.md counts too (IMP-127): the
 	// Active plans section is often a view on the plans folder, and its rows
 	// exist only once the view is computed.
-	if len(views.FindBlocks(hotBody.Content)) > 0 {
+	// An embed counts as well (BUG-095): ![[myproject/plans#Active]]
+	// brings a view of the plans database into hot.md.
+	if len(views.FindBlocks(hotBody.Content)) > 0 || len(views.EmbedOffsets(hotBody.Content)) > 0 {
 		inProject := func(o index.QueryOptions) ([]index.QueryHit, int, error) {
 			o.Projects = []string{project}
 			return l.index.Query(o)
 		}
-		c := views.Context{This: views.ThisFields(hotPath, parser.ParseFrontmatterFields(parser.FrontmatterRawForPath(hotPath, hotBody.Content))), Resolve: l.index.Resolve}
+		load := func(p string) ([]byte, bool) {
+			if !strings.HasPrefix(p, project+"/") {
+				return nil, false
+			}
+			n, err := l.vault.Load(p)
+			if err != nil {
+				return nil, false
+			}
+			return n.Content, true
+		}
+		c := views.Context{This: views.ThisFields(hotPath, parser.ParseFrontmatterFields(parser.FrontmatterRawForPath(hotPath, hotBody.Content))), Resolve: l.index.Resolve, Load: load}
 		rendered, _ := views.RenderNote(hotBody.Content, true, c, inProject)
 		hot = string(rendered)
 	}

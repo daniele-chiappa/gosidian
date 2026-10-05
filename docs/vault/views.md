@@ -131,6 +131,12 @@ other note, write its path in the view instead of `this`.
   and in the bootstrap, the embed line stays and the included text follows
   it between `gosidian:embed` markers, never to be copied into the file.
   Without, the `hint` says how many embeds were left out.
+- **By sections** — `memory_get_section` finds the heading in the text as
+  written and includes the embed whole, even when the included section
+  starts with a heading of the same level; a heading that only the embed
+  holds is found in the computed note. The outline marks a section that
+  embeds with `embeds: N`, and the bootstrap's lite outline of `hot.md` is
+  that of the text as written, so it names only the note's own headings.
 
 ## Snapshots
 
@@ -150,6 +156,39 @@ itself does not change.
 - The vault's git keeps the series: what a backlog view showed each week,
   say. A snapshot links to what its views listed, so those notes count it
   among their backlinks.
+
+## Obsidian bases
+
+A `.base` file, the YAML of views that Obsidian's Bases read, shows in
+gosidian as a read-only note: the tree lists it, the web UI opens it, and
+`memory_get` reads it with `kind: "base"`, its YAML as written in
+`source`. Each of its views becomes a view block under its name, computed
+like any other with the reader's scope; what has no equivalent is said in
+a warning above the view, never guessed. No tool writes a base: it is
+edited in Obsidian.
+
+| Base | View |
+|---|---|
+| `file.inFolder("Books")` | `from: <project>/Books` (a base reads the folders of its own project; several in an `or` are several folders) |
+| `file.hasTag("a", "b")`, `tags.contains("a")` | `tags = a`, `tags in [a, b]` (a nested tag `a/x` is not matched) |
+| `file.hasLink("Note")` | `links contains [[Note]]` |
+| `file.hasProperty("due")`, `due.isEmpty()` | `due exists`, `due !exists` |
+| `status == "done"`, `!=`, `<`, `<=`, `>`, `>=` with a string, number or boolean | the same condition |
+| `x.contains("text")` | `x contains text` |
+| `a && b`, `and:` | both conditions |
+| `or:` of folders, or of one field equal to several values | several folders, `in` |
+| `not:`, a leading `!` | the opposite condition (`=` and `!=`, `<` and `>=`, `exists` and `!exists`) |
+| `order` | `columns`, with `file.name` as `title`, `file.mtime` as `modified`, `file.ctime` as `created_at`; the title comes first |
+| the first `sort` key, `limit` | `sort`, `limit` |
+| `type: table`, `type: list` | `as: table`, `as: list` |
+
+Left out, each with its warning: formulas, summaries, display names,
+grouping, the keys of `sort` after the first, the other view types (cards
+show as a table), and filters that name dates relative to now, the file's
+name or a formula. A filter left out widens the view, and the warning says
+so. `file.hasLink(this)` names the base itself, and gosidian does not
+follow links to a base, so its view lists nothing. `file.ext == "md"`,
+always true of a note, goes silently.
 
 ## Values in the text
 

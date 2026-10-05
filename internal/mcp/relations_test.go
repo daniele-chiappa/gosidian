@@ -3,6 +3,8 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -137,12 +139,24 @@ func TestRollups_MemoryQuery(t *testing.T) {
 	write("p/plans/fix2.md", "---\ntitle: Fix again\nstatus: draft\nrelated: [\"[[BUG-1]]\", \"[[BUG-2]]\"]\ntags: [p]\n---\n")
 
 	out := runQuery(t, s, ctx, map[string]any{"from": "p/docs/bugs", "fields": []any{"id", "fixes"}, "sort": "fixes", "order": "desc"})
-	if out.Total != 2 || len(out.Notes) != 2 || out.Notes[0].Fields["fixes"] != "2" || out.Notes[1].Fields["fixes"] != "1" {
+	// A rollup is a number in the response, not text (BUG-096).
+	if out.Total != 2 || len(out.Notes) != 2 || out.Notes[0].Fields["fixes"] != float64(2) || out.Notes[1].Fields["fixes"] != float64(1) {
 		t.Errorf("query = %+v", out)
 	}
 	res, _ := s.handleQuery(ctx, call(map[string]any{"from": "p/docs/bugs", "where": []any{map[string]any{"field": "fixes", "op": "gt", "value": "1"}}}))
 	if msg := expectError(t, res); !strings.Contains(msg, "is a rollup") {
 		t.Errorf("where on a rollup: %s", msg)
+	}
+	// Over several folders a rollup has no rows to be computed over: said,
+	// not an empty answer (BUG-096).
+	for _, args := range []map[string]any{
+		{"from": []any{"p/docs/bugs", "p/plans"}, "where": []any{map[string]any{"field": "fixes", "op": "gte", "value": float64(1)}}},
+		{"from": []any{"p/docs/bugs", "p/plans"}, "fields": []any{"fixes"}},
+	} {
+		res, _ := s.handleQuery(ctx, call(args))
+		if msg := expectError(t, res); !strings.Contains(msg, `"fixes" is a rollup of the database of p/docs/bugs`) || !strings.Contains(msg, "from: [p/docs/bugs]") {
+			t.Errorf("%v: %s", args, msg)
+		}
 	}
 	req := call(map[string]any{"path": "p/docs/bugs/BUG-3.md", "content": "---\ntitle: BUG-3\nid: BUG-3\nstatus: open\nfixes: 4\ntags: [p]\n---\n"})
 	req.Params.Name = "memory_create"
@@ -234,5 +248,50 @@ func TestSnapshot_Tool(t *testing.T) {
 	res, _ = s.handleSnapshot(ctx, call(map[string]any{"path": "p/attachments/x.png"}))
 	if msg := expectError(t, res); !strings.Contains(msg, "not a markdown note") {
 		t.Errorf("non-markdown: %s", msg)
+	}
+}
+
+// memory_get reads an Obsidian base as a read-only note, its views
+// translated and computed with render_views; no tool writes it (IMP-118).
+func TestBase_MemoryGet(t *testing.T) {
+	s, _, dir := newTestServer(t)
+	ctx := context.Background()
+	if res, err := s.handleCreate(ctx, call(map[string]any{"path": "p/Books/dune.md", "content": "---\ntitle: Dune\nstatus: reading\ntags: [p]\n---\n"})); err != nil || res.IsError {
+		t.Fatalf("create: %v %+v", err, res)
+	}
+	base := "views:\n  - type: cards\n    name: Shelf\n    filters: 'file.inFolder(\"Books\")'\n    order: [file.name, status, formula.x]\n"
+	if err := os.WriteFile(filepath.Join(dir, "p/books.base"), []byte(base), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		Kind, Content, Source, Hint string
+		Rendered                    bool `json:"views_rendered"`
+	}
+	res, _ := s.handleGet(ctx, call(map[string]any{"path": "p/books.base", "render_views": true}))
+	if err := json.Unmarshal([]byte(resultText(t, res)), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Kind != "base" || out.Source != base || !out.Rendered || !strings.Contains(out.Hint, "read-only") {
+		t.Errorf("base = %+v", out)
+	}
+	for _, want := range []string{"## Shelf", "- ⚠️ a cards view has no equivalent", "- ⚠️ the column formula.x has no equivalent", "[[p/Books/dune\\|Dune]]", "| reading |"} {
+		if !strings.Contains(out.Content, want) {
+			t.Errorf("content lacks %q:\n%s", want, out.Content)
+		}
+	}
+	res, _ = s.handleGet(ctx, call(map[string]any{"path": "p/books.base"}))
+	out.Rendered = false
+	if err := json.Unmarshal([]byte(resultText(t, res)), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Rendered || !strings.Contains(out.Hint, "pass render_views:true") || !strings.Contains(out.Content, "```view\nfrom: p/Books\n") {
+		t.Errorf("without render_views the views are left as blocks: %+v", out)
+	}
+	res, _ = s.handleEdit(ctx, call(map[string]any{"path": "p/books.base", "old_string": "cards", "new_string": "table"}))
+	if !res.IsError || !strings.Contains(res.Content[0].(mcplib.TextContent).Text, "Obsidian base, read-only") {
+		t.Errorf("edit = %+v", res)
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, "p/books.base")); string(data) != base {
+		t.Errorf("the base changed: %q", data)
 	}
 }

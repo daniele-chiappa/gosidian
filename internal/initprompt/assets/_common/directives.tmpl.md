@@ -93,6 +93,13 @@ e includila, invece di copiarla. Letta con `render_views: true` l'inclusione arr
 `gosidian:embed`, da non copiare mai nel file. Per conservare cosa mostrano le viste di una nota in un
 momento, `memory_snapshot` la congela in `<nome>.snapshots/AAAA-MM-GG.md`.
 
+**Scadenze e automazioni**: `due` è la data entro cui una riga va fatta; mettila solo per una scadenza
+vera (una consegna, una data data dall'utente), mai stimata. Una nota database può dichiarare
+`automations:`: un avviso quando il `due` di una riga arriva entro N giorni (`due`, `before`, `where`,
+`handoff: <agente>`), o un'istantanea o un handoff a un orario fisso (`every: monday 09:00`). Scrivi una
+regola solo se l'utente la chiede, e prima di dire che funziona provala a secco con `memory_automations`
+(`as_of: <data>` risponde «cosa scatterebbe quel giorno?», senza scrivere).
+
 **Frontmatter**: metti fra virgolette un valore che contiene `: `, un `[[wikilink]]` o un `{{segnaposto}}`
 (`title: "Plan: uno"`, `related: "[[{{PROJECT}}/nota]]"`): senza, non è YAML valido. Una scrittura con un
 frontmatter non valido lo dice in `notices`, e il lint lo segnala con `frontmatter-invalid-yaml`.
@@ -187,7 +194,9 @@ Saltarlo è la via più rapida perché la memoria diventi inutile.
 ### Handoff fra agenti
 
 `memory_create_handoff` passa contesto come nota in `{{PROJECT}}/handoffs/`;
-lifecycle `pending → claimed → done|rejected`. Se ricevi lavoro:
+lifecycle `pending → claimed → done|rejected`. Il bootstrap elenca gli handoff in attesa del progetto in
+`pending_handoffs`, compresi gli avvisi delle automazioni (`from_agent: automation`): se uno è per te,
+o per nessuno in particolare, occupatene prima del resto o dillo all'utente. Se ricevi lavoro:
 `memory_pending_handoffs` → **`memory_claim_handoff` prima di iniziare**
 (claim atomico: fra concorrenti ne vince uno) → `memory_complete_handoff`
 (`done`/`rejected`). `created_by`/`claimed_by`/`completed_by` sono stampati

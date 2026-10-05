@@ -87,7 +87,9 @@
     "history": "History",
     "unsaved": "Unsaved changes",
     "snapshot": "Snapshot: freeze views and counts into a dated note",
-    "snapshot_failed": "Snapshot failed"
+    "snapshot_failed": "Snapshot failed",
+    "base_readonly": "Obsidian base, read-only",
+    "base_source": "Base YAML (Obsidian)"
   },
   "note_create": {
     "title": "New note",

@@ -124,6 +124,16 @@ type bootstrapTagCount struct {
 // bootstrapPendingInsights is the owner-facing surface for un-triaged
 // self-improvement insights (status:pending). Count is the full total;
 // Notes is capped to the first few for a quick preview.
+// bootstrapPendingHandoffs is memory_bootstrap's `pending_handoffs`: how
+// many handoffs of the project wait to be claimed, and the newest of them.
+type bootstrapPendingHandoffs struct {
+	Count    int            `json:"count"`
+	Handoffs []handoffEntry `json:"handoffs"`
+}
+
+// maxBootstrapHandoffs caps the handoffs the bootstrap lists.
+const maxBootstrapHandoffs = 10
+
 type bootstrapPendingInsights struct {
 	Project string    `json:"project"`
 	Count   int       `json:"count"`
@@ -312,7 +322,7 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 	for _, f := range conventionFiles {
 		full := path.Join(project, f.rel)
 		file := s.loadBootstrapFile(full)
-		written := len(file.Content) // the prose, before the views are computed
+		written := file.Content // the prose, before the views are computed
 		file, cut := s.withRenderedViews(tok, file, bootstrapViewsBudget)
 		if f.key == "hot_md" && file.ViewsETag != "" {
 			hotComputed, hotViewsCut = int64(len(file.Content)), cut
@@ -320,7 +330,7 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 		file = applyKnownEtag(file, knownEtags)
 		liteHot := mode == "lite"
 		if (mode == "" || mode == "auto") && f.key == "hot_md" &&
-			int64(written) > autoLiteThreshold {
+			int64(len(written)) > autoLiteThreshold {
 			liteHot = true
 			file.AutoLite = true
 		}
@@ -328,14 +338,17 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 			// Lite: the session cache tends to be the payload's heaviest part.
 			// Serve its shape (frontmatter + outline), not its body; the agent
 			// pulls the sections it needs via memory_get_section.
-			content := []byte(file.Content)
+			// The outline of the text as written: an embed's included
+			// headings are not the note's, and memory_get_section would not
+			// find them (BUG-094).
+			content := []byte(written)
 			file.Frontmatter = parser.FrontmatterRawForPath(file.Path, content)
 			file.Headings = outline(content)
 			for _, h := range file.Headings {
-				if h.Views > 0 {
+				if h.Views > 0 || h.Embeds > 0 {
 					// The computed views go with the body (BUG-087): say
 					// which sections need render_views to show them again.
-					file.Hint = "headings with views:N hold ```view blocks: fetch those sections with memory_get_section and render_views:true to see their rows"
+					file.Hint = "headings with views:N or embeds:N hold ```view blocks or embeds of other notes: fetch those sections with memory_get_section and render_views:true to see their rows and the included text"
 					break
 				}
 			}
@@ -371,6 +384,18 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 	// Intersect with type:plan — only plans count as "active plans" here.
 	active = s.intersectWithTag(active, "type:plan")
 	payload["active_plans"] = active
+
+	// pending_handoffs: the project's handoffs waiting to be claimed, the
+	// alerts of its automations among them (IMP-127 iteration 3), so an
+	// agent sees them at session start. Best-effort, like pending_insights.
+	if pend, err := s.listHandoffs(tok, project, "", "pending"); err == nil && len(pend) > 0 {
+		sort.SliceStable(pend, func(i, j int) bool { return pend[i].Created > pend[j].Created })
+		shown := pend
+		if len(shown) > maxBootstrapHandoffs {
+			shown = shown[:maxBootstrapHandoffs]
+		}
+		payload["pending_handoffs"] = bootstrapPendingHandoffs{Count: len(pend), Handoffs: shown}
+	}
 
 	skills, err := s.filterByTagAndProject("type:skill", project, tok)
 	if err != nil {

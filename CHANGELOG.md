@@ -8,6 +8,79 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.57.0] — 2026-10-05 — "bases and automations"
+
+Obsidian's `.base` files show as read-only views, and a database note can
+declare automations that act at a time: a handoff when a row's date comes
+near, a snapshot or a handoff each week or day. The bootstrap now lists
+the handoffs waiting in the project. Version 2.56.0 was not published on
+its own; this release includes it. Pull the image and restart, nothing to
+migrate; set `automations.timezone` if the server's local zone is not the
+one your rules mean (a container usually runs in UTC).
+
+### Added
+- **Obsidian bases, read-only** — a `.base` file shows in the tree and
+  opens in the web UI as a read-only note, and `memory_get` reads it with
+  `kind: "base"` and its YAML in `source`. Each of its views becomes a
+  view block under its name, computed with the reader's scope:
+  `file.inFolder` gives `from` (inside the base's project),
+  `file.hasTag`, `file.hasLink`, `file.hasProperty`, comparisons of a
+  property with a literal, `contains` and `isEmpty` give conditions,
+  `and`, `or` (of folders, or of one field's values) and `not` combine
+  them, `order` gives the columns, the first `sort` key the sort, `limit`
+  the limit, `table` and `list` the view. What has no equivalent
+  (formulas, summaries, display names, grouping, cards, filters on dates
+  relative to now or on the file's name) is a warning above the view,
+  never a guess. No tool writes a base: an edit is refused with a message
+  that says so.
+- **Automations** — a database note can declare rules under
+  `automations:` that act at a time, never on a write, so no rule sets
+  another off. A `due` rule hands off, once, the rows whose date field
+  comes within `before` days (or is past), filtered by `where`, in one
+  handoff that lists them with how far each is; it acts again for a row
+  only if its date changes. An `every` rule (`monday 09:00`, `day 18:30`)
+  freezes a note with a snapshot, or writes a handoff, once per slot,
+  from the first slot after the server first saw it. The rules act as the
+  server's own identity, `automation`, inside the database's project
+  only, and the audit log and `created_by` name it. `memory_automations`
+  is their dry run (`as_of` a date: what would fire then, with nothing
+  written) and runs them on demand (`run: true`). The server runs them
+  every 5 minutes and keeps what they did in `automations.json` in the
+  state directory; `database-field-invalid` reports a rule that would not
+  run.
+- **Pending handoffs in the bootstrap** — `memory_bootstrap` lists the
+  project's handoffs waiting to be claimed in `pending_handoffs`, newest
+  first, the alerts of the automations among them.
+- **Configuration** — `automations.enabled` (default `true`: a rule acts
+  only where a database note declares it), `automations.interval`
+  (default `5m`) and `automations.timezone` (an IANA zone; default the
+  server's local zone), or `GOSIDIAN_AUTOMATIONS_*`.
+
+### Changed
+- **Directives v22 → v23** — `due` only for a real deadline, never
+  estimated; an automation is written only when the user asks, and tried
+  with `memory_automations` first; the pending handoffs of the bootstrap
+  come before the rest.
+- **A rollup's value is a number** in `memory_query` and `POST
+  /api/v1/query`, not text.
+
+### Fixed
+- **A section that embeds reads whole** — `memory_get_section` with
+  `render_views` on a section holding `![[note#Heading]]` returned the
+  embed's opening marker and nothing else when the included section began
+  with a heading of the same level, which ended the section; the heading
+  is now looked up in the text as written and the section's views and
+  embeds computed after. The outline marks a section that embeds with
+  `embeds: N`, and the lite outline of `hot.md` in the bootstrap is the
+  written text's, without the headings an embed brings in.
+- **An embed in `hot.md` counts for `status-incoherent`** — a plan listed
+  by a view that `hot.md` embeds was reported as missing from its Active
+  plans.
+- **A rollup over several folders is refused** — `memory_query` and
+  `POST /api/v1/query` over two folders ignored the rollups of their
+  databases: a `where` on one gave no row, a `fields` no value, without
+  saying why. They now refuse and name the folder to query alone.
+
 ## [2.55.0] — 2026-10-05 — "rollups, embeds and snapshots"
 
 A database can compute a field for each row from other notes, every note

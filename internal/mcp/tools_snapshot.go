@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
+	"github.com/gosidian/gosidian/internal/auth"
+	"github.com/gosidian/gosidian/internal/vault"
 	"github.com/gosidian/gosidian/internal/views"
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -42,17 +44,12 @@ func (s *Server) handleSnapshot(ctx context.Context, req mcp.CallToolRequest) (*
 		return readNoteError(rel, err), nil
 	}
 	now := time.Now()
-	dest := views.SnapshotPath(rel, now, func(p string) bool {
-		_, err := s.vault.Load(p)
-		return err == nil
-	})
+	dest := s.snapshotDest(rel, now)
 	tok, errRes := s.authorizeWrite(ctx, dest)
 	if errRes != nil {
 		return errRes, nil
 	}
-	frozen, st := views.Freeze(note.Content, s.viewContext(tok, rel, note.Content), s.viewQuery(tok))
-	project, _, _ := strings.Cut(rel, "/")
-	content := views.SnapshotNote(rel, note.Title, project, frozen, now)
+	content, st := s.snapshotContent(tok, rel, note, now)
 	if errRes := s.checkWriteLimits(ctx, tok, len(content)); errRes != nil {
 		return errRes, nil
 	}
@@ -78,4 +75,20 @@ func (s *Server) handleSnapshot(ctx context.Context, req mcp.CallToolRequest) (*
 		"values": st.Values,
 		"embeds": st.Embeds,
 	})
+}
+
+// snapshotDest is the free path of a snapshot of the note at rel taken now.
+func (s *Server) snapshotDest(rel string, now time.Time) string {
+	return views.SnapshotPath(rel, now, func(p string) bool {
+		_, err := s.vault.Load(p)
+		return err == nil
+	})
+}
+
+// snapshotContent is the snapshot of note, at rel, as tok reads it now, and
+// what it froze.
+func (s *Server) snapshotContent(tok *auth.Token, rel string, note *vault.Note, now time.Time) ([]byte, views.FreezeStats) {
+	frozen, st := views.Freeze(note.Content, s.viewContext(tok, rel, note.Content), s.viewQuery(tok))
+	project, _, _ := strings.Cut(rel, "/")
+	return views.SnapshotNote(rel, note.Title, project, frozen, now), st
 }

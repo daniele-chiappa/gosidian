@@ -106,9 +106,14 @@ func TestRollups_REST(t *testing.T) {
 	if r.code != http.StatusOK || !strings.Contains(r.body, `"notes":"2"`) || !strings.Contains(r.body, `"type":"rollup"`) {
 		t.Errorf("row fields = %d %s", r.code, r.body)
 	}
+	// A number in a query's response (BUG-096).
 	r = f.doAuthRecorder(http.MethodPost, "/api/v1/query", `{"from":["p/docs/tasks"],"fields":["notes"]}`, nil)
-	if r.code != http.StatusOK || !strings.Contains(r.body, `"notes":"2"`) {
+	if r.code != http.StatusOK || !strings.Contains(r.body, `"notes":2`) {
 		t.Errorf("query = %d %s", r.code, r.body)
+	}
+	r = f.doAuthRecorder(http.MethodPost, "/api/v1/query", `{"from":["p/docs/tasks","p/notes"],"fields":["notes"]}`, nil)
+	if r.code != http.StatusBadRequest || !strings.Contains(r.body, "is a rollup of the database of p/docs/tasks") {
+		t.Errorf("over two folders = %d %s", r.code, r.body)
 	}
 	r = f.doAuthRecorder(http.MethodPatch, "/api/v1/notes/p/docs/tasks/T-1.md/frontmatter", `{"set":{"notes":5}}`, nil)
 	if r.code == http.StatusOK || !strings.Contains(r.body, "computed when the row is read") {
@@ -158,5 +163,36 @@ func TestSnapshot_REST(t *testing.T) {
 	}
 	if r := f.doAuthRecorder(http.MethodGet, "/api/v1/notes/p/hot.md/snapshot", "", nil); r.code != http.StatusMethodNotAllowed {
 		t.Errorf("GET = %d", r.code)
+	}
+}
+
+// An Obsidian base reads as a read-only note, its views translated, and
+// shows in the tree (IMP-118).
+func TestBase_REST(t *testing.T) {
+	f := newNotesFixture(t)
+	f.seedNote(t, "p/Books/dune.md", "---\ntitle: Dune\nstatus: reading\ntags: [p]\n---\n")
+	f.seedNote(t, "p/Books/odyssey.md", "---\ntitle: Odyssey\nstatus: done\ntags: [p]\n---\n")
+	base := "filters: 'file.inFolder(\"Books\") && status != \"done\"'\nviews:\n  - type: table\n    name: Reading\n    order: [file.name, status]\n"
+	if err := os.WriteFile(filepath.Join(f.vaultRoot, "p/books.base"), []byte(base), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := f.doAuthRecorder(http.MethodGet, "/api/v1/notes/p/books.base", "", nil)
+	var note noteResponse
+	if err := json.Unmarshal([]byte(r.body), &note); err != nil || r.code != http.StatusOK {
+		t.Fatalf("GET = %d %s", r.code, r.body)
+	}
+	if note.Kind != "base" || note.Format != "markdown" || note.Source != base || note.Title != "books" ||
+		!strings.Contains(note.Content, "## Reading\n\n```view\nfrom: p/Books\nwhere:\n    - status != done\n") {
+		t.Errorf("base = %+v", note)
+	}
+	if r := f.doAuthRecorder(http.MethodPut, "/api/v1/notes/p/books.base", `{"content":"x"}`, nil); r.code < 400 {
+		t.Errorf("PUT = %d: a base is never written", r.code)
+	}
+	if data, _ := os.ReadFile(filepath.Join(f.vaultRoot, "p/books.base")); string(data) != base {
+		t.Errorf("the base changed: %q", data)
+	}
+	tree := f.doAuthRecorder(http.MethodGet, "/api/v1/tree?project=p", "", nil)
+	if !strings.Contains(tree.body, `"path":"p/books.base","is_dir":false,"kind":"base"`) {
+		t.Errorf("tree = %s", tree.body)
 	}
 }

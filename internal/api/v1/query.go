@@ -110,6 +110,9 @@ func (r *Router) handleQuery(w http.ResponseWriter, req *http.Request) {
 	var schema *dbschema.Schema
 	if len(from) == 1 {
 		schema = r.viewSchema(p)(from[0])
+	} else if err := views.RollupsAcross(from, r.viewSchema(p), opts); err != nil {
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
+		return
 	}
 	vc := views.Context{Schema: r.viewSchema(p), Resolve: previewResolver{r: r, p: p}.Resolve}
 	hits, total, err := views.RollupQuery(opts, schema, vc, r.deps.Index.Query, r.viewQuery(p))
@@ -128,7 +131,7 @@ func (r *Router) handleQuery(w http.ResponseWriter, req *http.Request) {
 			continue
 		}
 		out = append(out, queryNote{Path: h.Path, Title: h.Title,
-			Modified: time.Unix(h.ModTime, 0).UTC().Format(time.RFC3339), Fields: h.FieldValues()})
+			Modified: time.Unix(h.ModTime, 0).UTC().Format(time.RFC3339), Fields: views.NumberRollups(h.FieldValues(), schema)})
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"notes": out, "count": len(out), "total": total, "truncated": total > len(out),

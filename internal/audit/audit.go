@@ -34,6 +34,9 @@ type Source string
 const (
 	SourceHTTP Source = "http"
 	SourceMCP  Source = "mcp"
+	// SourceAutomation is a write of the automations of a database note
+	// (IMP-127 iteration 3), made by the server itself.
+	SourceAutomation Source = "automation"
 )
 
 type Action string

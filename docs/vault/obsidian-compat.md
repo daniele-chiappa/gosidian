@@ -26,11 +26,17 @@ backlinks appear — without editing a single file.
 
 ### Obsidian → gosidian (things Obsidian has that gosidian doesn't)
 
-- **`![[target]]` embeds** — the parser recognises them as links
-  (counts as outlink/backlink), but the web UI doesn't render them
-  inline. Link graph coherent, rendering: plain link.
+- **`![[target]]` embeds** — a line made of an embed alone includes
+  that note, or its section with `![[target#Heading]]`, one level deep
+  ([views](views.md#embeds)); an embed inside a sentence stays a link.
+  Either way it counts as an outlink and a backlink.
 - **Block references `[[target#^block-id]]`** — the anchor is stored
   as part of the link; rendering degrades to the target.
+- **`.base` files** (Obsidian Bases) — shown read-only, each view
+  translated into a gosidian view, with a warning for what has no
+  equivalent (formulas, summaries, cards…): see
+  [views](views.md#obsidian-bases). gosidian never writes them, and a
+  ```` ```base ```` block inside a note stays a code block.
 - **`.canvas` files** (Obsidian Canvas) — JSON, not markdown. Ignored
   by gosidian (left on disk untouched).
 - **`.obsidian/` folder** (workspace / config / plugins) — ignored
@@ -38,8 +44,9 @@ backlinks appear — without editing a single file.
 - **Plugin content**:
   - **Dataview** queries in code blocks — preserved as static code
     blocks; gosidian doesn't execute them. For filters on frontmatter
-    fields (type, status, dates, importance…) use the **Query** window
-    or the MCP `memory_query` tool instead.
+    fields (type, status, dates, importance…) write a
+    [view block](views.md), or use the **Query** window or the MCP
+    `memory_query` tool.
   - **Templater** — likewise preserved as template source.
   - **Excalidraw** `.excalidraw.md` — file is valid markdown so it's
     indexed, but the graphical layer isn't rendered.

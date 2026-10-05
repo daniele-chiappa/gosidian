@@ -315,3 +315,43 @@ func RollupQuery(opts index.QueryOptions, schema *dbschema.Schema, c Context, ma
 	}
 	return hits, total, nil
 }
+
+// RollupsAcross refuses a query over several folders that names a rollup
+// of one of their databases in where, fields or sort: a rollup is computed
+// over the rows of one database, and the query would give no value, or no
+// row, without saying why (BUG-096).
+func RollupsAcross(folders []string, schemaOf func(string) *dbschema.Schema, opts index.QueryOptions) error {
+	if len(folders) < 2 || schemaOf == nil {
+		return nil
+	}
+	names := append(slices.Clone(opts.Fields), opts.Sort)
+	for _, w := range opts.Where {
+		names = append(names, w.Field)
+	}
+	for _, folder := range folders {
+		for _, f := range RollupFields(schemaOf(folder), names...) {
+			return fmt.Errorf("%w: %q is a rollup of the database of %s, computed over the rows of one database: query that folder alone (from: [%s])", index.ErrBadQuery, f.Name, folder, folder)
+		}
+	}
+	return nil
+}
+
+// NumberRollups gives the rollups among values, as FieldValues returns
+// them, as numbers rather than text.
+func NumberRollups(values map[string]any, schema *dbschema.Schema) map[string]any {
+	if schema == nil {
+		return values
+	}
+	for k, v := range values {
+		s, ok := v.(string)
+		if !ok || len(RollupFields(schema, k)) == 0 {
+			continue
+		}
+		if n, err := strconv.ParseInt(s, 10, 64); err == nil {
+			values[k] = n
+		} else if f, err := strconv.ParseFloat(s, 64); err == nil {
+			values[k] = f
+		}
+	}
+	return values
+}

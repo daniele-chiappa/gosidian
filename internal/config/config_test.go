@@ -293,3 +293,25 @@ func TestGlobal_ApplyEnv(t *testing.T) {
 		t.Errorf("env not applied: %+v", cfg.Global)
 	}
 }
+
+// Automations are on unless the file or the environment turns them off.
+func TestAutomations(t *testing.T) {
+	dir := t.TempDir()
+	cfg, err := Load(filepath.Join(dir, "nope.toml"))
+	if err != nil || !cfg.Automations.Enabled || cfg.Automations.Interval != 5*time.Minute || cfg.Automations.Timezone != "" {
+		t.Fatalf("defaults = %+v, %v", cfg.Automations, err)
+	}
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte("[automations]\nenabled = false\ninterval = \"1m\"\ntimezone = \"Europe/Rome\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(path)
+	if err != nil || cfg.Automations.Enabled || cfg.Automations.Interval != time.Minute || cfg.Automations.Timezone != "Europe/Rome" {
+		t.Fatalf("file = %+v, %v", cfg.Automations, err)
+	}
+	t.Setenv("GOSIDIAN_AUTOMATIONS_ENABLED", "true")
+	t.Setenv("GOSIDIAN_AUTOMATIONS_INTERVAL", "30s")
+	if err := cfg.ApplyEnv(); err != nil || !cfg.Automations.Enabled || cfg.Automations.Interval != 30*time.Second {
+		t.Errorf("env = %+v, %v", cfg.Automations, err)
+	}
+}

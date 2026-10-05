@@ -21,6 +21,7 @@ import (
 	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/gosidian/gosidian/internal/projectops"
 	"github.com/gosidian/gosidian/internal/vault"
+	"github.com/gosidian/gosidian/internal/views"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -137,7 +138,7 @@ func (s *Server) registerTools() {
 	), s.handleNotesByTag)
 
 	s.impl.AddTool(mcp.NewTool("memory_get",
-		mcp.WithDescription("Read a note by its vault-relative path (e.g. 'project/note.md'). Oversize guard: when the body exceeds 24 KiB (and raw is not set) the response is truncated — frontmatter + heading outline + the first chunk, with truncated:true, the full size, and the note's real etag (if_match still works). Fetch just the section you need via memory_get_section, or pass raw:true only when you really need the whole body. To get a large note onto your own disk without spending context tokens, GET the HTTP /download endpoint instead (your MCP base URL plus /download?path=<path>, bearer token), or pass transfer:\"http\" for a single-use URL that needs no bearer — see bootstrap capabilities."),
+		mcp.WithDescription("Read a note by its vault-relative path (e.g. 'project/note.md'). Oversize guard: when the body exceeds 24 KiB (and raw is not set) the response is truncated — frontmatter + heading outline + the first chunk, with truncated:true, the full size, and the note's real etag (if_match still works). Fetch just the section you need via memory_get_section, or pass raw:true only when you really need the whole body. To get a large note onto your own disk without spending context tokens, GET the HTTP /download endpoint instead (your MCP base URL plus /download?path=<path>, bearer token), or pass transfer:\"http\" for a single-use URL that needs no bearer — see bootstrap capabilities. An Obsidian base ('project/books.base') reads as a note too, read-only: kind \"base\", its views translated into ```view blocks (render_views computes them), what has no equivalent in a warning, and its YAML in source."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative path to the .md file.")),
 		mcp.WithBoolean("raw", mcp.Description("Bypass the oversize guard and return the full body regardless of size.")),
 		mcp.WithNumber("max_bytes", mcp.Description("Explicit body cap in bytes — truncates even below the default threshold. Ignored when raw:true.")),
@@ -274,6 +275,7 @@ func (s *Server) registerTools() {
 	s.registerGlobalCheckTool()
 	s.registerWaitTool()
 	s.registerSnapshotTool()
+	s.registerAutomationTool()
 }
 
 // ---- handlers ----
@@ -574,8 +576,11 @@ type noteContent struct {
 	// ViewsRendered says Content carries computed views (render_views), so
 	// it is not the file as stored; ETag is still the stored file's.
 	ViewsRendered bool            `json:"views_rendered,omitempty"`
-	Kind          string          `json:"kind,omitempty"`  // "image" for a resolved media note (ADR-013); empty otherwise
+	Kind          string          `json:"kind,omitempty"`  // "image" for a resolved media note (ADR-013), "base" for an Obsidian base; empty otherwise
 	Media         *vault.MediaRef `json:"media,omitempty"` // resolved image payload when Kind=="image"
+	// Source is an Obsidian base's YAML as written (Kind "base"); Content
+	// is then its views translated (IMP-118).
+	Source string `json:"source,omitempty"`
 	// Oversize-guard fields (plan 20260706-token-economy-round2): set only
 	// when the body was truncated. ETag always stamps the FULL note, so
 	// optimistic locking works unchanged on a truncated read.
@@ -618,6 +623,9 @@ func (s *Server) handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	}
 	if !tok.AllowsPath(path) {
 		return mcp.NewToolResultErrorf("path %q is outside the token's project scope", path), nil
+	}
+	if vault.IsBaseFile(path) {
+		return s.getBase(tok, path, req.GetBool("render_views", false)), nil
 	}
 	note, err := s.vault.Load(path)
 	if err != nil {
@@ -743,14 +751,30 @@ func (s *Server) handleGetSection(ctx context.Context, req mcp.CallToolRequest) 
 	}
 	content := note.Content
 	rendered := req.GetBool("render_views", false)
-	if rendered {
+	// The heading itself, or the one that starts with it, an ID alone such
+	// as "BUG-014" (IMP-130), looked up in the text as written; the section's
+	// views and embeds are computed after. An embedded section brings
+	// headings of its own, which would end the section early (BUG-094). A
+	// heading that only an embed holds is looked up in the computed note.
+	resolved, candidates := parser.ResolveHeading(content, heading)
+	section := ""
+	switch {
+	case resolved != "":
+		section = parser.ExtractSection(content, resolved)
+		if rendered && section != "" {
+			if out, hash := views.RenderNote([]byte(section), true, s.viewContext(tok, note.Path, note.Content), s.viewQuery(tok)); hash != "" {
+				section = string(out)
+			}
+		}
+	case rendered:
 		if out, hash := s.renderViews(tok, note.Path, content); hash != "" {
-			content = out
+			if r, c := parser.ResolveHeading(out, heading); r != "" {
+				resolved, section = r, parser.ExtractSection(out, r)
+			} else if len(c) > 0 {
+				candidates = c
+			}
 		}
 	}
-	// The heading itself, or the one that starts with it, an ID alone such
-	// as "BUG-014" (IMP-130).
-	resolved, candidates := parser.ResolveHeading(content, heading)
 	if resolved == "" {
 		if len(candidates) > 0 {
 			return mcp.NewToolResultErrorf("heading %q not found in %q; headings that start with it or contain it: %s — pass one of them",
@@ -758,7 +782,6 @@ func (s *Server) handleGetSection(ctx context.Context, req mcp.CallToolRequest) 
 		}
 		return mcp.NewToolResultErrorf("heading %q not found in %q; memory_get_outline lists the headings", heading, path), nil
 	}
-	section := parser.ExtractSection(content, resolved)
 	if section == "" {
 		return mcp.NewToolResultErrorf("heading %q not found in %q", heading, path), nil
 	}
@@ -1633,6 +1656,9 @@ type outlineHeading struct {
 	// Views counts the ```view blocks in the heading's own lines (up to the
 	// next heading): read that section with render_views to see their rows.
 	Views int `json:"views,omitempty"`
+	// Embeds counts the lines that include another note's section
+	// (![[note#Heading]]): render_views brings their text, and its views.
+	Embeds int `json:"embeds,omitempty"`
 }
 
 func (s *Server) handleGetOutline(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1769,6 +1795,9 @@ func readNoteError(path string, err error) *mcp.CallToolResult {
 // writeNoteError is readNoteError's counterpart for the load-before-write of
 // memory_update / memory_edit: a non-note path points at the file tools.
 func writeNoteError(rel string, err error) *mcp.CallToolResult {
+	if errors.Is(err, vault.ErrNotNote) && vault.IsBaseFile(rel) {
+		return mcp.NewToolResultErrorf("%q is an Obsidian base, read-only in gosidian: memory_get shows its views; it is edited in Obsidian", rel)
+	}
 	if errors.Is(err, vault.ErrNotNote) {
 		return mcp.NewToolResultErrorf("%q is not a note (.md, or .html when html notes are enabled) — files go through memory_ingest (bridge_filename, source_path, transfer:\"http\") or memory_upload_attachment", rel)
 	}

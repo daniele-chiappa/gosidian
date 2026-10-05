@@ -22,6 +22,7 @@ type Config struct {
 	Git          GitConfig          `toml:"git"`
 	MCP          MCPConfig          `toml:"mcp"`
 	Trash        TrashConfig        `toml:"trash"`
+	Automations  AutomationsConfig  `toml:"automations"`
 	Theme        ThemeConfig        `toml:"theme"`
 	Webauth      WebauthConfig      `toml:"webauth"`
 	Vault        VaultConfig        `toml:"vault"`
@@ -212,6 +213,19 @@ type TrashConfig struct {
 	Retention time.Duration `toml:"retention"`
 }
 
+// AutomationsConfig runs the rules database notes declare under
+// `automations:` (IMP-127 iteration 3): handoffs when a row's date comes
+// near, snapshots and handoffs at a time of the week or day. On by default:
+// a rule acts only where a database note declares it.
+type AutomationsConfig struct {
+	Enabled bool `toml:"enabled"`
+	// Interval is how often the rules are run; default 5m.
+	Interval time.Duration `toml:"interval"`
+	// Timezone is the IANA zone of the days and times of the rules
+	// ("Europe/Rome"); default the server's local zone.
+	Timezone string `toml:"timezone"`
+}
+
 // MCPConfig caps how aggressively an MCP client may mutate the vault.
 // The write rate counts per MCP session, the note size per write. Zero
 // values mean "use defaults".
@@ -268,6 +282,9 @@ func Load(path string) (*Config, error) {
 // Default returns a Config with sensible defaults (git sync disabled).
 func Default() *Config {
 	cfg := &Config{}
+	// On unless the file or the environment turns them off: applyDefaults
+	// runs after the file is read, so it cannot tell false from unset.
+	cfg.Automations.Enabled = true
 	cfg.applyDefaults()
 	return cfg
 }
@@ -404,6 +421,19 @@ func (c *Config) ApplyEnv() error {
 			}
 		}
 		c.MCP.IngestURLAllowlist = prefixes
+	}
+	if v := os.Getenv("GOSIDIAN_AUTOMATIONS_ENABLED"); v != "" {
+		c.Automations.Enabled = envBool(v)
+	}
+	if v := os.Getenv("GOSIDIAN_AUTOMATIONS_INTERVAL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("GOSIDIAN_AUTOMATIONS_INTERVAL: %w", err)
+		}
+		c.Automations.Interval = d
+	}
+	if v := os.Getenv("GOSIDIAN_AUTOMATIONS_TIMEZONE"); v != "" {
+		c.Automations.Timezone = v
 	}
 	if v := os.Getenv("GOSIDIAN_TRASH_ENABLED"); v != "" {
 		c.Trash.Enabled = envBool(v)
@@ -632,6 +662,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Trash.Retention == 0 {
 		c.Trash.Retention = 30 * 24 * time.Hour
+	}
+	if c.Automations.Interval <= 0 {
+		c.Automations.Interval = 5 * time.Minute
 	}
 	if c.Theme.Preset == "" {
 		c.Theme.Preset = DefaultThemePreset

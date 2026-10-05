@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+
+	"github.com/gosidian/gosidian/internal/vault"
 )
 
 // apiTreeNode is the JSON projection of the sidebar tree shipped to
@@ -66,6 +68,16 @@ func (r *Router) handleTree(w http.ResponseWriter, req *http.Request) {
 			continue
 		}
 		paths = append(paths, n.Path)
+	}
+	// Obsidian bases are no notes, so the index does not hold them: they
+	// are read off the vault, read-only (IMP-118).
+	if r.deps.Vault != nil {
+		bases, _ := r.deps.Vault.ListBases(project)
+		for _, b := range bases {
+			if r.canSee(p, b) {
+				paths = append(paths, b)
+			}
+		}
 	}
 
 	// In-progress flag: notes tagged status:in-progress get a badge in
@@ -130,6 +142,9 @@ func buildAPITree(paths []string, inProgress map[string]bool) *apiTreeNode {
 // would fight the package layering (api is a peer of server, not a
 // consumer).
 func classifyAPIKind(path string) string {
+	if vault.IsBaseFile(path) {
+		return "base"
+	}
 	lower := strings.ToLower(path)
 	base := path
 	if i := strings.LastIndex(base, "/"); i >= 0 {
