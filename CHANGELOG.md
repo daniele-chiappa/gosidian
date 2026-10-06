@@ -8,6 +8,29 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.63.2] — 2026-10-06 — "npm advisories"
+
+Web UI dependencies updated after three npm advisories published on
+2026-10-06. Pull the image and restart, nothing to migrate.
+
+### Security
+- **`vue` 3.5.43** — fixes the `@vue/server-renderer` XSS
+  (GHSA-g2v6-rqmx-r4w6). The web UI renders nothing server-side, so the
+  vulnerable code was not in the bundle; the dependency is updated
+  anyway.
+- **`source-map-js` 1.2.2** — an event-loop denial of service through
+  crafted source maps. Used only while building the web UI.
+- **`postcss-selector-parser` 7.1.6** — quadratic parsing of flat
+  selectors. Used only while building the web UI; `tailwindcss` 3 still
+  asks for 6.x, so 7.1.6 is set through an `overrides` in
+  `web/package.json`. The generated CSS is byte for byte the same.
+
+### Notes
+- Patch releases within the declared ranges came along, among them
+  vue-i18n 11.4.13 and postcss 8.5.29.
+- `braces` (a build-time dependency of `tailwindcss` 3) still has an
+  advisory with no fix upstream.
+
 ## [2.63.1] — 2026-10-06 — "CI gates"
 
 CI now checks the formatting of the Go code and the web UI's lint and
