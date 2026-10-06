@@ -141,11 +141,11 @@ func (s *Server) handleDownloadTicketRedeem(w http.ResponseWriter, r *http.Reque
 	s.serveNoteBytes(w, tok, tk.Path)
 }
 
-// tokenByID finds the token a ticket was minted with: the admin token when no
-// token store is configured (open mode), nil when it no longer exists or
-// expired since the mint.
+// tokenByID finds the token a ticket was minted with: the admin token in
+// open mode (see openMode), nil when it no longer exists or expired since
+// the mint.
 func (s *Server) tokenByID(id string) *auth.Token {
-	if s.tokens == nil || s.tokens.Empty() {
+	if s.openMode() {
 		return auth.AdminToken()
 	}
 	for _, t := range s.tokens.List() {

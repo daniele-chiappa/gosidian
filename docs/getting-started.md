@@ -76,7 +76,8 @@ fully-annotated compose with optional git sync, reverse proxy, and TLS.
 2. **Sign in as `admin`** with the password of the first start (in the
    log, and in `<state-dir>/initial-admin-password`), then choose your
    own — see [Authentication](mcp/authentication.md#web-ui-login).
-3. **Create an MCP token** from `/admin/tokens` (or via the CLI — see
+3. **Create an MCP token** — MCP answers nothing without one — from
+   `/admin/tokens` (or via the CLI — see
    [MCP authentication](mcp/authentication.md#mcp-bearer-tokens)).
 4. **Wire your MCP client** — see [Client setup](mcp/client-setup.md).
 5. **Bootstrap your first project** — see

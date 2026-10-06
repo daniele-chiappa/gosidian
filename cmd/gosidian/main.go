@@ -288,9 +288,12 @@ func main() {
 		log.Printf("ldap: enabled (url=%q base=%q filter=%q)", cfg.LDAP.URL, cfg.LDAP.UserBaseDN, cfg.LDAP.UserFilter)
 	}
 
-	if tokenStore.Empty() {
-		log.Printf("auth: token store empty, running in open mode (provision via `gosidian token create`)")
-	} else {
+	switch {
+	case tokenStore.Empty() && cfg.MCP.Open:
+		slog.Warn("auth: MCP OPEN MODE — no token exists and [mcp] open is on (GOSIDIAN_MCP_OPEN): MCP requests without a token run as admin, for whoever can reach this port, until the first token is created")
+	case tokenStore.Empty():
+		log.Printf("auth: no MCP token yet — every MCP request needs one: create it from Settings → My MCP tokens or with `gosidian token create` (GOSIDIAN_MCP_OPEN=true allows token-less access for local use)")
+	default:
 		log.Printf("auth: %d token(s) loaded from %s", len(tokenStore.List()), tokensPath)
 	}
 
@@ -496,6 +499,7 @@ func main() {
 	mcpServer := mcpsrv.New(v, idx, tokenStore)
 	mcpServer.SetAuditLog(auditLog)
 	mcpServer.SetWriteLimits(cfg.MCP.WritePerMinute, cfg.MCP.MaxNoteBytes)
+	mcpServer.SetOpenWhenEmpty(cfg.MCP.Open)
 	mcpServer.SetPackageLimits(cfg.MCP.PackageMaxFiles, cfg.MCP.PackageMaxBytes)
 	mcpServer.SetAllowedUploadRoots(cfg.MCP.AllowedUploadRoots)
 	mcpServer.SetBridgeDir(cfg.MCP.BridgeDir)

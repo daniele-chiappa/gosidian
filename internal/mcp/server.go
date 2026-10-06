@@ -122,15 +122,18 @@ type Server struct {
 	streams    context.Context
 	endStreams context.CancelFunc
 
-	vault        *vault.Vault
-	index        *index.Index
-	tokens       *auth.Store
-	projects     *projects.Store
-	trash        *trash.Bin // nil = memory_delete_project removes from disk
-	audit        *audit.Log
-	impl         *server.MCPServer
-	limiter      *writeLimiter
-	maxNoteBytes int64
+	vault  *vault.Vault
+	index  *index.Index
+	tokens *auth.Store
+	// openWhenEmpty is the operator's opt-in to token-less MCP while the
+	// token store is empty (SetOpenWhenEmpty, IMP-146).
+	openWhenEmpty bool
+	projects      *projects.Store
+	trash         *trash.Bin // nil = memory_delete_project removes from disk
+	audit         *audit.Log
+	impl          *server.MCPServer
+	limiter       *writeLimiter
+	maxNoteBytes  int64
 	// packageMaxFiles and packageMaxBytes cap a memory_ingest package
 	// (IMP-116); SetPackageLimits overrides the defaults.
 	packageMaxFiles    int
@@ -399,6 +402,19 @@ func (s *Server) SetTrash(b *trash.Bin) { s.trash = b }
 // SetWriteLimits configures the write/minute cap of an MCP session (a token's
 // sessions share tokenLimitFactor times that) and the per-note size cap.
 // Pass zero values to keep the defaults already set in New().
+// SetOpenWhenEmpty lets MCP answer without a token while the token store
+// holds none, as admin ([mcp] open, GOSIDIAN_MCP_OPEN). Off by default: an
+// empty store used to open MCP to whoever reached the port (IMP-146).
+func (s *Server) SetOpenWhenEmpty(open bool) { s.openWhenEmpty = open }
+
+// openMode reports whether a request without a token runs as admin: with
+// no token store at all (tests, in-process use), or with the operator's
+// opt-in while the store is empty. Read at every request, so the first
+// token created closes it.
+func (s *Server) openMode() bool {
+	return s.tokens == nil || (s.openWhenEmpty && s.tokens.Empty())
+}
+
 func (s *Server) SetWriteLimits(perMinute int, maxNoteBytes int64) {
 	if perMinute > 0 {
 		s.limiter = newWriteLimiter(perMinute)
@@ -570,8 +586,9 @@ func New(v *vault.Vault, idx *index.Index, tokens *auth.Store) *Server {
 // SSE-only because Streamable HTTP needs a non-empty exact path to route on.
 //
 // Both transports share one context func (bearer → token, correlation id,
-// Accept-Language, basePath) and one bearer guard when the token store is
-// non-empty (unknown bearers → 401). Each invocation constructs fresh
+// Accept-Language, basePath) and one bearer guard: a request without a
+// valid bearer gets 401, unless openMode (no token store, or the operator's
+// opt-in while it is empty). Each invocation constructs fresh
 // transport servers — obtain one handler per mount point.
 //
 // The mux must route both the exact prefix and the prefix subtree to this
@@ -696,11 +713,11 @@ func (s *Server) httpContext(basePath string) func(ctx context.Context, r *http.
 }
 
 // transport wraps a transport handler with what both share: the bearer guard
-// when the token store is non-empty, and X-Accel-Buffering: no, which tells
+// (decided at each request: see openMode), and X-Accel-Buffering: no, which tells
 // nginx-style proxies not to buffer the response — an SSE stream held in a
 // proxy buffer never reaches the client.
 func (s *Server) transport(next http.Handler) http.Handler {
-	if s.tokens != nil && !s.tokens.Empty() {
+	if s.tokens != nil {
 		next = s.requireToken(next)
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -747,7 +764,7 @@ func (s *Server) authenticate(r *http.Request) *auth.Token {
 
 // authenticateWhy is authenticate plus the reason for a nil token.
 func (s *Server) authenticateWhy(r *http.Request) (*auth.Token, authDenial) {
-	if s.tokens == nil || s.tokens.Empty() {
+	if s.openMode() {
 		return auth.AdminToken(), denyInvalid
 	}
 	raw := auth.ExtractBearer(r.Header.Get("Authorization"))
@@ -896,12 +913,12 @@ func (s *Server) requireToken(next http.Handler) http.Handler {
 }
 
 // tokenFromContext returns the authenticated token from ctx, or an admin
-// token when auth is disabled (empty store).
+// token in open mode (see openMode).
 func (s *Server) tokenFromContext(ctx context.Context) *auth.Token {
 	if tok, ok := ctx.Value(tokenCtxKey).(*auth.Token); ok && tok != nil {
 		return tok
 	}
-	if s.tokens == nil || s.tokens.Empty() {
+	if s.openMode() {
 		return auth.AdminToken()
 	}
 	// Should not happen: auth middleware would have rejected the request.

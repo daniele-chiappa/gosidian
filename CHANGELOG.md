@@ -8,6 +8,35 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.61.0] — 2026-10-06 — "token required"
+
+MCP now always wants a token. Pull the image and restart; an install
+that already has MCP tokens is not affected.
+
+**Upgrade note**: until this release, an install with no MCP token at
+all (an empty `<state-dir>/tokens.json`) answered every MCP request as
+admin. A client that relied on that now gets 401. Create a token —
+**Settings → My MCP tokens** in the web UI, or `gosidian token create` —
+or, for local use only, set `GOSIDIAN_MCP_OPEN=true`.
+
+### Security
+- **MCP always wants a token** — with no MCP token created yet, MCP
+  answered every request as admin, for whoever reached the port: read and
+  write on the whole vault. Now every MCP request needs a token: `/mcp`,
+  `/mcp/sse`, the byte endpoints (`/upload`, `/download`, `/append`,
+  `/manifest`) and the legacy standalone listener. The start log says how
+  to create the first one.
+- **The transport guard is decided at each request** — a server started
+  without tokens, which got one later, still let token-less requests
+  through to the tools, which then refused them one by one; they are now
+  refused with 401 at the transport.
+
+### Added
+- **`GOSIDIAN_MCP_OPEN`** (`[mcp] open`) — token-less MCP for local use,
+  as admin, while no token exists. The log warns about it at every start,
+  and the first token created closes it. Never turn it on for a server
+  reachable from other machines.
+
 ## [2.60.1] — 2026-10-06 — "first start"
 
 A fresh install now gets its owner at the first start, and the `user`

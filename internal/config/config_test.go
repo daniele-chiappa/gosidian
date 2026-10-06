@@ -340,3 +340,16 @@ func TestAutoOwner(t *testing.T) {
 		t.Errorf("env off = %v, %v", cfg.Webauth.AutoOwner, err)
 	}
 }
+
+// MCP wants a token unless the operator opts in to token-less access
+// (IMP-146).
+func TestMCPOpen(t *testing.T) {
+	cfg, err := Load(filepath.Join(t.TempDir(), "nope.toml"))
+	if err != nil || cfg.MCP.Open {
+		t.Fatalf("default = %v, %v", cfg.MCP.Open, err)
+	}
+	t.Setenv("GOSIDIAN_MCP_OPEN", "true")
+	if err := cfg.ApplyEnv(); err != nil || !cfg.MCP.Open {
+		t.Errorf("env = %v, %v", cfg.MCP.Open, err)
+	}
+}

@@ -5,9 +5,10 @@ on the server.
 
 ## MCP bearer tokens
 
-When `<state-dir>/tokens.json` is empty, the MCP endpoint is
-**open** (useful for localhost development). The first token you create
-switches auth on globally.
+Every MCP request needs a token: `/mcp`, `/mcp/sse`, the byte endpoints
+(`/upload`, `/download`, `/append`, `/manifest`) and the legacy listener.
+Create one from **Settings → My MCP tokens** in the web UI (it asks for
+your password), or at the console:
 
 ```bash
 gosidian token create --vault ./vault \
@@ -20,6 +21,14 @@ gosidian token create --vault ./vault \
 
 The plaintext token is printed **once** and hashed on disk (SHA-256).
 Losing it means revoking and recreating.
+
+**Token-less access, for local use only.** Until v2.60, an empty
+`<state-dir>/tokens.json` left MCP open to whoever reached the port, as
+admin. Now it does so only when you ask for it: `GOSIDIAN_MCP_OPEN=true`
+(or `[mcp] open = true`) lets requests without a token run as admin
+while no token exists, and the log warns about it at every start. The
+first token you create closes it. Never turn it on for a server reachable
+from other machines.
 
 ## Scopes
 
@@ -258,7 +267,7 @@ An `owner` account can invite `member` accounts from `/admin/users`:
 
 ### When to skip web login
 
-If gosidian runs on localhost and only you use it, leaving webauth
-unconfigured is fine — the UI is open and the MCP token is the only
-credential. For anything exposed over the network, always pair a
+If gosidian runs on localhost and only you use it, you may keep a single
+account and an MCP token, or set `GOSIDIAN_MCP_OPEN=true` until you create
+one. For anything exposed over the network, always pair a
 reverse proxy with TLS **and** web login.

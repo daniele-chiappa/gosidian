@@ -243,6 +243,10 @@ type MCPConfig struct {
 	PackageMaxFiles    int      `toml:"package_max_files"`    // default 500
 	PackageMaxBytes    int64    `toml:"package_max_bytes"`    // default 20 MiB
 	AllowedUploadRoots []string `toml:"allowed_upload_roots"` // fs roots for source_path uploads
+	// Open lets MCP answer without a token, as admin, while the token store
+	// holds none (IMP-146). Default false: every MCP request needs a token.
+	// For local use only: whoever reaches the port gets full access.
+	Open               bool     `toml:"open"`
 	BridgeDir          string   `toml:"bridge_dir"`           // staging dir for bridge_filename uploads (auto-allowed root; IMP-059)
 	IngestURLAllowlist []string `toml:"ingest_url_allowlist"` // URL prefixes memory_ingest may fetch from; empty disables the url source (ADR-018)
 	// DisableDNSRebindingProtection turns off the MCP transports' built-in
@@ -373,6 +377,9 @@ func (c *Config) ApplyEnv() error {
 			return fmt.Errorf("GOSIDIAN_MCP_PACKAGE_MAX_BYTES: %w", err)
 		}
 		c.MCP.PackageMaxBytes = n
+	}
+	if v := os.Getenv("GOSIDIAN_MCP_OPEN"); v != "" {
+		c.MCP.Open = envBool(v)
 	}
 	if v := os.Getenv("GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS"); v != "" {
 		var roots []string
