@@ -9,15 +9,20 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"text/tabwriter"
 
+	apiv1 "github.com/gosidian/gosidian/internal/api/v1"
 	"github.com/gosidian/gosidian/internal/auth"
+	"github.com/gosidian/gosidian/internal/projects"
 	"github.com/gosidian/gosidian/internal/qrsvg"
 	"github.com/gosidian/gosidian/internal/statedir"
+	"github.com/gosidian/gosidian/internal/vault"
 	"github.com/gosidian/gosidian/internal/webauth"
 	"golang.org/x/term"
 )
 
-// runUserCmd implements `gosidian user <action>`: setup / disable / status.
+// runUserCmd implements `gosidian user <action>`: setup / add / disable /
+// list / status / totp-reset.
 func runUserCmd(args []string) {
 	if len(args) == 0 {
 		userUsage()
@@ -27,8 +32,12 @@ func runUserCmd(args []string) {
 	switch action {
 	case "setup":
 		userSetup(rest)
+	case "add":
+		userAdd(rest)
 	case "disable":
 		userDisable(rest)
+	case "list":
+		userList(rest)
 	case "status":
 		userStatus(rest)
 	case "totp-reset":
@@ -49,10 +58,20 @@ Actions:
   setup       Create the owner account, or reset its password in place
               (same --username; --totp re-enrolls two-factor). --replace
               wipes every account and starts over.
-  disable     Remove the account (web UI becomes open again)
-  status      Show current account state
+  add         Add a member or guest account, leaving the others alone; it
+              must change its password at its first sign-in
+  disable     Disable one account (--username): its web sessions end and
+              its MCP tokens are revoked. --all removes EVERY account and
+              turns the login off.
+  list        List the accounts
+  status      Show whether the login is on, and the owner
   totp-reset  Clear a user's two-factor secret and recovery codes
               (lost authenticator; works while the server is running)
+
+The commands work with the server running: it re-reads the accounts on
+its next request. A fresh install gets its owner "admin" at the first
+start, with the password in the log and in <state-dir>/initial-admin-password
+(GOSIDIAN_AUTO_OWNER=false turns that off).
 
 Common options:
   --vault <dir>      Vault directory (default: $GOSIDIAN_VAULT)
@@ -62,6 +81,15 @@ Setup options:
   --username <s>     Account username (default: admin)
   --totp             Enable TOTP (prints the QR and the recovery codes)
   --password-stdin   Read password from stdin instead of prompt
+
+Add options:
+  --username <s>     Account username (required)
+  --role <r>         member (default) or guest
+  --password-stdin   Read the first password from stdin instead of prompt
+
+Disable options:
+  --username <s>     Account to disable (the owner cannot be)
+  --all              Remove every account instead
 
 totp-reset options:
   --username <s>     Account to reset (required)`)
@@ -239,13 +267,133 @@ func userTOTPReset(args []string) {
 	fmt.Println("goes through enrolment again (new QR, new recovery codes).")
 }
 
+// userAdd implements `gosidian user add`: a member or guest account, added
+// to the others (IMP-089). Like an account the owner creates from the web
+// UI, it must change its password at its first sign-in, and a member gets
+// its personal project when the server gives them.
+func userAdd(args []string) {
+	fs := flag.NewFlagSet("user add", flag.ExitOnError)
+	vaultDir := fs.String("vault", "", "vault directory")
+	stateDirFlag := fs.String("state-dir", "", "state dir (default <vault>/.gosidian; env GOSIDIAN_STATE_DIR)")
+	username := fs.String("username", "", "account username (required)")
+	roleFlag := fs.String("role", string(webauth.RoleMember), "member or guest")
+	pwStdin := fs.Bool("password-stdin", false, "read the first password from stdin instead of prompt")
+	_ = fs.Parse(args)
+	if *username == "" {
+		log.Fatal("--username is required")
+	}
+	role := webauth.Role(*roleFlag)
+	switch role {
+	case webauth.RoleMember, webauth.RoleGuest:
+	case webauth.RoleOwner:
+		log.Fatal("there is one owner: `gosidian user setup` creates it or resets its password")
+	default:
+		log.Fatalf("unknown role %q (member or guest)", *roleFlag)
+	}
+
+	stateDir := cliStateDir(*vaultDir, *stateDirFlag)
+	store := openWebauth(*vaultDir, *stateDirFlag)
+	// Refuse before prompting for a password that would be thrown away.
+	if u, ok := store.UserByUsername(*username); ok {
+		if u.Enabled() {
+			log.Fatalf("add: username %q already exists", *username)
+		}
+		log.Fatalf("add: username %q belongs to a disabled account; reusing it is done from Admin → Users, which archives the old one", *username)
+	}
+	password, err := readPassword(*pwStdin)
+	if err != nil {
+		log.Fatalf("read password: %v", err)
+	}
+	u, err := store.AddUser(*username, password, role)
+	if err != nil {
+		log.Fatalf("add: %v", err)
+	}
+	if err := store.SetMustChangePassword(u.ID, true); err != nil {
+		log.Fatalf("add: %v", err)
+	}
+	fmt.Printf("Account %q (%s) added. It must choose its own password at its first sign-in.\n", u.Username, u.Role)
+
+	if role != webauth.RoleMember {
+		return
+	}
+	ps, err := projects.Open(filepath.Join(stateDir, "projects.json"))
+	if err != nil {
+		log.Printf("warning: personal project not provisioned: %v", err)
+		return
+	}
+	tokens, err := auth.Open(filepath.Join(stateDir, "tokens.json"))
+	if err != nil {
+		log.Printf("warning: personal project not provisioned: %v", err)
+		return
+	}
+	abs, err := filepath.Abs(cliVaultDir(*vaultDir))
+	if err != nil {
+		log.Fatalf("vault: %v", err)
+	}
+	switch name, err := apiv1.ProvisionPersonalProject(vault.New(abs), ps, tokens, nil, *u, false); {
+	case err != nil:
+		log.Printf("warning: personal project not provisioned: %v", err)
+	case name != "":
+		fmt.Printf("Personal project %q created.\n", name)
+	}
+}
+
+// userDisable implements `gosidian user disable`. With --username it
+// disables that account as Admin → Users does (IMP-089): its web sessions
+// end and its MCP tokens are revoked; the owner cannot be disabled. With
+// --all it removes every account, which turns the login off. Without
+// either it refuses: the bare command used to remove every account.
 func userDisable(args []string) {
 	fs := flag.NewFlagSet("user disable", flag.ExitOnError)
 	vaultDir := fs.String("vault", "", "vault directory")
 	stateDirFlag := fs.String("state-dir", "", "state dir (default <vault>/.gosidian; env GOSIDIAN_STATE_DIR)")
+	username := fs.String("username", "", "account to disable")
+	all := fs.Bool("all", false, "remove EVERY account and turn the login off")
 	_ = fs.Parse(args)
+	switch {
+	case *all && *username != "":
+		log.Fatal("disable: --username or --all, not both")
+	case !*all && *username == "":
+		log.Fatal("disable: say which account with --username <name>, or remove every account with --all")
+	case *all:
+		userDisableAll(*vaultDir, *stateDirFlag)
+		return
+	}
 
 	store := openWebauth(*vaultDir, *stateDirFlag)
+	u, ok := store.UserByUsername(*username)
+	if !ok {
+		log.Fatalf("user %q not found", *username)
+	}
+	if u.Role == webauth.RoleOwner {
+		log.Fatal("disable: the owner cannot be disabled (to remove every account: --all)")
+	}
+	if !u.Enabled() {
+		fmt.Printf("Account %q is already disabled.\n", *username)
+		return
+	}
+	if err := store.DisableUser(u.ID); err != nil {
+		log.Fatalf("disable: %v", err)
+	}
+	stateDir := cliStateDir(*vaultDir, *stateDirFlag)
+	sessions, revoked := 0, 0
+	if spa, err := auth.OpenSpaTokens(filepath.Join(stateDir, "spa_tokens.json")); err != nil {
+		log.Printf("warning: web sessions not revoked: %v", err)
+	} else {
+		sessions = spa.RevokeByUser(u.ID)
+	}
+	if tokens, err := auth.Open(filepath.Join(stateDir, "tokens.json")); err != nil {
+		log.Printf("warning: MCP tokens not revoked: %v", err)
+	} else {
+		revoked = tokens.RevokeByOwner(u.ID)
+	}
+	fmt.Printf("Account %q disabled: %d web session(s) ended, %d MCP token(s) revoked.\n", *username, sessions, revoked)
+}
+
+// userDisableAll is the old `user disable`: every account goes, and with it
+// the login.
+func userDisableAll(vaultDir, stateDirFlag string) {
+	store := openWebauth(vaultDir, stateDirFlag)
 	if !store.Enabled() {
 		fmt.Println("Auth already disabled.")
 		return
@@ -257,7 +405,47 @@ func userDisable(args []string) {
 	fmt.Println("With the default config the web UI is now unusable — every data route")
 	fmt.Println("requires a token. Run `gosidian user setup` to provision an owner, or set")
 	fmt.Println("GOSIDIAN_OPEN_MODE=readonly to serve an anonymous read-only view of public")
-	fmt.Println("projects.")
+	fmt.Println("projects. At the next start the server creates the owner \"admin\" itself,")
+	fmt.Println("unless GOSIDIAN_AUTO_OWNER=false.")
+}
+
+// userList implements `gosidian user list`: one line per account.
+func userList(args []string) {
+	fs := flag.NewFlagSet("user list", flag.ExitOnError)
+	vaultDir := fs.String("vault", "", "vault directory")
+	stateDirFlag := fs.String("state-dir", "", "state dir (default <vault>/.gosidian; env GOSIDIAN_STATE_DIR)")
+	_ = fs.Parse(args)
+
+	store := openWebauth(*vaultDir, *stateDirFlag)
+	users := store.ListUsers()
+	if len(users) == 0 {
+		fmt.Println("No accounts.")
+		return
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "USERNAME\tROLE\tSOURCE\tTOTP\tSTATE")
+	for _, u := range users {
+		source := "local"
+		if u.AuthSource == "ldap" {
+			source = "ldap"
+		}
+		totp := "no"
+		if u.TOTPSec != "" {
+			totp = "yes"
+		}
+		var state []string
+		if !u.Enabled() {
+			state = append(state, "disabled")
+		}
+		if u.MustChangePassword {
+			state = append(state, "must change password")
+		}
+		if len(state) == 0 {
+			state = append(state, "active")
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", u.Username, u.Role, source, totp, strings.Join(state, ", "))
+	}
+	_ = w.Flush()
 }
 
 func userStatus(args []string) {

@@ -81,6 +81,11 @@ function openLinks(win: WindowInstance): void {
 
 onMounted(() => plancia.hydrate())
 
+// While a gate is up (a password to change, a TOTP to enrol) the server
+// refuses every data route: the sidebar and the windows are not mounted, so
+// they load once the gate is gone instead of keeping a 403 from behind it.
+const gated = computed(() => auth.passwordChangeRequired || auth.enrollmentRequired)
+
 function onEnrolled(codeCount: number) {
   auth.setEnrolled(true)
   auth.setRecoveryCodesRemaining(codeCount)
@@ -122,7 +127,7 @@ function openSettings(): void {
         {{ t('totp.recovery_used_dismiss') }}
       </button>
     </div>
-    <div class="flex-1 flex overflow-hidden min-h-0">
+    <div v-if="!gated" class="flex-1 flex overflow-hidden min-h-0">
       <!-- Left sidebar chrome via the library's <PlanciaSidebar> (inline shell).
            gosidian has no collapse/rail/peek, so it stays permanently expanded
            with the toggle suppressed; the host keeps driving the width through
@@ -186,8 +191,14 @@ function openSettings(): void {
         <h2 class="text-lg font-semibold mb-1">
           {{ t('password.interstitial_title') }}
         </h2>
+        <!-- The owner's password is never set by someone else: a temporary
+             one is the password of the first start (IMP-044). -->
         <p class="text-sm text-text-muted mb-4">
-          {{ t('password.interstitial_desc') }}
+          {{
+            auth.isOwner
+              ? t('password.interstitial_desc_first_start')
+              : t('password.interstitial_desc')
+          }}
         </p>
         <PasswordChange @done="auth.clearPasswordChange()" />
       </div>

@@ -315,3 +315,28 @@ func TestAutomations(t *testing.T) {
 		t.Errorf("env = %+v, %v", cfg.Automations, err)
 	}
 }
+
+// The owner of the first start is created unless the file or the
+// environment turns it off (IMP-044).
+func TestAutoOwner(t *testing.T) {
+	dir := t.TempDir()
+	cfg, err := Load(filepath.Join(dir, "nope.toml"))
+	if err != nil || !cfg.Webauth.AutoOwner {
+		t.Fatalf("default = %v, %v", cfg.Webauth.AutoOwner, err)
+	}
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte("[webauth]\nauto_owner = false\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err = Load(path); err != nil || cfg.Webauth.AutoOwner {
+		t.Fatalf("file = %v, %v", cfg.Webauth.AutoOwner, err)
+	}
+	t.Setenv("GOSIDIAN_AUTO_OWNER", "true")
+	if err := cfg.ApplyEnv(); err != nil || !cfg.Webauth.AutoOwner {
+		t.Errorf("env on = %v, %v", cfg.Webauth.AutoOwner, err)
+	}
+	t.Setenv("GOSIDIAN_AUTO_OWNER", "false")
+	if err := cfg.ApplyEnv(); err != nil || cfg.Webauth.AutoOwner {
+		t.Errorf("env off = %v, %v", cfg.Webauth.AutoOwner, err)
+	}
+}

@@ -42,6 +42,19 @@ Verify:
 curl -sS http://127.0.0.1:8080/healthz    # → "ok"
 ```
 
+At the first start, with no account yet, the server creates the owner
+`admin` with a random password, and prints it in the log:
+
+```bash
+docker logs gosidian 2>&1 | grep "owner account created"
+```
+
+The same password is in `initial-admin-password` in the state dir
+(`<vault>/.gosidian/` unless you moved it). Sign in with it: the web UI
+then asks you to choose your own, and the file goes away.
+`GOSIDIAN_AUTO_OWNER=false` turns this off, and the owner then comes from
+`gosidian user setup`.
+
 ## Docker Compose
 
 Two flavours, depending on where the image comes from:
@@ -60,8 +73,9 @@ fully-annotated compose with optional git sync, reverse proxy, and TLS.
 ## First run checklist
 
 1. **Open the web UI** at `http://127.0.0.1:8080`.
-2. **(Optional) Set up web login** if gosidian will be exposed beyond
-   localhost — see [Authentication](mcp/authentication.md#web-ui-login).
+2. **Sign in as `admin`** with the password of the first start (in the
+   log, and in `<state-dir>/initial-admin-password`), then choose your
+   own — see [Authentication](mcp/authentication.md#web-ui-login).
 3. **Create an MCP token** from `/admin/tokens` (or via the CLI — see
    [MCP authentication](mcp/authentication.md#mcp-bearer-tokens)).
 4. **Wire your MCP client** — see [Client setup](mcp/client-setup.md).

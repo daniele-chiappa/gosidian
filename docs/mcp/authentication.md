@@ -200,7 +200,15 @@ for a refresh token; one is issued regardless). A client asking for
 For the web UI (not MCP), gosidian supports an optional login layer
 on top of the bearer-token surface.
 
-### Single-user setup
+### The first owner
+
+At the first start, when there is no account at all, the server creates
+the owner `admin` with a random password: the log shows it once, and
+`<state-dir>/initial-admin-password` (mode 0600, never in the vault)
+keeps it. The first sign-in asks for a password of your own, and the file
+goes away when you have chosen it. `GOSIDIAN_AUTO_OWNER=false` (or
+`[webauth] auto_owner = false`) turns this off; the owner then comes from
+the console:
 
 ```bash
 gosidian user setup --vault ./vault --username admin
@@ -218,6 +226,21 @@ working.
 With web login enabled, unauthenticated browser requests are
 redirected to `/login`. Failed attempts trigger a rate limiter
 (default 5 failures per 15 minutes, see [Configuration](../configuration.md)).
+
+Accounts from the console, with the server running or not (it re-reads
+the accounts on its next request):
+
+```bash
+gosidian user add --vault ./vault --username ada [--role guest]   # asks for the first password
+gosidian user disable --vault ./vault --username ada              # one account, as Admin → Users does
+gosidian user list --vault ./vault
+```
+
+An account added this way must choose its own password at its first
+sign-in, like one the owner creates from the web UI, and a member gets
+its personal project. `user disable --username` ends the account's web
+sessions and revokes its MCP tokens; the owner cannot be disabled.
+`user disable --all` removes every account and turns the login off.
 
 Lost the authenticator of an account with TOTP? `gosidian user totp-reset
 --vault ./vault --username admin` clears its secret and recovery codes,

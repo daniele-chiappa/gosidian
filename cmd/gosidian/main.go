@@ -167,6 +167,16 @@ func main() {
 	// Every machine-owned file follows the state dir, not the index path:
 	// --db relocates the index alone.
 	hiddenDir := sdir
+	// The config comes before the stores: auto_owner decides, right after
+	// the accounts store opens, whether a fresh install gets its owner.
+	cfgPath := filepath.Join(hiddenDir, "config.toml")
+	cfg, err := config.Load(cfgPath)
+	if err != nil {
+		log.Fatalf("load config: %v", err)
+	}
+	if err := cfg.ApplyEnv(); err != nil {
+		log.Fatalf("apply env: %v", err)
+	}
 	tokensPath := filepath.Join(hiddenDir, "tokens.json")
 	tokenStore, err := auth.Open(tokensPath)
 	if err != nil {
@@ -178,6 +188,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("open web auth: %v", err)
 	}
+	provisionFirstOwner(webauthStore, cfg.Webauth.AutoOwner)
 
 	auditPath := filepath.Join(hiddenDir, "audit.jsonl")
 	auditLog, err := audit.Open(auditPath)
@@ -240,15 +251,6 @@ func main() {
 	// Who created and last modified each note, from the audit log, as the
 	// fields created_by and modified_by of queries (IMP-127 iteration 3).
 	wireAuthors(idx, auditLog, tokenStore, webauthStore)
-
-	cfgPath := filepath.Join(hiddenDir, "config.toml")
-	cfg, err := config.Load(cfgPath)
-	if err != nil {
-		log.Fatalf("load config: %v", err)
-	}
-	if err := cfg.ApplyEnv(); err != nil {
-		log.Fatalf("apply env: %v", err)
-	}
 
 	// v2.2: global TOTP policy from config. Backward-compat: if the mode
 	// resolves to "off" (the default) but an account already has a secret

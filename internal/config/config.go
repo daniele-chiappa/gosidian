@@ -163,6 +163,12 @@ type WebauthConfig struct {
 	// who can reach the server can read public projects, so enable it knowingly
 	// (e.g. a public showcase). Does not affect MCP (token-only).
 	OpenMode string `toml:"open_mode"`
+	// AutoOwner creates the owner "admin" at the first start, when there is
+	// no account at all, with a random password written to
+	// <state-dir>/initial-admin-password and to the log, to be changed at
+	// the first sign-in (IMP-044). Default true; off, the owner comes from
+	// `gosidian user setup`.
+	AutoOwner bool `toml:"auto_owner"`
 }
 
 // VaultConfig tunes the vault read cache.
@@ -285,6 +291,7 @@ func Default() *Config {
 	// On unless the file or the environment turns them off: applyDefaults
 	// runs after the file is read, so it cannot tell false from unset.
 	cfg.Automations.Enabled = true
+	cfg.Webauth.AutoOwner = true
 	cfg.applyDefaults()
 	return cfg
 }
@@ -500,6 +507,9 @@ func (c *Config) ApplyEnv() error {
 		default:
 			return fmt.Errorf("GOSIDIAN_OPEN_MODE: %q not supported (use \"off\" or \"readonly\")", v)
 		}
+	}
+	if v := os.Getenv("GOSIDIAN_AUTO_OWNER"); v != "" {
+		c.Webauth.AutoOwner = envBool(v)
 	}
 	if v := os.Getenv("GOSIDIAN_VAULT_CACHE_SIZE"); v != "" {
 		n, err := strconv.Atoi(v)

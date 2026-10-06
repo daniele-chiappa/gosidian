@@ -400,6 +400,7 @@
     "ldap": "Your password is managed by the directory (LDAP): change it there.",
     "interstitial_title": "Choose your password",
     "interstitial_desc": "Your password was set by the administrator. Choose your own to continue.",
+    "interstitial_desc_first_start": "This is the password of the first start, from the server's log. Choose your own to continue.",
     "confirm_action": "Your password, to confirm",
     "reset_title": "Reset password",
     "reset_new": "Temporary password",

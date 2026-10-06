@@ -35,6 +35,7 @@ const (
 // database they belong to).
 var Files = []string{
 	"auth.json",
+	"initial-admin-password", // webauth.InitialPasswordFile, while the first owner has not changed it
 	"tokens.json",
 	"spa_tokens.json",
 	"oauth_clients.json",

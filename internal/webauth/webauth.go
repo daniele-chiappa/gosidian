@@ -449,14 +449,24 @@ func (s *Store) Setup(username, password string, withTOTP bool, issuer string) (
 			cur.RecoveryCodes = nil
 		}
 		s.sessions = make(map[string]session)
-		return otpURI, s.saveLocked()
+		return otpURI, s.saveOwnerLocked()
 	}
 	if len(s.file.Users) > 0 {
 		return "", ErrSetupWouldReplace
 	}
 	s.file = AccountsFile{Version: accountsVersion, Users: []User{u}}
 	s.sessions = make(map[string]session)
-	return otpURI, s.saveLocked()
+	return otpURI, s.saveOwnerLocked()
+}
+
+// saveOwnerLocked saves after the console set the owner's password: the
+// password of the first start, if still on disk, is no longer the owner's.
+func (s *Store) saveOwnerLocked() error {
+	if err := s.saveLocked(); err != nil {
+		return err
+	}
+	s.removeInitialPassword()
+	return nil
 }
 
 // Replace wipes every account and invite and provisions username as the only
@@ -472,7 +482,7 @@ func (s *Store) Replace(username, password string, withTOTP bool, issuer string)
 	defer s.mu.Unlock()
 	s.file = AccountsFile{Version: accountsVersion, Users: []User{u}}
 	s.sessions = make(map[string]session)
-	return otpURI, s.saveLocked()
+	return otpURI, s.saveOwnerLocked()
 }
 
 // newOwner builds a fresh owner record, validating the credentials.
@@ -511,7 +521,7 @@ func newOwner(username, password string, withTOTP bool, issuer string) (User, st
 }
 
 // Disable removes all accounts + invites and invalidates all sessions. Used
-// by tests and by the CLI `gosidian user disable`.
+// by tests and by the CLI `gosidian user disable --all`.
 func (s *Store) Disable() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -520,6 +530,7 @@ func (s *Store) Disable() error {
 	if err := os.Remove(s.path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
+	s.removeInitialPassword()
 	return nil
 }
 

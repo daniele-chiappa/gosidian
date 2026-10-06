@@ -8,6 +8,51 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.60.1] — 2026-10-06 — "first start"
+
+A fresh install now gets its owner at the first start, and the `user`
+commands of the CLI work on one account at a time. Pull the image and
+restart: an install that already has accounts is not affected. 2.60.0
+was not published on its own; its changes are below.
+
+**Upgrade note**: `gosidian user disable` without arguments used to
+remove every account. It now refuses: `--username <name>` disables one
+account, `--all` removes them all.
+
+### Added
+- **The owner of the first start** — a fresh install had a login page
+  and no account to sign in with: the only way in was
+  `gosidian user setup` at the console. Now, when there is no account at
+  all, the server creates the owner `admin` with a random password. It
+  shows the password once in the log
+  (`docker logs gosidian | grep "owner account created"`) and keeps it in
+  `<state-dir>/initial-admin-password` (mode 0600, never in the vault).
+  The first sign-in asks for a password of your own, and the file goes
+  away once it is chosen, or after `user setup`.
+  `GOSIDIAN_AUTO_OWNER=false` (or `[webauth] auto_owner = false`) turns
+  this off, and the owner then comes from `user setup`.
+- **`gosidian user add`** — creates a member or guest account beside the
+  others, with the server running or not. Like an account the owner
+  creates from the web UI, it must choose its own password at its first
+  sign-in, and a member gets its personal project.
+- **`gosidian user list`** — every account, with its role, source (local
+  or LDAP), two-factor and state.
+
+### Changed
+- **`gosidian user disable` disables one account** — `--username`
+  disables it as Admin → Users does: its web sessions end and its MCP
+  tokens are revoked. The owner cannot be disabled. Removing every
+  account takes `--all`.
+
+### Fixed
+- **The sidebar after a forced password change or TOTP enrolment** — the
+  sidebar and the windows loaded behind the screen that asks for a new
+  password (or a two-factor enrolment), got 403 from the server, and kept
+  showing "Request failed with status code 403" after the change until a
+  reload. They now load once the screen is gone.
+- **The documentation of the first start** — it described a "create
+  admin" step in the browser that did not exist.
+
 ## [2.59.1] — 2026-10-06 — "one write path"
 
 Every MCP tool that writes a note now goes through one write pipeline,

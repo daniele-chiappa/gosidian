@@ -81,7 +81,14 @@ func (s *Store) SetPassword(userID, password string, mustChange bool) error {
 		}
 		u.Hash = string(hash)
 		u.MustChangePassword = mustChange
-		return s.saveLocked()
+		if err := s.saveLocked(); err != nil {
+			return err
+		}
+		// The owner chose a password: the first one is no longer needed.
+		if u.Role == RoleOwner && !mustChange {
+			s.removeInitialPassword()
+		}
+		return nil
 	}
 	return fmt.Errorf("user %q not found", userID)
 }

@@ -400,6 +400,7 @@
     "ldap": "La tua password è gestita dalla directory (LDAP): cambiala lì.",
     "interstitial_title": "Scegli la tua password",
     "interstitial_desc": "La tua password l'ha impostata l'amministratore. Scegline una tua per continuare.",
+    "interstitial_desc_first_start": "È la password del primo avvio, presa dal log del server. Scegline una tua per continuare.",
     "confirm_action": "La tua password, per confermare",
     "reset_title": "Reimposta password",
     "reset_new": "Password temporanea",

@@ -70,9 +70,12 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST http://localhost:8080/mcp \
   -H "Content-Type: application/json" -d '{}'         # → 401 (Streamable HTTP mounted)
 ```
 
-Open `http://localhost:8080` in a browser to provision the first
-admin user (see [Authentication](mcp/authentication.md#web-ui-login)).
-Then create an MCP token from `/admin/tokens` and wire your client —
+The first start creates the owner `admin` with a random password, shown
+once in the log (`docker compose logs gosidian | grep "owner account
+created"`) and kept in `<state-dir>/initial-admin-password`. Open
+`http://localhost:8080`, sign in with it and choose your own (see
+[Authentication](mcp/authentication.md#web-ui-login)); the file goes away
+then. Then create an MCP token from `/admin/tokens` and wire your client —
 [Client setup](mcp/client-setup.md) covers Claude Code, Zed, Cursor.
 
 ## Reverse proxy + TLS

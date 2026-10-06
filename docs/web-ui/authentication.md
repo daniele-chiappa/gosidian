@@ -6,9 +6,11 @@ enabled — by logging in against your directory. This page covers the
 role model, project visibility, two-factor (TOTP), and LDAP / Active
 Directory login.
 
-> If `<state-dir>/auth.json` does not exist, authentication is
-> **disabled** and the UI is open (local bootstrap mode). The first
-> `gosidian user setup` or the on-screen "create admin" step turns it on.
+> At the first start, with no account at all, the server creates the
+> owner `admin` with a random password, shown once in the log and kept in
+> `<state-dir>/initial-admin-password` until you choose your own at the
+> first sign-in. With `GOSIDIAN_AUTO_OWNER=false` it does not, and the
+> owner comes from `gosidian user setup`: until then nobody can sign in.
 
 ## Roles
 

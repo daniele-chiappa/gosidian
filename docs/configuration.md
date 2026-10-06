@@ -55,6 +55,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_LOGIN_MAX_FAILURES` | `webauth.login_max_failures` | `5` |
 | `GOSIDIAN_TRUSTED_PROXIES` | `webauth.trusted_proxies` | empty (comma-separated IPs/CIDRs of the reverse proxies whose `X-Forwarded-For` the login rate limiter may trust; empty = the header is ignored and the peer address is used) |
 | `GOSIDIAN_TOTP_MODE` | `webauth.totp_mode` | `off` (`optional`, `required`) |
+| `GOSIDIAN_AUTO_OWNER` | `webauth.auto_owner` | `true` (at the first start, with no account at all, create the owner `admin` with a random password, shown once in the log and kept in `<state-dir>/initial-admin-password` until the owner chooses its own at the first sign-in; `false` leaves the owner to `gosidian user setup`) |
 | `GOSIDIAN_LDAP_ENABLED` | `ldap.enabled` | `false` |
 | `GOSIDIAN_LDAP_URL` | `ldap.url` | empty (`ldap://host:389`, `ldaps://host:636`) |
 | `GOSIDIAN_LDAP_START_TLS` | `ldap.start_tls` | `false` |
@@ -186,6 +187,9 @@ gosidian token create --vault <path> --name <s> [flags]
 gosidian token list   --vault <path>
 gosidian token revoke --vault <path> --id <8hex>
 gosidian user setup   --vault <path> --username <s> [--totp] [--replace]
+gosidian user add     --vault <path> --username <s> [--role member|guest]
+gosidian user disable --vault <path> (--username <s> | --all)
+gosidian user list    --vault <path>
 gosidian healthcheck  [--addr <host:port>]
 gosidian import-vault --vault <path> [flags]
 gosidian version                         # print the build version (also --version)
@@ -198,7 +202,8 @@ Run `gosidian token -h` etc. for per-subcommand options.
 `<state-dir>` is where gosidian keeps its machine-owned files: `auth.json`
 (web accounts), `tokens.json` and `spa_tokens.json` (hashed tokens),
 `gitsync.json`, `config.toml`, `projects.json`, `audit.jsonl` and the
-SQLite index. By default it is `<vault>/.gosidian/`, unchanged from earlier
+SQLite index, and, until the owner of the first start has chosen its own
+password, `initial-admin-password`. By default it is `<vault>/.gosidian/`, unchanged from earlier
 releases. Set `--state-dir` (or `GOSIDIAN_STATE_DIR`) to move it **out of
 the vault root** — the recommended layout: nothing that resolves inside the
 vault can reach the credential store, and the vault's git repository never
