@@ -132,7 +132,7 @@ If you build your own MCP client:
 
 ## Verification
 
-Once connected, every client should see 58 tools in `tools/list`. A
+Once connected, every client should see 61 tools in `tools/list`. A
 good smoke sequence for your first call:
 
 ```

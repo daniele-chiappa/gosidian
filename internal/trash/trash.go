@@ -51,8 +51,9 @@ func New(vaultRoot string, retention time.Duration) *Bin {
 	}
 }
 
-// DiscardNote moves a single note into the trash. Returns the trash-relative
-// id (timestamp-prefixed name) so callers can audit it.
+// DiscardNote moves a single note (or an attachment, IMP-033) into the
+// trash, and removes the folders it left empty (IMP-129). Returns the
+// trash-relative id (timestamp-prefixed name) so callers can audit it.
 func (b *Bin) DiscardNote(rel string) (string, error) {
 	src := filepath.Join(b.vaultRoot, filepath.FromSlash(rel))
 	if _, err := os.Stat(src); err != nil {
@@ -70,6 +71,7 @@ func (b *Bin) DiscardNote(rel string) (string, error) {
 		}
 		_ = os.Remove(src)
 	}
+	vault.PruneEmptyParents(b.vaultRoot, filepath.ToSlash(filepath.Clean(rel)))
 	return id, nil
 }
 

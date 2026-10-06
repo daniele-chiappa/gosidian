@@ -57,6 +57,13 @@ func (s *Server) registerAttachmentTools() {
 		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative attachment path (e.g. 'project/attachments/abc123.png').")),
 	), s.handleDeleteAttachment)
 
+	s.impl.AddTool(mcp.NewTool("memory_gc_attachments",
+		mcp.WithDescription("Find the attachments of a project that no file of the vault names any more (a note deleted or edited, an upload never linked), older than min_age_hours. A dry run (the default) only lists them, with size and age; with dry_run:false they go to the server's trash when it is on (restorable from the web UI), else they are deleted. References count from every project, canvases, bases and the trash, so a file another project uses, or a trashed note would need, stays. Use the dry run first and show the list before removing."),
+		mcp.WithString("project", mcp.Description("Project whose attachments to check. A token scoped to a single project may omit it.")),
+		mcp.WithBoolean("dry_run", mcp.Description("Default true: list only. false removes the orphans listed (write scope on the project).")),
+		mcp.WithNumber("min_age_hours", mcp.Description("Only files older than this count (default 24): an upload not linked yet is left alone.")),
+	), s.handleGCAttachments)
+
 	s.impl.AddTool(mcp.NewTool("memory_attachment_info",
 		mcp.WithDescription("Get metadata about an attachment, including which notes reference it. Use this to check if an attachment is orphaned before deleting."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative attachment path.")),

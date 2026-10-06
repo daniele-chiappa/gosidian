@@ -1,6 +1,6 @@
 # MCP tool catalogue
 
-**58 tools** cover the full retrieval → write → workflow →
+**61 tools** cover the full retrieval → write → workflow →
 orchestration → self-check cycle for agent memory.
 
 Consult each tool's `description` via your client's `tools/list` call
@@ -238,6 +238,13 @@ a note naming it (and the likely intended argument, e.g. `Project` →
   resource handle without an embed
 - `memory_list_attachments(project?)`
 - `memory_delete_attachment(path)`
+- `memory_gc_attachments(project, dry_run?, min_age_hours?)` — the
+  project's attachments that no file of the vault names any more, older
+  than `min_age_hours` (default 24, so an upload not linked yet is left
+  alone). References count from every project, canvases, bases and the
+  trash. A dry run (the default) lists them with size and age; with
+  `dry_run: false` they go to the trash when it is on, else they are
+  deleted (write scope; audited as `delete_attachment`)
 - `memory_attachment_info(path)`
 - `memory_create_media_note(project, data|source_path, filename, caption?, title?, path?)` —
   image media note (ADR-013): uploads the image **and** creates the `.md`

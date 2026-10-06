@@ -8,6 +8,34 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.63.0] — 2026-10-06 — "tidy vault"
+
+A tool that finds the attachments nothing uses any more, and no more
+empty folders left behind by a delete. Pull the image and restart,
+nothing to migrate.
+
+### Added
+- **`memory_gc_attachments`** — the attachments of a project that no file
+  of the vault names any more (a note deleted or edited, an upload never
+  linked), older than `min_age_hours` (default 24, so an upload not linked
+  yet is left alone). An attachment counts as used when its file name
+  appears in a note of any project, a canvas, a base, or a note in the
+  trash (a restore must not find its image gone). A dry run, the default,
+  lists them with size and age; `dry_run: false` sends them to the trash
+  when it is on (restorable from the web UI), else deletes them. Writing
+  needs write access to the project. A note that writes an attachment's
+  full file name counts as using it.
+
+### Fixed
+- **Empty folders after a delete** — deleting, trashing, renaming or
+  moving the last note of a folder, or deleting the last attachment of
+  one, left the folder on disk, where nothing showed it and nothing
+  removed it. The folders it leaves empty now go, up to the project's
+  folder, which stays.
+- **The tool count in the docs** — the README, the docs and `server.json`
+  said 57 or 58 tools while 60 were registered; they now say 61, and a
+  test keeps them in line.
+
 ## [2.62.0] — 2026-10-06 — "quotas and last use"
 
 An optional upload quota per account, the last use of every MCP token,

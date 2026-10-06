@@ -208,3 +208,25 @@ func TestBin_RestoreRefusesOriginsOutsideTheVault(t *testing.T) {
 		}
 	}
 }
+
+// Trashing the last note of a folder removes the folders it left empty,
+// up to the project (IMP-129).
+func TestDiscardNote_PrunesEmptyFolders(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "p", "a", "b"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "p", "a", "b", "n.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b := New(root, -1)
+	if _, err := b.DiscardNote("p/a/b/n.md"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "p", "a")); err == nil {
+		t.Error("p/a was left on disk")
+	}
+	if _, err := os.Stat(filepath.Join(root, "p")); err != nil {
+		t.Errorf("the project went too: %v", err)
+	}
+}

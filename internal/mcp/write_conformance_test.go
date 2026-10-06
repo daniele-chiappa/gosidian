@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/server/events"
@@ -218,6 +219,17 @@ func writeConformanceCases() []conformanceCase {
 		{tool: "memory_delete_attachment", setup: note(map[string]string{"p/attachments/x.png": string(png)}),
 			call:  args(func(s *Server) toolFn { return s.handleDeleteAttachment }, map[string]any{"path": "p/attachments/x.png"}),
 			audit: []auditWant{{audit.ActionDeleteAttachment, "p/attachments/x.png"}}},
+		{tool: "memory_gc_attachments",
+			setup: func(t *testing.T, s *Server, _ context.Context) string {
+				seed(t, s, map[string]string{"p/attachments/old.png": string(png), "p/n.md": "# n\n"})
+				old := time.Now().Add(-48 * time.Hour)
+				if err := os.Chtimes(filepath.Join(s.vault.Root, "p", "attachments", "old.png"), old, old); err != nil {
+					t.Fatal(err)
+				}
+				return ""
+			},
+			call:  args(func(s *Server) toolFn { return s.handleGCAttachments }, map[string]any{"project": "p", "dry_run": false}),
+			audit: []auditWant{{audit.ActionDeleteAttachment, "p/attachments/old.png"}}},
 		{tool: "memory_project_scaffold",
 			setup: func(t *testing.T, s *Server, _ context.Context) string {
 				seedTemplatesForTest(t, s.vault.Root)

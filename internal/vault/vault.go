@@ -199,13 +199,18 @@ func (v *Vault) Delete(rel string) error {
 	if !v.IsNoteFile(abs) {
 		return fmt.Errorf("%w: %q", ErrNotNote, rel)
 	}
-	if v.cache != nil {
+	r, rErr := v.Rel(rel)
+	if v.cache != nil && rErr == nil {
 		// We need the cleaned relative path for the cache key; reuse Rel.
-		if r, rErr := v.Rel(rel); rErr == nil {
-			v.cache.Invalidate(r)
-		}
+		v.cache.Invalidate(r)
 	}
-	return os.Remove(abs)
+	if err := os.Remove(abs); err != nil {
+		return err
+	}
+	if rErr == nil {
+		PruneEmptyParents(v.Root, r)
+	}
+	return nil
 }
 
 // Save writes a note. Only note files (IsNoteFile) can be written through the
@@ -218,10 +223,7 @@ func (v *Vault) Save(rel string, content []byte) error {
 	if !v.IsNoteFile(abs) {
 		return fmt.Errorf("%w: %q", ErrNotNote, rel)
 	}
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(abs, content, 0o644); err != nil {
+	if err := writeInDir(abs, content); err != nil {
 		return err
 	}
 	if v.cache != nil {
@@ -245,11 +247,7 @@ func (v *Vault) SaveAttachment(rel string, content []byte, allowedExt map[string
 	if err := checkAttachmentPath(r, allowedExt); err != nil {
 		return err
 	}
-	abs := filepath.Join(v.Root, filepath.FromSlash(r))
-	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(abs, content, 0o644)
+	return writeInDir(filepath.Join(v.Root, filepath.FromSlash(r)), content)
 }
 
 // DeleteAttachment removes an attachment file under the same confinement as
@@ -262,7 +260,63 @@ func (v *Vault) DeleteAttachment(rel string, allowedExt map[string]bool) error {
 	if err := checkAttachmentPath(r, allowedExt); err != nil {
 		return err
 	}
-	return os.Remove(filepath.Join(v.Root, filepath.FromSlash(r)))
+	if err := os.Remove(filepath.Join(v.Root, filepath.FromSlash(r))); err != nil {
+		return err
+	}
+	PruneEmptyParents(v.Root, r)
+	return nil
+}
+
+// renameInDir moves a file, making the target folder first, again once if
+// another request pruned it in between.
+func renameInDir(from, to string) error {
+	for attempt := 0; ; attempt++ {
+		if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+			return err
+		}
+		err := os.Rename(from, to)
+		if err == nil || attempt > 0 || !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		if _, statErr := os.Stat(from); statErr != nil {
+			return err // the source is what is missing
+		}
+	}
+}
+
+// writeInDir writes a file, making its folder first. A folder another
+// request pruned in between (PruneEmptyParents) is made again, once.
+func writeInDir(abs string, content []byte) error {
+	for attempt := 0; ; attempt++ {
+		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			return err
+		}
+		err := os.WriteFile(abs, content, 0o644)
+		if err == nil || attempt > 0 || !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+}
+
+// PruneEmptyParents removes the folders above rel that its removal left
+// empty, up to its project folder, which stays even when empty (IMP-129):
+// a deleted, trashed or moved note left them on disk, where nothing showed
+// them and nothing removed them. A folder that still holds anything stops
+// it. rel is vault-relative and already cleaned.
+func PruneEmptyParents(root, rel string) {
+	rel = filepath.ToSlash(rel)
+	project, _, nested := strings.Cut(rel, "/")
+	if !nested || project == "" || strings.HasPrefix(project, ".") {
+		return
+	}
+	stop := filepath.Join(root, project)
+	dir := filepath.Dir(filepath.Join(root, filepath.FromSlash(rel)))
+	for dir != stop && strings.HasPrefix(dir, stop+string(filepath.Separator)) {
+		if os.Remove(dir) != nil { // not empty, or gone already
+			return
+		}
+		dir = filepath.Dir(dir)
+	}
 }
 
 func checkAttachmentPath(r string, allowedExt map[string]bool) error {
@@ -743,12 +797,10 @@ func (v *Vault) RenameNote(idx *index.Index, from, to string) ([]string, error) 
 		return nil, fmt.Errorf("lookup backlinks: %w", err)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(toAbs), 0o755); err != nil {
+	if err := renameInDir(fromAbs, toAbs); err != nil {
 		return nil, err
 	}
-	if err := os.Rename(fromAbs, toAbs); err != nil {
-		return nil, err
-	}
+	PruneEmptyParents(v.Root, fromRel)
 
 	oldBase := stripNoteExt(filepath.Base(fromRel))
 	newBase := stripNoteExt(filepath.Base(toRel))
