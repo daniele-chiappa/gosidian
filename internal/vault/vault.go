@@ -558,7 +558,41 @@ func sanitizeProjectName(name string) (string, error) {
 			return "", fmt.Errorf("project name cannot contain %q", ch)
 		}
 	}
+	// A NUL or another control character makes every os call fail (IMP-125),
+	// after the rename already wrote it to the access store.
+	for _, r := range clean {
+		if r < 0x20 || r == 0x7f {
+			return "", errors.New("project name cannot contain control characters")
+		}
+	}
+	// Windows drops a trailing dot ("ok." is the folder "ok") and reserves
+	// device names: refused everywhere, so a vault stays portable.
+	if strings.HasSuffix(clean, ".") {
+		return "", errors.New("project name cannot end with a dot")
+	}
+	if windowsReserved(clean) {
+		return "", fmt.Errorf("project name %q is reserved on Windows", clean)
+	}
+	if !filepath.IsLocal(clean) {
+		return "", errors.New("invalid project name")
+	}
 	return clean, nil
+}
+
+// windowsReserved reports whether name is a Windows device name (CON, PRN,
+// AUX, NUL, COM0-9, LPT0-9), in any case and with any extension: "nul.txt"
+// is the device too.
+func windowsReserved(name string) bool {
+	base, _, _ := strings.Cut(strings.ToUpper(name), ".")
+	base = strings.TrimRight(base, " ")
+	switch base {
+	case "CON", "PRN", "AUX", "NUL":
+		return true
+	}
+	if len(base) == 4 && (strings.HasPrefix(base, "COM") || strings.HasPrefix(base, "LPT")) {
+		return base[3] >= '0' && base[3] <= '9'
+	}
+	return false
 }
 
 // AttachmentInfo describes a single file inside an attachments/ directory.

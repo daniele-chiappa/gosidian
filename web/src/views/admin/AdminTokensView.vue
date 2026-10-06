@@ -174,6 +174,7 @@ onMounted(load)
         <th class="text-left py-2 px-3">Scopes</th>
         <th class="text-left py-2 px-3">Created</th>
         <th class="text-left py-2 px-3">Expires</th>
+        <th class="text-left py-2 px-3">Last used</th>
         <th class="text-left py-2 px-3">Self-improve</th>
         <th class="text-right py-2 px-3">Actions</th>
       </tr>
@@ -200,6 +201,13 @@ onMounted(load)
         <td class="py-2 px-3 font-mono text-xs">{{ t.created_at }}</td>
         <td class="py-2 px-3 font-mono text-xs">
           <span :class="t.expired ? 'text-warning' : ''">{{ t.expires_at || '—' }}</span>
+        </td>
+        <td
+          class="py-2 px-3 font-mono text-xs"
+          data-last-used
+          :title="t.last_used_at ? undefined : 'Not used since gosidian started recording it'"
+        >
+          {{ t.last_used_at || '—' }}
         </td>
         <td class="py-2 px-3">
           <button

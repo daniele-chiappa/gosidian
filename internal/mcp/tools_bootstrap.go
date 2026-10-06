@@ -18,6 +18,7 @@ import (
 	"github.com/gosidian/gosidian/internal/initprompt"
 	"github.com/gosidian/gosidian/internal/lint"
 	"github.com/gosidian/gosidian/internal/parser"
+	"github.com/gosidian/gosidian/internal/uploadquota"
 	"github.com/gosidian/gosidian/internal/vault"
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -184,6 +185,11 @@ type bootstrapAttachCapability struct {
 	// IngestURLEnabled reports whether the memory_ingest url source has a
 	// non-empty allowlist on this instance.
 	IngestURLEnabled bool `json:"ingest_url_enabled"`
+	// QuotaBytes and QuotaWindow are the account's upload quota, when the
+	// operator set one (IMP-034): attachment bytes per sliding window, the
+	// account's tokens and web sessions together.
+	QuotaBytes  int64  `json:"quota_bytes,omitempty"`
+	QuotaWindow string `json:"quota_window,omitempty"`
 }
 
 // buildCapabilities assembles the capabilities block from live config and the
@@ -217,8 +223,18 @@ func (s *Server) buildCapabilities(readOnly bool) bootstrapCapabilities {
 			BridgeDir:            s.bridgeDir,
 			AllowedUploadRoots:   s.allowedUploadRoots,
 			IngestURLEnabled:     len(s.ingestURLAllow) > 0,
+			QuotaBytes:           s.uploadQuota.Max(),
+			QuotaWindow:          quotaWindow(s.uploadQuota),
 		},
 	}
+}
+
+// quotaWindow is the quota's window for the capabilities, "" without one.
+func quotaWindow(q *uploadquota.Quota) string {
+	if !q.Enabled() {
+		return ""
+	}
+	return q.Window().String()
 }
 
 // downloadEndpointHint is the read-side byte path (IMP-081), shared by the

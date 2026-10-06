@@ -12,6 +12,7 @@ import (
 	"github.com/gosidian/gosidian/internal/ratelimit"
 	"github.com/gosidian/gosidian/internal/server/events"
 	"github.com/gosidian/gosidian/internal/trash"
+	"github.com/gosidian/gosidian/internal/uploadquota"
 	"github.com/gosidian/gosidian/internal/vault"
 )
 
@@ -22,17 +23,20 @@ import (
 // CodeServerUnavailable when their dependency is nil so the SPA can
 // surface the missing-feature state cleanly.
 type Deps struct {
-	Auth       *AuthDeps
-	Audit      *audit.Log
-	Vault      *vault.Vault
-	Events     *events.Hub
-	Index      *index.Index
-	Trash      *trash.Bin
-	Renderer   *parser.Renderer
-	Projects   *projects.Store
-	GitSync    *gitsync.Sync // optional; nil disables /history
-	ConfigPath string        // path to cfg.toml; "" disables /settings PUT
-	OAuth      *oauth.Server // optional; nil disables the consent API (IMP-092)
+	// UploadQuota caps the bytes an account uploads in a window, shared
+	// with its MCP tokens (IMP-034); nil = no limit.
+	UploadQuota *uploadquota.Quota
+	Auth        *AuthDeps
+	Audit       *audit.Log
+	Vault       *vault.Vault
+	Events      *events.Hub
+	Index       *index.Index
+	Trash       *trash.Bin
+	Renderer    *parser.Renderer
+	Projects    *projects.Store
+	GitSync     *gitsync.Sync // optional; nil disables /history
+	ConfigPath  string        // path to cfg.toml; "" disables /settings PUT
+	OAuth       *oauth.Server // optional; nil disables the consent API (IMP-092)
 	// StateDir is left out of zip exports when it sits inside the vault
 	// under a visible name (the default .gosidian/ is hidden anyway).
 	StateDir string

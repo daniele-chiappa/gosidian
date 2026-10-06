@@ -10,6 +10,9 @@ export interface MCPToken {
   created_at: string
   expires_at?: string
   expired?: boolean
+  /** When it last authenticated a request, to five minutes; absent = not
+   *  used since the field exists (IMP-100). */
+  last_used_at?: string
   self_improve_opt_in: boolean
   /** Multi-project scope; absent = inherit (owner: unscoped). */
   projects?: string[]

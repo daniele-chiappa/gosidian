@@ -12,6 +12,19 @@ converges on the same code path (`internal/attach.Store`): identical
 filename (`<sha256[:16]>.<ext>`), identical magic-bytes verification
 (rejects MIME spoofs).
 
+**Upload quota.** The operator may cap how many bytes of attachments an
+account uploads in a sliding window: `[uploads] quota_bytes` and
+`quota_window` (default 24h), or `GOSIDIAN_UPLOAD_QUOTA_BYTES` and
+`GOSIDIAN_UPLOAD_QUOTA_WINDOW`. Off by default. The quota is the
+account's: its MCP tokens and its web UI uploads count together (a CLI
+token without an account has its own). Every upload path checks it before
+anything is stored: the tools above say how much is used and how long to
+wait, the HTTP endpoints answer 429 with `Retry-After` (413 for a file
+larger than the whole quota). `memory_bootstrap` reports it in
+`capabilities.attachments.quota_bytes` / `quota_window`. Bytes count as
+they arrive, also when the attachment was already stored, and the count
+starts again at every restart.
+
 ## memory_ingest — sources, cheapest first
 
 | Source | When | Cost |

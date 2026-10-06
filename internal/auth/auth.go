@@ -73,6 +73,10 @@ type Token struct {
 	// use. RefreshExpiresAt bounds it independently of ExpiresAt.
 	RefreshHash      string    `json:"refresh_hash,omitempty"`
 	RefreshExpiresAt time.Time `json:"refresh_expires_at,omitempty"`
+	// LastUsedAt is when the token last authenticated a request, kept to
+	// lastUsedEvery (IMP-100): zero for a token never used since the field
+	// exists.
+	LastUsedAt time.Time `json:"last_used_at,omitempty"`
 }
 
 // KindOAuth marks a token record minted by the OAuth consent flow (a grant).
@@ -213,6 +217,10 @@ type Store struct {
 	mtime  time.Time // mtime observed at last (re)load; zero when file absent
 }
 
+// lastUsedEvery is how fresh LastUsedAt is kept: a token's use is recorded,
+// and written to disk, at most this often (IMP-100).
+const lastUsedEvery = 5 * time.Minute
+
 type storeFile struct {
 	Tokens []Token `json:"tokens"`
 }
@@ -302,9 +310,9 @@ func (s *Store) save() error {
 	return nil
 }
 
-// Empty reports whether the store has no tokens. When empty, auth is disabled.
-// Also triggers a lazy reload so a newly-created first token flips auth on
-// without a restart (closing BUG-004's "latent admin mode" edge case).
+// Empty reports whether the store has no tokens. MCP still wants a token
+// then, unless the operator opted in to token-less access (IMP-146). Also
+// triggers a lazy reload, so a token created by the CLI counts at once.
 func (s *Store) Empty() bool {
 	s.mu.Lock()
 	s.reloadIfStale()
@@ -323,6 +331,28 @@ func (s *Store) List() []Token {
 	out := make([]Token, len(s.tokens))
 	copy(out, s.tokens)
 	return out
+}
+
+// Touch records that the token id authenticated a request now, at most
+// every lastUsedEvery: a write of the store every few minutes per token in
+// use, not one per request. The store reloads the file first, so a token
+// the CLI made meanwhile is kept; a failed write only loses the timestamp.
+func (s *Store) Touch(id string) {
+	now := time.Now().UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reloadIfStale()
+	for i := range s.tokens {
+		if s.tokens[i].ID != id {
+			continue
+		}
+		if now.Sub(s.tokens[i].LastUsedAt) < lastUsedEvery {
+			return
+		}
+		s.tokens[i].LastUsedAt = now
+		_ = s.save()
+		return
+	}
 }
 
 // Create generates a new token, stores its hash, and returns the plaintext
@@ -734,19 +764,27 @@ func (s *Store) Validate(plaintext string) (*Token, error) {
 	s.mu.Unlock()
 
 	s.mu.RLock()
-	defer s.mu.RUnlock()
+	var found *Token
 	for i := range s.tokens {
 		t := &s.tokens[i]
 		// Constant-time comparison to avoid timing oracles on the hash.
 		if subtle.ConstantTimeCompare([]byte(t.Hash), []byte(hashHex)) == 1 {
-			if t.Expired() {
-				return nil, errors.New("token expired")
-			}
 			out := *t
-			return &out, nil
+			found = &out
+			break
 		}
 	}
-	return nil, errors.New("invalid token")
+	s.mu.RUnlock()
+	switch {
+	case found == nil:
+		return nil, errors.New("invalid token")
+	case found.Expired():
+		return nil, errors.New("token expired")
+	}
+	if time.Since(found.LastUsedAt) >= lastUsedEvery { // cheap check: no write lock per request
+		s.Touch(found.ID)
+	}
+	return found, nil
 }
 
 // AdminToken returns a synthetic admin token used when the store is empty

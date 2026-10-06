@@ -242,6 +242,7 @@ func (s *Server) Resolve(plaintext string) (*auth.Token, bool) {
 	if !ok || !grant.IsOAuthGrant() || grant.Expired() {
 		return nil, false
 	}
+	s.tokens.Touch(grant.ID) // IMP-100
 	return grant, true
 }
 

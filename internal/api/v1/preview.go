@@ -42,10 +42,11 @@ type previewRequest struct {
 	Path string `json:"path,omitempty"`
 }
 
-// previewResponse returns sanitized HTML the SPA can drop into a
-// preview pane via DOMPurify.sanitize. Server-side goldmark is
-// already configured safe-by-default, but the SPA passes it through
-// DOMPurify for defense in depth.
+// previewResponse returns the note rendered as HTML for the SPA's preview
+// pane. It is NOT sanitized: goldmark runs with WithUnsafe, so a note's raw
+// HTML (scripts and event handlers included) comes out as written. The SPA
+// sanitizes it with DOMPurify (sanitizePreviewHtml, MarkdownPreview.vue),
+// and any other consumer of this HTML must do the same (IMP-128).
 type previewResponse struct {
 	HTML string `json:"html"`
 	// Views holds the note's views in the form the web UI's editors use,

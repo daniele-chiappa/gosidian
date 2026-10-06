@@ -276,16 +276,30 @@ func (s *Server) importPackage(ctx context.Context, in packageIntent, entries []
 	}
 
 	// Attachments first: they are content-addressed, so one already there
-	// is the same file and stays.
-	for _, a := range plan.Attachments {
+	// is the same file and stays. The new ones count against the upload
+	// quota, all together, before any is written (IMP-034).
+	var fresh []int
+	var freshBytes int64
+	for i, a := range plan.Attachments {
 		if abs, err := s.vault.Abs(a.Path); err == nil {
 			if _, err := os.Stat(abs); err == nil {
 				continue
 			}
 		}
+		fresh = append(fresh, i)
+		freshBytes += int64(len(a.Data))
+	}
+	if _, refusal := s.reserveUpload(tok, freshBytes); refusal != nil {
+		return mcp.NewToolResultError("package not imported, nothing written: " + refusal.Error()), nil
+	}
+	for _, i := range fresh {
+		a := plan.Attachments[i]
 		if err := s.vault.SaveAttachment(a.Path, a.Data, attach.ExtSet()); err != nil {
+			// The bytes not written go back to the quota.
+			s.uploadQuota.Refund(uploadKey(tok), freshBytes)
 			return mcp.NewToolResultErrorFromErr("package not imported: attachment "+a.Src, err), nil
 		}
+		freshBytes -= int64(len(a.Data))
 		s.auditWrite(ctx, audit.ActionUploadAttachment, a.Path, "", int64(len(a.Data)))
 	}
 	type done struct {

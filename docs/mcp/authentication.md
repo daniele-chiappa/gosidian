@@ -126,6 +126,11 @@ and the owning account.
 
 From the web UI at `/admin/tokens`:
 
+- Both lists show when each token **last authenticated a request**
+  (`last_used_at`, kept to five minutes; empty for a token not used since
+  v2.62), and so does `gosidian token list`: a token idle for months is a
+  candidate for revocation.
+
 - Owner accounts mint and revoke any token from `/admin/tokens`; every
   other account mints its own from **Settings → My MCP tokens**
   (`POST /api/v1/me/tokens`, mode `inherit` or `custom`; read-only

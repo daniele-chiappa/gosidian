@@ -8,6 +8,44 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.62.0] — 2026-10-06 — "quotas and last use"
+
+An optional upload quota per account, the last use of every MCP token,
+and two hardening fixes. Pull the image and restart, nothing to migrate:
+the quota is off unless you set it.
+
+### Added
+- **An upload quota per account** — cap how many bytes of attachments an
+  account uploads in a sliding window: `[uploads] quota_bytes` and
+  `quota_window` (default 24h), or `GOSIDIAN_UPLOAD_QUOTA_BYTES` and
+  `GOSIDIAN_UPLOAD_QUOTA_WINDOW`. Off by default. An account's MCP tokens
+  and its web UI uploads share the quota (a CLI token without an account
+  has its own). Every upload path checks it before storing: the MCP tools,
+  `/mcp/upload`, the ingest tickets, package imports, and the web UI's
+  `/api/v1/upload` and `/api/v1/attach`, which until now passed no limit
+  at all. Over it, a tool says how much is used and how long to wait, and
+  HTTP answers 429 with `Retry-After`. `memory_bootstrap` reports it in
+  `capabilities.attachments`. The count lives in memory, so a restart
+  starts it again.
+- **When an MCP token was last used** — Admin → Tokens, Settings → My MCP
+  tokens and `gosidian token list` show when each token, static or OAuth
+  grant, last authenticated a request (`last_used_at`, to five minutes),
+  so idle tokens are easy to spot and revoke.
+
+### Security
+- **Project names that are not a portable folder name** — a name with a
+  NUL or another control character was accepted, and every file operation
+  on it then failed, after a rename had already written it to the access
+  store; a trailing dot or a Windows device name (`CON`, `NUL`, `COM1`…)
+  made a folder that Windows reads as another one, or as a device. They
+  are now refused when a project is created or renamed.
+- **The contract of the server's HTML** — the code comments said the
+  server's markdown rendering was safe on its own and the web UI's
+  DOMPurify an extra. A note's raw HTML in fact passes through the
+  renderer, and DOMPurify is the barrier; the comments now say so, and it
+  was checked in a browser that a note's script, event handler and
+  `javascript:` link never reach the page.
+
 ## [2.61.0] — 2026-10-06 — "token required"
 
 MCP now always wants a token. Pull the image and restart; an install

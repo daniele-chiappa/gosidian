@@ -166,11 +166,15 @@ func tokenList(args []string) {
 		users[u.ID] = u
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tNAME\tOWNER\tPROJECT\tSCOPES\tCREATED\tEXPIRES\tSELF-IMPROVE\tPROFILE")
+	fmt.Fprintln(w, "ID\tNAME\tOWNER\tPROJECT\tSCOPES\tCREATED\tEXPIRES\tLAST USED\tSELF-IMPROVE\tPROFILE")
 	for _, t := range tokens {
 		exp := "-"
 		if !t.ExpiresAt.IsZero() {
 			exp = t.ExpiresAt.Format("2006-01-02")
+		}
+		used := "-"
+		if !t.LastUsedAt.IsZero() {
+			used = t.LastUsedAt.UTC().Format("2006-01-02 15:04")
 		}
 		si := "-"
 		if t.SelfImproveOptIn {
@@ -181,11 +185,11 @@ func tokenList(args []string) {
 			profile = "full"
 		}
 		u, found := users[t.OwnerUserID]
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			t.ID, t.Name, ownerLabel(t, u, found), storedScopeLabel(t, u, found),
 			strings.Join(t.Scopes, ","),
 			t.CreatedAt.Format("2006-01-02"),
-			exp, si, profile)
+			exp, used, si, profile)
 	}
 	_ = w.Flush()
 }

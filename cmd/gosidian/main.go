@@ -34,6 +34,7 @@ import (
 	"github.com/gosidian/gosidian/internal/server/events"
 	"github.com/gosidian/gosidian/internal/statedir"
 	"github.com/gosidian/gosidian/internal/trash"
+	"github.com/gosidian/gosidian/internal/uploadquota"
 	"github.com/gosidian/gosidian/internal/vault"
 	"github.com/gosidian/gosidian/internal/webauth"
 )
@@ -500,6 +501,13 @@ func main() {
 	mcpServer.SetAuditLog(auditLog)
 	mcpServer.SetWriteLimits(cfg.MCP.WritePerMinute, cfg.MCP.MaxNoteBytes)
 	mcpServer.SetOpenWhenEmpty(cfg.MCP.Open)
+	// One upload quota for an account's MCP tokens and web sessions
+	// (IMP-034); off unless [uploads] quota_bytes is set.
+	uploadQuota := uploadquota.New(cfg.Uploads.QuotaBytes, cfg.Uploads.QuotaWindow)
+	mcpServer.SetUploadQuota(uploadQuota)
+	if uploadQuota.Enabled() {
+		log.Printf("uploads: quota of %d bytes per account every %s", uploadQuota.Max(), uploadQuota.Window())
+	}
 	mcpServer.SetPackageLimits(cfg.MCP.PackageMaxFiles, cfg.MCP.PackageMaxBytes)
 	mcpServer.SetAllowedUploadRoots(cfg.MCP.AllowedUploadRoots)
 	mcpServer.SetBridgeDir(cfg.MCP.BridgeDir)
@@ -616,6 +624,7 @@ func main() {
 		log.Printf("webauth: trusting X-Forwarded-For from %s", strings.Join(cfg.Webauth.TrustedProxies, ", "))
 	}
 	apiRouter := apiv1.NewRouter(&apiv1.Deps{
+		UploadQuota: uploadQuota,
 		Auth: &apiv1.AuthDeps{
 			WebAuth:   webauthStore,
 			SpaAuth:   spaTokenStore,

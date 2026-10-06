@@ -353,3 +353,29 @@ func TestMCPOpen(t *testing.T) {
 		t.Errorf("env = %v, %v", cfg.MCP.Open, err)
 	}
 }
+
+// The upload quota is off unless set, in the file or the environment
+// (IMP-034).
+func TestUploadsQuota(t *testing.T) {
+	dir := t.TempDir()
+	cfg, err := Load(filepath.Join(dir, "nope.toml"))
+	if err != nil || cfg.Uploads.QuotaBytes != 0 {
+		t.Fatalf("default = %+v, %v", cfg.Uploads, err)
+	}
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte("[uploads]\nquota_bytes = 1048576\nquota_window = \"6h\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err = Load(path); err != nil || cfg.Uploads.QuotaBytes != 1<<20 || cfg.Uploads.QuotaWindow != 6*time.Hour {
+		t.Fatalf("file = %+v, %v", cfg.Uploads, err)
+	}
+	t.Setenv("GOSIDIAN_UPLOAD_QUOTA_BYTES", "500")
+	t.Setenv("GOSIDIAN_UPLOAD_QUOTA_WINDOW", "30m")
+	if err := cfg.ApplyEnv(); err != nil || cfg.Uploads.QuotaBytes != 500 || cfg.Uploads.QuotaWindow != 30*time.Minute {
+		t.Errorf("env = %+v, %v", cfg.Uploads, err)
+	}
+	t.Setenv("GOSIDIAN_UPLOAD_QUOTA_BYTES", "lots")
+	if err := cfg.ApplyEnv(); err == nil {
+		t.Error("a quota that is not a number was accepted")
+	}
+}

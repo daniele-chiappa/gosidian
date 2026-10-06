@@ -56,6 +56,10 @@ func NewRenderer() *Renderer {
 			),
 		),
 		goldmark.WithParserOptions(parser.WithAutoHeadingID()),
+		// Raw HTML in a note passes through, as in Obsidian: the output is
+		// not safe to show as it is. The SPA sanitizes it with DOMPurify
+		// (web/src/components/domain/sanitizePreview.ts); a new consumer
+		// of Render must sanitize too (IMP-128).
 		goldmark.WithRendererOptions(gmhtml.WithUnsafe()),
 	)
 	return &Renderer{md: md}

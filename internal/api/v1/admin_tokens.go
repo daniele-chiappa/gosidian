@@ -23,6 +23,7 @@ type mcpTokenView struct {
 	CreatedAt        string   `json:"created_at"`
 	ExpiresAt        string   `json:"expires_at,omitempty"`
 	Expired          bool     `json:"expired,omitempty"`
+	LastUsedAt       string   `json:"last_used_at,omitempty"` // to five minutes; absent = never used since v2.62 (IMP-100)
 	SelfImproveOptIn bool     `json:"self_improve_opt_in"`
 	ToolProfile      string   `json:"tool_profile,omitempty"` // "" | "full" | "core"
 	Kind             string   `json:"kind,omitempty"`         // "" static bearer | "oauth" grant minted by a consent (IMP-092)
@@ -255,6 +256,9 @@ func mcpTokenToView(t *auth.Token) mcpTokenView {
 	if !t.ExpiresAt.IsZero() {
 		v.ExpiresAt = t.ExpiresAt.UTC().Format(rfc3339Z)
 		v.Expired = t.Expired()
+	}
+	if !t.LastUsedAt.IsZero() {
+		v.LastUsedAt = t.LastUsedAt.UTC().Format(rfc3339Z)
 	}
 	return v
 }

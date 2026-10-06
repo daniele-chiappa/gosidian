@@ -10,6 +10,7 @@ import (
 
 	"github.com/gosidian/gosidian/internal/attach"
 	"github.com/gosidian/gosidian/internal/audit"
+	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -99,8 +100,13 @@ func (s *Server) storeAttachmentFromRequest(ctx context.Context, project, filena
 		if errRes := s.checkWriteLimits(ctx, tok, 0); errRes != nil {
 			return nil, 0, errRes
 		}
+		refund, errRes := s.reserveFileUpload(tok, staged)
+		if errRes != nil {
+			return nil, 0, errRes
+		}
 		res, err := attach.StoreFromPath(s.vault, staged, filename, project, s.effectiveUploadRoots())
 		if err != nil {
+			refund()
 			return nil, 0, mcp.NewToolResultError(err.Error())
 		}
 		var size int64
@@ -132,8 +138,13 @@ func (s *Server) storeAttachmentFromRequest(ctx context.Context, project, filena
 		if errRes := s.checkWriteLimits(ctx, tok, 0); errRes != nil {
 			return nil, 0, errRes
 		}
+		refund, errRes := s.reserveFileUpload(tok, sourcePath)
+		if errRes != nil {
+			return nil, 0, errRes
+		}
 		res, err := attach.StoreFromPath(s.vault, sourcePath, filename, project, s.effectiveUploadRoots())
 		if err != nil {
+			refund()
 			return nil, 0, mcp.NewToolResultError(err.Error())
 		}
 		// For audit: stat the stored file to get size.
@@ -163,11 +174,36 @@ func (s *Server) storeAttachmentFromRequest(ctx context.Context, project, filena
 	if errRes := s.checkWriteLimits(ctx, tok, len(data)); errRes != nil {
 		return nil, 0, errRes
 	}
+	refund, refusal := s.reserveUpload(tok, int64(len(data)))
+	if refusal != nil {
+		return nil, 0, mcp.NewToolResultError(refusal.Error())
+	}
 	res, err := attach.Store(s.vault, data, filename, project)
 	if err != nil {
+		refund()
 		return nil, 0, mcp.NewToolResultError(err.Error())
 	}
 	return res, int64(len(data)), nil
+}
+
+// reserveFileUpload is reserveUpload for a file on the server (staged in
+// the bridge dir, or source_path). The path is checked against the allowed
+// roots before its size is read: a refusal names the size, which must not
+// tell anything about a file the caller may not upload. A file that cannot
+// be read reserves nothing and fails in the store, with its own error.
+func (s *Server) reserveFileUpload(tok *auth.Token, path string) (func(), *mcp.CallToolResult) {
+	if attach.ValidateSourcePath(path, s.effectiveUploadRoots()) != nil {
+		return func() {}, nil
+	}
+	fi, err := os.Stat(filepath.Clean(path))
+	if err != nil || fi.IsDir() {
+		return func() {}, nil
+	}
+	refund, refusal := s.reserveUpload(tok, fi.Size())
+	if refusal != nil {
+		return nil, mcp.NewToolResultError(refusal.Error())
+	}
+	return refund, nil
 }
 
 func (s *Server) handleUploadAttachment(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

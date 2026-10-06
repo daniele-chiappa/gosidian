@@ -22,6 +22,7 @@ import (
 	"github.com/gosidian/gosidian/internal/projects"
 	"github.com/gosidian/gosidian/internal/server/events"
 	"github.com/gosidian/gosidian/internal/trash"
+	"github.com/gosidian/gosidian/internal/uploadquota"
 	"github.com/gosidian/gosidian/internal/vault"
 	"github.com/gosidian/gosidian/internal/webauth"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -128,12 +129,15 @@ type Server struct {
 	// openWhenEmpty is the operator's opt-in to token-less MCP while the
 	// token store is empty (SetOpenWhenEmpty, IMP-146).
 	openWhenEmpty bool
-	projects      *projects.Store
-	trash         *trash.Bin // nil = memory_delete_project removes from disk
-	audit         *audit.Log
-	impl          *server.MCPServer
-	limiter       *writeLimiter
-	maxNoteBytes  int64
+	// uploadQuota caps the bytes an account uploads in a window, shared
+	// with the web UI's uploads (SetUploadQuota, IMP-034); nil = no limit.
+	uploadQuota  *uploadquota.Quota
+	projects     *projects.Store
+	trash        *trash.Bin // nil = memory_delete_project removes from disk
+	audit        *audit.Log
+	impl         *server.MCPServer
+	limiter      *writeLimiter
+	maxNoteBytes int64
 	// packageMaxFiles and packageMaxBytes cap a memory_ingest package
 	// (IMP-116); SetPackageLimits overrides the defaults.
 	packageMaxFiles    int
@@ -402,6 +406,28 @@ func (s *Server) SetTrash(b *trash.Bin) { s.trash = b }
 // SetWriteLimits configures the write/minute cap of an MCP session (a token's
 // sessions share tokenLimitFactor times that) and the per-note size cap.
 // Pass zero values to keep the defaults already set in New().
+// SetUploadQuota wires the upload quota shared with the web UI (IMP-034).
+func (s *Server) SetUploadQuota(q *uploadquota.Quota) { s.uploadQuota = q }
+
+// reserveUpload counts n bytes of an upload against the caller's account
+// (IMP-034). A refusal means nothing may be stored; otherwise refund gives
+// the bytes back when the store fails.
+func (s *Server) reserveUpload(tok *auth.Token, n int64) (refund func(), refusal *uploadquota.Refusal) {
+	key := uploadKey(tok)
+	if r := s.uploadQuota.Reserve(key, n); r != nil {
+		return func() {}, r
+	}
+	return func() { s.uploadQuota.Refund(key, n) }, nil
+}
+
+// uploadKey is the account an upload by tok counts against.
+func uploadKey(tok *auth.Token) string {
+	if tok == nil {
+		return uploadquota.Key("", "")
+	}
+	return uploadquota.Key(tok.OwnerUserID, tok.ID)
+}
+
 // SetOpenWhenEmpty lets MCP answer without a token while the token store
 // holds none, as admin ([mcp] open, GOSIDIAN_MCP_OPEN). Off by default: an
 // empty store used to open MCP to whoever reached the port (IMP-146).

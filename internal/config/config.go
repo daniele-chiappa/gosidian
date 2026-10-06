@@ -33,6 +33,17 @@ type Config struct {
 	Global       GlobalConfig       `toml:"global"`
 	AgentAnchors AgentAnchorsConfig `toml:"agent_anchors"`
 	OAuth        OAuthConfig        `toml:"oauth"`
+	Uploads      UploadsConfig      `toml:"uploads"`
+}
+
+// UploadsConfig caps what an account uploads (IMP-034).
+type UploadsConfig struct {
+	// QuotaBytes is how many bytes of attachments an account may upload in
+	// QuotaWindow, its MCP tokens and its web sessions together. 0 (the
+	// default) means no limit. Counted in memory: a restart starts again.
+	QuotaBytes int64 `toml:"quota_bytes"`
+	// QuotaWindow is the sliding window of the quota; default 24h.
+	QuotaWindow time.Duration `toml:"quota_window"`
 }
 
 // OAuthConfig enables the embedded OAuth 2.1 authorization server that lets
@@ -377,6 +388,20 @@ func (c *Config) ApplyEnv() error {
 			return fmt.Errorf("GOSIDIAN_MCP_PACKAGE_MAX_BYTES: %w", err)
 		}
 		c.MCP.PackageMaxBytes = n
+	}
+	if v := os.Getenv("GOSIDIAN_UPLOAD_QUOTA_BYTES"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return fmt.Errorf("GOSIDIAN_UPLOAD_QUOTA_BYTES: %w", err)
+		}
+		c.Uploads.QuotaBytes = n
+	}
+	if v := os.Getenv("GOSIDIAN_UPLOAD_QUOTA_WINDOW"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("GOSIDIAN_UPLOAD_QUOTA_WINDOW: %w", err)
+		}
+		c.Uploads.QuotaWindow = d
 	}
 	if v := os.Getenv("GOSIDIAN_MCP_OPEN"); v != "" {
 		c.MCP.Open = envBool(v)

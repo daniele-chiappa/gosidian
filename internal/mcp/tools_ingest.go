@@ -420,8 +420,13 @@ func (s *Server) ingestRaw(ctx context.Context, in ingestIntent, data []byte) (*
 	if errRes := s.checkWriteLimits(ctx, tok, len(data)); errRes != nil {
 		return errRes, nil
 	}
+	refund, refusal := s.reserveUpload(tok, int64(len(data)))
+	if refusal != nil {
+		return mcp.NewToolResultError(refusal.Error()), nil
+	}
 	res, err := attach.Store(s.vault, data, in.Filename, in.Project)
 	if err != nil {
+		refund()
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	s.auditWrite(ctx, audit.ActionUploadAttachment, res.Path, "", int64(len(data)))

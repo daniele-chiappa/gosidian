@@ -358,3 +358,39 @@ func TestAdminAudit_MemberForbidden(t *testing.T) {
 		t.Errorf("status=%d, want 403", w.Code)
 	}
 }
+
+// Admin → Tokens shows when a token last authenticated a request; one
+// never used has no last_used_at (IMP-100).
+func TestAdminTokens_LastUsed(t *testing.T) {
+	f := newAdminFixture(t)
+	used, _, err := f.mcpStore.Create("used", nil, []string{"read"}, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.mcpStore.Create("idle", nil, []string{"read"}, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.mcpStore.Validate(used); err != nil {
+		t.Fatal(err)
+	}
+	w := f.doAuthRecorder(http.MethodGet, "/api/v1/admin/tokens", "", nil)
+	if w.code != http.StatusOK {
+		t.Fatalf("list = %d %s", w.code, w.body)
+	}
+	var out struct {
+		Items []struct {
+			Name       string `json:"name"`
+			LastUsedAt string `json:"last_used_at"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal([]byte(w.body), &out); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, it := range out.Items {
+		got[it.Name] = it.LastUsedAt
+	}
+	if got["used"] == "" || got["idle"] != "" {
+		t.Errorf("last_used_at = %v", got)
+	}
+}

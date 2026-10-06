@@ -5,9 +5,12 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gosidian/gosidian/internal/attach"
+	"github.com/gosidian/gosidian/internal/uploadquota"
 )
 
 // uploadResponse is the rich shape returned by /api/v1/upload —
@@ -52,8 +55,13 @@ func (r *Router) handleAttach(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, errCode, CodeValidationFormat, errMsg)
 		return
 	}
+	refund, ok := r.reserveUpload(w, req, len(data))
+	if !ok {
+		return
+	}
 	res, err := attach.Store(r.deps.Vault, data, header.Filename, project)
 	if err != nil {
+		refund()
 		if strings.Contains(err.Error(), "MIME mismatch") {
 			WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
 			return
@@ -96,8 +104,13 @@ func (r *Router) handleUpload(w http.ResponseWriter, req *http.Request) {
 	}
 	ext := strings.ToLower(filepath.Ext(header.Filename))
 	mime, isImage := header.MIME, header.IsImage
+	refund, ok := r.reserveUpload(w, req, len(data))
+	if !ok {
+		return
+	}
 	res, err := attach.Store(r.deps.Vault, data, header.Filename, project)
 	if err != nil {
+		refund()
 		if strings.Contains(err.Error(), "MIME mismatch") {
 			WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
 			return
@@ -166,4 +179,27 @@ type attachHeader struct {
 	Size     int64
 	MIME     string // from the validated extension
 	IsImage  bool
+}
+
+// reserveUpload counts an upload of n bytes against the account's upload
+// quota, shared with its MCP tokens (IMP-034). When it does not fit it
+// answers 429 with Retry-After (413 when n alone is over the quota) and
+// returns false; otherwise refund gives the bytes back after a failed store.
+func (r *Router) reserveUpload(w http.ResponseWriter, req *http.Request, n int) (refund func(), ok bool) {
+	userID := ""
+	if u := UserFromContext(req.Context()); u != nil {
+		userID = u.ID
+	}
+	key := uploadquota.Key(userID, "")
+	refusal := r.deps.UploadQuota.Reserve(key, int64(n))
+	if refusal == nil {
+		return func() { r.deps.UploadQuota.Refund(key, int64(n)) }, true
+	}
+	if refusal.Wait > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(int((refusal.Wait+time.Second-1)/time.Second)))
+		WriteError(w, http.StatusTooManyRequests, CodeRateLimit, refusal.Error())
+	} else {
+		WriteError(w, http.StatusRequestEntityTooLarge, CodeValidationFormat, refusal.Error())
+	}
+	return nil, false
 }

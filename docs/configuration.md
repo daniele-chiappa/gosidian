@@ -30,6 +30,8 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_MCP_MAX_NOTE_BYTES` | `mcp.max_note_bytes` | `1048576` (1 MiB) |
 | `GOSIDIAN_MCP_PACKAGE_MAX_FILES` | `mcp.package_max_files` | `500` (files of a `memory_ingest` package) |
 | `GOSIDIAN_MCP_PACKAGE_MAX_BYTES` | `mcp.package_max_bytes` | `20971520` (20 MiB, a package unpacked) |
+| `GOSIDIAN_UPLOAD_QUOTA_BYTES` | `uploads.quota_bytes` | `0` (no limit; bytes of attachments an account may upload per window, its MCP tokens and web uploads together) |
+| `GOSIDIAN_UPLOAD_QUOTA_WINDOW` | `uploads.quota_window` | `24h` (the sliding window of the quota) |
 | `GOSIDIAN_MCP_OPEN` | `mcp.open` | `false` (`true` lets MCP requests without a token run as admin while no token exists, for local use only; the first token closes it) |
 | `GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS` | `mcp.allowed_upload_roots` | empty (vault only) |
 | `GOSIDIAN_MCP_BRIDGE_DIR` | `mcp.bridge_dir` | empty (off; staging dir for cheap `bridge_filename` uploads, IMP-059) |

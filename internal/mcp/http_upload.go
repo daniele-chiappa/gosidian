@@ -82,9 +82,15 @@ func (s *Server) handleHTTPUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	refund, refusal := s.reserveUpload(tok, int64(len(data)))
+	if refusal != nil {
+		writeRateLimited(w, http.StatusRequestEntityTooLarge, refusal.Error(), refusal.Wait)
+		return
+	}
 	// attach.Store validates the extension, magic-bytes MIME, and the 10 MiB cap.
 	res, err := attach.Store(s.vault, data, hdr.Filename, project)
 	if err != nil {
+		refund()
 		writeJSONError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}

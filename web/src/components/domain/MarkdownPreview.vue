@@ -1,10 +1,11 @@
 <script setup lang="ts">
 /**
  * MarkdownPreview — renders the HTML produced by /api/v1/preview inside a
- * sanitized v-html container. Server-side goldmark already escapes raw HTML;
- * DOMPurify is defense-in-depth (strips on*= attrs, javascript: URLs, unknown
- * tags). DOMPurify keeps data-* attributes by default, so the renderer's
- * `data-preview-path` on resolved wikilinks survives.
+ * sanitized v-html container. Server-side goldmark lets a note's raw HTML
+ * through (WithUnsafe): DOMPurify, in sanitizePreviewHtml, is the barrier,
+ * not an extra (strips scripts, on*= attrs, javascript: URLs, unknown tags).
+ * It keeps data-* attributes, so the renderer's `data-preview-path` on
+ * resolved wikilinks survives.
  *
  * Link interception (plancia): internal links open as windows instead of
  * navigating away from the SPA —
@@ -27,7 +28,7 @@
  * `.gosidian-embed-end` rule.
  */
 import { computed, inject, ref } from 'vue'
-import DOMPurify from 'dompurify'
+import { sanitizePreviewHtml } from './sanitizePreview'
 import { useWindowsStore, type OpenSpec } from 'plancia'
 import { planciaKey } from '@/composables/planciaKey'
 import type { ViewData } from '@/api/preview'
@@ -45,12 +46,7 @@ const root = ref<HTMLElement | null>(null)
 const proseClass =
   'prose prose-invert max-w-none prose-pre:bg-bg-elevated prose-pre:border prose-pre:border-border prose-code:before:hidden prose-code:after:hidden'
 
-const sanitized = computed(() =>
-  DOMPurify.sanitize(props.html, {
-    ADD_TAGS: ['math', 'mfrac', 'mrow', 'msup', 'mn', 'mi'],
-    ADD_ATTR: ['class', 'data-preview-path', 'data-view', 'data-heading', 'data-embed'],
-  }),
-)
+const sanitized = computed(() => sanitizePreviewHtml(props.html))
 
 // The note cut at its views, when there are views to show as components.
 const segments = computed(() => (props.views?.length ? splitViews(sanitized.value) : null))

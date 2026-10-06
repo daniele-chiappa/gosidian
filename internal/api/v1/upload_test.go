@@ -6,10 +6,15 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gosidian/gosidian/internal/attach"
+	"github.com/gosidian/gosidian/internal/uploadquota"
 )
 
 // uploadFixture is the smallest setup needed for the upload/attach
@@ -193,5 +198,38 @@ func TestUpload_OversizedBodyIs413(t *testing.T) {
 	rec := f.doMultipart(t, http.MethodPost, "/api/v1/upload?project=proj", ct, raw)
 	if rec.code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status=%d body=%s", rec.code, rec.body)
+	}
+}
+
+// The web UI's uploads count against the account's upload quota, the same
+// one its MCP tokens use: over it, 429 with Retry-After, nothing stored
+// (IMP-034).
+func TestUpload_Quota(t *testing.T) {
+	f := newUploadFixture(t)
+	q := uploadquota.New(int64(len(pngBody()))+10, time.Hour)
+	f.router.deps.UploadQuota = q
+	// The account already used most of it through an MCP token.
+	if r := q.Reserve(uploadquota.Key(f.owner.ID, "tok"), 20); r != nil {
+		t.Fatal(r)
+	}
+	ct, body := uploadFile(t, "a.png", pngBody())
+	w := f.doMultipart(t, http.MethodPost, "/api/v1/upload?project=alpha", ct, body)
+	if w.code != http.StatusTooManyRequests || !strings.Contains(w.body, "upload quota exceeded") {
+		t.Fatalf("upload over the quota = %d %s", w.code, w.body)
+	}
+	if ra, err := strconv.Atoi(w.headers.Get("Retry-After")); err != nil || ra < 1 {
+		t.Errorf("Retry-After = %q", w.headers.Get("Retry-After"))
+	}
+	if entries, _ := os.ReadDir(filepath.Join(f.vaultRoot, "alpha", "attachments")); len(entries) != 0 {
+		t.Errorf("a refused upload stored %d file(s)", len(entries))
+	}
+	ct, body = uploadFile(t, "b.png", pngBody())
+	if w := f.doMultipart(t, http.MethodPost, "/api/v1/attach?project=alpha", ct, body); w.code != http.StatusTooManyRequests {
+		t.Errorf("attach over the quota = %d %s", w.code, w.body)
+	}
+	// No quota: no limit.
+	f.router.deps.UploadQuota = nil
+	if w := f.doMultipart(t, http.MethodPost, "/api/v1/upload?project=alpha", ct, body); w.code != http.StatusCreated {
+		t.Errorf("without a quota = %d %s", w.code, w.body)
 	}
 }

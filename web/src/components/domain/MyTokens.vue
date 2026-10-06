@@ -195,6 +195,11 @@ onMounted(() => {
         <span class="font-medium">{{ t.name }}</span>
         <span v-if="t.kind === 'oauth'" class="text-[10px] uppercase px-1.5 py-0.5 rounded border border-border text-text-muted">oauth</span>
         <span class="flex-1 truncate text-xs text-text-muted">{{ scopeLabel(t) }}</span>
+        <span
+          class="font-mono text-xs text-text-muted"
+          data-last-used
+          :title="t.last_used_at ? 'Last used' : 'Not used since gosidian started recording it'"
+        >{{ t.last_used_at ? `used ${t.last_used_at}` : 'no use recorded' }}</span>
         <span class="font-mono text-xs" :class="t.expired ? 'text-warning' : 'text-text-muted'">{{ t.expires_at || 'no expiry' }}</span>
         <button type="button" class="text-xs px-2 py-1 rounded text-danger hover:bg-surface-hover" @click="revoke(t)">Revoke</button>
       </li>
