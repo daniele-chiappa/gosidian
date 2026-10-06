@@ -157,20 +157,17 @@ func (s *Server) handleCreateTableNote(ctx context.Context, req mcp.CallToolRequ
 
 	// Assemble and write the note.
 	content := buildTableNote(title, res.Path, project, caption, cols, rows)
-	if errRes := s.checkWriteLimits(ctx, tok, len(content)); errRes != nil {
-		return errRes, nil
-	}
-	if err := s.writeAndIndex(rel, []byte(content)); err != nil {
-		// The attachment is content-addressed (dedup by hash) and orphan GC is
-		// tracked separately (IMP-033), so we leave it and surface its path so a
-		// retry can reference it instead of re-uploading.
-		return mcp.NewToolResultErrorf("note write failed (csv stored at %q): %v", res.Path, err), nil
-	}
-	s.auditWrite(ctx, audit.ActionCreate, rel, "", int64(len(content)))
-	if fresh, err := s.vault.Load(rel); err == nil {
-		s.publishNoteChange("create", rel, fresh.ETag(), true)
-	} else {
-		s.publishNoteChange("create", rel, "", true)
+	if _, werr := s.writeNote(ctx, tok, noteWrite{
+		rel: rel, mode: writeCreate, content: fixedContent([]byte(content)), action: audit.ActionCreate,
+		locked: true, // held since the exists-probe above
+	}); werr != nil {
+		if werr.kind == writeFailed {
+			// The attachment is content-addressed (dedup by hash) and orphan GC
+			// is tracked separately (IMP-033), so we leave it and surface its
+			// path so a retry can reference it instead of re-uploading.
+			return mcp.NewToolResultErrorf("note %s (csv stored at %q)", werr.msg, res.Path), nil
+		}
+		return werr.result(), nil
 	}
 
 	out := map[string]any{

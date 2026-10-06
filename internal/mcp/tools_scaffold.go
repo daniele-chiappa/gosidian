@@ -106,17 +106,19 @@ func (s *Server) handleProjectScaffold(ctx context.Context, req mcp.CallToolRequ
 		}
 		body := applyVars(string(data), vars)
 		vaultPath := project + "/" + rel
-		if _, loadErr := s.vault.Load(vaultPath); loadErr == nil {
+		_, werr := s.writeNote(ctx, tok, noteWrite{
+			rel: vaultPath, mode: writeCreate, content: fixedContent([]byte(body)), action: audit.ActionCreate,
+		})
+		if werr != nil && werr.kind == writeExists {
 			res.Skipped = append(res.Skipped, vaultPath)
 			continue
 		}
-		if errRes := s.checkWriteLimits(ctx, tok, len(body)); errRes != nil {
-			return errRes, nil
+		if werr != nil && werr.kind == writeFailed {
+			return mcp.NewToolResultErrorf("write %s: %s", vaultPath, strings.TrimPrefix(werr.msg, "write failed: ")), nil
 		}
-		if err := s.writeAndIndex(vaultPath, []byte(body)); err != nil {
-			return mcp.NewToolResultErrorFromErr(fmt.Sprintf("write %s", vaultPath), err), nil
+		if werr != nil {
+			return werr.result(), nil
 		}
-		s.auditWrite(ctx, audit.ActionCreate, vaultPath, "", int64(len(body)))
 		res.Created = append(res.Created, vaultPath)
 	}
 	if res.Created == nil {

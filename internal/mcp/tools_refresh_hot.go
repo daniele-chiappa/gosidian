@@ -19,6 +19,7 @@ import (
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/gosidian/gosidian/internal/parser"
+	"github.com/gosidian/gosidian/internal/vault"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -67,57 +68,36 @@ func (s *Server) handleRefreshHot(ctx context.Context, req mcp.CallToolRequest) 
 	if _, errRes := s.authorizeWrite(ctx, hotPath); errRes != nil {
 		return errRes, nil
 	}
-	unlock := s.vault.LockPath(hotPath)
-	defer unlock()
-	hot, err := s.vault.Load(hotPath)
-	if err != nil {
-		return mcp.NewToolResultErrorf("cannot read %s: %v", hotPath, err), nil
-	}
-	body := string(hot.Content)
-	openIdx := strings.Index(body, recentMarkerOpen)
-	closeIdx := strings.Index(body, recentMarkerClose)
-	if openIdx < 0 || closeIdx < 0 || closeIdx < openIdx {
-		return mcp.NewToolResultJSON(refreshHotResult{
-			Project: project,
-			Updated: false,
-			HotPath: hotPath,
-			Reason:  "no <!-- auto:recent-decisions --> markers found; insert them in hot.md to opt in",
-		})
-	}
-
-	entries := s.buildRecentEntries(project, limit)
-	section := recentMarkerOpen + "\n\n" + renderRecentEntries(entries) + "\n" + recentMarkerClose
-	newBody := body[:openIdx] + section + body[closeIdx+len(recentMarkerClose):]
-	if newBody == body {
-		return mcp.NewToolResultJSON(refreshHotResult{
-			Project: project,
-			Updated: false,
-			HotPath: hotPath,
-			Entries: len(entries),
-			Reason:  "already up to date",
-		})
-	}
-	if errRes := s.checkWriteLimits(ctx, tok, len(newBody)); errRes != nil {
-		return errRes, nil
-	}
-	if err := s.writeAndIndex(hotPath, []byte(newBody)); err != nil {
-		return mcp.NewToolResultErrorFromErr("write failed", err), nil
-	}
-	s.auditWrite(ctx, audit.ActionUpdate, hotPath, "", int64(len(newBody)))
-
-	newNote, _ := s.vault.Load(hotPath)
-	newTag := ""
-	if newNote != nil {
-		newTag = newNote.ETag()
-	}
-	s.publishNoteChange("update", hotPath, newTag, false)
-	return mcp.NewToolResultJSON(refreshHotResult{
-		Project: project,
-		Updated: true,
-		HotPath: hotPath,
-		Entries: len(entries),
-		NewETag: newTag,
+	entries, reason := 0, ""
+	res, werr := s.writeNote(ctx, tok, noteWrite{
+		rel: hotPath, mode: writeReplace, action: audit.ActionUpdate,
+		content: func(hot *vault.Note) ([]byte, error) {
+			body := string(hot.Content)
+			openIdx := strings.Index(body, recentMarkerOpen)
+			closeIdx := strings.Index(body, recentMarkerClose)
+			if openIdx < 0 || closeIdx < 0 || closeIdx < openIdx {
+				reason = "no <!-- auto:recent-decisions --> markers found; insert them in hot.md to opt in"
+				return nil, errSkipWrite
+			}
+			list := s.buildRecentEntries(project, limit)
+			entries = len(list)
+			section := recentMarkerOpen + "\n\n" + renderRecentEntries(list) + "\n" + recentMarkerClose
+			newBody := body[:openIdx] + section + body[closeIdx+len(recentMarkerClose):]
+			if newBody == body {
+				reason = "already up to date"
+				return nil, errSkipWrite
+			}
+			return []byte(newBody), nil
+		},
 	})
+	if werr != nil {
+		return werr.result(), nil
+	}
+	out := refreshHotResult{Project: project, Updated: !res.Skipped, HotPath: hotPath, Entries: entries, Reason: reason}
+	if !res.Skipped {
+		out.NewETag = res.ETag
+	}
+	return mcp.NewToolResultJSON(out)
 }
 
 type recentEntry struct {

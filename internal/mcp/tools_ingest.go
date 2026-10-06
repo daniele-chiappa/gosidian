@@ -340,48 +340,28 @@ func (s *Server) writeIngestedNote(ctx context.Context, project, ext, fnForExt, 
 	if errRes != nil {
 		return errRes, nil
 	}
-	if errRes := s.checkWriteLimits(ctx, tok, len(content)); errRes != nil {
-		return errRes, nil
+	mode := writeCreate
+	if overwrite {
+		mode = writeUpsert
 	}
-
-	unlock := s.vault.LockPath(rel)
-	defer unlock()
-	created := true
-	if existing, loadErr := s.vault.Load(rel); loadErr == nil {
-		if !overwrite {
+	res, werr := s.writeNote(ctx, tok, noteWrite{
+		rel: rel, mode: mode, ifMatch: ifMatch, content: fixedContent(content), schemaCheck: true,
+	})
+	if werr != nil {
+		if werr.kind == writeExists {
 			return mcp.NewToolResultErrorf("note %q already exists; pass overwrite:true to replace it (optionally with if_match for a safe concurrent replace)", rel), nil
 		}
-		if errRes := checkIfMatch(existing, ifMatch); errRes != nil {
-			return errRes, nil
-		}
-		created = false
-	} else if ifMatch != "" {
-		return mcp.NewToolResultErrorf("etag mismatch: note %q does not exist", rel), nil
+		return werr.result(), nil
 	}
-
-	if err := s.writeAndIndex(rel, content); err != nil {
-		return mcp.NewToolResultErrorFromErr("write failed", err), nil
-	}
-	s.noteSchemaProblems(ctx, rel, content)
-	action := audit.ActionCreate
-	event := "create"
-	if !created {
-		action = audit.ActionUpdate
-		event = "update"
-	}
-	s.auditWrite(ctx, action, rel, "", int64(len(content)))
 	out := map[string]any{
 		"path":    rel,
 		"kind":    string(ingestNote),
 		"size":    len(content),
-		"created": created,
+		"created": res.Created,
 	}
-	freshETag := ""
-	if fresh, err := s.vault.Load(rel); err == nil {
-		freshETag = fresh.ETag()
-		out["etag"] = freshETag
+	if res.ETag != "" {
+		out["etag"] = res.ETag
 	}
-	s.publishNoteChange(event, rel, freshETag, created)
 	if hint != "" {
 		out["hint"] = hint
 	}

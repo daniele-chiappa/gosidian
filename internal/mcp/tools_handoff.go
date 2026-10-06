@@ -27,6 +27,7 @@ import (
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/gosidian/gosidian/internal/parser"
+	"github.com/gosidian/gosidian/internal/vault"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -120,9 +121,6 @@ func (s *Server) handleCreateHandoff(ctx context.Context, req mcp.CallToolReques
 
 	creator := tokenIdentity(tok)
 	content := renderHandoffBody(fromAgent, toAgent, creator, now, summary, pending)
-	if errRes := s.checkWriteLimits(ctx, tok, len(content)); errRes != nil {
-		return errRes, nil
-	}
 
 	// The timestamped filename makes collisions unlikely but not impossible
 	// (two same-second handoffs between the same agents), so probe candidate
@@ -139,27 +137,21 @@ func (s *Server) handleCreateHandoff(ctx context.Context, req mcp.CallToolReques
 		if _, errRes := s.authorizeWrite(ctx, candidate); errRes != nil {
 			return errRes, nil
 		}
-		unlock := s.vault.LockPath(candidate)
-		if _, err := s.vault.Load(candidate); err == nil {
-			unlock()
+		_, werr := s.writeNote(ctx, tok, noteWrite{
+			rel: candidate, mode: writeCreate, content: fixedContent([]byte(content)), action: audit.ActionCreate,
+		})
+		switch {
+		case werr != nil && werr.kind == writeExists:
 			continue
-		}
-		err := s.writeAndIndex(candidate, []byte(content))
-		unlock()
-		if err != nil {
-			return mcp.NewToolResultErrorFromErr("handoff create failed", err), nil
+		case werr != nil && werr.kind == writeFailed:
+			return mcp.NewToolResultError("handoff create failed: " + werr.msg), nil
+		case werr != nil:
+			return werr.result(), nil
 		}
 		relPath = candidate
 	}
 	if relPath == "" {
 		return mcp.NewToolResultError("could not allocate a unique handoff path (too many same-second handoffs); retry"), nil
-	}
-	s.auditWrite(ctx, audit.ActionCreate, relPath, "", int64(len(content)))
-	// Wake memory_wait_changes waiters (the receiving agent's poll loop).
-	if fresh, err := s.vault.Load(relPath); err == nil {
-		s.publishNoteChange("create", relPath, fresh.ETag(), true)
-	} else {
-		s.publishNoteChange("create", relPath, "", true)
 	}
 
 	return mcp.NewToolResultJSON(map[string]any{
@@ -255,44 +247,40 @@ func (s *Server) handleClaimHandoff(ctx context.Context, req mcp.CallToolRequest
 		return errRes, nil
 	}
 
-	// The whole read→check→flip sequence runs under the path lock: among
-	// N concurrent claimants exactly one sees status=pending.
-	unlock := s.vault.LockPath(rel)
-	defer unlock()
-	note, err := s.vault.Load(rel)
-	if err != nil {
-		return mcp.NewToolResultErrorf("handoff %q does not exist", rel), nil
-	}
-	raw := parser.FrontmatterRawForPath(rel, note.Content)
-	fm := parser.ParseFrontmatterFields(raw)
-	if !isHandoffNote(fm, raw) {
-		return mcp.NewToolResultErrorf("%q is not a handoff note (missing type: handoff)", rel), nil
-	}
-	switch status := fmString(fm, "status"); status {
-	case "pending":
-		// claimable
-	case "claimed":
-		return mcp.NewToolResultErrorf("handoff %q already claimed by %s at %s", rel, fmString(fm, "claimed_by"), fmString(fm, "claimed_at")), nil
-	default:
-		return mcp.NewToolResultErrorf("handoff %q is %q, not pending", rel, status), nil
-	}
-
+	// The whole read→check→flip sequence runs under the path lock (in
+	// writeNote): among N concurrent claimants exactly one sees
+	// status=pending.
 	now := time.Now().UTC().Format(time.RFC3339)
 	claimer := tokenIdentity(tok)
-	updated, err := handoffSetStatus(note.Content, "claimed", [][2]string{
-		{"claimed_by", claimer},
-		{"claimed_at", now},
+	res, werr := s.writeNote(ctx, tok, noteWrite{
+		rel: rel, mode: writeReplace, action: audit.ActionUpdate,
+		content: func(note *vault.Note) ([]byte, error) {
+			raw := parser.FrontmatterRawForPath(rel, note.Content)
+			fm := parser.ParseFrontmatterFields(raw)
+			if !isHandoffNote(fm, raw) {
+				return nil, contentError("%q is not a handoff note (missing type: handoff)", rel)
+			}
+			switch status := fmString(fm, "status"); status {
+			case "pending":
+				// claimable
+			case "claimed":
+				return nil, contentError("handoff %q already claimed by %s at %s", rel, fmString(fm, "claimed_by"), fmString(fm, "claimed_at"))
+			default:
+				return nil, contentError("handoff %q is %q, not pending", rel, status)
+			}
+			updated, err := handoffSetStatus(note.Content, "claimed", [][2]string{
+				{"claimed_by", claimer},
+				{"claimed_at", now},
+			})
+			if err != nil {
+				return nil, contentError("claim failed: %v", err)
+			}
+			return updated, nil
+		},
 	})
-	if err != nil {
-		return mcp.NewToolResultErrorFromErr("claim failed", err), nil
+	if werr != nil {
+		return handoffWriteError(rel, werr), nil
 	}
-	if errRes := s.checkWriteLimits(ctx, tok, len(updated)); errRes != nil {
-		return errRes, nil
-	}
-	if err := s.writeAndIndex(rel, updated); err != nil {
-		return mcp.NewToolResultErrorFromErr("claim write failed", err), nil
-	}
-	s.auditWrite(ctx, audit.ActionUpdate, rel, "", int64(len(updated)))
 
 	out := map[string]any{
 		"path":       rel,
@@ -300,12 +288,9 @@ func (s *Server) handleClaimHandoff(ctx context.Context, req mcp.CallToolRequest
 		"claimed_by": claimer,
 		"claimed_at": now,
 	}
-	freshETag := ""
-	if fresh, err := s.vault.Load(rel); err == nil {
-		freshETag = fresh.ETag()
-		out["etag"] = freshETag
+	if res.ETag != "" {
+		out["etag"] = res.ETag
 	}
-	s.publishNoteChange("update", rel, freshETag, false)
 	return mcp.NewToolResultJSON(out)
 }
 
@@ -331,47 +316,41 @@ func (s *Server) handleCompleteHandoff(ctx context.Context, req mcp.CallToolRequ
 		return errRes, nil
 	}
 
-	unlock := s.vault.LockPath(rel)
-	defer unlock()
-	note, err := s.vault.Load(rel)
-	if err != nil {
-		return mcp.NewToolResultErrorf("handoff %q does not exist", rel), nil
-	}
-	raw := parser.FrontmatterRawForPath(rel, note.Content)
-	fm := parser.ParseFrontmatterFields(raw)
-	if !isHandoffNote(fm, raw) {
-		return mcp.NewToolResultErrorf("%q is not a handoff note (missing type: handoff)", rel), nil
-	}
-	if status := fmString(fm, "status"); status != "claimed" {
-		return mcp.NewToolResultErrorf("handoff %q is %q, not claimed (claim it first)", rel, status), nil
-	}
-	claimedBy := fmString(fm, "claimed_by")
-	completer := tokenIdentity(tok)
-	// Admin tokens (unscoped) may complete on behalf of anyone — the escape
-	// hatch for stuck claims from dead agents.
-	if !tok.IsAdmin() && claimedBy != completer {
-		return mcp.NewToolResultErrorf("handoff %q was claimed by %s; only the claimer or an admin token can complete it", rel, claimedBy), nil
-	}
-
 	now := time.Now().UTC().Format(time.RFC3339)
-	updated, err := handoffSetStatus(note.Content, outcome, [][2]string{
-		{"completed_by", completer},
-		{"completed_at", now},
+	completer := tokenIdentity(tok)
+	res, werr := s.writeNote(ctx, tok, noteWrite{
+		rel: rel, mode: writeReplace, action: audit.ActionUpdate,
+		content: func(note *vault.Note) ([]byte, error) {
+			raw := parser.FrontmatterRawForPath(rel, note.Content)
+			fm := parser.ParseFrontmatterFields(raw)
+			if !isHandoffNote(fm, raw) {
+				return nil, contentError("%q is not a handoff note (missing type: handoff)", rel)
+			}
+			if status := fmString(fm, "status"); status != "claimed" {
+				return nil, contentError("handoff %q is %q, not claimed (claim it first)", rel, status)
+			}
+			// Admin tokens (unscoped) may complete on behalf of anyone — the
+			// escape hatch for stuck claims from dead agents.
+			if claimedBy := fmString(fm, "claimed_by"); !tok.IsAdmin() && claimedBy != completer {
+				return nil, contentError("handoff %q was claimed by %s; only the claimer or an admin token can complete it", rel, claimedBy)
+			}
+			updated, err := handoffSetStatus(note.Content, outcome, [][2]string{
+				{"completed_by", completer},
+				{"completed_at", now},
+			})
+			if err != nil {
+				return nil, contentError("complete failed: %v", err)
+			}
+			if outcomeNote != "" {
+				body := strings.TrimRight(string(updated), "\n")
+				updated = []byte(body + "\n\n## Outcome\n\n" + outcomeNote + "\n")
+			}
+			return updated, nil
+		},
 	})
-	if err != nil {
-		return mcp.NewToolResultErrorFromErr("complete failed", err), nil
+	if werr != nil {
+		return handoffWriteError(rel, werr), nil
 	}
-	if outcomeNote != "" {
-		body := strings.TrimRight(string(updated), "\n")
-		updated = []byte(body + "\n\n## Outcome\n\n" + outcomeNote + "\n")
-	}
-	if errRes := s.checkWriteLimits(ctx, tok, len(updated)); errRes != nil {
-		return errRes, nil
-	}
-	if err := s.writeAndIndex(rel, updated); err != nil {
-		return mcp.NewToolResultErrorFromErr("complete write failed", err), nil
-	}
-	s.auditWrite(ctx, audit.ActionUpdate, rel, "", int64(len(updated)))
 
 	out := map[string]any{
 		"path":         rel,
@@ -379,13 +358,19 @@ func (s *Server) handleCompleteHandoff(ctx context.Context, req mcp.CallToolRequ
 		"completed_by": completer,
 		"completed_at": now,
 	}
-	freshETag := ""
-	if fresh, err := s.vault.Load(rel); err == nil {
-		freshETag = fresh.ETag()
-		out["etag"] = freshETag
+	if res.ETag != "" {
+		out["etag"] = res.ETag
 	}
-	s.publishNoteChange("update", rel, freshETag, false)
 	return mcp.NewToolResultJSON(out)
+}
+
+// handoffWriteError words a refused handoff write: a missing note is a
+// missing handoff.
+func handoffWriteError(rel string, werr *writeError) *mcp.CallToolResult {
+	if werr.kind == writeMissing {
+		return mcp.NewToolResultErrorf("handoff %q does not exist", rel)
+	}
+	return werr.result()
 }
 
 // ---- helpers ----

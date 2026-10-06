@@ -8,6 +8,46 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.59.1] — 2026-10-06 — "one write path"
+
+Every MCP tool that writes a note now goes through one write pipeline,
+and a test checks every tool that changes the vault against it. The test
+found the gaps fixed below. Pull the image and restart, nothing to
+migrate.
+
+### Fixed
+- **Project tools and the write rate limit** — `memory_create_project`,
+  `memory_rename_project` and `memory_delete_project` did not count
+  against the write rate limit, and neither did `memory_automations`
+  with `run: true`. Now they all do.
+- **A project created from MCP shows at once** — the web UI's sidebar
+  did not show it until a reload. It now announces itself to the tree,
+  and the project tools also send the sidebar event the web UI's own
+  project endpoints send.
+- **`memory_project_scaffold`** wrote its notes without the per-path
+  lock and without events, so the web UI's tree did not show them until
+  a reload.
+- **`memory_self_improve`** wrote without the per-path lock, and
+  announced the note only to the insights listeners, not to the tree.
+
+### Changed
+- **One write pipeline for the MCP tools** — the tools that write a
+  note (create, update, edit, append, compact, the handoff tools,
+  snapshots, questions, insights, table and media notes, ingest as a
+  note, agent promotion, scaffolding, and the automations' writes)
+  share one sequence: per-path lock, preconditions, size and rate
+  limits, write and index, audit entry, events. A conformance test runs
+  every tool that changes the vault with the write budget free (it must
+  leave its audit entries and events) and spent (it must be refused and
+  change nothing), and fails on any registered tool that is neither
+  read-only nor covered. Contributors adding a tool: see "Adding an MCP
+  tool that writes" in `docs/development.md`.
+- **A panic in an MCP tool answers the call** — the call gets an error
+  result that names the tool, and the log the stack trace. Before, the
+  connection was dropped and the client got no answer.
+- **`memory_compact` with `dry_run`** no longer counts against the write
+  rate limit: it writes nothing.
+
 ## [2.59.0] — 2026-10-05 — "passwords"
 
 An account can change its password, the owner can reset one, and the

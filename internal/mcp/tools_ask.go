@@ -13,15 +13,14 @@ package mcp
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
+	"github.com/gosidian/gosidian/internal/vault"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -81,46 +80,31 @@ func (s *Server) handleAsk(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 		return errRes, nil
 	}
 
-	// Load existing file when present; otherwise seed with the canonical
-	// template. Either way we end up with a byte slice and the next OQ id.
-	// Locked so two concurrent asks can't mint the same OQ id.
-	unlock := s.vault.LockPath(rel)
-	defer unlock()
-	// Only "not found" may bootstrap the file from the template: any other
-	// read error (permissions, a directory in the way, I/O) would otherwise
-	// be mistaken for a first use and the existing questions overwritten.
-	var existing []byte
-	if note, loadErr := s.vault.Load(rel); loadErr == nil {
-		existing = note.Content
-	} else if !errors.Is(loadErr, os.ErrNotExist) && !strings.Contains(loadErr.Error(), "no such file") {
-		return mcp.NewToolResultErrorFromErr("load failed", loadErr), nil
+	// Seed the file with the canonical template on first use, else append
+	// to it; writeNote holds the path lock, so two concurrent asks cannot
+	// mint the same OQ id, and only "not found" counts as a first use: any
+	// other read error would have the existing questions overwritten.
+	nextID := 0
+	res, werr := s.writeNote(ctx, tok, noteWrite{
+		rel: rel, mode: writeUpsert, action: audit.ActionAppend,
+		content: func(note *vault.Note) ([]byte, error) {
+			var existing []byte
+			if note != nil {
+				existing = note.Content
+			}
+			nextID = nextOQIndex(existing)
+			return appendOQBlock(existing, project, nextID, question, urgency, qContext), nil
+		},
+	})
+	if werr != nil {
+		return werr.result(), nil
 	}
-	created := len(existing) == 0
-	nextID := nextOQIndex(existing)
-	body := appendOQBlock(existing, project, nextID, question, urgency, qContext)
-
-	if errRes := s.checkWriteLimits(ctx, tok, len(body)); errRes != nil {
-		return errRes, nil
-	}
-	if err := s.writeAndIndex(rel, body); err != nil {
-		return mcp.NewToolResultErrorFromErr("write failed", err), nil
-	}
-	s.auditWrite(ctx, audit.ActionAppend, rel, "", int64(len(body)))
-
-	result := askResult{
+	return mcp.NewToolResultJSON(askResult{
 		Path:  rel,
 		OQID:  fmt.Sprintf("OQ-%03d", nextID),
 		Index: nextID,
-	}
-	if fresh, err := s.vault.Load(rel); err == nil {
-		result.ETag = fresh.ETag()
-	}
-	action := "update"
-	if created {
-		action = "create"
-	}
-	s.publishNoteChange(action, rel, result.ETag, created)
-	return mcp.NewToolResultJSON(result)
+		ETag:  res.ETag,
+	})
 }
 
 // nextOQIndex scans existing content for `### OQ-NNN` headings and returns

@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -158,24 +159,18 @@ func (h automationHost) Snapshot(db automation.Database, r automation.Rule, now 
 	return dest, nil
 }
 
-// write creates rel, under its lock, unless it exists (false), audits it
-// as the automation and tells the listeners.
+// write creates rel unless it exists (false), through the write pipeline
+// as the automation: audited as such, without a token's limiter.
 func (h automationHost) write(rel string, content []byte) (bool, error) {
-	unlock := h.s.vault.LockPath(rel)
-	defer unlock()
-	if _, err := h.s.vault.Load(rel); err == nil {
+	_, werr := h.s.writeNote(context.Background(), nil, noteWrite{
+		rel: rel, mode: writeCreate, content: fixedContent(content), action: audit.ActionCreate, automation: true,
+	})
+	switch {
+	case werr == nil:
+		return true, nil
+	case werr.kind == writeExists:
 		return false, nil
+	default:
+		return false, werr
 	}
-	if err := h.s.writeAndIndex(rel, content); err != nil {
-		return false, err
-	}
-	if h.s.audit != nil {
-		_ = h.s.audit.Write(audit.Entry{Source: audit.SourceAutomation, Actor: AutomationAgent, Action: audit.ActionCreate, Path: rel, Size: int64(len(content))})
-	}
-	etag := ""
-	if fresh, err := h.s.vault.Load(rel); err == nil {
-		etag = fresh.ETag()
-	}
-	h.s.publishNoteChange("create", rel, etag, true)
-	return true, nil
 }

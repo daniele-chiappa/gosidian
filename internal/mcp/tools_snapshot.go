@@ -50,23 +50,14 @@ func (s *Server) handleSnapshot(ctx context.Context, req mcp.CallToolRequest) (*
 		return errRes, nil
 	}
 	content, st := s.snapshotContent(tok, rel, note, now)
-	if errRes := s.checkWriteLimits(ctx, tok, len(content)); errRes != nil {
-		return errRes, nil
+	if _, werr := s.writeNote(ctx, tok, noteWrite{
+		rel: dest, mode: writeCreate, content: fixedContent(content), action: audit.ActionCreate,
+	}); werr != nil {
+		if werr.kind == writeExists {
+			return mcp.NewToolResultErrorf("snapshot %q already exists: try again", dest), nil
+		}
+		return werr.result(), nil
 	}
-	unlock := s.vault.LockPath(dest)
-	defer unlock()
-	if _, err := s.vault.Load(dest); err == nil {
-		return mcp.NewToolResultErrorf("snapshot %q already exists: try again", dest), nil
-	}
-	if err := s.writeAndIndex(dest, content); err != nil {
-		return mcp.NewToolResultErrorFromErr("write failed", err), nil
-	}
-	s.auditWrite(ctx, audit.ActionCreate, dest, "", int64(len(content)))
-	etag := ""
-	if fresh, err := s.vault.Load(dest); err == nil {
-		etag = fresh.ETag()
-	}
-	s.publishNoteChange("create", dest, etag, true)
 	return mcp.NewToolResultJSON(map[string]any{
 		"path":   dest,
 		"source": rel,

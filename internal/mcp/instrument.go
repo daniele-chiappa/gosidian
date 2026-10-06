@@ -18,7 +18,9 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"time"
 
 	"github.com/gosidian/gosidian/internal/auth"
@@ -112,4 +114,23 @@ func firstTextContent(r *mcp.CallToolResult) string {
 		}
 	}
 	return ""
+}
+
+// recoverMiddleware turns a panic in a tool into an error result for that
+// call (IMP-086). Without it the Streamable HTTP transport ran the tool in
+// the request's goroutine, net/http caught the panic and dropped the
+// connection, and the client never learned what happened. The stack goes to
+// the log; the handlers release their per-path locks in deferred calls, so
+// nothing stays locked. It sits just inside instrumentMiddleware, which
+// then counts the call as an error.
+func recoverMiddleware(next server.ToolHandlerFunc) server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (res *mcp.CallToolResult, err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("mcp tool panic", "tool", req.Params.Name, "panic", fmt.Sprint(r), "stack", string(debug.Stack()))
+				res, err = mcp.NewToolResultErrorf("internal error in %s: the server recovered from a panic (%v). The operation may be incomplete: read what it was writing before retrying, and report the error", req.Params.Name, r), nil
+			}
+		}()
+		return next(ctx, req)
+	}
 }

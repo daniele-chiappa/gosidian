@@ -48,13 +48,26 @@ A `memory_search` call crosses the following layers:
 
 ## Write path
 
-1. Tool handler validates input + checks `if_match` ETag if provided
-   (returns a dedicated error on mismatch).
-2. `vault.Save` writes atomically (temp file + rename).
-3. Synchronously: LRU invalidated, SQLite index upserted in the same
-   request, audit log appended.
+1. Tool handler validates input and authorizes the token on the path.
+2. Every MCP tool that writes a note hands it to one pipeline,
+   `writeNote` (`internal/mcp/write.go`), which runs the whole sequence
+   in one place: per-path lock, load, the mode (create, replace or
+   either) and `if_match` preconditions, the new body, the size and rate
+   limits on that body, the write, the index, the audit entry, the
+   schema check and the `note`/`tree` events.
+3. `vault.Save` writes atomically (temp file + rename); synchronously,
+   the LRU is invalidated and the SQLite index upserted in the same
+   request.
 4. fsnotify is a **fallback** for external writes; the write path
    itself never waits on it.
+
+A write conformance test (`internal/mcp/write_conformance_test.go`) runs
+every tool that changes the vault twice: with the write budget free it
+must leave its audit entries and publish its events, with the budget
+spent it must be refused and change nothing. Every registered tool must
+be either listed as read-only or have a case there, so a new tool cannot
+skip a step unnoticed. A panic in a tool becomes an error result for
+that call, with the stack in the log.
 
 ## Key invariants
 

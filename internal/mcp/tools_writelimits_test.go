@@ -1,83 +1,18 @@
 package mcp
 
 import (
-	"context"
-	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/gosidian/gosidian/internal/auth"
-	mcplib "github.com/mark3labs/mcp-go/mcp"
 )
 
-// limitedServer returns a server whose write budget (1/min) has already been
-// spent by a content write, plus fixtures for the structural tools.
-func limitedServer(t *testing.T) (*Server, string) {
-	t.Helper()
-	s, _, dir := newTestServer(t)
-	s.SetWriteLimits(1, 0)
-	for _, p := range []string{"proj/a.md", "proj/attachments/x.png"} {
-		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, p)), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, p), []byte("# a\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	res, _ := s.handleCreate(context.Background(), call(map[string]any{"path": "proj/warm.md", "content": "x"}))
-	if res.IsError {
-		t.Fatalf("warm-up write must pass: %s", expectError(t, res))
-	}
-	return s, dir
-}
-
-// Every mutation — not only content writes — must consult the per-token
-// write limiter (BUG-035).
-func TestWriteLimiter_CoversStructuralAndUploadTools(t *testing.T) {
-	png, _ := base64.StdEncoding.DecodeString(onePxPNG)
-	cases := []struct {
-		name string
-		call func(s *Server) (*mcplibResult, error)
-	}{
-		{"delete", func(s *Server) (*mcplibResult, error) {
-			return s.handleDelete(context.Background(), call(map[string]any{"path": "proj/a.md"}))
-		}},
-		{"rename", func(s *Server) (*mcplibResult, error) {
-			return s.handleRenameNote(context.Background(), call(map[string]any{"from": "proj/a.md", "to": "proj/z.md"}))
-		}},
-		{"move", func(s *Server) (*mcplibResult, error) {
-			return s.handleMoveNote(context.Background(), call(map[string]any{"path": "proj/a.md", "project": "other"}))
-		}},
-		{"delete_attachment", func(s *Server) (*mcplibResult, error) {
-			return s.handleDeleteAttachment(context.Background(), call(map[string]any{"path": "proj/attachments/x.png"}))
-		}},
-		{"ingest attachment bytes", func(s *Server) (*mcplibResult, error) {
-			return s.handleIngest(context.Background(), call(map[string]any{
-				"project": "proj", "data": base64.StdEncoding.EncodeToString(png), "filename": "shot.png", "as": "attachment",
-			}))
-		}},
-		{"mint ingest ticket", func(s *Server) (*mcplibResult, error) {
-			return s.handleIngest(context.Background(), call(map[string]any{"project": "proj", "transfer": "http"}))
-		}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			s, _ := limitedServer(t)
-			res, err := tc.call(s)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if msg := expectError(t, res); !strings.Contains(msg, "rate limit") {
-				t.Fatalf("expected a rate-limit rejection, got: %s", msg)
-			}
-		})
-	}
-}
+// The limiter of every MCP tool that writes is checked by the write
+// conformance suite (write_conformance_test.go), which replaced the table
+// that lived here (BUG-035); the HTTP surfaces are checked below.
 
 func TestHTTPUpload_HonoursWriteLimiter(t *testing.T) {
 	s, plaintext := serverWithToken(t, "", []string{auth.ScopeRead, auth.ScopeWrite})
@@ -120,5 +55,3 @@ func TestMintIngestTicket_CapPerToken(t *testing.T) {
 		t.Fatalf("expected the per-token ticket cap, got: %s", msg)
 	}
 }
-
-type mcplibResult = mcplib.CallToolResult

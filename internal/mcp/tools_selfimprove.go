@@ -114,13 +114,14 @@ func (s *Server) handleSelfImprove(ctx context.Context, req mcp.CallToolRequest)
 	}
 
 	body := renderInsight(project, now, category, title, friction, confidence, suggestion, agentLabel, tok.ID, correlationIDFromContext(ctx))
-	if errRes := s.checkWriteLimits(ctx, tok, len(body)); errRes != nil {
-		return errRes, nil
+	// The insight project is the operator's, not the token's: an opted-in
+	// token writes there whatever its scope, so no authorizeWrite here.
+	res, werr := s.writeNote(ctx, tok, noteWrite{
+		rel: rel, mode: writeCreate, content: fixedContent([]byte(body)), action: audit.ActionCreate,
+	})
+	if werr != nil {
+		return werr.result(), nil
 	}
-	if err := s.writeAndIndex(rel, []byte(body)); err != nil {
-		return mcp.NewToolResultErrorFromErr("write failed", err), nil
-	}
-	s.auditWrite(ctx, audit.ActionCreate, rel, "", int64(len(body)))
 
 	if s.events != nil {
 		s.events.Publish(events.TopicInsight, map[string]any{
@@ -133,11 +134,7 @@ func (s *Server) handleSelfImprove(ctx context.Context, req mcp.CallToolRequest)
 		})
 	}
 
-	result := selfImproveResult{Path: rel, Category: category, Status: "pending"}
-	if fresh, err := s.vault.Load(rel); err == nil {
-		result.ETag = fresh.ETag()
-	}
-	return mcp.NewToolResultJSON(result)
+	return mcp.NewToolResultJSON(selfImproveResult{Path: rel, Category: category, Status: "pending", ETag: res.ETag})
 }
 
 // renderInsight builds the markdown body of one insight note. category and

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
+	"github.com/gosidian/gosidian/internal/vault"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -69,84 +70,43 @@ func (s *Server) handleCompact(ctx context.Context, req mcp.CallToolRequest) (*m
 	}
 	dryRun := req.GetBool("dry_run", false)
 
-	unlock := s.vault.LockPath(rel)
-	defer unlock()
-	note, err := s.vault.Load(rel)
-	if err != nil {
-		return mcp.NewToolResultErrorf("cannot read %q: %v", rel, err), nil
-	}
-	body := note.Content
-	starts := entryStartRe.FindAllIndex(body, -1)
-	if len(starts) == 0 {
-		return mcp.NewToolResultError("no `## YYYY-MM-DD` entries found; file shape not compatible with memory_compact"), nil
-	}
-	original := len(starts)
-	if keep >= original {
-		// Nothing to do: file already shorter than or equal to the target.
-		return mcp.NewToolResultJSON(compactResult{
-			Path:            rel,
-			OriginalEntries: original,
-			KeptEntries:     original,
-			ArchivedEntries: 0,
-			OriginalBytes:   len(body),
-			NewBytes:        len(body),
-			DryRun:          dryRun,
-			ETag:            note.ETag(),
-			Noop:            true,
-		})
-	}
-	// The "header" of the file is everything before the first entry's heading
-	// (frontmatter, intro, top title). The "kept" section is everything from
-	// the first entry to archive plus `keep` onwards.
-	headerEnd := starts[0][0]
-	keepStart := len(body) // keep == 0: archive every entry
-	if keep > 0 {
-		keepStart = starts[original-keep][0]
-	}
-	header := body[:headerEnd]
-	keepSuffix := body[keepStart:]
-
-	newBody := renderCompactedHead(header, summary, original-keep, time.Now().UTC()) + string(keepSuffix)
-
-	if errRes := s.checkWriteLimits(ctx, tok, len(newBody)); errRes != nil {
-		return errRes, nil
-	}
-
-	if dryRun {
-		return mcp.NewToolResultJSON(compactResult{
-			Path:            rel,
-			OriginalEntries: original,
-			KeptEntries:     keep,
-			ArchivedEntries: original - keep,
-			OriginalBytes:   len(body),
-			NewBytes:        len(newBody),
-			DryRun:          true,
-			ETag:            note.ETag(),
-		})
-	}
-
-	if err := s.writeAndIndex(rel, []byte(newBody)); err != nil {
-		return mcp.NewToolResultErrorFromErr("compact write failed", err), nil
-	}
-	s.auditWrite(ctx, audit.ActionUpdate, rel, "", int64(len(newBody)))
-
-	// Re-load to fetch the new etag.
-	newNote, _ := s.vault.Load(rel)
-	etag := ""
-	if newNote != nil {
-		etag = newNote.ETag()
-	}
-	s.publishNoteChange("update", rel, etag, false)
-	return mcp.NewToolResultJSON(compactResult{
-		Path:            rel,
-		OriginalEntries: original,
-		KeptEntries:     keep,
-		ArchivedEntries: original - keep,
-		OriginalBytes:   len(body),
-		NewBytes:        len(newBody),
-		DryRun:          false,
-		ETag:            etag,
+	result := compactResult{Path: rel, DryRun: dryRun}
+	res, werr := s.writeNote(ctx, tok, noteWrite{
+		rel: rel, mode: writeReplace, action: audit.ActionUpdate,
+		content: func(note *vault.Note) ([]byte, error) {
+			body := note.Content
+			starts := entryStartRe.FindAllIndex(body, -1)
+			if len(starts) == 0 {
+				return nil, contentError("no `## YYYY-MM-DD` entries found; file shape not compatible with memory_compact")
+			}
+			original := len(starts)
+			result.OriginalEntries, result.OriginalBytes = original, len(body)
+			if keep >= original {
+				// Nothing to do: file already shorter than or equal to the target.
+				result.KeptEntries, result.NewBytes, result.Noop = original, len(body), true
+				return nil, errSkipWrite
+			}
+			// The "header" of the file is everything before the first entry's
+			// heading (frontmatter, intro, top title). The "kept" section is
+			// everything from the first entry to archive plus `keep` onwards.
+			headerEnd := starts[0][0]
+			keepStart := len(body) // keep == 0: archive every entry
+			if keep > 0 {
+				keepStart = starts[original-keep][0]
+			}
+			newBody := renderCompactedHead(body[:headerEnd], summary, original-keep, time.Now().UTC()) + string(body[keepStart:])
+			result.KeptEntries, result.ArchivedEntries, result.NewBytes = keep, original-keep, len(newBody)
+			if dryRun {
+				return nil, errSkipWrite
+			}
+			return []byte(newBody), nil
+		},
 	})
+	if werr != nil {
+		return werr.result(), nil
+	}
+	result.ETag = res.ETag
+	return mcp.NewToolResultJSON(result)
 }
 
 // renderCompactedHead rebuilds the head of the file: whatever came before the

@@ -39,6 +39,11 @@ func (s *Server) handleAutomations(ctx context.Context, req mcp.CallToolRequest)
 		if _, errRes := s.authorizeWrite(ctx, project+"/handoffs/x.md"); errRes != nil {
 			return errRes, nil
 		}
+		// The writes are the server's, but the call is the token's: it counts
+		// against its budget like any other write.
+		if errRes := s.checkWriteLimits(ctx, tok, 0); errRes != nil {
+			return errRes, nil
+		}
 		runs := s.automations.Tick(project)
 		plan, err := s.automations.Plan(project, time.Time{})
 		if err != nil {

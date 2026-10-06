@@ -112,3 +112,17 @@ See [CHANGELOG.md](../CHANGELOG.md) for the release history.
 
 See [Architecture](architecture.md) for package layout, data flow,
 and ADRs.
+
+### Adding an MCP tool that writes
+
+- Authorize the token on the path (`authorizeWrite`), then hand the note
+  to `writeNote` (`internal/mcp/write.go`) rather than writing it
+  yourself: it takes the lock and runs the limits, the audit entry and
+  the events. A tool that changes the vault without writing a note (a
+  delete, a rename, an attachment, a project) calls `checkWriteLimits`
+  and `auditWrite`, and publishes its events, itself.
+- Give the tool a case in `writeConformanceCases`
+  (`internal/mcp/write_conformance_test.go`): the audit entries and
+  events it must leave. A read-only tool goes in `readOnlyTools`
+  instead. `TestTools_EveryToolClassified` fails until one of the two
+  is done.

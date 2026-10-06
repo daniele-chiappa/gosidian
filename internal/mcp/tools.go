@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"path"
 	"slices"
 	"strconv"
@@ -850,23 +849,11 @@ func (s *Server) handleCreate(ctx context.Context, req mcp.CallToolRequest) (*mc
 	if errRes != nil {
 		return errRes, nil
 	}
-	if errRes := s.checkWriteLimits(ctx, tok, len(content)); errRes != nil {
-		return errRes, nil
-	}
-	unlock := s.vault.LockPath(rel)
-	defer unlock()
-	if _, err := s.vault.Load(rel); err == nil {
-		return mcp.NewToolResultErrorf("note %q already exists", rel), nil
-	}
-	if err := s.writeAndIndex(rel, []byte(content)); err != nil {
-		return mcp.NewToolResultErrorFromErr("write failed", err), nil
-	}
-	s.auditWrite(ctx, audit.ActionCreate, rel, "", int64(len(content)))
-	s.noteSchemaProblems(ctx, rel, []byte(content))
-	if fresh, err := s.vault.Load(rel); err == nil {
-		s.publishNoteChange("create", rel, fresh.ETag(), true)
-	} else {
-		s.publishNoteChange("create", rel, "", true)
+	if _, werr := s.writeNote(ctx, tok, noteWrite{
+		rel: rel, mode: writeCreate, content: fixedContent([]byte(content)),
+		action: audit.ActionCreate, schemaCheck: true,
+	}); werr != nil {
+		return werr.result(), nil
 	}
 	return mcp.NewToolResultJSON(pathResult{Path: rel})
 }
@@ -888,35 +875,18 @@ func (s *Server) handleUpdate(ctx context.Context, req mcp.CallToolRequest) (*mc
 	if errRes != nil {
 		return errRes, nil
 	}
-	if errRes := s.checkWriteLimits(ctx, tok, len(content)); errRes != nil {
-		return errRes, nil
+	res, werr := s.writeNote(ctx, tok, noteWrite{
+		rel: rel, mode: writeReplace, ifMatch: req.GetString("if_match", ""),
+		content: fixedContent([]byte(content)), action: audit.ActionUpdate, schemaCheck: true,
+	})
+	if werr != nil {
+		return werr.result(), nil
 	}
-	unlock := s.vault.LockPath(rel)
-	defer unlock()
-	existing, err := s.vault.Load(rel)
-	if err != nil {
-		return writeNoteError(rel, err), nil
-	}
-	if errRes := checkIfMatch(existing, req.GetString("if_match", "")); errRes != nil {
-		return errRes, nil
-	}
-	if err := s.writeAndIndex(rel, []byte(content)); err != nil {
-		return mcp.NewToolResultErrorFromErr("write failed", err), nil
-	}
-	s.auditWrite(ctx, audit.ActionUpdate, rel, "", int64(len(content)))
-	s.noteSchemaProblems(ctx, rel, []byte(content))
-	// Return the new etag so the caller can pipeline further edits without a
-	// re-read. Note: reloading here is cheap (likely cache hit on the write).
+	// The new etag lets the caller pipeline further edits without a re-read.
 	out := map[string]any{"path": rel}
-	freshETag := ""
-	if fresh, err := s.vault.Load(rel); err == nil {
-		freshETag = fresh.ETag()
-		out["etag"] = freshETag
+	if res.ETag != "" {
+		out["etag"] = res.ETag
 	}
-	// Update doesn't change the tree shape, so only the `note` topic
-	// fires here. Two tabs editing the same path each see the other's
-	// save via the `etag` payload field.
-	s.publishNoteChange("update", rel, freshETag, false)
 	return mcp.NewToolResultJSON(out)
 }
 
@@ -956,72 +926,32 @@ type appendOutcome struct {
 	Created bool
 }
 
-// appendError is an append failure with the HTTP status the byte endpoint
-// answers, and for a rate refusal how long to wait; the MCP tool uses the
-// message alone.
-type appendError struct {
-	status int
-	msg    string
-	wait   time.Duration
-}
-
-// appendNote is the one append pipeline behind memory_append and
-// POST /mcp/append (IMP-094, the first slice of IMP-086): per-path lock,
-// optional ETag precondition, separator-aware merge, size and rate limits,
-// write + index, audit, and the note/tree events. Authorization (scope and
-// path) is the caller's job — both surfaces check it before getting here, so
-// a new caller cannot skip a guard by mistake: everything below the auth
-// line lives in one place.
-func (s *Server) appendNote(ctx context.Context, tok *auth.Token, rel, addition, ifMatch string) (appendOutcome, *appendError) {
-	unlock := s.vault.LockPath(rel)
-	defer unlock()
-	var existing []byte
-	if note, err := s.vault.Load(rel); err == nil {
-		existing = note.Content
-		if errRes := checkIfMatch(note, ifMatch); errRes != nil {
-			return appendOutcome{}, &appendError{status: http.StatusPreconditionFailed, msg: toolErrorText(errRes)}
-		}
-	} else if !errors.Is(err, os.ErrNotExist) && !strings.Contains(err.Error(), "no such file") {
-		return appendOutcome{}, &appendError{status: http.StatusInternalServerError, msg: "load failed: " + err.Error()}
-	} else if ifMatch != "" {
-		// Client provided if_match but the note doesn't exist — that's a
-		// mismatch too (they thought it was there).
-		return appendOutcome{}, &appendError{status: http.StatusPreconditionFailed, msg: fmt.Sprintf("etag mismatch: note %q does not exist", rel)}
+// appendNote is the append behind memory_append and POST /mcp/append
+// (IMP-094): the separator-aware merge, through writeNote. A note it creates
+// gets the minimal frontmatter. Authorization (scope and path) is the
+// caller's job — both surfaces check it before getting here.
+func (s *Server) appendNote(ctx context.Context, tok *auth.Token, rel, addition, ifMatch string) (appendOutcome, *writeError) {
+	res, werr := s.writeNote(ctx, tok, noteWrite{
+		rel: rel, mode: writeUpsert, ifMatch: ifMatch, action: audit.ActionAppend, schemaCheck: true,
+		content: func(existing *vault.Note) ([]byte, error) {
+			if existing == nil || len(existing.Content) == 0 {
+				return []byte(withMinimalFrontmatter(rel, addition)), nil
+			}
+			body := string(existing.Content)
+			sep := ""
+			switch {
+			case !strings.HasSuffix(body, "\n"):
+				sep = "\n\n"
+			case !strings.HasSuffix(body, "\n\n"):
+				sep = "\n"
+			}
+			return []byte(body + sep + addition), nil
+		},
+	})
+	if werr != nil {
+		return appendOutcome{}, werr
 	}
-	var merged []byte
-	if len(existing) == 0 {
-		merged = []byte(withMinimalFrontmatter(rel, addition))
-	} else {
-		sep := "\n"
-		if !strings.HasSuffix(string(existing), "\n") {
-			sep = "\n\n"
-		} else if !strings.HasSuffix(string(existing), "\n\n") {
-			sep = "\n"
-		} else {
-			sep = ""
-		}
-		merged = []byte(string(existing) + sep + addition)
-	}
-	if msg, wait := s.writeLimitViolation(ctx, tok, len(merged)); msg != "" {
-		return appendOutcome{}, &appendError{status: http.StatusRequestEntityTooLarge, msg: msg, wait: wait}
-	}
-	if err := s.writeAndIndex(rel, merged); err != nil {
-		return appendOutcome{}, &appendError{status: http.StatusInternalServerError, msg: "write failed: " + err.Error()}
-	}
-	s.auditWrite(ctx, audit.ActionAppend, rel, "", int64(len(merged)))
-	s.noteSchemaProblems(ctx, rel, merged)
-	res := appendOutcome{Path: rel, Created: len(existing) == 0}
-	if fresh, err := s.vault.Load(rel); err == nil {
-		res.ETag = fresh.ETag()
-	}
-	// An append onto a missing note is a create for subscribers too: the
-	// tree changes and per-note listeners have no record to update.
-	action := "update"
-	if res.Created {
-		action = "create"
-	}
-	s.publishNoteChange(action, rel, res.ETag, res.Created)
-	return res, nil
+	return appendOutcome{Path: res.Path, ETag: res.ETag, Created: res.Created}, nil
 }
 
 // withMinimalFrontmatter gives a markdown note that an append creates the
@@ -1091,51 +1021,36 @@ func (s *Server) handleEdit(ctx context.Context, req mcp.CallToolRequest) (*mcp.
 	if errRes != nil {
 		return errRes, nil
 	}
-	unlock := s.vault.LockPath(rel)
-	defer unlock()
-	note, err := s.vault.Load(rel)
-	if err != nil {
-		return writeNoteError(rel, err), nil
+	count := 0
+	res, werr := s.writeNote(ctx, tok, noteWrite{
+		rel: rel, mode: writeReplace, ifMatch: req.GetString("if_match", ""),
+		action: audit.ActionUpdate, schemaCheck: true,
+		content: func(note *vault.Note) ([]byte, error) {
+			body := string(note.Content)
+			count = strings.Count(body, oldS)
+			if count == 0 {
+				return nil, contentError("old_string not found in %q", rel)
+			}
+			if count > 1 && !replaceAll {
+				return nil, contentError("old_string matches %d occurrences in %q; pass replace_all=true or include more context to make it unique", count, rel)
+			}
+			if replaceAll {
+				return []byte(strings.ReplaceAll(body, oldS, newS)), nil
+			}
+			return []byte(strings.Replace(body, oldS, newS, 1)), nil
+		},
+	})
+	if werr != nil {
+		return werr.result(), nil
 	}
-	if errRes := checkIfMatch(note, req.GetString("if_match", "")); errRes != nil {
-		return errRes, nil
-	}
-	body := string(note.Content)
-
-	count := strings.Count(body, oldS)
-	if count == 0 {
-		return mcp.NewToolResultErrorf("old_string not found in %q", rel), nil
-	}
-	if count > 1 && !replaceAll {
-		return mcp.NewToolResultErrorf("old_string matches %d occurrences in %q; pass replace_all=true or include more context to make it unique", count, rel), nil
-	}
-
-	var updated string
-	if replaceAll {
-		updated = strings.ReplaceAll(body, oldS, newS)
-	} else {
-		updated = strings.Replace(body, oldS, newS, 1)
-	}
-
-	if errRes := s.checkWriteLimits(ctx, tok, len(updated)); errRes != nil {
-		return errRes, nil
-	}
-	if err := s.writeAndIndex(rel, []byte(updated)); err != nil {
-		return mcp.NewToolResultErrorFromErr("write failed", err), nil
-	}
-	s.auditWrite(ctx, audit.ActionUpdate, rel, "", int64(len(updated)))
-	s.noteSchemaProblems(ctx, rel, []byte(updated))
 	out := map[string]any{
 		"path":         rel,
 		"replacements": count,
-		"new_size":     len(updated),
+		"new_size":     res.Size,
 	}
-	freshETag := ""
-	if fresh, err := s.vault.Load(rel); err == nil {
-		freshETag = fresh.ETag()
-		out["etag"] = freshETag
+	if res.ETag != "" {
+		out["etag"] = res.ETag
 	}
-	s.publishNoteChange("update", rel, freshETag, false)
 	return mcp.NewToolResultJSON(out)
 }
 
@@ -1200,6 +1115,9 @@ func (s *Server) handleCreateProject(ctx context.Context, req mcp.CallToolReques
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	if errRes := s.checkWriteLimits(ctx, tok, 0); errRes != nil {
+		return errRes, nil
+	}
 	// The visibility is pinned at creation (the store default now), from a
 	// fresh access entry; a name MCP tokens are scoped to is refused
 	// (IMP-124).
@@ -1208,6 +1126,8 @@ func (s *Server) handleCreateProject(ctx context.Context, req mcp.CallToolReques
 		return mcp.NewToolResultErrorFromErr("create project failed", err), nil
 	}
 	s.auditWrite(ctx, audit.ActionCreateProject, clean, "", 0)
+	s.publishTreeChange("create_project", clean, nil)
+	s.publishSidebar("create", clean)
 	return mcp.NewToolResultJSON(map[string]any{"name": clean, "visibility": s.projectVisibility(clean)})
 }
 
@@ -1337,6 +1257,9 @@ func (s *Server) handleRenameProject(ctx context.Context, req mcp.CallToolReques
 	if from == to {
 		return mcp.NewToolResultError("from and to name the same project"), nil
 	}
+	if errRes := s.checkWriteLimits(ctx, tok, 0); errRes != nil {
+		return errRes, nil
+	}
 	moved, err := projectops.Rename(s.vault, s.index, s.projects, s.tokens, from, to)
 	if err != nil && !errors.Is(err, projectops.ErrIncomplete) {
 		return mcp.NewToolResultErrorFromErr("rename project failed", err), nil
@@ -1345,6 +1268,7 @@ func (s *Server) handleRenameProject(ctx context.Context, req mcp.CallToolReques
 	// on what did not follow.
 	s.auditWrite(ctx, audit.ActionRenameProject, from, to, 0)
 	s.publishTreeChange("rename_project", from, map[string]any{"to": to})
+	s.publishSidebar("update", to)
 	res, jerr := mcp.NewToolResultJSON(map[string]any{"from": from, "to": to, "tokens_moved": moved})
 	if err != nil && jerr == nil {
 		appendNotice(res, "Note: "+err.Error())
@@ -1367,6 +1291,9 @@ func (s *Server) handleDeleteProject(ctx context.Context, req mcp.CallToolReques
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	if errRes := s.checkWriteLimits(ctx, tok, 0); errRes != nil {
+		return errRes, nil
+	}
 	// The same path as the web UI: into the trash when it is on, with the
 	// access saved for the restore, then out of the index, the access store
 	// and the MCP token scopes (IMP-124).
@@ -1377,6 +1304,7 @@ func (s *Server) handleDeleteProject(ctx context.Context, req mcp.CallToolReques
 	removed := res.Removed
 	s.auditWrite(ctx, audit.ActionDeleteProject, res.Name, res.TrashID, int64(len(removed)))
 	s.publishTreeChange("delete_project", res.Name, map[string]any{"removed_notes": len(removed)})
+	s.publishSidebar("delete", res.Name)
 	out, jerr := mcp.NewToolResultJSON(map[string]any{
 		"deleted":         true,
 		"name":            res.Name,

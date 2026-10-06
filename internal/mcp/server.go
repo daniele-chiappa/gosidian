@@ -356,6 +356,16 @@ func (s *Server) publishTreeChange(action, path string, extra map[string]any) {
 	s.events.Publish(events.TopicTree, payload)
 }
 
+// publishSidebar tells the web UI that a project appeared, changed or went
+// away, on the sidebar topic its project list listens to: the same event
+// the web UI's own project endpoints send.
+func (s *Server) publishSidebar(action, project string) {
+	if s.events == nil {
+		return
+	}
+	s.events.Publish(events.TopicSidebar, map[string]any{"action": action, "project": project})
+}
+
 // publishRename broadcasts a note move as a delete of the old path plus a
 // create of the new one — the two actions every subscriber already handles —
 // followed by an update for each note whose links were rewritten.
@@ -530,6 +540,7 @@ func New(v *vault.Vault, idx *index.Index, tokens *auth.Store) *Server {
 		Version,
 		server.WithToolCapabilities(true),
 		server.WithToolHandlerMiddleware(instrumentMiddleware),
+		server.WithToolHandlerMiddleware(recoverMiddleware),
 		server.WithToolHandlerMiddleware(s.selfImproveNudgeMiddleware),
 		server.WithToolHandlerMiddleware(s.unknownArgsMiddleware),
 		server.WithToolHandlerMiddleware(callNotesMiddleware),

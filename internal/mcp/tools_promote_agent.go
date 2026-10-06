@@ -86,15 +86,11 @@ func (s *Server) handlePromoteAgent(ctx context.Context, req mcp.CallToolRequest
 	}
 
 	canonical := buildCanonicalAgentNote(project, slug, []byte(foreign))
-	if errRes := s.checkWriteLimits(ctx, tok, len(canonical)); errRes != nil {
-		return errRes, nil
-	}
-	if err := s.writeAndIndex(rel, []byte(canonical)); err != nil {
-		return mcp.NewToolResultErrorFromErr("write failed", err), nil
-	}
-	s.auditWrite(ctx, audit.ActionCreate, rel, "", int64(len(canonical)))
-	if fresh, lerr := s.vault.Load(rel); lerr == nil {
-		s.publishNoteChange("create", rel, fresh.ETag(), true)
+	if _, werr := s.writeNote(ctx, tok, noteWrite{
+		rel: rel, mode: writeCreate, content: fixedContent([]byte(canonical)), action: audit.ActionCreate,
+		locked: true, // held since the probe above
+	}); werr != nil {
+		return werr.result(), nil
 	}
 
 	resp := promoteAgentResponse{Path: rel}
@@ -201,15 +197,11 @@ func (s *Server) adoptIntoExisting(ctx context.Context, req mcp.CallToolRequest,
 	raw := parser.FrontmatterRawForPath(rel, canonical)
 	if !parser.HasFrontmatterKey(raw, "harness") {
 		if updated, ok := insertHarnessBlock(canonical, slug, f); ok {
-			if errRes := s.checkWriteLimits(ctx, tok, len(updated)); errRes != nil {
-				return errRes, nil
-			}
-			if err := s.writeAndIndex(rel, updated); err != nil {
-				return mcp.NewToolResultErrorFromErr("write failed", err), nil
-			}
-			s.auditWrite(ctx, audit.ActionUpdate, rel, "", int64(len(updated)))
-			if fresh, lerr := s.vault.Load(rel); lerr == nil {
-				s.publishNoteChange("update", rel, fresh.ETag(), true)
+			// The caller holds the path lock since its probe.
+			if _, werr := s.writeNote(ctx, tok, noteWrite{
+				rel: rel, mode: writeReplace, content: fixedContent(updated), action: audit.ActionUpdate, locked: true,
+			}); werr != nil {
+				return werr.result(), nil
 			}
 			canonical = updated
 		}
