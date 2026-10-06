@@ -52,7 +52,10 @@ end-to-end tests.
 
 ## Code style
 
-- Formatting is enforced by `gofmt` (run `gofmt -w .` before commit)
+- Formatting is enforced by `gofmt` (run `gofmt -w .` before commit);
+  CI fails when `gofmt -l .` lists a file
+- The web UI (`web/`) must pass `npm run lint` and `npm run test:unit`,
+  which CI runs too
 - Prefer the standard library. New direct dependencies need a short
   justification in the PR description.
 - Web UI handlers pass `map[string]any` to templates (not typed

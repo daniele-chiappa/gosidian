@@ -32,6 +32,16 @@ jobs:
       - name: go vet
         run: go vet ./...
 
+      - name: gofmt
+        # CONTRIBUTING.md promises gofmt-clean code; this keeps it so.
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then
+            echo "These files are not gofmt-clean (run gofmt -w):"
+            echo "$out"
+            exit 1
+          fi
+
       - name: go test
         # -race makes the bcrypt-heavy api/v1 and webauth suites take several
         # minutes; the default 10m per package leaves too little headroom.
@@ -44,9 +54,37 @@ jobs:
             -o gosidian ./cmd/gosidian
           ./gosidian --help 2>&1 | head -5 || true
 
+  web:
+    name: Lint & unit-test SPA
+    runs-on: ubuntu-latest
+    # The image build already type-checks the SPA (vue-tsc in npm run build);
+    # this adds eslint and vitest.
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: npm ci
+        working-directory: web
+        run: npm ci --no-audit --no-fund
+
+      - name: eslint
+        working-directory: web
+        run: npm run lint
+
+      - name: vitest
+        working-directory: web
+        run: npm run test:unit
+
   docker:
     name: Build & push image
-    needs: test
+    needs: [test, web]
     runs-on: ubuntu-latest
     # Only push images on main branch pushes or version tags, not on PRs.
     if: github.event_name == 'push'

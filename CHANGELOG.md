@@ -8,6 +8,20 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.63.1] — 2026-10-06 — "CI gates"
+
+CI now checks the formatting of the Go code and the web UI's lint and
+unit tests. The binary is the same as 2.63.0 apart from its version
+number: no need to update.
+
+### Changed
+- **CI checks the formatting and the web UI** — a run fails when
+  `gofmt -l` lists a file, as `CONTRIBUTING.md` already promised, and
+  when the web UI's `npm run lint` or its unit tests
+  (`npm run test:unit`) fail. Before, only the type check inside the
+  image build looked at the web UI. `CONTRIBUTING.md` says what a pull
+  request must pass.
+
 ## [2.63.0] — 2026-10-06 — "tidy vault"
 
 A tool that finds the attachments nothing uses any more, and no more
