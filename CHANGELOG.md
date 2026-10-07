@@ -8,6 +8,25 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.67.0] — 2026-10-07 — "link words"
+
+Full-text search no longer matches the folder path of a link. Pull the
+image and restart: at the first start the index re-reads every note
+(about 15 seconds for 1,400 notes), answering "starting" meanwhile.
+
+### Changed
+- **Search reads a link as its words, not its path** — the full-text
+  index took links as written, `[[project/folder/note|label]]` path
+  included, in the body and in the weightier frontmatter column: a
+  folder name searched found nearly every note that linked a page under
+  it ("services" found 53 of the 57 notes of a project; now 38, the
+  notes that say it). A link now reads as its alias, or else the linked
+  note's file name and heading (`[[docs/bugs#BUG-065]]` as "bugs
+  BUG-065"); links inside code stay as written. To find the notes that
+  link a page, use `memory_backlinks`. Backlinks, the graph and link
+  resolution are unchanged, and the retrieval benchmark gives the same
+  R@1, R@5 and MRR.
+
 ## [2.66.0] — 2026-10-07 — "quieter lint"
 
 The opt-in `unlinked-mentions` lint rule leaves out what is noise by

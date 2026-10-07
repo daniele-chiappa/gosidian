@@ -76,6 +76,14 @@ backlinks, with the key it was written under, in the graph and in lint,
 and a rename rewrites it like a link in the body. A link resolves by path,
 by title or by file name alike in the index and in the web UI.
 
+Full-text search reads a link as the words a reader sees: its alias, or
+else the linked note's file name and heading (`[[plans/2026-x|the plan]]`
+is searchable as "the plan", `[[docs/bugs#BUG-065]]` as "bugs BUG-065").
+The folders of the path are not searchable text, so a word like `plans`
+or `services` finds the notes that say it, not every note linking a page
+under that folder. To find the notes that link a page, use its backlinks
+(`memory_backlinks`). Links inside code are left as written.
+
 ### Frontmatter
 
 ```yaml

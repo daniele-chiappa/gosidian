@@ -77,7 +77,7 @@ const schemaVersion = 5
 // keeping rows extracted by the old code. TestContentVersion_Golden fails
 // when the extraction output changes without a bump. Link resolution is not
 // covered: the boot scan runs ResolveAll every time.
-const ContentVersion = 7
+const ContentVersion = 8
 
 // migrate brings an index file to schemaVersion and reports whether it had
 // to. The index is a cache of the vault — the boot scan re-upserts every
@@ -218,10 +218,12 @@ func stripNoteExt(p string) string {
 // which goes to its own FTS column (see upsertLocked).
 func extractForPath(path, body string) (links []parser.WikiLinkRef, tags []string, title, ftsBody string) {
 	if strings.HasSuffix(strings.ToLower(path), ".html") {
-		return parser.ExtractHTML([]byte(body))
+		links, tags, title, ftsBody = parser.ExtractHTML([]byte(body))
+		return links, tags, title, parser.SearchText(ftsBody)
 	}
 	links, tags, title = parser.Extract([]byte(body))
-	return links, tags, title, parser.BodyAfterFrontmatter([]byte(body))
+	// The FTS reads a link as its words, not its path (IMP-120).
+	return links, tags, title, parser.SearchText(parser.BodyAfterFrontmatter([]byte(body)))
 }
 
 // Upsert stores the note, extracts links/tags from the body, and refreshes
@@ -435,7 +437,9 @@ func (i *Index) upsertLocked(n NoteDoc, resolve bool) (int64, error) {
 
 	if _, err := tx.Exec(
 		`INSERT INTO notes_fts(rowid, title, meta, body) VALUES(?,?,?,?)`,
-		id, title, meta, ftsBody,
+		// meta's links as their words too (IMP-120); the fields and the
+		// frontmatter links above read the text as written.
+		id, title, parser.SearchText(meta), ftsBody,
 	); err != nil {
 		return 0, err
 	}

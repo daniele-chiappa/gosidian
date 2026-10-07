@@ -90,7 +90,11 @@ func TestSearchWith_FieldWeights(t *testing.T) {
 func TestSearchWith_StructuralFactors(t *testing.T) {
 	idx := openTest(t)
 	body := "zebra quartz lantern"
-	upsert(t, idx, "p/plain.md", "", "# Plain\n\n"+body)
+	// plain.md has a frontmatter of as many words as pinned.md's and
+	// important.md's: bm25 normalizes by the row's length, so with none it
+	// won on length alone. The margin was a rounding until IMP-120 made the
+	// ref rows a word shorter.
+	upsert(t, idx, "p/plain.md", "", "---\ntags: [plain]\n---\n\n# Plain\n\n"+body)
 	upsert(t, idx, "p/hub.md", "", "# Hub\n\n"+body)
 	for k := 0; k < 3; k++ {
 		upsert(t, idx, fmt.Sprintf("p/ref%d.md", k), "", "see [[p/hub]]")
@@ -232,5 +236,47 @@ func TestOpen_MigratesV0Index(t *testing.T) {
 	defer idx2.Close()
 	if hits, _ := idx2.Search("new", 10); len(hits) != 1 {
 		t.Errorf("v1 reopen lost rows: %+v", hits)
+	}
+}
+
+// A word found only in the path of a link no longer matches: the FTS reads
+// a link as its alias or file name (IMP-120). The words a reader sees still
+// match, in the body and in the frontmatter.
+func TestSearch_LinkPathNotSearchable(t *testing.T) {
+	idx := openTest(t)
+	for _, d := range []NoteDoc{
+		{Path: "p/services/gitea.md", Title: "gitea", Body: "# Gitea\n\nThe git server.\n"},
+		{Path: "p/notes/a.md", Title: "a", Body: "# A\n\nRuns on [[p/services/gitea]] behind [[p/services/npm|the proxy]].\n"},
+		{Path: "p/notes/b.md", Title: "b", Body: "---\ntitle: B\nrelated: [\"[[p/services/gitea]]\"]\n---\n\n# B\n\nNothing else.\n"},
+		{Path: "p/notes/c.md", Title: "c", Body: "# C\n\nAll our services run in containers.\n"},
+	} {
+		d.ModTime, d.Size = 1, int64(len(d.Body))
+		if err := idx.Upsert(d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	paths := func(q string) map[string]bool {
+		t.Helper()
+		hits, err := idx.Search(q, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]bool{}
+		for _, h := range hits {
+			out[h.Path] = true
+		}
+		return out
+	}
+	if got := paths("services"); len(got) != 1 || !got["p/notes/c.md"] {
+		t.Errorf("services = %v, want only the note that says it", got)
+	}
+	if got := paths("gitea"); !got["p/notes/a.md"] || !got["p/notes/b.md"] {
+		t.Errorf("gitea = %v, want a (body link) and b (frontmatter link)", got)
+	}
+	if got := paths("proxy"); !got["p/notes/a.md"] {
+		t.Errorf("proxy = %v, want a (the alias)", got)
+	}
+	if got := paths("npm"); got["p/notes/a.md"] {
+		t.Errorf("npm = %v: an aliased link's target should not match", got)
 	}
 }

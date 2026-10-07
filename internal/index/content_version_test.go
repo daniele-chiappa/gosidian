@@ -36,6 +36,10 @@ var extractionDigests = map[int]string{
 	// 7: a color followed by a slash is a color too (#FAFAFA/#EFEFEF,
 	// IMP-145); the corpus gained such a list.
 	7: "3637b94e7932d7766cf23201dcd41e0755559311fb6e5f2bc594b54d75538378",
+	// 8: the FTS reads a link as its words, the alias or the file name and
+	// heading, not its path (IMP-120); in the body, the HTML text and the
+	// meta column. The corpus already had every kind of link.
+	8: "86975a51a19bdc44f2641a66951aa95d927979c7c733400f48791a83965becd4",
 }
 
 // goldenCorpus covers every extracted row kind: title from frontmatter and
