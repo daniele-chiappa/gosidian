@@ -8,6 +8,21 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.69.1] — 2026-10-07 — "plancia 0.3.2"
+
+The web UI's window manager moves to a newer
+[plancia](https://github.com/daniele-chiappa/plancia) release. Nothing
+changes in what you see or do. Pull the image and restart, nothing to
+migrate.
+
+### Changed
+- **plancia 0.3.2** — from 0.3.0. plancia 0.3.1 types the slots of its
+  dialog component, which gosidian does not use. 0.3.2 builds the package
+  with plancia's updated toolchain (Vite 8, the version gosidian builds
+  with), so its code is rebundled and smaller. Windows, tabs, resizing
+  and minimising look and behave as before: screenshots of the same steps
+  on both versions match.
+
 ## [2.69.0] — 2026-10-07 — "skill bundles"
 
 The skill catalogue tells which skills come with reference notes, and

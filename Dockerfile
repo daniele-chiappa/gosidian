@@ -16,8 +16,8 @@ FROM node:24-alpine AS web-builder
 WORKDIR /web
 
 # Cache `npm ci` against the lockfile. The `plancia` dependency is the
-# public npm release (resolved from registry.npmjs.org), so the lockfile
-# alone is enough — no vendored tarball to COPY in.
+# tarball of one of its GitHub releases, pinned with its integrity in the
+# lockfile, so the lockfile alone is enough — no vendored tarball to COPY in.
 COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 
