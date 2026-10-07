@@ -72,30 +72,6 @@ func TestTokenStore_SetEmptyRejected(t *testing.T) {
 	}
 }
 
-func TestTokenStore_Mask(t *testing.T) {
-	cases := map[string]string{
-		"":                 "(non impostato)",
-		"abc":              "••••",
-		"abcd":             "••••abcd",
-		"glpat-1234567890": "••••7890",
-	}
-	for input, want := range cases {
-		if got := MaskToken(input); got != want {
-			t.Errorf("MaskToken(%q) = %q, want %q", input, got, want)
-		}
-	}
-
-	dir := t.TempDir()
-	ts, _ := OpenTokenStore(filepath.Join(dir, "gitsync.json"))
-	if got := ts.Mask(); got != "(non impostato)" {
-		t.Errorf("empty store Mask = %q", got)
-	}
-	_ = ts.Set("xyz123ABCD")
-	if got := ts.Mask(); got != "••••ABCD" {
-		t.Errorf("Mask after Set = %q", got)
-	}
-}
-
 func TestTokenStore_OpenMissingDir(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "nested", "missing", "gitsync.json")

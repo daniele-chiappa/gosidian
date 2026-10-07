@@ -144,25 +144,3 @@ func (t *TokenStore) Clear() error {
 	t.mtime = time.Time{}
 	return nil
 }
-
-// Mask returns a UI-safe representation of the current token. Returns
-// "(non impostato)" when empty, "••••XXXX" exposing the last 4 chars
-// otherwise. The string is intentionally human-readable — translations
-// happen at the template layer if needed.
-func (t *TokenStore) Mask() string {
-	tok := t.Get()
-	return MaskToken(tok)
-}
-
-// MaskToken is a pure function (no I/O) that returns the masked form of an
-// arbitrary token string. Exposed so callers can mask values they hold in
-// memory without going through the store.
-func MaskToken(tok string) string {
-	if tok == "" {
-		return "(non impostato)"
-	}
-	if len(tok) < 4 {
-		return "••••"
-	}
-	return "••••" + tok[len(tok)-4:]
-}

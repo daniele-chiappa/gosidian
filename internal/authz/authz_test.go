@@ -50,12 +50,12 @@ func TestExplain_TeamSources(t *testing.T) {
 
 func TestCapabilities(t *testing.T) {
 	cases := []struct {
-		role                webauth.Role
-		write, admin, guest bool
+		role         webauth.Role
+		write, admin bool
 	}{
-		{webauth.RoleOwner, true, true, false},
-		{webauth.RoleMember, true, false, false},
-		{webauth.RoleGuest, false, false, true},
+		{webauth.RoleOwner, true, true},
+		{webauth.RoleMember, true, false},
+		{webauth.RoleGuest, false, false},
 	}
 	for _, c := range cases {
 		p := Principal{Role: c.role}
@@ -64,9 +64,6 @@ func TestCapabilities(t *testing.T) {
 		}
 		if p.CanAdmin() != c.admin {
 			t.Errorf("%s CanAdmin=%v want %v", c.role, p.CanAdmin(), c.admin)
-		}
-		if p.IsGuest() != c.guest {
-			t.Errorf("%s IsGuest=%v want %v", c.role, p.IsGuest(), c.guest)
 		}
 	}
 }

@@ -1,8 +1,7 @@
 # MCP client setup
 
 Connect any MCP-compatible client to the MCP endpoint, passing the
-token as a bearer header. Language preference uses the standard
-`Accept-Language` header.
+token as a bearer header.
 
 The endpoint is **`/mcp` on the web port** (single-port mode), speaking
 **Streamable HTTP** — the current MCP transport. The legacy **HTTP + SSE**
@@ -20,8 +19,7 @@ of this page.
       "type": "http",
       "url": "http://127.0.0.1:8080/mcp",
       "headers": {
-        "Authorization": "Bearer gosidian_XXXXXXXXXXXXXXXXXXXXXXXX",
-        "Accept-Language": "en"
+        "Authorization": "Bearer gosidian_XXXXXXXXXXXXXXXXXXXXXXXX"
       }
     }
   }
@@ -103,8 +101,6 @@ with custom headers works. Typical configuration fields:
   `http://<host>:<port>/sse` when the standalone listener is enabled
 - `transport` / `type` — `"http"` (Streamable HTTP) or `"sse"`
 - `headers.Authorization` — `Bearer <plaintext>`
-- `headers.Accept-Language` — optional; `en`, `it`, `es`, `fr`, `de`
-  available in v1.10
 
 ## stdio clients
 

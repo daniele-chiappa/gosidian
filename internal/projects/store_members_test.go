@@ -107,15 +107,6 @@ func TestProjectMembers_DeleteAndRename(t *testing.T) {
 	}
 }
 
-func TestLevelRank(t *testing.T) {
-	if !(LevelRank(LevelRead) < LevelRank(LevelWrite) && LevelRank(LevelWrite) < LevelRank(LevelAdmin)) {
-		t.Error("levels must be ordered read < write < admin")
-	}
-	if LevelRank("root") != 0 {
-		t.Error("unknown level must rank 0")
-	}
-}
-
 func TestVisibility_DefaultsAndOverrides(t *testing.T) {
 	s, _ := Open(filepath.Join(t.TempDir(), "projects.json"))
 	if s.Visibility("nope") != VisibilityPrivate || s.DefaultVisibility() != VisibilityPrivate {
@@ -130,14 +121,14 @@ func TestVisibility_DefaultsAndOverrides(t *testing.T) {
 	if err := s.Set("p", Flags{Visibility: VisibilityPrivate}); err != nil {
 		t.Fatal(err)
 	}
-	if s.Visibility("p") != VisibilityPrivate || s.IsPublic("p") {
+	if s.Visibility("p") != VisibilityPrivate {
 		t.Error("explicit visibility must win over the default")
 	}
 	// The legacy Public flag still reads as public until migrated.
 	if err := s.Set("legacy", Flags{Public: true}); err != nil {
 		t.Fatal(err)
 	}
-	if !s.IsPublic("legacy") {
+	if s.Visibility("legacy") != VisibilityPublic {
 		t.Error("legacy Public flag must resolve to public")
 	}
 	if err := s.Set("bad", Flags{Visibility: "secret"}); err == nil {

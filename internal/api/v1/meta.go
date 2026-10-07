@@ -66,12 +66,9 @@ func (r *Router) handleVersion(w http.ResponseWriter, req *http.Request) {
 // then takes over.
 //
 // Scope handling: the on-disk catalogs are split by scope
-// (`ui.<lang>.json`, `errors.<lang>.json`, `mcp.<lang>.json`). The SPA
-// can request a specific scope via `?scope=ui` (default) or `?scope=all`
-// to receive the merged tree. Only `ui` and `errors` are SPA-relevant;
-// `mcp` is reserved for the MCP server's localized error strings and
-// returns 404 from the SPA endpoint to avoid accidentally shipping
-// agent-specific copy to browsers.
+// (`ui.<lang>.json`, `errors.<lang>.json`). A client can request a
+// specific scope via `?scope=ui` (default) or `?scope=all` to receive the
+// merged tree. An unknown scope is a 404.
 func (r *Router) handleI18nCatalog(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
 		WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
@@ -84,10 +81,6 @@ func (r *Router) handleI18nCatalog(w http.ResponseWriter, req *http.Request) {
 	scope := strings.TrimSpace(req.URL.Query().Get("scope"))
 	if scope == "" {
 		scope = "ui"
-	}
-	if scope == "mcp" {
-		WriteError(w, http.StatusNotFound, CodeNotFound, "mcp scope is server-only")
-		return
 	}
 
 	cfs := i18n.CatalogFS()

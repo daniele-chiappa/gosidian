@@ -50,15 +50,6 @@ func drainEvents(t *testing.T, sub *events.Subscription, n int) []seenEvent {
 	}
 }
 
-func hasEvent(evs []seenEvent, topic events.Topic, action, path string) bool {
-	for _, e := range evs {
-		if e.Topic == topic && e.Action == action && e.Path == path {
-			return true
-		}
-	}
-	return false
-}
-
 // The events of every tool that writes are checked by the write
 // conformance suite (write_conformance_test.go), which replaced the table
 // that lived here (BUG-036).

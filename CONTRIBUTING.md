@@ -104,23 +104,25 @@ releases from `main` when the accumulated change justifies one.
 
 ## Translating gosidian
 
-The UI and MCP error strings live in `internal/i18n/catalogs/`, one
-JSON file per (scope, language) pair:
+The web UI strings live in `internal/i18n/catalogs/`, one JSON file per
+(scope, language) pair. The SPA bundles the `ui` catalogs
+(`web/src/locales/index.ts`); `/api/v1/i18n` serves `ui` and `errors` to
+other clients:
 
 ```
 catalogs/
-├── ui.en.json      errors.en.json     mcp.en.json
-├── ui.it.json      errors.it.json     mcp.it.json
-├── ui.es.json      errors.es.json     mcp.es.json    ← stub (v1.10)
-├── ui.fr.json      errors.fr.json     mcp.fr.json    ← stub (v1.10)
-└── ui.de.json      errors.de.json     mcp.de.json    ← stub (v1.10)
+├── ui.en.json      errors.en.json
+├── ui.it.json      errors.it.json
+├── ui.es.json      errors.es.json    ← stub (v1.10)
+├── ui.fr.json      errors.fr.json    ← stub (v1.10)
+└── ui.de.json      errors.de.json    ← stub (v1.10)
 ```
 
 **Current state**: English is the reference. Italian is complete. Spanish,
 French, and German ship as scaffolding stubs in v1.10 — only the
 topbar/navigation strings are translated; every other key falls back to
-the English catalog automatically (see `internal/i18n/i18n.go` `T()`
-fallback chain).
+the English catalog automatically (vue-i18n's `fallbackLocale` in
+`web/src/locales/index.ts`).
 
 ### How to contribute a translation
 
@@ -129,25 +131,24 @@ fallback chain).
 3. Keep the **keys** identical. Translate only the **values**. The
    JSON tree shape must mirror the EN source so new keys added
    upstream don't silently disappear on merge.
-4. Preserve any format verbs (`%s`, `%d`, …). They get substituted at
-   runtime via `fmt.Sprintf`.
+4. Preserve any format verbs (`%s`, `%d`, …) and placeholders
+   (`{name}`). They are filled in at runtime.
 5. Remove the `"_stub"` header key once the file is materially
    complete — it's a contribution marker, not a translation.
 6. Open a PR with a short summary ("complete ES ui catalog", "fix DE
    plural in tokens.confirm_revoke", …). No need to translate all
-   three scopes at once; partial PRs are welcome.
+   both scopes at once; partial PRs are welcome.
 
 ### Adding a new language
 
-1. Create `<scope>.<lang>.json` for each of the three scopes, mirroring
-   the EN structure. Start with an empty `{}` if you only have time
-   for the topbar — missing keys fall back to EN without crashing.
-2. Add the new language code to the `<select class="lang-switcher">`
-   dropdown in `internal/server/templates/layout.html` (both a new
-   `<option>` and the display label).
-3. Extend `I18nConfig.EnabledLangs` default in
-   `internal/config/config.go` so the boot log lists it.
-4. Submit a PR with the 3 files + the 2 small edits.
+1. Create `<scope>.<lang>.json` for both scopes, mirroring the EN
+   structure. Start with an empty `{}` if you only have time for the
+   topbar — missing keys fall back to EN without crashing.
+2. Add the language to the SPA: import its `ui` catalog in
+   `web/src/locales/index.ts`, add the code to `LocaleCode` and
+   `VALID_LOCALES` in `web/src/stores/ui.ts`, and add an entry with its
+   display label to `localeOptions` in `web/src/views/SettingsView.vue`.
+3. Submit a PR with the 2 files + the SPA edits.
 
 ### AI-assisted translations
 
@@ -167,9 +168,9 @@ scrutiny accordingly.
 
 ### Testing locally
 
-After editing a catalog, rebuild and switch languages via the topbar
-selector. Missing keys surface as their literal dotted path (e.g.
-`nav.projects`), which makes visible gaps easy to spot.
+After editing a catalog, rebuild and switch languages in Settings. A key
+missing from the language shows the English text; a key missing from
+English too shows its literal dotted path (e.g. `nav.projects`).
 
 ## Code of conduct
 

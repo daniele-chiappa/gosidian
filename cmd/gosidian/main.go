@@ -20,7 +20,6 @@ import (
 	"github.com/gosidian/gosidian/internal/automation"
 	"github.com/gosidian/gosidian/internal/config"
 	"github.com/gosidian/gosidian/internal/gitsync"
-	"github.com/gosidian/gosidian/internal/i18n"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/insights"
 	"github.com/gosidian/gosidian/internal/ldap"
@@ -470,14 +469,6 @@ func main() {
 	srv := server.New(v, idx)
 	srv.SetBuildInfo(version, cfg.Git.Enabled)
 
-	// i18n: load embedded catalogues. /api/v1/i18n serves them to the
-	// SPA; load failures are not fatal — vue-i18n falls back to bundle-
-	// time strings, dev-friendly enough that we don't bring down boot.
-	if _, err := i18n.Load(cfg.I18n.DefaultLang); err != nil {
-		log.Printf("i18n: load error (SPA falls back to bundled strings): %v", err)
-	} else {
-		log.Printf("i18n: loaded (default=%s, enabled=%v)", cfg.I18n.DefaultLang, cfg.I18n.EnabledLangs)
-	}
 	if cfg.Git.Enabled {
 		srv.SetGitSync(syncer)
 	}

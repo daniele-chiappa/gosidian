@@ -34,9 +34,6 @@ func (p Principal) CanWrite() bool { return p.Role.CanWrite() }
 // (users, tokens, invites, audit, global settings).
 func (p Principal) CanAdmin() bool { return p.Role.CanAdmin() }
 
-// IsGuest reports whether the principal holds the restricted guest role.
-func (p Principal) IsGuest() bool { return p.Role.IsGuest() }
-
 // CanSeeAllProjects reports whether the principal holds a role of the member
 // tier or above (owner or member). Kept for role-tier gates such as the
 // settings page; project visibility itself is decided by Level.

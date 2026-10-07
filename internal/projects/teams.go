@@ -317,21 +317,3 @@ func (s *Store) teamLevelsForLocked(userID, project string) []TeamGrant {
 	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].TeamName) < strings.ToLower(out[j].TeamName) })
 	return out
 }
-
-// TeamsOf lists the teams the account belongs to, by name.
-func (s *Store) TeamsOf(userID string) []Team {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.reloadIfStale()
-	var out []Team
-	for _, t := range s.teams {
-		for _, u := range t.Users {
-			if u == userID {
-				out = append(out, cloneTeam(t))
-				break
-			}
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
-	return out
-}

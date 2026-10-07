@@ -62,7 +62,6 @@ func (s *Store) ProvisionInitialOwner(username string) (string, error) {
 		return "", nil
 	}
 	s.file = AccountsFile{Version: accountsVersion, Users: []User{u}}
-	s.sessions = make(map[string]session)
 	err = s.saveLocked()
 	if err != nil {
 		s.file = AccountsFile{}

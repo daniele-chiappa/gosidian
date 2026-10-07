@@ -285,23 +285,6 @@ func checkID(id string) error {
 	return nil
 }
 
-// PurgeAll empties the trash.
-func (b *Bin) PurgeAll() error {
-	entries, err := os.ReadDir(b.dir)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return err
-	}
-	for _, e := range entries {
-		if err := os.RemoveAll(filepath.Join(b.dir, e.Name())); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // PruneExpired removes entries older than the bin's retention window. A
 // non-positive retention means "never prune". Returns the number of removed
 // items. Best run at server startup.

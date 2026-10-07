@@ -246,9 +246,6 @@ func (s *Server) Resolve(plaintext string) (*auth.Token, bool) {
 	return grant, true
 }
 
-// IsAccessToken reports whether a bearer has the OAuth access-token shape.
-func IsAccessToken(plaintext string) bool { return strings.HasPrefix(plaintext, accessPrefix) }
-
 // handleRevoke implements RFC 7009 for public clients: revoking a refresh
 // token deletes the grant; revoking an access token drops it. Always 200.
 func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {

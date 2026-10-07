@@ -106,20 +106,6 @@ const (
 // ValidLevel reports whether s is an accepted grant level.
 func ValidLevel(s string) bool { return s == LevelRead || s == LevelWrite || s == LevelAdmin }
 
-// LevelRank orders the grant levels (unknown → 0) so callers can compare
-// them without string switches.
-func LevelRank(s string) int {
-	switch s {
-	case LevelRead:
-		return 1
-	case LevelWrite:
-		return 2
-	case LevelAdmin:
-		return 3
-	}
-	return 0
-}
-
 // ProjectMember is a per-user grant on a project. The account's role stays
 // the ceiling: a guest with a write grant is still read-only. Persisted in a
 // separate map from Flags so Flags stays a comparable struct (Set relies on
@@ -471,12 +457,6 @@ func (s *Store) visibilityLocked(name string) string {
 		return VisibilityPublic
 	}
 	return s.defaultVisibilityLocked()
-}
-
-// IsPublic reports whether the project is readable by every signed-in
-// account, guests included.
-func (s *Store) IsPublic(name string) bool {
-	return s.Visibility(name) == VisibilityPublic
 }
 
 // DefaultVisibility is the visibility applied to projects without an entry

@@ -51,10 +51,9 @@ func TestHTTPContext_CorrelationFollowsSession(t *testing.T) {
 		t.Errorf("sessionless messages should get distinct 8-char ids, got %q and %q", n1, n2)
 	}
 
-	req.Header.Set("Accept-Language", "it")
 	ctx := fn(withSession("x"), req)
-	if basePathFromContext(ctx) != "/mcp" || LangFromContext(ctx) != "it" {
-		t.Errorf("basePath/lang not threaded: %q %q", basePathFromContext(ctx), LangFromContext(ctx))
+	if basePathFromContext(ctx) != "/mcp" {
+		t.Errorf("basePath not threaded: %q", basePathFromContext(ctx))
 	}
 }
 

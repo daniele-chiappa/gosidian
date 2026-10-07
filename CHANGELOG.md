@@ -8,6 +8,26 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.67.4] — 2026-10-07 — "dead code"
+
+Code that nothing called is gone. Behavior is unchanged: pull the image
+and restart, nothing to migrate.
+
+### Removed
+- **Leftovers of earlier rewrites** — the cookie sessions of the old
+  web login (the web UI signs in with bearer tokens since 2.0), the
+  Go-side translation lookup together with the `mcp.*.json` catalogs
+  only it could have read, and a handful of unused helpers. The startup
+  log no longer has the `i18n: loaded` line; `/api/v1/i18n` serves the
+  `ui` and `errors` catalogs as before.
+
+### Changed
+- **Docs: no `Accept-Language` for MCP clients** — the client setup
+  guide suggested the header, but MCP replies were never translated and
+  it had no effect; a client config that still sends it keeps working.
+  The translation guide in `CONTRIBUTING.md` now describes the web UI's
+  catalogs and the files to touch for a new language.
+
 ## [2.67.3] — 2026-10-07 — "plancia from GitHub"
 
 The window manager library now comes from its GitHub release, and the

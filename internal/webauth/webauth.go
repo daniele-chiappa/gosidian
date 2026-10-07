@@ -8,18 +8,17 @@
 //   - Invites are single-use, time-limited tokens stored alongside users in
 //     the same file; they are created by the owner, served once via the UI,
 //     and consumed on signup.
-//   - Sessions are an in-memory map keyed by a random cookie value; they are
-//     lost on restart (accepted trade-off for team-ristretto self-hosted).
-//     Sessions carry the user id so handlers can enforce role policies.
+//   - Browser sessions are bearer tokens issued at login by internal/auth
+//     (SpaTokenStore); this package checks the credentials and holds the
+//     accounts those tokens point to.
 //   - If the auth file does not exist, authentication is disabled and the web
 //     UI is open (bootstrap / local-only mode).
 //
 // Legacy single-user auth.json files (pre-v1.4) are migrated in-place on
 // Open(): the lone account becomes the owner, the invites list starts empty.
 //
-// The package exposes a Store (persisted accounts + session cache) and
-// helpers to validate credentials and set/validate session cookies. The HTTP
-// middleware wiring lives in the server package.
+// The package exposes a Store (persisted accounts) and helpers to validate
+// credentials. The HTTP wiring lives in internal/api/v1.
 package webauth
 
 import (
@@ -85,9 +84,6 @@ func (r Role) CanAdmin() bool { return r == RoleOwner }
 // CanWrite reports whether the role may create/edit/delete notes and projects.
 // Owner and member; guests are read-only.
 func (r Role) CanWrite() bool { return r == RoleOwner || r == RoleMember }
-
-// IsGuest reports whether the role is the restricted guest role.
-func (r Role) IsGuest() bool { return r == RoleGuest }
 
 // TOTP global modes (set via Store.SetTOTPMode from config) and per-user
 // override values (User.TOTPPolicy). Effective enforcement is resolved by
@@ -176,14 +172,12 @@ type AccountsFile struct {
 
 const accountsVersion = 2
 
-// Store holds the on-disk accounts plus an in-memory session map. All methods
-// are safe for concurrent use.
+// Store holds the on-disk accounts. All methods are safe for concurrent use.
 type Store struct {
 	path string
 
 	mu       sync.RWMutex
 	file     AccountsFile
-	sessions map[string]session
 	mtime    time.Time // mtime observed at last (re)load; zero when file absent
 	totpMode string    // global TOTP policy: off|optional|required (set at startup)
 
@@ -198,11 +192,6 @@ type Store struct {
 	// renamed to free the username, nil otherwise. Called without holding
 	// Store.mu.
 	onUserCreated func(u User, replaced *User)
-}
-
-type session struct {
-	userID  string
-	expires time.Time
 }
 
 // SetOnUserCreated installs the provisioning hook for new accounts. Safe to
@@ -225,7 +214,7 @@ func (s *Store) SetOnUserDisabled(fn func(userID string)) {
 // (auth-disabled bootstrap). A legacy v1 single-account file is migrated to
 // v2 in memory and persisted back on the next mutation.
 func Open(path string) (*Store, error) {
-	s := &Store{path: path, sessions: make(map[string]session)}
+	s := &Store{path: path}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -252,11 +241,6 @@ func Open(path string) (*Store, error) {
 // no I/O beyond that when the file is unchanged. Called from Enabled() (and
 // hence indirectly from every webauth-protected route) so that an external
 // `gosidian user setup` is visible to the server without a restart.
-//
-// Active sessions survive the reload: user IDs are derived deterministically
-// from username+created_at and the sessions map is keyed by id, so a session
-// cookie issued before the reload remains valid as long as the same user
-// still exists in the new file.
 func (s *Store) reloadIfStale() {
 	st, err := os.Stat(s.path)
 	if err != nil {
@@ -371,7 +355,7 @@ func (s *Store) Enabled() bool {
 
 // Username returns the owner's username if any, otherwise an empty string.
 // Exposed for backward compatibility with handlers that used the old
-// single-user api; new code should prefer UserBySession.
+// single-user api; new code should resolve the account behind the request.
 func (s *Store) Username() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -448,14 +432,12 @@ func (s *Store) Setup(username, password string, withTOTP bool, issuer string) (
 			cur.TOTPSec = u.TOTPSec
 			cur.RecoveryCodes = nil
 		}
-		s.sessions = make(map[string]session)
 		return otpURI, s.saveOwnerLocked()
 	}
 	if len(s.file.Users) > 0 {
 		return "", ErrSetupWouldReplace
 	}
 	s.file = AccountsFile{Version: accountsVersion, Users: []User{u}}
-	s.sessions = make(map[string]session)
 	return otpURI, s.saveOwnerLocked()
 }
 
@@ -481,7 +463,6 @@ func (s *Store) Replace(username, password string, withTOTP bool, issuer string)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.file = AccountsFile{Version: accountsVersion, Users: []User{u}}
-	s.sessions = make(map[string]session)
 	return otpURI, s.saveOwnerLocked()
 }
 
@@ -520,13 +501,12 @@ func newOwner(username, password string, withTOTP bool, issuer string) (User, st
 	return u, otpURI, nil
 }
 
-// Disable removes all accounts + invites and invalidates all sessions. Used
-// by tests and by the CLI `gosidian user disable --all`.
+// Disable removes all accounts + invites. Used by tests and by the CLI
+// `gosidian user disable --all`.
 func (s *Store) Disable() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.file = AccountsFile{}
-	s.sessions = make(map[string]session)
 	if err := os.Remove(s.path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -729,76 +709,6 @@ func (s *Store) Authenticate(username, password, totpCode string, ldap LDAPAuthe
 	return AuthResult{User: u, RecoveryCodeUsed: used}, nil
 }
 
-// CreateSession returns a fresh session cookie value for the given user,
-// valid for ttl.
-func (s *Store) CreateSession(userID string, ttl time.Duration) (string, error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
-	}
-	id := base64.RawURLEncoding.EncodeToString(buf)
-	s.mu.Lock()
-	s.sessions[id] = session{userID: userID, expires: time.Now().Add(ttl)}
-	s.mu.Unlock()
-	return id, nil
-}
-
-// ValidateSession checks whether the cookie id maps to a live session for a
-// still-enabled user. Expired or orphaned sessions are evicted lazily.
-func (s *Store) ValidateSession(id string) bool {
-	_, ok := s.UserBySession(id)
-	return ok
-}
-
-// UserBySession returns a copy of the user behind the given session id, or
-// (nil, false) if the session is missing, expired, or belongs to a disabled
-// user (in which case the session is also evicted).
-func (s *Store) UserBySession(id string) (*User, bool) {
-	if id == "" {
-		return nil, false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	sess, ok := s.sessions[id]
-	if !ok {
-		return nil, false
-	}
-	if time.Now().After(sess.expires) {
-		delete(s.sessions, id)
-		return nil, false
-	}
-	for i := range s.file.Users {
-		if s.file.Users[i].ID == sess.userID {
-			u := s.file.Users[i]
-			if !u.Enabled() {
-				delete(s.sessions, id)
-				return nil, false
-			}
-			return &u, true
-		}
-	}
-	// Session references a non-existent user — evict.
-	delete(s.sessions, id)
-	return nil, false
-}
-
-// RevokeSession deletes a session id (used on logout).
-func (s *Store) RevokeSession(id string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.sessions, id)
-}
-
-// revokeSessionsForUserLocked evicts every session belonging to userID.
-// Caller must hold s.mu (write lock).
-func (s *Store) revokeSessionsForUserLocked(userID string) {
-	for id, sess := range s.sessions {
-		if sess.userID == userID {
-			delete(s.sessions, id)
-		}
-	}
-}
-
 // ListUsers returns a copy of the users slice (safe to mutate).
 func (s *Store) ListUsers() []User {
 	s.mu.RLock()
@@ -977,8 +887,8 @@ func (s *Store) SetCanCreateProjects(id string, can bool) error {
 	return fmt.Errorf("user %q not found", id)
 }
 
-// DisableUser marks the user as disabled, evicts their sessions, and invokes
-// the cascade hook. An owner cannot be disabled (guards against lock-out).
+// DisableUser marks the user as disabled and invokes the cascade hook. An
+// owner cannot be disabled (guards against lock-out).
 func (s *Store) DisableUser(id string) error {
 	s.mu.Lock()
 	var fn func(string)
@@ -1008,7 +918,6 @@ func (s *Store) DisableUser(id string) error {
 		s.mu.Unlock()
 		return err
 	}
-	s.revokeSessionsForUserLocked(id)
 	fn = s.onUserDisabled
 	s.mu.Unlock()
 	if fn != nil {
@@ -1276,36 +1185,6 @@ func (s *Store) saveLocked() error {
 		s.mtime = st.ModTime()
 	}
 	return nil
-}
-
-// SessionCookie builds an http.Cookie carrying the session id. Use secure=true
-// when serving behind TLS (the server decides based on r.TLS or an X-Forwarded
-// header — see server package).
-const SessionCookieName = "gosidian_session"
-
-func SessionCookie(id string, ttl time.Duration, secure bool) *http.Cookie {
-	return &http.Cookie{
-		Name:     SessionCookieName,
-		Value:    id,
-		Path:     "/",
-		Expires:  time.Now().Add(ttl),
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		Secure:   secure,
-	}
-}
-
-// ClearCookie returns an expired cookie that the browser will drop.
-func ClearCookie(secure bool) *http.Cookie {
-	return &http.Cookie{
-		Name:     SessionCookieName,
-		Value:    "",
-		Path:     "/",
-		MaxAge:   -1,
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		Secure:   secure,
-	}
 }
 
 // IsSecureRequest reports whether r looks like it came over TLS. It trusts

@@ -34,7 +34,6 @@ type ctxKey int
 const (
 	tokenCtxKey       ctxKey = 1
 	correlationCtxKey ctxKey = 2
-	langCtxKey        ctxKey = 3
 	basePathCtxKey    ctxKey = 4
 	sessionCtxKey     ctxKey = 5
 )
@@ -56,16 +55,6 @@ func sessionFromContext(ctx context.Context) string {
 // win — tickets minted over /mcp/sse would advertise the wrong endpoint.
 func basePathFromContext(ctx context.Context) string {
 	if v, ok := ctx.Value(basePathCtxKey).(string); ok {
-		return v
-	}
-	return ""
-}
-
-// LangFromContext returns the Accept-Language value (first tag) extracted
-// from the request headers, or empty when the caller did not supply one.
-// Tool handlers pick this up to localise error messages.
-func LangFromContext(ctx context.Context) string {
-	if v, ok := ctx.Value(langCtxKey).(string); ok {
 		return v
 	}
 	return ""
@@ -634,7 +623,7 @@ func New(v *vault.Vault, idx *index.Index, tokens *auth.Store) *Server {
 // SSE-only because Streamable HTTP needs a non-empty exact path to route on.
 //
 // Both transports share one context func (bearer → token, correlation id,
-// Accept-Language, basePath) and one bearer guard: a request without a
+// basePath) and one bearer guard: a request without a
 // valid bearer gets 401, unless openMode (no token store, or the operator's
 // opt-in while it is empty). Each invocation constructs fresh
 // transport servers — obtain one handler per mount point.
@@ -740,8 +729,8 @@ func (s *Server) CloseStreams() {
 
 // httpContext returns the per-message context decorator shared by both HTTP
 // transports: the correlation id (see correlationIDFor), the mount prefix
-// the message arrived on (tickets advertise it), Accept-Language for
-// localised errors, and the bearer token when valid. mcp-go invokes it once
+// the message arrived on (tickets advertise it), and the bearer token when
+// valid. mcp-go invokes it once
 // per JSON-RPC message with the client session already in ctx.
 func (s *Server) httpContext(basePath string) func(ctx context.Context, r *http.Request) context.Context {
 	return func(ctx context.Context, r *http.Request) context.Context {
@@ -750,9 +739,6 @@ func (s *Server) httpContext(basePath string) func(ctx context.Context, r *http.
 			ctx = context.WithValue(ctx, sessionCtxKey, h)
 		}
 		ctx = context.WithValue(ctx, basePathCtxKey, basePath)
-		if lang := r.Header.Get("Accept-Language"); lang != "" {
-			ctx = context.WithValue(ctx, langCtxKey, lang)
-		}
 		if tok := s.authenticate(r); tok != nil {
 			ctx = context.WithValue(ctx, tokenCtxKey, tok)
 		}
@@ -772,21 +758,6 @@ func (s *Server) transport(next http.Handler) http.Handler {
 		w.Header().Set("X-Accel-Buffering", "no")
 		next.ServeHTTP(w, r)
 	})
-}
-
-// ServeSSE starts a standalone HTTP listener serving the MCP SSE endpoint
-// at the root of addr. Kept for backward compatibility with the pre-v1.12
-// deployment pattern (env GOSIDIAN_MCP_ADDR / --mcp-addr). New deployments
-// should mount Handler() on the main web server (single-port mode) — see
-// *internal/server.Server.MountMCP.
-//
-// Blocks until the listener stops or errors.
-func (s *Server) ServeSSE(addr string) error {
-	srv := &http.Server{
-		Addr:    addr,
-		Handler: s.Handler(""),
-	}
-	return srv.ListenAndServe()
 }
 
 // authDenial says why a request carried no usable token, so the response can
@@ -972,7 +943,3 @@ func (s *Server) tokenFromContext(ctx context.Context) *auth.Token {
 	// Should not happen: auth middleware would have rejected the request.
 	return nil
 }
-
-// MCPServer returns the underlying mcp-go server. Exposed for tests so they
-// can invoke tool handlers in-process without opening a socket.
-func (s *Server) MCPServer() *server.MCPServer { return s.impl }

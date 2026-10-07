@@ -99,10 +99,10 @@ The language selector lives in **Settings**. On first load the SPA reads
 the operator's configured `i18n.default_lang`; the user's later choice is
 persisted client-side and wins thereafter. Keys missing from the selected
 language fall back to English automatically — see
-[`internal/i18n/i18n.go`](../../internal/i18n/i18n.go). Spanish, French,
-and German are scaffolding stubs; contributing a complete translation is
-documented in [CONTRIBUTING.md](../../CONTRIBUTING.md). Agents pick their
-language via the `Accept-Language` header on the MCP transport.
+[`web/src/locales/index.ts`](../../web/src/locales/index.ts). Spanish,
+French, and German are scaffolding stubs; contributing a complete
+translation is documented in [CONTRIBUTING.md](../../CONTRIBUTING.md).
+MCP tool output is in English.
 
 ## Web login
 

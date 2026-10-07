@@ -59,9 +59,6 @@ func TestTeams_CRUDAndGrants(t *testing.T) {
 	if lv := s.TeamLevelsFor("u9", "alpha"); len(lv) != 0 {
 		t.Errorf("stranger must inherit nothing: %+v", lv)
 	}
-	if mine := s.TeamsOf("u2"); len(mine) != 1 || mine[0].ID != devs.ID {
-		t.Errorf("TeamsOf(u2) = %+v", mine)
-	}
 
 	// Mutating a returned copy must not touch the store.
 	got.Users = append(got.Users, "u3")

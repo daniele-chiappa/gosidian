@@ -333,11 +333,11 @@ func TestI18n_ScopeAll(t *testing.T) {
 	}
 }
 
-func TestI18n_RejectsMcpScope(t *testing.T) {
+func TestI18n_UnknownScope(t *testing.T) {
 	f := newAuthFixture(t)
 	w := f.request(http.MethodGet, "/api/v1/i18n?lang=en&scope=mcp", "", nil)
 	if w.Code != http.StatusNotFound {
-		t.Errorf("status=%d, want 404 for mcp scope on SPA endpoint", w.Code)
+		t.Errorf("status=%d, want 404 for a scope with no catalog", w.Code)
 	}
 }
 

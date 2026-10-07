@@ -216,35 +216,6 @@ func TestStore_Disable(t *testing.T) {
 	}
 }
 
-func TestStore_Session(t *testing.T) {
-	s := newStore(t)
-	uid := setupOwner(t, s, "admin", "goodpassword")
-
-	id, err := s.CreateSession(uid, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !s.ValidateSession(id) {
-		t.Errorf("session not valid right after creation")
-	}
-	if u, ok := s.UserBySession(id); !ok || u.ID != uid {
-		t.Errorf("UserBySession = (%+v, %v), want matching owner", u, ok)
-	}
-	s.RevokeSession(id)
-	if s.ValidateSession(id) {
-		t.Errorf("session still valid after revoke")
-	}
-}
-
-func TestStore_ExpiredSession(t *testing.T) {
-	s := newStore(t)
-	uid := setupOwner(t, s, "admin", "goodpassword")
-	id, _ := s.CreateSession(uid, -time.Second) // already expired
-	if s.ValidateSession(id) {
-		t.Errorf("expired session should be invalid")
-	}
-}
-
 func TestStore_AddUserAndInvite(t *testing.T) {
 	s := newStore(t)
 	ownerID := setupOwner(t, s, "owner", "ownerpass1")
@@ -307,16 +278,8 @@ func TestStore_DisableUserCascade(t *testing.T) {
 	var cascadedID string
 	s.SetOnUserDisabled(func(id string) { cascadedID = id })
 
-	// Create a session for the member, then disable — session must be gone.
-	sid, _ := s.CreateSession(member.ID, time.Hour)
-	if !s.ValidateSession(sid) {
-		t.Fatal("session should be valid")
-	}
 	if err := s.DisableUser(member.ID); err != nil {
 		t.Fatal(err)
-	}
-	if s.ValidateSession(sid) {
-		t.Errorf("session should be evicted after disable")
 	}
 	if cascadedID != member.ID {
 		t.Errorf("cascade called with %q, want %q", cascadedID, member.ID)

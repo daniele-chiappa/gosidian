@@ -176,17 +176,6 @@ func DefaultRules() []string {
 	return out
 }
 
-// AllRules returns the known rule registry keyed by name — default plus
-// optional rules. Exposed for the MCP tool to validate/advertise `rules` input.
-func AllRules() map[string]Severity {
-	known := knownRules()
-	out := make(map[string]Severity, len(known))
-	for _, r := range known {
-		out[r.name] = r.defaultSeverity
-	}
-	return out
-}
-
 // Run executes the selected rules against project. When enabled is empty,
 // all default rules run. minSeverity filters the returned issues (empty =
 // no filtering).

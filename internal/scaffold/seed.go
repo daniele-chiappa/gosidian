@@ -13,8 +13,8 @@
 // template whose target folder is missing in the vault. It never
 // overwrites user edits.
 //
-// `LoadTemplate` reads a single template (meta + file list) from the
-// vault; `ListTemplates` walks the directory.
+// `LoadTemplateIn` reads a single template (meta + file list) from a
+// templates directory; `ListTemplatesIn` walks it.
 package scaffold
 
 import (
@@ -62,8 +62,8 @@ const (
 	MetaFilename = "_template.toml"
 )
 
-// ErrTemplateNotFound is returned by LoadTemplate when the requested
-// template directory does not exist under <vault>/.gosidian/templates/.
+// ErrTemplateNotFound is returned by LoadTemplateIn when the requested
+// template directory does not exist.
 var ErrTemplateNotFound = errors.New("template not found")
 
 // TemplatesDir returns <vault>/.gosidian/templates given the vault root.
@@ -142,13 +142,6 @@ func copyEmbedTree(efs fs.FS, src, dst string) error {
 	})
 }
 
-// ListTemplates returns every template found in
-// <vault>/.gosidian/templates/, sorted alphabetically. Missing dir is
-// not an error — it just returns an empty slice.
-func ListTemplates(vaultRoot string) ([]Template, error) {
-	return ListTemplatesIn(TemplatesDir(vaultRoot))
-}
-
 // ListTemplatesIn returns every template found in the given templates
 // directory, sorted. A missing directory is not an error — it returns an empty
 // slice.
@@ -179,11 +172,6 @@ func ListTemplatesIn(dir string) ([]Template, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
-}
-
-// LoadTemplate reads a single template by name from <vault>/.gosidian/templates/.
-func LoadTemplate(vaultRoot, name string) (Template, error) {
-	return LoadTemplateIn(TemplatesDir(vaultRoot), name)
 }
 
 // LoadTemplateIn reads a single template by name from an explicit templates
