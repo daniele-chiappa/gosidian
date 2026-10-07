@@ -89,6 +89,10 @@ const localeOptions: LocaleOption[] = [
   { value: 'fr', label: 'Français' },
   { value: 'de', label: 'Deutsch' },
 ]
+// The selector offers only the languages the operator enables (IMP-148).
+const enabledLocaleOptions = computed(() =>
+  localeOptions.filter((l) => ui.enabledLocales.includes(l.value)),
+)
 const data = ref<Settings | null>(null)
 const draft = reactive<{
   git: {
@@ -100,18 +104,25 @@ const draft = reactive<{
     token_env: string
   }
   trash: { enabled: boolean; retention_ms: number }
-  i18n: { default_lang: string; enabled_langs: string }
+  i18n: { default_lang: string; enabled_langs: string[] }
   totp_mode: string
   default_visibility: string
   personal_projects: boolean
 }>({
   git: { enabled: false, remote: '', branch: '', debounce_ms: 30000, push: false, token_env: '' },
   trash: { enabled: false, retention_ms: 0 },
-  i18n: { default_lang: 'en', enabled_langs: 'it,en' },
+  i18n: { default_lang: 'en', enabled_langs: [] },
   totp_mode: 'off',
   default_visibility: 'private',
   personal_projects: true,
 })
+// The default is picked among the languages ticked below; the current one
+// stays listed even when it is not (an environment variable may set it).
+const defaultLangOptions = computed(() =>
+  localeOptions.filter(
+    (l) => draft.i18n.enabled_langs.includes(l.value) || l.value === draft.i18n.default_lang,
+  ),
+)
 const loading = ref(false)
 const saving = ref(false)
 const message = ref<string | null>(null)
@@ -147,7 +158,7 @@ function hydrate(s: Settings) {
   draft.trash = { enabled: s.trash.enabled, retention_ms: s.trash.retention_ms }
   draft.i18n = {
     default_lang: s.i18n.default_lang,
-    enabled_langs: (s.i18n.enabled_langs ?? []).join(','),
+    enabled_langs: [...(s.i18n.enabled_langs ?? [])],
   }
   draft.totp_mode = s.totp_mode ?? 'off'
   draft.default_visibility = s.default_visibility || 'private'
@@ -160,7 +171,7 @@ async function load() {
   try {
     hydrate(await getSettings())
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to load settings'
+    error.value = apiErrorMessage(e, 'Failed to load settings')
   } finally {
     loading.value = false
   }
@@ -176,10 +187,7 @@ async function save() {
       trash: { ...draft.trash },
       i18n: {
         default_lang: draft.i18n.default_lang,
-        enabled_langs: draft.i18n.enabled_langs
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean),
+        enabled_langs: [...draft.i18n.enabled_langs],
       },
       totp_mode: draft.totp_mode,
       default_visibility: draft.default_visibility,
@@ -187,8 +195,10 @@ async function save() {
     }))
     hydrate(result)
     message.value = 'Saved.'
+    // The languages apply at once: the selector above follows them.
+    await ui.refreshLocales()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Save failed'
+    error.value = apiErrorMessage(e, 'Save failed')
   } finally {
     saving.value = false
   }
@@ -383,7 +393,7 @@ onMounted(load)
           class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2"
           @change="ui.setLocale(($event.target as HTMLSelectElement).value as LocaleCode)"
         >
-          <option v-for="l in localeOptions" :key="l.value" :value="l.value">
+          <option v-for="l in enabledLocaleOptions" :key="l.value" :value="l.value">
             {{ l.label }}
           </option>
         </select>
@@ -487,24 +497,35 @@ onMounted(load)
 
       <fieldset class="rounded border border-border bg-surface p-4 space-y-3">
         <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">i18n</legend>
-        <div class="grid grid-cols-2 gap-3">
-          <label class="block text-sm">
-            <span class="text-text-muted">Default language</span>
-            <input
-              v-model.trim="draft.i18n.default_lang"
-              :disabled="!auth.isOwner || fromEnv('i18n.default_lang')"
-              class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2"
-            />
-          </label>
-          <label class="block text-sm">
-            <span class="text-text-muted">Enabled (comma-separated)</span>
-            <input
-              v-model.trim="draft.i18n.enabled_langs"
-              :disabled="!auth.isOwner || fromEnv('i18n.enabled_langs')"
-              class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2"
-            />
-          </label>
+        <div class="text-sm">
+          <span class="text-text-muted">Languages offered in the selector</span>
+          <div class="mt-1 flex flex-wrap gap-x-4 gap-y-1">
+            <label v-for="l in localeOptions" :key="l.value" class="inline-flex items-center gap-2">
+              <input
+                v-model="draft.i18n.enabled_langs"
+                type="checkbox"
+                :value="l.value"
+                :disabled="!auth.isOwner || fromEnv('i18n.enabled_langs')"
+              />
+              {{ l.label }}
+            </label>
+          </div>
         </div>
+        <label class="block text-sm">
+          <span class="text-text-muted">Default language</span>
+          <select
+            v-model="draft.i18n.default_lang"
+            :disabled="!auth.isOwner || fromEnv('i18n.default_lang')"
+            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2"
+          >
+            <option v-for="l in defaultLangOptions" :key="l.value" :value="l.value">
+              {{ l.label }}
+            </option>
+          </select>
+        </label>
+        <p class="text-xs text-text-muted">
+          The default is the language a browser starts in; it must be one of the languages offered.
+        </p>
       </fieldset>
 
       <div class="flex items-center gap-3">

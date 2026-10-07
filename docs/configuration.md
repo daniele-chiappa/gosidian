@@ -67,7 +67,8 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_VAULT_HTML_NOTES` | `vault.html_notes` | `false` (treat single-file `.html` as first-class notes; ADR-011, sandboxed iframe) |
 | `GOSIDIAN_VAULT_MEDIA_NOTES` | `vault.media_notes` | `false` (resolve image media notes: `.md` with `type: image` + `media:`; ADR-013) |
 | `GOSIDIAN_VAULT_TABLE_NOTES` | `vault.table_notes` | `false` (resolve CSV table notes: `.md` with `type: table` + `media:`; ADR-016) |
-| `GOSIDIAN_I18N_DEFAULT_LANG` | `i18n.default_lang` | `en` |
+| `GOSIDIAN_I18N_DEFAULT_LANG` | `i18n.default_lang` | `en` (the language a browser starts in; must be among the enabled ones) |
+| `GOSIDIAN_I18N_ENABLED_LANGS` | `i18n.enabled_langs` | every language with a catalogue (`it`, `en`, `es`, `fr`, `de`); comma-separated, the languages the web UI's selector offers |
 | `GOSIDIAN_SELF_IMPROVE_ENABLED` | `self_improve.enabled` | `false` |
 | `GOSIDIAN_SELF_IMPROVE_TARGET_PROJECT` | `self_improve.target_project` | `insights` |
 | `GOSIDIAN_SELF_IMPROVE_EVERY_N_CALLS` | `self_improve.every_n_calls` | `25` |

@@ -9,11 +9,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/gosidian/gosidian/internal/i18n"
 )
 
 // Config is the top-level settings document.
@@ -188,11 +190,82 @@ type VaultConfig struct {
 	TableNotes bool `toml:"table_notes"` // resolve CSV table notes (type: table + media: pointer); default false (ADR-016)
 }
 
-// I18nConfig chooses the default UI language and the list of enabled ones.
-// File-based catalogues ship embedded and are merged at startup.
+// I18nConfig chooses the web UI's default language and the languages its
+// selector offers. The catalogues ship embedded (internal/i18n); a language
+// is available when it has a `ui` catalogue (i18n.Languages).
 type I18nConfig struct {
 	DefaultLang  string   `toml:"default_lang"`  // default "en"
-	EnabledLangs []string `toml:"enabled_langs"` // default ["it", "en"]
+	EnabledLangs []string `toml:"enabled_langs"` // default: every available language
+}
+
+// Validate checks the pair as a settings save must: every enabled code and
+// the default have a catalogue, the list is not empty, and the default is
+// one of the enabled languages.
+func (c I18nConfig) Validate() error {
+	langs := NormalizeLangs(c.EnabledLangs)
+	if len(langs) == 0 {
+		return errors.New("i18n.enabled_langs cannot be empty")
+	}
+	available := strings.Join(i18n.Languages(), ", ")
+	for _, l := range langs {
+		if !i18n.Supported(l) {
+			return fmt.Errorf("i18n.enabled_langs: no catalogue for %q (available: %s)", l, available)
+		}
+	}
+	d := strings.ToLower(strings.TrimSpace(c.DefaultLang))
+	if !i18n.Supported(d) {
+		return fmt.Errorf("i18n.default_lang: no catalogue for %q (available: %s)", d, available)
+	}
+	if !slices.Contains(langs, d) {
+		return fmt.Errorf("i18n.default_lang %q is not among the enabled languages", d)
+	}
+	return nil
+}
+
+// Effective returns the values the server runs with, and a warning for each
+// one it had to correct: a wrong config.toml or environment never stops the
+// server. Codes are trimmed, lowercased and deduplicated; a code without a
+// catalogue is dropped, and an empty list means every language. A default
+// without a catalogue becomes "en"; a default left out of the list is added
+// to it, since the web UI starts in that language.
+func (c I18nConfig) Effective() (I18nConfig, []string) {
+	var out I18nConfig
+	var warns []string
+	for _, l := range NormalizeLangs(c.EnabledLangs) {
+		if !i18n.Supported(l) {
+			warns = append(warns, fmt.Sprintf("i18n.enabled_langs: no catalogue for %q, ignored", l))
+			continue
+		}
+		out.EnabledLangs = append(out.EnabledLangs, l)
+	}
+	if len(out.EnabledLangs) == 0 {
+		out.EnabledLangs = i18n.Languages()
+	}
+	out.DefaultLang = strings.ToLower(strings.TrimSpace(c.DefaultLang))
+	if !i18n.Supported(out.DefaultLang) {
+		if out.DefaultLang != "" {
+			warns = append(warns, fmt.Sprintf("i18n.default_lang: no catalogue for %q, using en", out.DefaultLang))
+		}
+		out.DefaultLang = "en"
+	}
+	if !slices.Contains(out.EnabledLangs, out.DefaultLang) {
+		warns = append(warns, fmt.Sprintf("i18n.default_lang %q is not among i18n.enabled_langs: enabled too", out.DefaultLang))
+		out.EnabledLangs = append([]string{out.DefaultLang}, out.EnabledLangs...)
+	}
+	return out, warns
+}
+
+// NormalizeLangs trims and lowercases language codes, dropping empty ones
+// and repeats; the order is kept.
+func NormalizeLangs(langs []string) []string {
+	var out []string
+	for _, l := range langs {
+		l = strings.ToLower(strings.TrimSpace(l))
+		if l != "" && !slices.Contains(out, l) {
+			out = append(out, l)
+		}
+	}
+	return out
 }
 
 // TrashConfig opts the trash bin in. When enabled, deleting a note or a
@@ -545,6 +618,11 @@ func (c *Config) ApplyEnv() error {
 	if v := os.Getenv("GOSIDIAN_I18N_DEFAULT_LANG"); v != "" {
 		c.I18n.DefaultLang = v
 	}
+	if v := os.Getenv("GOSIDIAN_I18N_ENABLED_LANGS"); v != "" {
+		if langs := NormalizeLangs(strings.Split(v, ",")); len(langs) > 0 {
+			c.I18n.EnabledLangs = langs
+		}
+	}
 	if v := os.Getenv("GOSIDIAN_LDAP_ENABLED"); v != "" {
 		c.LDAP.Enabled = envBool(v)
 	}
@@ -710,7 +788,7 @@ func (c *Config) applyDefaults() {
 		c.I18n.DefaultLang = "en"
 	}
 	if len(c.I18n.EnabledLangs) == 0 {
-		c.I18n.EnabledLangs = []string{"it", "en", "es", "fr", "de"}
+		c.I18n.EnabledLangs = i18n.Languages()
 	}
 	if c.LDAP.UserFilter == "" {
 		c.LDAP.UserFilter = "(uid=%s)"

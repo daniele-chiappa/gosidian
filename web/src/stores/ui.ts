@@ -5,10 +5,13 @@
  *
  * Locale picking flow on first boot (no `gosidian.ui` in localStorage):
  *   1. State is created with `locale: ''` (empty sentinel).
- *   2. hydrate() is called from App.vue setup. If the locale is
- *      empty, fetch /api/v1/version (public, unauthenticated) to
- *      read the operator's `i18n.default_lang`. Apply it.
- *   3. The user's later choice via SettingsView wins forever after.
+ *   2. hydrate() is called from App.vue setup. It fetches
+ *      /api/v1/version (public, unauthenticated) for the operator's
+ *      `i18n.default_lang` and `i18n.enabled_langs`; an empty locale
+ *      takes the default.
+ *   3. The user's later choice via SettingsView wins after that, as long
+ *      as the operator keeps that language enabled: a stored locale that
+ *      is no longer in `enabled_langs` falls back to the default.
  *
  * The `''` empty sentinel is the only way to tell "first run" apart
  * from "user picked English" — pinia-plugin-persistedstate restores
@@ -17,7 +20,7 @@
  */
 import { defineStore } from 'pinia'
 import { i18n } from '@/locales'
-import { getVersion } from '@/api/version'
+import { getVersion, type VersionInfo } from '@/api/version'
 
 export type ThemePreset =
   | 'catppuccin-mocha'
@@ -40,6 +43,9 @@ interface UIState {
   locale: LocaleCode | ''
   planciaViewMode: PlanciaViewMode
   graphMode: GraphRenderMode
+  /** The languages the operator enables (`i18n.enabled_langs`), read from
+   *  /api/v1/version at every hydrate; not persisted. */
+  enabledLocales: LocaleCode[]
 }
 
 const VALID_PRESETS: ThemePreset[] = [
@@ -61,6 +67,7 @@ export const useUIStore = defineStore('ui', {
     locale: '',
     planciaViewMode: 'strip',
     graphMode: '2d',
+    enabledLocales: [...VALID_LOCALES],
   }),
   actions: {
     setPreset(preset: ThemePreset) {
@@ -77,7 +84,7 @@ export const useUIStore = defineStore('ui', {
       this.graphMode = mode
     },
     setLocale(locale: LocaleCode) {
-      if (!VALID_LOCALES.includes(locale)) return
+      if (!VALID_LOCALES.includes(locale) || !this.enabledLocales.includes(locale)) return
       this.locale = locale
       this.applyLocale()
     },
@@ -93,24 +100,32 @@ export const useUIStore = defineStore('ui', {
       document.documentElement.lang = lang
     },
     async hydrate() {
-      // First boot: pick the operator's configured default lang.
-      // Once the user explicitly chooses via SettingsView, the
-      // persisted value wins on subsequent loads.
-      if (!this.locale) {
-        try {
-          const v = await getVersion()
-          if (v.default_lang && isLocale(v.default_lang)) {
-            this.locale = v.default_lang
-          } else {
-            this.locale = 'en'
-          }
-        } catch {
-          this.locale = 'en'
-        }
-      }
+      // The stored choice applies at once (no first-paint flash); the
+      // server's languages may still correct it.
       this.applyPreset()
+      if (this.locale) this.applyLocale()
+      await this.refreshLocales()
+    },
+    /** Reads the operator's default and enabled languages: a locale that is
+     *  empty (first boot) or no longer enabled takes the default. Called at
+     *  hydrate and after the Settings save them. Without an answer every
+     *  language stays offered and the stored one is kept. */
+    async refreshLocales() {
+      let v: VersionInfo | null = null
+      try {
+        v = await getVersion()
+      } catch {
+        v = null
+      }
+      const enabled = (v?.enabled_langs ?? []).filter(isLocale)
+      this.enabledLocales = enabled.length ? enabled : [...VALID_LOCALES]
+      if (!this.locale || !this.enabledLocales.includes(this.locale)) {
+        const d = v?.default_lang
+        if (d && isLocale(d) && this.enabledLocales.includes(d)) this.locale = d
+        else this.locale = this.enabledLocales.includes('en') ? 'en' : (this.enabledLocales[0] ?? 'en')
+      }
       this.applyLocale()
     },
   },
-  persist: { key: 'gosidian.ui' },
+  persist: { key: 'gosidian.ui', paths: ['preset', 'locale', 'planciaViewMode', 'graphMode'] },
 })

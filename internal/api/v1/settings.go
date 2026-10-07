@@ -282,6 +282,22 @@ func (r *Router) putSettings(w http.ResponseWriter, req *http.Request) {
 			key+" is set by a GOSIDIAN_* environment variable; change it there (a value saved here would be overridden at every start)")
 		return
 	}
+	// The languages are checked as the server will run them, environment
+	// included: an enabled list saved here must still hold the default a
+	// GOSIDIAN_I18N_DEFAULT_LANG sets, and the other way round.
+	var effI18n config.I18nConfig
+	if body.I18n != nil {
+		eff := *cfg
+		if err := eff.ApplyEnv(); err != nil {
+			WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
+			return
+		}
+		if err := eff.I18n.Validate(); err != nil {
+			WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
+			return
+		}
+		effI18n, _ = eff.I18n.Effective()
+	}
 
 	if err := config.Save(r.deps.ConfigPath, cfg); err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, "save: "+err.Error())
@@ -293,6 +309,10 @@ func (r *Router) putSettings(w http.ResponseWriter, req *http.Request) {
 	// leaves env-set fields out of the body).
 	if body.TOTPMode != nil && r.deps.Auth != nil && r.deps.Auth.WebAuth != nil {
 		r.deps.Auth.WebAuth.SetTOTPMode(cfg.Webauth.TOTPMode)
+	}
+	// The languages too: /version serves them to the SPA from now on.
+	if body.I18n != nil {
+		SetI18n(effI18n.DefaultLang, effI18n.EnabledLangs)
 	}
 	// default_visibility lives in the projects store (not config.toml); apply
 	// it live.
@@ -446,14 +466,14 @@ func applySettingsPatch(cfg *config.Config, body *updateSettingsRequest) string 
 	}
 	if body.I18n != nil {
 		if body.I18n.DefaultLang != nil {
-			d := strings.TrimSpace(*body.I18n.DefaultLang)
+			d := strings.ToLower(strings.TrimSpace(*body.I18n.DefaultLang))
 			if d == "" {
 				return "i18n.default_lang cannot be empty"
 			}
 			cfg.I18n.DefaultLang = d
 		}
 		if body.I18n.EnabledLangs != nil {
-			cfg.I18n.EnabledLangs = append([]string(nil), body.I18n.EnabledLangs...)
+			cfg.I18n.EnabledLangs = config.NormalizeLangs(body.I18n.EnabledLangs)
 		}
 	}
 	if body.MCP != nil {

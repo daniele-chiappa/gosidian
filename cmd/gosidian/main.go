@@ -589,8 +589,11 @@ func main() {
 	// v2.0: REST API router under /api/v1/. Mounted always (purely
 	// additive). The SPA shell on `/` is gated by env var below.
 	apiv1.Version = version
-	apiv1.DefaultLang = cfg.I18n.DefaultLang
-	apiv1.EnabledLangs = cfg.I18n.EnabledLangs
+	i18nCfg, i18nWarns := cfg.I18n.Effective()
+	for _, w := range i18nWarns {
+		log.Printf("config: %s", w)
+	}
+	apiv1.SetI18n(i18nCfg.DefaultLang, i18nCfg.EnabledLangs)
 	apiv1.OpenMode = cfg.Webauth.OpenMode == "readonly"
 	apiv1.SelfImproveEnabled = cfg.SelfImprove.Enabled
 	apiv1.SelfImproveProject = cfg.SelfImprove.TargetProject

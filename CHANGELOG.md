@@ -8,6 +8,37 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.68.0] — 2026-10-07 — "enabled languages"
+
+`[i18n] enabled_langs` now does what its name says. Pull the image and
+restart, nothing to migrate — but check the setting: an instance whose
+`config.toml` lists fewer languages (a past Settings save may have
+written `["it", "en"]`) will offer only those in the language selector.
+
+### Added
+- **`enabled_langs` chooses the languages the web UI offers** — the
+  language selector in Settings lists only the enabled languages, and a
+  browser whose stored language is no longer enabled falls back to
+  `default_lang`. The setting was saved before but nothing read it.
+  - **Settings → i18n** has a checkbox per language and a default
+    picked among them. A save applies at once, without a restart (the
+    default language too, which used to wait for one), and is refused
+    for a language without a catalogue, an empty list, or a default
+    that is not enabled.
+  - **New variable** `GOSIDIAN_I18N_ENABLED_LANGS` (comma-separated).
+  - **Unset**, every language with a catalogue is offered, as before. A
+    wrong value in `config.toml` or the environment is corrected with a
+    warning in the log and never stops the server.
+
+### Fixed
+- **Settings errors show the server's message** instead of "Request
+  failed with status code 400".
+
+### Changed
+- **Docs**: Spanish, French and German are described as they are —
+  about three quarters of the web UI translated, the rest in English —
+  instead of the early stubs the docs still mentioned.
+
 ## [2.67.4] — 2026-10-07 — "dead code"
 
 Code that nothing called is gone. Behavior is unchanged: pull the image

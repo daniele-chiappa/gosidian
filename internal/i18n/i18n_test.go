@@ -42,3 +42,12 @@ func TestCatalogs_Parse(t *testing.T) {
 		}
 	}
 }
+
+func TestLanguages(t *testing.T) {
+	if got := strings.Join(Languages(), ","); got != "de,en,es,fr,it" {
+		t.Errorf("Languages() = %s, want de,en,es,fr,it (one per ui.<lang>.json)", got)
+	}
+	if !Supported("it") || Supported("xx") || Supported("") {
+		t.Error("Supported must follow the ui catalogues")
+	}
+}

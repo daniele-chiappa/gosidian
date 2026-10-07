@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"sync"
 
 	"github.com/gosidian/gosidian/internal/i18n"
 )
@@ -33,29 +34,45 @@ type versionResponse struct {
 // need it.
 var Version = "dev"
 
-// DefaultLang + EnabledLangs are the i18n config the SPA reads at
-// boot to pick the initial UI language when the user hasn't yet
-// expressed a preference. Set by cmd/gosidian/main.go alongside
-// Version. Public so /version stays unauthenticated and the SPA
-// can call it before /login.
-var (
-	DefaultLang  = "en"
-	EnabledLangs = []string{"en"}
-	// OpenMode mirrors AuthDeps.OpenMode for the public /version endpoint, set
-	// by cmd/gosidian/main.go. Public so the SPA can read it before /login.
-	OpenMode = false
-)
+// OpenMode mirrors AuthDeps.OpenMode for the public /version endpoint, set
+// by cmd/gosidian/main.go. Public so the SPA can read it before /login.
+var OpenMode = false
+
+// i18nState is the language config /version serves: the SPA starts in the
+// default language and offers only the enabled ones in its selector. main
+// sets it at boot and a settings save replaces it, hence the lock.
+var i18nState = struct {
+	sync.RWMutex
+	defaultLang string
+	enabled     []string
+}{defaultLang: "en", enabled: []string{"en"}}
+
+// SetI18n sets the default language and the enabled ones, already checked
+// (config.I18nConfig.Effective).
+func SetI18n(defaultLang string, enabled []string) {
+	i18nState.Lock()
+	defer i18nState.Unlock()
+	i18nState.defaultLang = defaultLang
+	i18nState.enabled = append([]string(nil), enabled...)
+}
+
+func currentI18n() (string, []string) {
+	i18nState.RLock()
+	defer i18nState.RUnlock()
+	return i18nState.defaultLang, append([]string(nil), i18nState.enabled...)
+}
 
 func (r *Router) handleVersion(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
 		WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
 		return
 	}
+	defaultLang, enabled := currentI18n()
 	WriteJSON(w, http.StatusOK, versionResponse{
 		Version:      Version,
 		API:          "v1",
-		DefaultLang:  DefaultLang,
-		EnabledLangs: EnabledLangs,
+		DefaultLang:  defaultLang,
+		EnabledLangs: enabled,
 		OpenMode:     OpenMode,
 	})
 }

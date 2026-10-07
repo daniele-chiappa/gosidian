@@ -24,27 +24,32 @@ Selecting `custom` falls back to the Mocha palette as a base.
 The choice is stored **in the browser** (Pinia `ui` store, localStorage
 key `gosidian.ui`), not in `config.toml`.
 
-> **Note (IMP-054):** the backend and frontend currently track *different*
-> preset catalogues — the names above are the ones the SPA actually
-> renders; the server-side preset list has diverged. The mismatch is
-> tracked as **IMP-054**.
-
 ## Language
 
-The language selector lives in **Settings** and offers five languages:
+The language selector lives in **Settings** and offers the languages the
+operator enables, out of five:
 
 - **IT** (Italian) — complete
 - **EN** (English) — reference
-- **ES / FR / DE** — scaffolding stubs; topbar strings translated,
-  everything else falls back to English
+- **ES / FR / DE** — about three quarters translated; the missing
+  strings (two-factor setup among them) show in English
 
 The choice is a pure client-side preference: it persists in
 **localStorage** (Pinia `ui` store, key `gosidian.ui`) and switches the
-active `vue-i18n` locale in place. There is **no cookie, no `/api/i18n`
-endpoint, and no redirect**. On first boot — when no `gosidian.ui` entry
-exists yet — the store seeds the locale from the operator's server-side
-default `i18n.default_lang`, then falls back to English. MCP clients are
-unaffected by this picker.
+active `vue-i18n` locale in place. There is **no cookie and no
+redirect**. On first boot — when no `gosidian.ui` entry exists yet — the
+store seeds the locale from the operator's server-side default
+`i18n.default_lang`, then falls back to English. A stored language the
+operator later disables falls back to that default too. MCP tool output
+is in English.
+
+The owner chooses both under **i18n** in the same page: tick the
+languages the selector offers (`i18n.enabled_langs`; all of them when
+unset) and pick the default among them (`i18n.default_lang`). A save
+applies at once, without a restart; a default left out of the ticked
+languages is refused. `GOSIDIAN_I18N_ENABLED_LANGS` and
+`GOSIDIAN_I18N_DEFAULT_LANG` set them from the environment instead (see
+[configuration](../configuration.md)).
 
 To contribute a complete translation, see the *Translating gosidian*
 section in [CONTRIBUTING.md](../../CONTRIBUTING.md).

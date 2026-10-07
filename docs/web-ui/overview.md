@@ -95,14 +95,16 @@ endpoints are `GET /api/v1/projects/{name}/export.zip` and
 
 ## Language switching
 
-The language selector lives in **Settings**. On first load the SPA reads
-the operator's configured `i18n.default_lang`; the user's later choice is
-persisted client-side and wins thereafter. Keys missing from the selected
-language fall back to English automatically — see
+The language selector lives in **Settings** and offers the languages the
+operator enables (`i18n.enabled_langs`, all of them by default). On first
+load the SPA reads the operator's configured `i18n.default_lang`; the
+user's later choice is persisted client-side and wins thereafter, as long
+as that language stays enabled. Keys missing from the selected language
+fall back to English automatically — see
 [`web/src/locales/index.ts`](../../web/src/locales/index.ts). Spanish,
-French, and German are scaffolding stubs; contributing a complete
-translation is documented in [CONTRIBUTING.md](../../CONTRIBUTING.md).
-MCP tool output is in English.
+French, and German are about three quarters translated; contributing the
+rest is documented in [CONTRIBUTING.md](../../CONTRIBUTING.md). MCP tool
+output is in English. Details: [Settings → Language](settings.md#language).
 
 ## Web login
 

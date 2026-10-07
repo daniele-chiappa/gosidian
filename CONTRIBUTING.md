@@ -119,10 +119,11 @@ catalogs/
 ```
 
 **Current state**: English is the reference. Italian is complete. Spanish,
-French, and German ship as scaffolding stubs in v1.10 — only the
-topbar/navigation strings are translated; every other key falls back to
-the English catalog automatically (vue-i18n's `fallbackLocale` in
-`web/src/locales/index.ts`).
+French, and German cover about three quarters of the `ui` keys (the
+two-factor screens are among the missing ones); every missing key falls
+back to the English catalog automatically (vue-i18n's `fallbackLocale` in
+`web/src/locales/index.ts`). An operator who prefers to hide a partial
+translation leaves it out of `i18n.enabled_langs`.
 
 ### How to contribute a translation
 
@@ -148,6 +149,9 @@ the English catalog automatically (vue-i18n's `fallbackLocale` in
    `web/src/locales/index.ts`, add the code to `LocaleCode` and
    `VALID_LOCALES` in `web/src/stores/ui.ts`, and add an entry with its
    display label to `localeOptions` in `web/src/views/SettingsView.vue`.
+   The server needs no code change: a language is available once its
+   `ui` catalog exists. Add the code to the list `TestLanguages`
+   (`internal/i18n`) expects.
 3. Submit a PR with the 2 files + the SPA edits.
 
 ### AI-assisted translations
