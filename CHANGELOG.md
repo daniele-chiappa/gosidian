@@ -8,6 +8,24 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.67.1] — 2026-10-07 — "remote corruption"
+
+The git sync says which side to repair when a repository is corrupt.
+Pull the image and restart, nothing to migrate.
+
+### Fixed
+- **A corrupt git remote is told apart from a corrupt vault** — a push
+  the remote rejected because it could not store the objects
+  (`[remote rejected] … (missing necessary objects)`, or a `remote:` line
+  naming an empty or corrupt object) showed git's raw message in
+  `/healthz`. It now says the remote is corrupt and the vault is fine:
+  repair the bare repository on the remote side, or recreate it empty
+  and the next push fills it with the whole history. The vault's own
+  corruption keeps its "run `git fsck --full` in the vault" hint; a hook
+  that declines the push and a non-fast-forward push keep git's message.
+  The patterns come from git's real output, captured from a push to a
+  bare repository whose objects were emptied.
+
 ## [2.67.0] — 2026-10-07 — "link words"
 
 Full-text search no longer matches the folder path of a link. Pull the

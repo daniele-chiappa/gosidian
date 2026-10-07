@@ -334,28 +334,98 @@ func TestSync_RefreshGitignore_ManagedBlock(t *testing.T) {
 	}
 }
 
-func TestIsRepoCorruption(t *testing.T) {
+// realRemoteCorruption is what git 2.x printed on 2026-10-07 for a push to a
+// bare repository whose object files were emptied, as flush receives it
+// (IMP-056). Over a file:// remote git also repeats the remote's lines
+// without the "remote:" prefix.
+const realRemoteCorruption = "git push: remote: error: object file /t/remote.git/objects/a2/8d194da3b896d560d4caca3562adcffe8e2d1c is empty        \n" +
+	"remote: fatal: bad object refs/heads/main        \n" +
+	"error: object file /t/remote.git/objects/a2/8d194da3b896d560d4caca3562adcffe8e2d1c is empty\n" +
+	"fatal: bad object refs/heads/main\n" +
+	"To ../remote.git\n" +
+	" ! [remote rejected] main -> main (missing necessary objects)\n" +
+	"error: failed to push some refs to '../remote.git'"
+
+func TestClassifyGitFailure(t *testing.T) {
 	cases := []struct {
 		name string
 		err  error
-		want bool
+		want gitFailure
 	}{
-		// Positive: the BUG-015 corruption class.
-		{"bad object HEAD", errors.New("fatal: bad object HEAD"), true},
-		{"empty object file", errors.New("error: object file .git/objects/85/e894de9b is empty"), true},
-		{"loose object corrupt", errors.New("error: loose object 85e894 is corrupt"), true},
-		{"upper-case", errors.New("FATAL: BAD OBJECT HEAD"), true},
-		// Negative: divergence is fail-loud per ADR-002, not corruption.
-		{"non-fast-forward", errors.New("! [rejected] main -> main (non-fast-forward)"), false},
-		{"rejected", errors.New("updates were rejected because the remote contains work"), false},
-		// Negative: ordinary failures / nil.
-		{"nothing to commit", errors.New("nothing to commit, working tree clean"), false},
-		{"network", errors.New("git push: could not resolve host"), false},
-		{"nil", nil, false},
+		// Local: the BUG-015 corruption class.
+		{"bad object HEAD", errors.New("fatal: bad object HEAD"), failureLocalCorruption},
+		{"empty object file", errors.New("error: object file .git/objects/85/e894de9b is empty"), failureLocalCorruption},
+		{"loose object corrupt", errors.New("error: loose object 85e894 is corrupt"), failureLocalCorruption},
+		{"upper-case", errors.New("FATAL: BAD OBJECT HEAD"), failureLocalCorruption},
+		// Remote (IMP-056): the vault is fine, the remote is not.
+		{"real push output", errors.New(realRemoteCorruption), failureRemoteCorruption},
+		{"http transport", errors.New("git push: remote: error: object file ./objects/ab/cdef is empty\nTo https://git.example.com/v.git\n ! [remote rejected] main -> main (missing necessary objects)"), failureRemoteCorruption},
+		{"unpacker error", errors.New("git push: error: remote unpack failed: unpack-objects abnormal exit\n ! [remote rejected] main -> main (unpacker error)"), failureRemoteCorruption},
+		{"remote line only", errors.New("git push: remote: fatal: loose object 85e894 (stored in ./objects/85/e894) is corrupt"), failureRemoteCorruption},
+		// Other: divergence is fail-loud per ADR-002, a declining hook is a
+		// refusal, not corruption.
+		{"non-fast-forward", errors.New("! [rejected] main -> main (non-fast-forward)"), failureOther},
+		{"rejected", errors.New("updates were rejected because the remote contains work"), failureOther},
+		{"fetch first", errors.New("git push: To ../remote.git\n ! [rejected]        main -> main (fetch first)\nerror: failed to push some refs"), failureOther},
+		{"hook declined", errors.New("git push: remote: protected branch        \nTo ../remote.git\n ! [remote rejected] main -> main (pre-receive hook declined)\nerror: failed to push some refs to '../remote.git'"), failureOther},
+		{"nothing to commit", errors.New("nothing to commit, working tree clean"), failureOther},
+		{"network", errors.New("git push: could not resolve host"), failureOther},
+		{"nil", nil, failureOther},
 	}
 	for _, tc := range cases {
-		if got := isRepoCorruption(tc.err); got != tc.want {
-			t.Errorf("%s: isRepoCorruption(%v) = %v, want %v", tc.name, tc.err, got, tc.want)
+		if got := classifyGitFailure(tc.err); got != tc.want {
+			t.Errorf("%s: classifyGitFailure = %d, want %d", tc.name, got, tc.want)
 		}
+	}
+}
+
+// A push to a remote whose objects are broken is recorded with the remote's
+// hint, not the vault's "git fsck" one (IMP-056).
+func TestSync_RemoteCorruptionMessage(t *testing.T) {
+	requireGit(t)
+	bare := filepath.Join(t.TempDir(), "remote.git")
+	if out, err := exec.Command("git", "init", "-q", "--bare", bare).CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare: %v %s", err, out)
+	}
+	dir := t.TempDir()
+	cfg := testCfg()
+	cfg.Debounce = 10 * time.Second
+	cfg.Push = true
+	cfg.Remote = bare
+	s := New(dir, cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	_ = os.WriteFile(filepath.Join(dir, "a.md"), []byte("a"), 0o644)
+	s.TriggerCommit()
+	s.Flush()
+	if st := s.Status(); !st.Healthy {
+		t.Fatalf("first push: %+v", st)
+	}
+
+	// Break the remote: empty every object file it holds.
+	err := filepath.WalkDir(filepath.Join(bare, "objects"), func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		if err := os.Chmod(p, 0o644); err != nil {
+			return err
+		}
+		return os.WriteFile(p, nil, 0o644)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = os.WriteFile(filepath.Join(dir, "a.md"), []byte("a, then b"), 0o644)
+	s.TriggerCommit()
+	s.Flush()
+	st := s.Status()
+	if st.Healthy || !strings.Contains(st.LastError, "the remote repository is corrupt") || !strings.Contains(st.LastError, "the vault here is fine") {
+		t.Fatalf("status = %+v", st)
+	}
+	if strings.Contains(st.LastError, "in the vault; see BUG-015") {
+		t.Errorf("the remote's corruption got the vault's hint: %q", st.LastError)
 	}
 }

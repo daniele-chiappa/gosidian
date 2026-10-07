@@ -70,6 +70,20 @@ Push failures surface in `/healthz` (`git_sync.healthy=false` with
 `last_error` + `last_error_at`) and as a red state on the metric
 `gosidian_gitsync_status` (0=disabled, 1=healthy, 2=degraded).
 
+`last_error` says which side to repair when a repository is corrupt:
+
+- **The vault's own `.git`** — "repository corruption detected — manual
+  repair required (run `git fsck --full` in the vault …)".
+- **The remote** — "the remote repository is corrupt — the vault here is
+  fine …": git rejected the push because the remote could not store the
+  objects (`[remote rejected] … (missing necessary objects)`). Repair the
+  bare repository on the remote side, or recreate it empty: the next
+  push fills it with the whole history.
+
+A push the remote rejects for another reason (a hook declining it, a
+protected branch) or because it is ahead (non-fast-forward) shows git's
+own message.
+
 Git sync changes apply on the **next server restart**, not
 immediately — a boot-time invariant.
 

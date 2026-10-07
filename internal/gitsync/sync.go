@@ -186,11 +186,11 @@ func (s *Sync) recordCommitSuccess() {
 	statusGauge.Set(statusCodeHealthy)
 }
 
-// repoCorruptionSignatures are substrings git emits when the local repository
-// is structurally broken — an empty/corrupt loose object or an unreadable HEAD
-// (the BUG-015 class). Deliberately excludes "non-fast-forward"/"rejected",
-// which signal a benign remote divergence handled fail-loud per ADR-002, not
-// corruption.
+// repoCorruptionSignatures are substrings git emits when a repository is
+// structurally broken — an empty/corrupt loose object or an unreadable HEAD:
+// the vault's own (the BUG-015 class) or, on a "remote:" line, the remote's
+// (IMP-056). They leave out "non-fast-forward"/"rejected", which signal a
+// benign remote divergence handled fail-loud per ADR-002, not corruption.
 var repoCorruptionSignatures = []string{
 	"bad object",   // "fatal: bad object HEAD"
 	"object file",  // "error: object file .git/objects/.. is empty"
@@ -198,22 +198,64 @@ var repoCorruptionSignatures = []string{
 	"corrupt",
 }
 
-// isRepoCorruption reports whether err looks like local .git corruption that
-// requires manual repair, as opposed to an ordinary git failure such as a
-// rejected non-fast-forward push. Used by flush to wrap the error with an
-// actionable hint so /healthz surfaces "run git fsck" instead of a raw,
-// opaque git message. Case-insensitive.
-func isRepoCorruption(err error) bool {
+// gitFailure classifies a failed commit or push for the hint /healthz shows.
+type gitFailure int
+
+const (
+	// failureOther is any other failure: network, credentials, a rejected
+	// non-fast-forward push, a hook that declines it.
+	failureOther gitFailure = iota
+	// failureLocalCorruption is the vault's own .git broken (BUG-015).
+	failureLocalCorruption
+	// failureRemoteCorruption is the remote repository broken (IMP-056):
+	// the vault here is fine.
+	failureRemoteCorruption
+)
+
+// remoteCorruptionReasons are the reasons git prints after a
+// "[remote rejected]" ref when the remote could not store the objects:
+// "! [remote rejected] main -> main (missing necessary objects)".
+var remoteCorruptionReasons = []string{"missing necessary objects", "unpacker error", "unpack failed"}
+
+// classifyGitFailure tells a corrupt remote from a corrupt vault and from
+// everything else. Case-insensitive.
+//   - Remote: a "[remote rejected]" ref with a reason of
+//     remoteCorruptionReasons, or a "remote:" line carrying a corruption
+//     signature ("remote: error: object file … is empty"). A ref the remote
+//     rejects for another reason (a hook declining it) is no corruption.
+//   - Local: a corruption signature in a message that does not mention a
+//     rejected push: divergence (remote ahead) stays fail-loud as it is,
+//     per ADR-002.
+func classifyGitFailure(err error) gitFailure {
 	if err == nil {
-		return false
+		return failureOther
 	}
 	msg := strings.ToLower(err.Error())
-	// Divergence (remote ahead) is not corruption — keep it fail-loud as-is.
-	if strings.Contains(msg, "non-fast-forward") || strings.Contains(msg, "rejected") {
-		return false
+	if strings.Contains(msg, "[remote rejected]") {
+		for _, r := range remoteCorruptionReasons {
+			if strings.Contains(msg, r) {
+				return failureRemoteCorruption
+			}
+		}
 	}
+	for _, line := range strings.Split(msg, "\n") {
+		line = strings.TrimPrefix(strings.TrimSpace(line), "git push: ")
+		if strings.HasPrefix(line, "remote:") && hasCorruptionSignature(line) {
+			return failureRemoteCorruption
+		}
+	}
+	if strings.Contains(msg, "non-fast-forward") || strings.Contains(msg, "rejected") {
+		return failureOther
+	}
+	if hasCorruptionSignature(msg) {
+		return failureLocalCorruption
+	}
+	return failureOther
+}
+
+func hasCorruptionSignature(s string) bool {
 	for _, sig := range repoCorruptionSignatures {
-		if strings.Contains(msg, sig) {
+		if strings.Contains(s, sig) {
 			return true
 		}
 	}
@@ -269,9 +311,15 @@ func (s *Sync) flush() {
 
 	if err := s.commitAndPush(); err != nil {
 		metrics.GitSyncCommits.WithLabelValues("failure").Inc()
-		if isRepoCorruption(err) {
+		switch classifyGitFailure(err) {
+		case failureLocalCorruption:
 			err = fmt.Errorf("repository corruption detected — manual repair "+
 				"required (run `git fsck --full` in the vault; see BUG-015): %w", err)
+		case failureRemoteCorruption:
+			err = fmt.Errorf("the remote repository is corrupt — the vault here "+
+				"is fine: repair the remote (`git fsck --full` in its bare "+
+				"repository), or recreate it empty and the next push fills it "+
+				"(IMP-056): %w", err)
 		}
 		s.recordError(err)
 		log.Printf("gitsync: %v", err)
