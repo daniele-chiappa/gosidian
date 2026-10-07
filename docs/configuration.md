@@ -49,12 +49,6 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_AUTOMATIONS_TIMEZONE` | `automations.timezone` | empty (the server's local zone; an IANA zone such as `Europe/Rome` for the days and times of the rules) |
 | `GOSIDIAN_TRASH_ENABLED` | `trash.enabled` | `false` |
 | `GOSIDIAN_TRASH_RETENTION` | `trash.retention` | `720h` |
-| `GOSIDIAN_THEME_PRESET` | `theme.preset` | `midnight-luxury` |
-| `GOSIDIAN_THEME_DEEP_SPACE` | `theme.deep_space` | `#0B0C10` |
-| `GOSIDIAN_THEME_GUNMETAL` | `theme.gunmetal` | `#1F2833` |
-| `GOSIDIAN_THEME_SILVER_MIST` | `theme.silver_mist` | `#C5C6C7` |
-| `GOSIDIAN_THEME_ELECTRIC_BLUE` | `theme.electric_blue` | `#66FCF1` |
-| `GOSIDIAN_THEME_GOLD_LEAF` | `theme.gold_leaf` | `#C5A021` |
 | `GOSIDIAN_LOGIN_SESSION_TTL` | `webauth.session_ttl` | `24h` |
 | `GOSIDIAN_LOGIN_WINDOW` | `webauth.login_window` | `15m` |
 | `GOSIDIAN_LOGIN_MAX_FAILURES` | `webauth.login_max_failures` | `5` |

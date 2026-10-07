@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -103,65 +104,27 @@ func TestApplyEnv_InvalidDuration(t *testing.T) {
 	}
 }
 
-func TestDefault_Theme(t *testing.T) {
-	cfg := Default()
-	cases := map[string]string{
-		"DeepSpace":    "#0B0C10",
-		"Gunmetal":     "#1F2833",
-		"SilverMist":   "#C5C6C7",
-		"ElectricBlue": "#66FCF1",
-		"GoldLeaf":     "#C5A021",
-	}
-	got := map[string]string{
-		"DeepSpace":    cfg.Theme.DeepSpace,
-		"Gunmetal":     cfg.Theme.Gunmetal,
-		"SilverMist":   cfg.Theme.SilverMist,
-		"ElectricBlue": cfg.Theme.ElectricBlue,
-		"GoldLeaf":     cfg.Theme.GoldLeaf,
-	}
-	for k, want := range cases {
-		if got[k] != want {
-			t.Errorf("Theme.%s = %q, want %q", k, got[k], want)
-		}
-	}
-}
-
-func TestValidHexColor(t *testing.T) {
-	valid := []string{"#0B0C10", "#ffffff", "#000000", "#abcDEF", "#123456"}
-	for _, s := range valid {
-		if !ValidHexColor(s) {
-			t.Errorf("ValidHexColor(%q) = false, want true", s)
-		}
-	}
-	invalid := []string{"", "#abc", "ffffff", "#gggggg", "#1234567", "0B0C10", "  #0B0C10  "}
-	for _, s := range invalid {
-		if ValidHexColor(s) {
-			t.Errorf("ValidHexColor(%q) = true, want false", s)
-		}
-	}
-}
-
-func TestThemeRoundTrip(t *testing.T) {
+// A config.toml written before the server-side themes went away (IMP-054)
+// still loads: the [theme] section is ignored, the rest is read.
+func TestLoad_OldThemeSection(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
-	cfg := Default()
-	cfg.Theme.ElectricBlue = "#FF00AA"
-	cfg.Theme.GoldLeaf = "#AABBCC"
+	body := "[theme]\npreset = \"midnight-luxury\"\ndeep_space = \"#0B0C10\"\n\n[mcp]\nwrite_per_minute = 120\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("a config with [theme] does not load: %v", err)
+	}
+	if cfg.MCP.WritePerMinute != 120 {
+		t.Errorf("write_per_minute = %d, want 120", cfg.MCP.WritePerMinute)
+	}
+	// Saved again, the section is gone.
 	if err := Save(path, cfg); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if loaded.Theme.ElectricBlue != "#FF00AA" {
-		t.Errorf("ElectricBlue lost round-trip: %q", loaded.Theme.ElectricBlue)
-	}
-	if loaded.Theme.GoldLeaf != "#AABBCC" {
-		t.Errorf("GoldLeaf lost round-trip: %q", loaded.Theme.GoldLeaf)
-	}
-	// Untouched fields stay at default.
-	if loaded.Theme.DeepSpace != "#0B0C10" {
-		t.Errorf("DeepSpace changed unexpectedly: %q", loaded.Theme.DeepSpace)
+	if b, _ := os.ReadFile(path); strings.Contains(string(b), "theme") {
+		t.Errorf("the saved config still has a theme section:\n%s", b)
 	}
 }
 

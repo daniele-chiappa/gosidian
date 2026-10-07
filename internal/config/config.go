@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -23,7 +22,6 @@ type Config struct {
 	MCP          MCPConfig          `toml:"mcp"`
 	Trash        TrashConfig        `toml:"trash"`
 	Automations  AutomationsConfig  `toml:"automations"`
-	Theme        ThemeConfig        `toml:"theme"`
 	Webauth      WebauthConfig      `toml:"webauth"`
 	Vault        VaultConfig        `toml:"vault"`
 	I18n         I18nConfig         `toml:"i18n"`
@@ -195,30 +193,6 @@ type VaultConfig struct {
 type I18nConfig struct {
 	DefaultLang  string   `toml:"default_lang"`  // default "en"
 	EnabledLangs []string `toml:"enabled_langs"` // default ["it", "en"]
-}
-
-// ThemeConfig holds the 5 root colors of the active palette. Other design
-// tokens in app.css are derived from these and do not need to be configured.
-// Values are hex strings in "#RRGGBB" form, validated by ValidHexColor.
-//
-// Preset selects a named palette: when set to a known preset (see
-// ThemePresets), EffectiveTheme overrides the 5 individual colors with the
-// preset's values. When "custom" (or unknown), the 5 fields are used
-// as-is — enabling the color picker to drive arbitrary palettes.
-type ThemeConfig struct {
-	Preset       string `toml:"preset"`        // "midnight-luxury" | "light-clean" | "high-contrast" | "custom"
-	DeepSpace    string `toml:"deep_space"`    // --bg-base
-	Gunmetal     string `toml:"gunmetal"`      // --bg-elev-1
-	SilverMist   string `toml:"silver_mist"`   // --text-secondary
-	ElectricBlue string `toml:"electric_blue"` // --accent-cool
-	GoldLeaf     string `toml:"gold_leaf"`     // --accent-gold
-}
-
-var hexColorRe = regexp.MustCompile(`^#[0-9A-Fa-f]{6}$`)
-
-// ValidHexColor reports whether s is a valid "#RRGGBB" hex color.
-func ValidHexColor(s string) bool {
-	return hexColorRe.MatchString(s)
 }
 
 // TrashConfig opts the trash bin in. When enabled, deleting a note or a
@@ -508,21 +482,6 @@ func (c *Config) ApplyEnv() error {
 		}
 		c.Trash.Retention = d
 	}
-	for envVar, dst := range map[string]*string{
-		"GOSIDIAN_THEME_PRESET":        &c.Theme.Preset,
-		"GOSIDIAN_THEME_DEEP_SPACE":    &c.Theme.DeepSpace,
-		"GOSIDIAN_THEME_GUNMETAL":      &c.Theme.Gunmetal,
-		"GOSIDIAN_THEME_SILVER_MIST":   &c.Theme.SilverMist,
-		"GOSIDIAN_THEME_ELECTRIC_BLUE": &c.Theme.ElectricBlue,
-		"GOSIDIAN_THEME_GOLD_LEAF":     &c.Theme.GoldLeaf,
-	} {
-		if v := os.Getenv(envVar); v != "" {
-			if !ValidHexColor(v) {
-				return fmt.Errorf("%s: expected #RRGGBB, got %q", envVar, v)
-			}
-			*dst = v
-		}
-	}
 	if v := os.Getenv("GOSIDIAN_LOGIN_SESSION_TTL"); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil {
@@ -731,24 +690,6 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Automations.Interval <= 0 {
 		c.Automations.Interval = 5 * time.Minute
-	}
-	if c.Theme.Preset == "" {
-		c.Theme.Preset = DefaultThemePreset
-	}
-	if c.Theme.DeepSpace == "" {
-		c.Theme.DeepSpace = "#0B0C10"
-	}
-	if c.Theme.Gunmetal == "" {
-		c.Theme.Gunmetal = "#1F2833"
-	}
-	if c.Theme.SilverMist == "" {
-		c.Theme.SilverMist = "#C5C6C7"
-	}
-	if c.Theme.ElectricBlue == "" {
-		c.Theme.ElectricBlue = "#66FCF1"
-	}
-	if c.Theme.GoldLeaf == "" {
-		c.Theme.GoldLeaf = "#C5A021"
 	}
 	if c.Webauth.SessionTTL == 0 {
 		c.Webauth.SessionTTL = 24 * time.Hour

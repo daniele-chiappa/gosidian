@@ -8,6 +8,21 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.67.2] — 2026-10-07 — "no server themes"
+
+Dead configuration removed. Pull the image and restart, nothing to
+migrate.
+
+### Removed
+- **The server-side theme settings** — `[theme]` in `config.toml` and
+  the `GOSIDIAN_THEME_*` variables configured the palette of the
+  server-rendered UI that the SPA replaced; nothing read them any more.
+  `GOSIDIAN_THEME_PRESET` was even checked as a color, so setting it to a
+  preset name stopped the server at start. The web UI's theme (Settings →
+  Theme preset, kept in the browser) is unchanged. A `config.toml` that
+  still has a `[theme]` section loads as before; the section is dropped
+  the next time the settings are saved.
+
 ## [2.67.1] — 2026-10-07 — "remote corruption"
 
 The git sync says which side to repair when a repository is corrupt.
