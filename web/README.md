@@ -20,6 +20,26 @@ Go embed picks them up at compile time:
 npm run build
 ```
 
+## Developing plancia alongside
+
+The window manager comes from [plancia](https://github.com/daniele-chiappa/plancia),
+pinned in `package.json` to the tarball of one of its GitHub releases. To
+change plancia and see the result here without releasing it, point
+`PLANCIA_SRC` at the `src/` folder of a plancia checkout (with its own
+`npm install` done: its TypeScript config extends a package there):
+
+```bash
+PLANCIA_SRC=/path/to/plancia/src npm run dev      # or: npm run test:unit
+```
+
+`plancia` and `plancia/style.css` then resolve to those sources, served
+through the dev server with hot reload, and Vue, Pinia and the router
+stay a single copy (`resolve.dedupe`). Without the variable — `npm run
+build`, the Dockerfile, CI — the pinned release is used. When the change
+is ready, release plancia (a version tag: its `release` workflow
+attaches `plancia-X.Y.Z.tgz` to the GitHub release), then point
+`package.json` at the new tarball URL and run `npm install`.
+
 ## Layout
 
 - `src/api/`         typed wrappers around `/api/v1/*`

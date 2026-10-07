@@ -1,7 +1,15 @@
-import { defineConfig } from 'vite'
+import { defineConfig, searchForWorkspaceRoot } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import VueI18nPlugin from '@intlify/unplugin-vue-i18n/vite'
+import { resolve } from 'node:path'
 import { fileURLToPath, URL } from 'node:url'
+
+// Developing plancia alongside gosidian: with PLANCIA_SRC set to the src/
+// folder of a plancia checkout, `plancia` resolves to those sources instead
+// of the release pinned in package.json, so a change there shows at once in
+// `npm run dev` and in the unit tests, with no release in between. Builds
+// without the variable (the Dockerfile, CI) use the release. See README.md.
+const planciaSrc = process.env.PLANCIA_SRC ? resolve(process.env.PLANCIA_SRC) : ''
 
 // gosidian SPA Vite config.
 //
@@ -32,18 +40,35 @@ export default defineConfig({
   ],
   base: '/static/dist/',
   resolve: {
-    alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url)),
-      '@catalogs': fileURLToPath(new URL('../internal/i18n/catalogs', import.meta.url)),
-    },
+    alias: [
+      { find: '@', replacement: fileURLToPath(new URL('./src', import.meta.url)) },
+      {
+        find: '@catalogs',
+        replacement: fileURLToPath(new URL('../internal/i18n/catalogs', import.meta.url)),
+      },
+      ...(planciaSrc
+        ? [
+            { find: /^plancia$/, replacement: `${planciaSrc}/index.ts` },
+            { find: /^plancia\/style\.css$/, replacement: `${planciaSrc}/style.css` },
+          ]
+        : []),
+    ],
+    // One Vue, Pinia and router: plancia's sources must not pick up the
+    // copies in its own node_modules.
+    dedupe: ['vue', 'pinia', 'vue-router'],
   },
   server: {
     port: 5173,
+    // The dev server serves only files under the workspace; plancia's
+    // sources are outside it.
+    ...(planciaSrc ? { fs: { allow: [searchForWorkspaceRoot(process.cwd()), planciaSrc] } } : {}),
     proxy: {
-      // During dev, proxy API + SSE to the Go server so the SPA can
-      // run with `npm run dev` while the binary serves data.
+      // During dev, proxy API + SSE and the vault's attachments to the Go
+      // server so the SPA can run with `npm run dev` while the binary
+      // serves data. Not /static/dist: that is this server's own base, and
+      // proxying it sent even /src/main.ts to the Go server (a 404).
       '/api': 'http://127.0.0.1:8080',
-      '/static/dist': 'http://127.0.0.1:8080',
+      '/vault-files': 'http://127.0.0.1:8080',
     },
   },
   build: {

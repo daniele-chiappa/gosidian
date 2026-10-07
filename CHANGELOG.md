@@ -8,6 +8,27 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.67.3] — 2026-10-07 — "plancia from GitHub"
+
+The window manager library now comes from its GitHub release, and the
+web UI's dev server works again. The built web UI is the same as in
+2.67.2: pull the image and restart, nothing to migrate.
+
+### Changed
+- **plancia comes from its GitHub release, not npm** — the window
+  manager ([plancia](https://github.com/daniele-chiappa/plancia)) is
+  pinned to the tarball attached to its v0.3.0 GitHub release, the same
+  bytes as on npm: the lockfile's integrity did not change and the built
+  web UI is identical, file by file. With `PLANCIA_SRC` pointing at the
+  `src/` folder of a plancia checkout, `npm run dev` and the unit tests
+  use its sources instead, so plancia can change alongside gosidian
+  without a release in between; `web/README.md` explains it.
+
+### Fixed
+- **`npm run dev`** — the dev server's own base, `/static/dist/`, was
+  proxied to the Go server, so even its entry module answered 404. The
+  proxy now covers the API and `/vault-files`.
+
 ## [2.67.2] — 2026-10-07 — "no server themes"
 
 Dead configuration removed. Pull the image and restart, nothing to
