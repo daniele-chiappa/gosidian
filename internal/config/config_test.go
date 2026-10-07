@@ -379,3 +379,35 @@ func TestUploadsQuota(t *testing.T) {
 		t.Error("a quota that is not a number was accepted")
 	}
 }
+
+// The shrink guard is on by default; an explicit 0 in the file turns it
+// off, and the environment overrides both (IMP-147).
+func TestShrinkGuard(t *testing.T) {
+	dir := t.TempDir()
+	cfg, err := Load(filepath.Join(dir, "nope.toml"))
+	if err != nil || cfg.MCP.ShrinkGuardPercent != 10 || cfg.MCP.ShrinkGuardMinBytes != 1024 {
+		t.Fatalf("default = %d %d, %v", cfg.MCP.ShrinkGuardPercent, cfg.MCP.ShrinkGuardMinBytes, err)
+	}
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte("[mcp]\nwrite_per_minute = 100\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err = Load(path); err != nil || cfg.MCP.ShrinkGuardPercent != 10 || cfg.MCP.ShrinkGuardMinBytes != 1024 {
+		t.Fatalf("a file without the keys = %d %d, %v", cfg.MCP.ShrinkGuardPercent, cfg.MCP.ShrinkGuardMinBytes, err)
+	}
+	if err := os.WriteFile(path, []byte("[mcp]\nshrink_guard_percent = 0\nshrink_guard_min_bytes = 4096\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err = Load(path); err != nil || cfg.MCP.ShrinkGuardPercent != 0 || cfg.MCP.ShrinkGuardMinBytes != 4096 {
+		t.Fatalf("file = %d %d, %v", cfg.MCP.ShrinkGuardPercent, cfg.MCP.ShrinkGuardMinBytes, err)
+	}
+	t.Setenv("GOSIDIAN_MCP_SHRINK_GUARD_PERCENT", "25")
+	t.Setenv("GOSIDIAN_MCP_SHRINK_GUARD_MIN_BYTES", "512")
+	if err := cfg.ApplyEnv(); err != nil || cfg.MCP.ShrinkGuardPercent != 25 || cfg.MCP.ShrinkGuardMinBytes != 512 {
+		t.Errorf("env = %d %d, %v", cfg.MCP.ShrinkGuardPercent, cfg.MCP.ShrinkGuardMinBytes, err)
+	}
+	t.Setenv("GOSIDIAN_MCP_SHRINK_GUARD_PERCENT", "ten")
+	if err := cfg.ApplyEnv(); err == nil {
+		t.Error("a percent that is not a number was accepted")
+	}
+}

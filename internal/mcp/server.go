@@ -140,8 +140,12 @@ type Server struct {
 	maxNoteBytes int64
 	// packageMaxFiles and packageMaxBytes cap a memory_ingest package
 	// (IMP-116); SetPackageLimits overrides the defaults.
-	packageMaxFiles    int
-	packageMaxBytes    int64
+	packageMaxFiles int
+	packageMaxBytes int64
+	// shrinkPercent and shrinkMinBytes are the guard against a rewrite
+	// that empties a note (SetShrinkGuard, IMP-147); a percent of 0 is off.
+	shrinkPercent      int
+	shrinkMinBytes     int64
 	allowedUploadRoots []string
 	bridgeDir          string
 	// events is optional. When wired, MCP write handlers (create,
@@ -461,6 +465,15 @@ func (s *Server) SetPackageLimits(maxFiles int, maxBytes int64) {
 	}
 }
 
+// SetShrinkGuard sets the guard against a rewrite that empties a note: a
+// content under percent % of a note of at least minBytes is refused unless
+// the call allows it. A percent of 0 or less turns the guard off; above 100
+// it is 100.
+func (s *Server) SetShrinkGuard(percent int, minBytes int64) {
+	s.shrinkPercent = min(max(percent, 0), 100)
+	s.shrinkMinBytes = max(minBytes, 0)
+}
+
 // SetAllowedUploadRoots configures the filesystem roots from which the
 // source_path upload parameter is allowed to read. The vault root is always
 // implicitly allowed and does not need to be listed.
@@ -571,6 +584,8 @@ func New(v *vault.Vault, idx *index.Index, tokens *auth.Store) *Server {
 		maxNoteBytes:    1 << 20,
 		packageMaxFiles: 500,
 		packageMaxBytes: 20 << 20,
+		shrinkPercent:   10,
+		shrinkMinBytes:  1024,
 		nudges:          newNudgeTracker(),
 	}
 	s.streams, s.endStreams = context.WithCancel(context.Background())

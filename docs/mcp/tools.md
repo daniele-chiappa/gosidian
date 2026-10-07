@@ -170,7 +170,14 @@ a note naming it (and the likely intended argument, e.g. `Project` →
 ## Write (all support optional `if_match` ETag)
 
 - `memory_create(path, content)`
-- `memory_update(path, content)` — full overwrite
+- `memory_update(path, content, allow_shrink?)` — full overwrite. A
+  content that would empty the note is refused, with nothing written:
+  by default under 10% of a note of 1 KiB or more, which is what a
+  placeholder written over a note by mistake looks like. `allow_shrink:
+  true` confirms a shrink that is meant (a note split into others, or
+  reset); `memory_edit` changes a part only. The thresholds are
+  `[mcp] shrink_guard_percent` and `shrink_guard_min_bytes`; a percent
+  of 0 turns the guard off
 - `memory_append(path, content)`
 - `memory_edit(path, old_string, new_string, replace_all?)` — surgical
   in-place edit
@@ -197,7 +204,7 @@ a note naming it (and the likely intended argument, e.g. `Project` →
 
 ## Attachments
 
-- `memory_ingest(project, bridge_filename|source_path|url|attachment|data, transfer?, as?, dest?, dry_run?, note_path?, title?, caption?, overwrite?, if_match?)` —
+- `memory_ingest(project, bridge_filename|source_path|url|attachment|data, transfer?, as?, dest?, dry_run?, note_path?, title?, caption?, overwrite?, if_match?, allow_shrink?)` —
   the single front door for "store this file": routes by extension —
   `.csv` → table note, image → media note, `.md`/`.html` → the note itself
   (body read server-side, no tokens through the context), anything else →
@@ -210,6 +217,9 @@ a note naming it (and the likely intended argument, e.g. `Project` →
   `file`, no bearer — the ticket is the credential, TTL 5 min) to the
   returned `/ingest/<ticket>` endpoint and the server executes the parked
   intent on receipt. The dedicated tools below remain for explicit workflows.
+  A note replaced with `overwrite: true` passes the same shrink guard as
+  `memory_update`: `allow_shrink: true` confirms a much shorter content,
+  and for a ticket it is given when the ticket is minted.
   **Packages** (`as: "package"`, `dest`, `dry_run?`): a folder or a `.zip`
   imported whole in one call — a folder or `.zip` staged in the bridge dir
   (`bridge_filename`), a server folder or `.zip` (`source_path`), a base64

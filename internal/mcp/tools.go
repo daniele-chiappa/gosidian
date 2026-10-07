@@ -183,10 +183,11 @@ func (s *Server) registerTools() {
 	), s.handleCreate)
 
 	s.impl.AddTool(mcp.NewTool("memory_update",
-		mcp.WithDescription("Overwrite an existing note's content. Fails if the note does not exist. Pass if_match (the etag returned by a previous memory_get) for optimistic locking: the call is rejected if the note has changed since you last read it. Size guard: content is capped (default 1 MiB) — for a large body already on disk use memory_ingest with overwrite:true instead."),
+		mcp.WithDescription("Overwrite an existing note's content. Fails if the note does not exist. Pass if_match (the etag returned by a previous memory_get) for optimistic locking: the call is rejected if the note has changed since you last read it. Size guard: content is capped (default 1 MiB) — for a large body already on disk use memory_ingest with overwrite:true instead. Shrink guard: a content that would empty a note (by default under 10% of a note of 1 KiB or more, as a placeholder written by mistake does) is refused unless allow_shrink is true; to change only a part, use memory_edit."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative path of the note to update.")),
 		mcp.WithString("content", mcp.Required(), mcp.Description("New full markdown content.")),
 		mcp.WithString("if_match", mcp.Description("Optional etag from a previous memory_get. When provided, the call fails if the note's current etag differs — reload and retry.")),
+		mcp.WithBoolean("allow_shrink", mcp.Description("Confirm a content much shorter than the note (a note split into others, or reset on purpose). Default false: the shrink guard refuses it.")),
 	), s.handleUpdate)
 
 	s.impl.AddTool(mcp.NewTool("memory_append",
@@ -878,6 +879,7 @@ func (s *Server) handleUpdate(ctx context.Context, req mcp.CallToolRequest) (*mc
 	res, werr := s.writeNote(ctx, tok, noteWrite{
 		rel: rel, mode: writeReplace, ifMatch: req.GetString("if_match", ""),
 		content: fixedContent([]byte(content)), action: audit.ActionUpdate, schemaCheck: true,
+		shrinkGuard: !req.GetBool("allow_shrink", false),
 	})
 	if werr != nil {
 		return werr.result(), nil

@@ -73,9 +73,12 @@ func (s *Server) mintIngestTicket(ctx context.Context, project, as string, req m
 			Caption:   req.GetString("caption", ""),
 			Filename:  strings.TrimSpace(req.GetString("filename", "")),
 			Overwrite: req.GetBool("overwrite", false),
-			IfMatch:   req.GetString("if_match", ""),
-			Dest:      strings.TrimSpace(req.GetString("dest", "")),
-			DryRun:    req.GetBool("dry_run", false),
+			// AllowShrink is decided when the ticket is minted, like
+			// overwrite: the upload carries only the bytes.
+			AllowShrink: req.GetBool("allow_shrink", false),
+			IfMatch:     req.GetString("if_match", ""),
+			Dest:        strings.TrimSpace(req.GetString("dest", "")),
+			DryRun:      req.GetBool("dry_run", false),
 		},
 		TokenID: tok.ID,
 		Expires: time.Now().Add(ttl),

@@ -265,6 +265,14 @@ type MCPConfig struct {
 	// localhost value). Off by default; only a same-host reverse proxy
 	// forwarding over 127.0.0.1 with the public Host header needs it.
 	DisableDNSRebindingProtection bool `toml:"disable_dns_rebinding_protection"`
+	// ShrinkGuardPercent and ShrinkGuardMinBytes guard a note against a
+	// rewrite that empties it (IMP-147): memory_update, or memory_ingest
+	// with overwrite, refuses a content under ShrinkGuardPercent % of a note
+	// of at least ShrinkGuardMinBytes, unless the call passes allow_shrink.
+	// Default 10 and 1024, set in Default so that an explicit 0 in the file
+	// stays 0: a percent of 0 turns the guard off.
+	ShrinkGuardPercent  int   `toml:"shrink_guard_percent"`
+	ShrinkGuardMinBytes int64 `toml:"shrink_guard_min_bytes"`
 }
 
 // GitConfig controls the auto-sync of the vault to a git remote.
@@ -307,6 +315,8 @@ func Default() *Config {
 	// runs after the file is read, so it cannot tell false from unset.
 	cfg.Automations.Enabled = true
 	cfg.Webauth.AutoOwner = true
+	cfg.MCP.ShrinkGuardPercent = 10
+	cfg.MCP.ShrinkGuardMinBytes = 1024
 	cfg.applyDefaults()
 	return cfg
 }
@@ -388,6 +398,20 @@ func (c *Config) ApplyEnv() error {
 			return fmt.Errorf("GOSIDIAN_MCP_PACKAGE_MAX_BYTES: %w", err)
 		}
 		c.MCP.PackageMaxBytes = n
+	}
+	if v := os.Getenv("GOSIDIAN_MCP_SHRINK_GUARD_PERCENT"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("GOSIDIAN_MCP_SHRINK_GUARD_PERCENT: %w", err)
+		}
+		c.MCP.ShrinkGuardPercent = n
+	}
+	if v := os.Getenv("GOSIDIAN_MCP_SHRINK_GUARD_MIN_BYTES"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return fmt.Errorf("GOSIDIAN_MCP_SHRINK_GUARD_MIN_BYTES: %w", err)
+		}
+		c.MCP.ShrinkGuardMinBytes = n
 	}
 	if v := os.Getenv("GOSIDIAN_UPLOAD_QUOTA_BYTES"); v != "" {
 		n, err := strconv.ParseInt(v, 10, 64)

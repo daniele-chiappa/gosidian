@@ -8,6 +8,33 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.64.0] — 2026-10-07 — "shrink guard"
+
+An agent can no longer empty a note by mistake with a whole-note
+rewrite: a content much shorter than the note is refused unless the call
+says it is meant. Pull the image and restart, nothing to migrate; the
+guard is on by default.
+
+### Added
+- **A guard against a rewrite that empties a note** — `memory_update`,
+  and `memory_ingest` with `overwrite` (an upload ticket and a URL fetch
+  too), refuse a content under 10% of a note of 1 KiB or more, which is
+  what a placeholder written over a note by mistake looks like. Nothing
+  is written and the write rate limit is not charged. The refusal says by
+  how much the note would shrink; `allow_shrink: true` confirms a shrink
+  that is meant (a note split into others, or reset), and for an upload
+  ticket it is given when the ticket is minted. `memory_edit`, a package
+  import and the server's own rewrites are not guarded, and neither is
+  the web UI, where the user sees what they save.
+- **`[mcp] shrink_guard_percent` and `shrink_guard_min_bytes`** (default
+  10 and 1024; `GOSIDIAN_MCP_SHRINK_GUARD_PERCENT`,
+  `GOSIDIAN_MCP_SHRINK_GUARD_MIN_BYTES`) — the thresholds of the guard. A
+  percent of 0 turns it off.
+
+### Notes
+- An MCP client keeps the tool schemas it read when it connected: it
+  lists `allow_shrink` after it reconnects.
+
 ## [2.63.2] — 2026-10-06 — "npm advisories"
 
 Web UI dependencies updated after three npm advisories published on

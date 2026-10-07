@@ -30,6 +30,8 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_MCP_MAX_NOTE_BYTES` | `mcp.max_note_bytes` | `1048576` (1 MiB) |
 | `GOSIDIAN_MCP_PACKAGE_MAX_FILES` | `mcp.package_max_files` | `500` (files of a `memory_ingest` package) |
 | `GOSIDIAN_MCP_PACKAGE_MAX_BYTES` | `mcp.package_max_bytes` | `20971520` (20 MiB, a package unpacked) |
+| `GOSIDIAN_MCP_SHRINK_GUARD_PERCENT` | `mcp.shrink_guard_percent` | `10` (`memory_update`, and `memory_ingest` with `overwrite`, refuse a content under this percentage of the note's size unless the call passes `allow_shrink: true`: a placeholder written over a note by mistake; `0` turns the guard off) |
+| `GOSIDIAN_MCP_SHRINK_GUARD_MIN_BYTES` | `mcp.shrink_guard_min_bytes` | `1024` (the guard looks only at notes of at least this size) |
 | `GOSIDIAN_UPLOAD_QUOTA_BYTES` | `uploads.quota_bytes` | `0` (no limit; bytes of attachments an account may upload per window, its MCP tokens and web uploads together) |
 | `GOSIDIAN_UPLOAD_QUOTA_WINDOW` | `uploads.quota_window` | `24h` (the sliding window of the quota) |
 | `GOSIDIAN_MCP_OPEN` | `mcp.open` | `false` (`true` lets MCP requests without a token run as admin while no token exists, for local use only; the first token closes it) |

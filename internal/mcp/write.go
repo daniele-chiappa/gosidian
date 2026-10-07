@@ -47,6 +47,8 @@ const (
 	writeLimit
 	writeContent
 	writeFailed
+	// writeShrink: the content would empty the note (shrinkGuard).
+	writeShrink
 )
 
 // writeError is a write refused or failed: the message for the tool, the
@@ -94,6 +96,10 @@ type noteWrite struct {
 	// automation is the server writing as itself: no token and no limiter,
 	// audited as the automation.
 	automation bool
+	// shrinkGuard refuses a content that would empty an existing note
+	// (shrinkRefusal, IMP-147): an agent's whole-note rewrite that did not
+	// say allow_shrink.
+	shrinkGuard bool
 }
 
 // noteWritten is a write's outcome.
@@ -153,6 +159,12 @@ func (s *Server) writeNote(ctx context.Context, tok *auth.Token, w noteWrite) (n
 		}
 		return noteWritten{}, &writeError{kind: writeContent, status: http.StatusBadRequest, msg: err.Error()}
 	}
+	// Before the limiter: a refused rewrite does not take a place.
+	if w.shrinkGuard && existing != nil {
+		if msg := s.shrinkRefusal(w.rel, existing.Size, len(content)); msg != "" {
+			return noteWritten{}, &writeError{kind: writeShrink, status: http.StatusConflict, msg: msg}
+		}
+	}
 	if !w.automation {
 		if msg, wait := s.writeLimitViolation(ctx, tok, len(content)); msg != "" {
 			return noteWritten{}, &writeError{kind: writeLimit, status: http.StatusRequestEntityTooLarge, msg: msg, wait: wait}
@@ -191,6 +203,28 @@ func (s *Server) writeNote(ctx context.Context, tok *auth.Token, w noteWrite) (n
 		s.publishNoteChange("update", w.rel, out.ETag, false)
 	}
 	return out, nil
+}
+
+// shrinkRefusal is why a rewrite of rel from oldSize to newSize bytes is
+// refused, or "" when it is not: with the guard on, a note of at least
+// shrinkMinBytes may not drop under shrinkPercent % of its size. A
+// placeholder or a stub written over a note by mistake looks like that; a
+// note split into others, or reset on purpose, passes allow_shrink.
+func (s *Server) shrinkRefusal(rel string, oldSize int64, newSize int) string {
+	if s.shrinkPercent <= 0 || oldSize < s.shrinkMinBytes || oldSize <= 0 {
+		return ""
+	}
+	if int64(newSize)*100 >= oldSize*int64(s.shrinkPercent) {
+		return ""
+	}
+	share := fmt.Sprintf("%d%%", int64(newSize)*100/oldSize)
+	if int64(newSize)*100 < oldSize {
+		share = "less than 1%"
+	}
+	return fmt.Sprintf("refused: this would shrink %q from %d to %d bytes (%s of it), under the %d%% this server allows for a note of %d bytes or more. "+
+		"Nothing was written. A placeholder or a stub written over a note looks like this. "+
+		"If the shrink is meant (the note split into others, or reset), call again with allow_shrink: true; to change only a part, use memory_edit.",
+		rel, oldSize, newSize, share, s.shrinkPercent, s.shrinkMinBytes)
 }
 
 // fixedContent is a noteWrite.content that writes body whatever the note is.

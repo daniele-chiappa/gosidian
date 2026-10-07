@@ -509,6 +509,11 @@ func main() {
 		log.Printf("uploads: quota of %d bytes per account every %s", uploadQuota.Max(), uploadQuota.Window())
 	}
 	mcpServer.SetPackageLimits(cfg.MCP.PackageMaxFiles, cfg.MCP.PackageMaxBytes)
+	// A rewrite that empties a note is refused unless allowed (IMP-147).
+	mcpServer.SetShrinkGuard(cfg.MCP.ShrinkGuardPercent, cfg.MCP.ShrinkGuardMinBytes)
+	if cfg.MCP.ShrinkGuardPercent <= 0 {
+		log.Printf("mcp: shrink guard off ([mcp] shrink_guard_percent = %d)", cfg.MCP.ShrinkGuardPercent)
+	}
 	mcpServer.SetAllowedUploadRoots(cfg.MCP.AllowedUploadRoots)
 	mcpServer.SetBridgeDir(cfg.MCP.BridgeDir)
 	if cfg.MCP.BridgeDir != "" {

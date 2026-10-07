@@ -45,6 +45,7 @@ func (s *Server) registerIngestTool() {
 		mcp.WithString("caption", mcp.Description("Table/media notes: markdown body describing the content — the searchable text. Strongly recommended.")),
 		mcp.WithBoolean("overwrite", mcp.Description("Note kind and package: replace the notes that already exist. Default false (fail on existing).")),
 		mcp.WithString("if_match", mcp.Description("Note kind only, with overwrite: etag from a previous memory_get — the replace fails if the note changed since you read it.")),
+		mcp.WithBoolean("allow_shrink", mcp.Description("Note kind only, with overwrite: confirm a content much shorter than the note it replaces. Default false: as for memory_update, the shrink guard refuses a content that would empty the note.")),
 	), s.handleIngest)
 }
 
@@ -170,14 +171,15 @@ func (s *Server) handleIngest(ctx context.Context, req mcp.CallToolRequest) (*mc
 			return mcp.NewToolResultError("cannot determine a filename from the URL; pass filename with an extension"), nil
 		}
 		return s.ingestRaw(ctx, ingestIntent{
-			Project:   project,
-			As:        as,
-			NotePath:  strings.TrimSpace(req.GetString("note_path", "")),
-			Title:     strings.TrimSpace(req.GetString("title", "")),
-			Caption:   req.GetString("caption", ""),
-			Filename:  name,
-			Overwrite: req.GetBool("overwrite", false),
-			IfMatch:   req.GetString("if_match", ""),
+			Project:     project,
+			As:          as,
+			NotePath:    strings.TrimSpace(req.GetString("note_path", "")),
+			Title:       strings.TrimSpace(req.GetString("title", "")),
+			Caption:     req.GetString("caption", ""),
+			Filename:    name,
+			Overwrite:   req.GetBool("overwrite", false),
+			AllowShrink: req.GetBool("allow_shrink", false),
+			IfMatch:     req.GetString("if_match", ""),
 		}, data)
 	}
 
@@ -306,7 +308,7 @@ func (s *Server) ingestNoteFromSource(ctx context.Context, project, ext, fnForEx
 
 	res, errOut := s.writeIngestedNote(ctx, project, ext, fnForExt,
 		strings.TrimSpace(req.GetString("note_path", "")), content,
-		req.GetBool("overwrite", false), req.GetString("if_match", ""), hint)
+		req.GetBool("overwrite", false), req.GetBool("allow_shrink", false), req.GetString("if_match", ""), hint)
 	if errOut == nil && res != nil && !res.IsError && consumeStaged != "" {
 		_ = os.Remove(consumeStaged) // consume the staging copy (best-effort)
 	}
@@ -317,7 +319,7 @@ func (s *Server) ingestNoteFromSource(ctx context.Context, project, ext, fnForEx
 // (ingestNoteFromSource) and the raw-bytes entrypoints (url fetch, ticket
 // redemption): path resolution, flag/authz/limit checks, create-vs-overwrite
 // with CAS, synchronous index, audit and event publish.
-func (s *Server) writeIngestedNote(ctx context.Context, project, ext, fnForExt, notePath string, content []byte, overwrite bool, ifMatch, hint string) (*mcp.CallToolResult, error) {
+func (s *Server) writeIngestedNote(ctx context.Context, project, ext, fnForExt, notePath string, content []byte, overwrite, allowShrink bool, ifMatch, hint string) (*mcp.CallToolResult, error) {
 	if ext == ".html" && !s.vault.HTMLNotesEnabled() {
 		return mcp.NewToolResultError("html notes are disabled on this instance — a per-project flag an admin can flip live from the web UI project toggles (or [vault] html_notes / GOSIDIAN_VAULT_HTML_NOTES)"), nil
 	}
@@ -346,6 +348,7 @@ func (s *Server) writeIngestedNote(ctx context.Context, project, ext, fnForExt, 
 	}
 	res, werr := s.writeNote(ctx, tok, noteWrite{
 		rel: rel, mode: mode, ifMatch: ifMatch, content: fixedContent(content), schemaCheck: true,
+		shrinkGuard: !allowShrink,
 	})
 	if werr != nil {
 		if werr.kind == writeExists {
@@ -381,7 +384,9 @@ type ingestIntent struct {
 	Caption   string
 	Filename  string
 	Overwrite bool
-	IfMatch   string
+	// AllowShrink lets an overwrite empty the note (IMP-147).
+	AllowShrink bool
+	IfMatch     string
 }
 
 // ingestRaw executes an ingestion whose bytes are already in hand server-side:
@@ -408,7 +413,7 @@ func (s *Server) ingestRaw(ctx context.Context, in ingestIntent, data []byte) (*
 	}
 
 	if kind == ingestNote {
-		return s.writeIngestedNote(ctx, in.Project, ext, in.Filename, in.NotePath, data, in.Overwrite, in.IfMatch, "")
+		return s.writeIngestedNote(ctx, in.Project, ext, in.Filename, in.NotePath, data, in.Overwrite, in.AllowShrink, in.IfMatch, "")
 	}
 
 	// Every other kind starts with the bytes stored as an attachment
