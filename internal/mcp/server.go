@@ -474,6 +474,13 @@ func (s *Server) SetShrinkGuard(percent int, minBytes int64) {
 	s.shrinkMinBytes = max(minBytes, 0)
 }
 
+// ToolCount is how many tools the server registered: /healthz reports it,
+// so a rebuild can be checked for a new tool without reconnecting a client
+// (IMP-030).
+func (s *Server) ToolCount() int {
+	return len(s.impl.ListTools())
+}
+
 // SetAllowedUploadRoots configures the filesystem roots from which the
 // source_path upload parameter is allowed to read. The vault root is always
 // implicitly allowed and does not need to be listed.

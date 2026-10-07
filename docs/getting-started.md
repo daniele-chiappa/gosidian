@@ -39,7 +39,7 @@ docker run -d \
 Verify:
 
 ```bash
-curl -sS http://127.0.0.1:8080/healthz    # → "ok"
+curl -sS http://127.0.0.1:8080/healthz    # → {"status":"ok",…}
 ```
 
 At the first start, with no account yet, the server creates the owner

@@ -30,8 +30,9 @@ func TestTopLevelStatus(t *testing.T) {
 }
 
 type healthBody struct {
-	Status  string `json:"status"`
-	GitSync struct {
+	Status   string `json:"status"`
+	MCPTools *int   `json:"mcp_tools"`
+	GitSync  struct {
 		Enabled bool   `json:"enabled"`
 		Healthy bool   `json:"healthy"`
 		LastErr string `json:"last_error"`
@@ -124,5 +125,19 @@ func TestHandleHealth_HealthyOK(t *testing.T) {
 	code, body := getHealth(t, s)
 	if code != http.StatusOK || body.Status != "ok" {
 		t.Errorf("healthy server = %d/%q; want 200/ok", code, body.Status)
+	}
+}
+
+// /healthz says how many MCP tools are registered once the MCP server is
+// wired, and leaves the field out before (IMP-030).
+func TestHandleHealth_MCPTools(t *testing.T) {
+	s := newTestServer(t)
+	if _, body := getHealth(t, s); body.MCPTools != nil {
+		t.Errorf("mcp_tools without an MCP server = %d", *body.MCPTools)
+	}
+	s.SetMCPToolCount(func() int { return 61 })
+	code, body := getHealth(t, s)
+	if code != http.StatusOK || body.MCPTools == nil || *body.MCPTools != 61 {
+		t.Errorf("mcp_tools = %v (HTTP %d)", body.MCPTools, code)
 	}
 }

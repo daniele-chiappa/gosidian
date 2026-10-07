@@ -8,6 +8,23 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.65.0] — 2026-10-07 — "tool count"
+
+`/healthz` says how many MCP tools the server registered. Pull the image
+and restart, nothing to migrate.
+
+### Added
+- **`mcp_tools` in `/healthz`** — the number of tools the MCP server
+  registered. After an upgrade it tells whether a new tool is in without
+  reconnecting an MCP client, which keeps the tool list it read when it
+  connected. The other fields are unchanged.
+
+### Changed
+- **The health probe in the docs** — `docs/deployment.md` and
+  `docs/getting-started.md` show the JSON `/healthz` answers instead of
+  `ok`, and say that a failing git sync shows in `git_sync.healthy`
+  without failing the probe.
+
 ## [2.64.0] — 2026-10-07 — "shrink guard"
 
 An agent can no longer empty a note by mistake with a whole-note

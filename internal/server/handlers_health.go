@@ -25,17 +25,24 @@ type gitSyncHealth struct {
 // orchestrators can reach it without credentials.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	type payload struct {
-		Status  string        `json:"status"`
-		Version string        `json:"version,omitempty"`
-		Vault   string        `json:"vault"`
-		Notes   int           `json:"notes"`
-		GitSync gitSyncHealth `json:"git_sync"`
+		Status  string `json:"status"`
+		Version string `json:"version,omitempty"`
+		Vault   string `json:"vault"`
+		Notes   int    `json:"notes"`
+		// MCPTools is how many tools the MCP server registered (IMP-030):
+		// after a rebuild it tells whether a new tool is in, without
+		// reconnecting an MCP client, which keeps the list it first read.
+		MCPTools int           `json:"mcp_tools,omitempty"`
+		GitSync  gitSyncHealth `json:"git_sync"`
 	}
 
 	out := payload{
 		Version: s.version,
 		Vault:   s.vault.Root,
 		GitSync: buildGitSyncHealth(s.gitSync, s.gitSyncOn),
+	}
+	if s.mcpTools != nil {
+		out.MCPTools = s.mcpTools()
 	}
 
 	// Liveness/readiness is decided by the *core* (can we read the index?),

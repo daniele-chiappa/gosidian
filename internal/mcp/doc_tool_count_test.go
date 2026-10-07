@@ -12,7 +12,7 @@ import (
 // tools registered: it had drifted to 57 and 58 while 60 were registered.
 func TestDocs_ToolCount(t *testing.T) {
 	s, _, _ := newTestServer(t)
-	n := len(s.impl.ListTools())
+	n := s.ToolCount()
 	root := filepath.Join("..", "..")
 	files := map[string]*regexp.Regexp{
 		"docs/mcp/tools.md":        regexp.MustCompile(`\*\*(\d+) tools\*\*`),

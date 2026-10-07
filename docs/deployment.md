@@ -154,11 +154,18 @@ second copy of the notes themselves.
 ## Health probe
 
 ```bash
-curl -sS http://127.0.0.1:8080/healthz    # → "ok" or structured JSON
+curl -sS http://127.0.0.1:8080/healthz
+# → {"status":"ok","version":"v2.64.0","vault":"/vault","notes":1406,
+#    "mcp_tools":61,"git_sync":{"enabled":true,"healthy":true,…}}
 ```
 
 Suitable for Kubernetes liveness/readiness, Docker healthcheck (already
-baked into the image), or external uptime monitors.
+baked into the image), or external uptime monitors. The probe passes on
+`"status":"ok"` (HTTP 200); a failing git sync shows in
+`git_sync.healthy` and never fails it. `mcp_tools` is how many MCP tools
+the server registered: after an upgrade it tells whether a new tool is
+there, without reconnecting an MCP client, which keeps the tool list it
+read when it connected.
 
 At startup the port opens before the vault scan brings the index up to
 date. Until the scan ends every request gets a `503` with

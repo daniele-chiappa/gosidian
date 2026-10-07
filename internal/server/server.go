@@ -28,6 +28,9 @@ type Server struct {
 	// Build + runtime info, populated by SetBuildInfo for /healthz.
 	version   string
 	gitSyncOn bool
+	// mcpTools counts the MCP server's tools for /healthz (IMP-030); nil
+	// leaves the field out.
+	mcpTools func() int
 
 	// vaultFileAuthz gates /vault-files/ (ADR-022, BUG-031). It returns 0 to
 	// allow, or the HTTP status to answer with (401 unauthenticated, 404 when
@@ -76,6 +79,11 @@ func New(v *vault.Vault, idx *index.Index) *Server {
 func (s *Server) SetBuildInfo(version string, gitSyncEnabled bool) {
 	s.version = version
 	s.gitSyncOn = gitSyncEnabled
+}
+
+// SetMCPToolCount wires the count of MCP tools that /healthz reports.
+func (s *Server) SetMCPToolCount(count func() int) {
+	s.mcpTools = count
 }
 
 // SetGitSync wires the git-sync helper used by /healthz to report

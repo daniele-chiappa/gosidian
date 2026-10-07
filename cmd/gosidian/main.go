@@ -653,6 +653,7 @@ func main() {
 	srv.MountAPIv1(apiRouter)
 	srv.SetVaultFileAuthorizer(apiRouter.VaultFileAuthorizer()) // ADR-022: attachments share the API auth
 	srv.MountMCP(mcpServer.Handler("/mcp"))
+	srv.SetMCPToolCount(mcpServer.ToolCount)
 	if oauthSrv != nil {
 		srv.MountOAuth(oauthSrv.Paths(), oauthSrv.Handler())
 	}
