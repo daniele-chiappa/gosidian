@@ -121,6 +121,26 @@ line by line as before, so the note does not disappear; lint
 (`frontmatter-invalid-yaml`) and the write tools' `notices` report it,
 and a value cut by a comment.
 
+**Imported content.** A note copied from somewhere else — a skill or a
+guide taken from a public repository — says where it comes from, so it
+can be brought up to date later. gosidian reads these fields as plain
+frontmatter and checks none of them:
+
+```yaml
+upstream: https://github.com/owner/repo   # where the original lives
+upstream_version: 1.1.0                   # the release copied, if it has one
+upstream_commit: 13ac0ec7e148…            # the exact commit copied
+license: MIT                              # if known; information only
+```
+
+They go on the note that is the entry point of what was imported. The
+other notes of the same import may carry just
+`upstream: "owner/repo@<commit> · <path in the repo>"`. Whether the
+content may be used is up to whoever imports it; `license` only records
+what was found. To know whether the original has moved on, compare
+`git ls-remote <upstream> HEAD` with `upstream_commit` — agents do it when
+asked; the server makes no network call for it.
+
 ### `.html` notes
 
 A single-file `.html` document can be a **first-class note** alongside

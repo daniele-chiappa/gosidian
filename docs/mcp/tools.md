@@ -27,7 +27,8 @@ a note naming it (and the likely intended argument, e.g. `Project` →
   share keeps the rows that fit and ends with the `memory_query` that
   returns them all.
   `access` (`read` | `write`) says whether the token may write in the
-  project.
+  project. A skill in `available_skills` with reference notes carries
+  `bundle` (see `memory_skills`).
   `pending_handoffs` lists the project's handoffs waiting to be claimed,
   newest first (up to 10, with their count), the alerts of its
   [automations](../vault/databases.md#automations) among them.
@@ -52,7 +53,13 @@ a note naming it (and the likely intended argument, e.g. `Project` →
   the response echoes the cutoff used and sets `truncated` when `limit`
   cut the list
 - `memory_plans(project, status)` — typed plan retrieval by status
-- `memory_skills(project, trigger_phrase?)` — reusable procedures
+- `memory_skills(project, trigger_phrase?)` — reusable procedures. A
+  skill that keeps reference notes in the folder named like it
+  (`skills/<slug>/` beside `skills/<slug>.md`, the shape of an imported
+  skill) carries `bundle: {notes, bytes, oversize}`: how many reference
+  notes, their total size, and how many are larger than `memory_get`
+  returns whole (read those by section). The bootstrap's
+  `available_skills` carries the same field.
 - `memory_notes_by_importance(project, min_level)` — filter by the
   `importance: 1..5` frontmatter scalar
 - `memory_todos(project, filter?)` — extract `- [ ]` checkboxes

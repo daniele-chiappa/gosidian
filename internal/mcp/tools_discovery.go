@@ -13,6 +13,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -33,7 +34,7 @@ func (s *Server) registerDiscoveryTools() {
 	), s.handlePlans)
 
 	s.impl.AddTool(mcp.NewTool("memory_skills",
-		mcp.WithDescription("List skills (notes with frontmatter type:skill) under a project. Optionally filter by a substring matching the '## Trigger phrase' section of the skill body. Returns path, title, description from frontmatter, and the first ~400 chars of the trigger phrase section as an excerpt."),
+		mcp.WithDescription("List skills (notes with frontmatter type:skill) under a project. Optionally filter by a substring matching the '## Trigger phrase' section of the skill body. Returns path, title, description from frontmatter, and the first ~400 chars of the trigger phrase section as an excerpt. A skill that keeps reference notes in the folder named like it (skills/<slug>/) also carries bundle {notes, bytes, oversize}: read the references when the entry's steps call for them, and the oversize ones (larger than memory_get returns whole) by section with memory_get_section, or with raw:true."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder) to scope the listing. "+scopedProjectNote)),
 		mcp.WithString("trigger_phrase", mcp.Description("Optional case-insensitive substring to match against the '## Trigger phrase' section of each skill. Empty returns all skills.")),
 	), s.handleSkills)
@@ -121,10 +122,31 @@ func (s *Server) handlePlans(ctx context.Context, req mcp.CallToolRequest) (*mcp
 // ---- memory_skills ----
 
 type skillEntry struct {
-	Path           string `json:"path"`
-	Title          string `json:"title"`
-	Description    string `json:"description,omitempty"`
-	TriggerExcerpt string `json:"trigger_excerpt,omitempty"`
+	Path           string       `json:"path"`
+	Title          string       `json:"title"`
+	Description    string       `json:"description,omitempty"`
+	TriggerExcerpt string       `json:"trigger_excerpt,omitempty"`
+	Bundle         *skillBundle `json:"bundle,omitempty"`
+}
+
+// skillBundle describes the reference notes a skill keeps in the folder
+// named like it (skills/<slug>/ beside skills/<slug>.md, IMP-115): how many,
+// their total size, and how many are larger than memory_get returns whole.
+type skillBundle struct {
+	Notes    int   `json:"notes"`
+	Bytes    int64 `json:"bytes"`
+	Oversize int   `json:"oversize"`
+}
+
+// skillBundleOf returns the bundle of the skill at notePath, or nil when no
+// note lives in the folder named like it.
+func (s *Server) skillBundleOf(notePath string) *skillBundle {
+	dir := strings.TrimSuffix(notePath, path.Ext(notePath))
+	st, err := s.index.FolderStats(dir, getBodySoftCap)
+	if err != nil || st.Notes == 0 {
+		return nil
+	}
+	return &skillBundle{Notes: st.Notes, Bytes: st.Bytes, Oversize: st.Over}
 }
 
 func (s *Server) handleSkills(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -163,6 +185,7 @@ func (s *Server) handleSkills(ctx context.Context, req mcp.CallToolRequest) (*mc
 			Path:           n.Path,
 			Title:          n.Title,
 			TriggerExcerpt: truncateExcerpt(trigger, 400),
+			Bundle:         s.skillBundleOf(n.Path),
 		}
 		raw := parser.FrontmatterRawForPath(n.Path, note.Content)
 		fm := parser.ParseFrontmatterFields(raw)

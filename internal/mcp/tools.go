@@ -409,9 +409,10 @@ func (s *Server) handleSearch(ctx context.Context, req mcp.CallToolRequest) (*mc
 }
 
 type noteRef struct {
-	Path   string `json:"path"`
-	Title  string `json:"title"`
-	Source string `json:"source,omitempty"` // local | global | global-private (skill/agent merge in bootstrap)
+	Path   string       `json:"path"`
+	Title  string       `json:"title"`
+	Source string       `json:"source,omitempty"` // local | global | global-private (skill/agent merge in bootstrap)
+	Bundle *skillBundle `json:"bundle,omitempty"` // skills only: their reference notes (IMP-115)
 }
 
 func (s *Server) handleListNotes(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

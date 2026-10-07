@@ -8,6 +8,31 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.69.0] — 2026-10-07 — "skill bundles"
+
+The skill catalogue tells which skills come with reference notes, and
+imported content has a documented way to say where it comes from. Pull
+the image and restart, nothing to migrate.
+
+### Added
+- **The skill catalogue says which skills come with reference notes** —
+  a skill imported from a harness-native package is an entry note plus
+  a folder of reference notes (`skills/<slug>/` beside
+  `skills/<slug>.md`). `memory_skills` and the bootstrap's
+  `available_skills` now give such a skill a `bundle` field: how many
+  notes, their total size, and how many are larger than `memory_get`
+  returns whole. An agent knows before opening it that a skill such as an
+  imported design guide has 137 reference notes, 10 of them to read by
+  section. Skills without a folder are listed as before.
+- **A convention for imported content** — a note copied from a public
+  repository records where it comes from: `upstream`,
+  `upstream_commit`, `upstream_version` and, as information only,
+  `license` on the entry note (`docs/vault/format.md`, "Imported
+  content"). The agent directives (v25) ask for it, and tell the agent to
+  check whether the original moved on with `git ls-remote` when the user
+  asks. gosidian checks none of these fields and makes no network call
+  for them: whether the content may be used is up to whoever imports it.
+
 ## [2.68.0] — 2026-10-07 — "enabled languages"
 
 `[i18n] enabled_langs` now does what its name says. Pull the image and

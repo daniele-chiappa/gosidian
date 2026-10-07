@@ -72,6 +72,26 @@ func (i *Index) NotesByPrefix(prefix string) ([]NoteRow, error) {
 	return out, rows.Err()
 }
 
+// FolderStats counts what a folder holds: its notes (at any depth), their
+// total size in bytes, and how many are larger than over.
+type FolderStats struct {
+	Notes int
+	Bytes int64
+	Over  int
+}
+
+// FolderStats returns the stats of the notes under prefix + "/".
+func (i *Index) FolderStats(prefix string, over int64) (FolderStats, error) {
+	like := strings.ReplaceAll(prefix, "%", `\%`)
+	like = strings.ReplaceAll(like, "_", `\_`) + "/%"
+	var st FolderStats
+	err := i.db.QueryRow(
+		`SELECT COUNT(*), COALESCE(SUM(size), 0), COALESCE(SUM(size > ?), 0) FROM notes WHERE path LIKE ? ESCAPE '\'`,
+		over, like,
+	).Scan(&st.Notes, &st.Bytes, &st.Over)
+	return st, err
+}
+
 func (i *Index) AllNotes() ([]NoteRow, error) {
 	rows, err := i.db.Query(`SELECT id, path, title FROM notes ORDER BY path`)
 	if err != nil {

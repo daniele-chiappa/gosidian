@@ -57,6 +57,7 @@ Quando scopri qualcosa che sopravvive al task corrente:
 | Dati tabellari lunghi (audit, export CSV) | table note linkata dal report | `memory_ingest` del `.csv` + caption (se `capabilities.table_notes`) |
 | File binario (screenshot, PDF, zip) | attachment/media note del vault | `memory_ingest` (bridge dir, `source_path`, `url` o ticket `transfer:"http"`; **mai** base64 per file grandi) |
 | Più file insieme (una cartella, uno `.zip`, una guida con i suoi link) | una cartella del progetto | `memory_ingest` con `as: "package"` e `dest`, prima con `dry_run: true`: una chiamata per tutto, link relativi già wikilink, non una chiamata per file |
+| Contenuto di terze parti (una skill, una guida da un repository) | dove serve nel progetto | nel frontmatter della nota d'ingresso `upstream` (URL), `upstream_commit` e `upstream_version` se c'è; `license` se la conosci, solo informativa (se usarlo lo decide l'utente). Se l'utente chiede se l'originale è andato avanti: `git ls-remote <upstream> HEAD` contro `upstream_commit` |
 | Fine task | `{{PROJECT}}/log.md` + `hot.md` | `memory_append` log, `memory_edit` hot |
 
 **Note database**: una nota con `type: database` (per esempio `{{PROJECT}}/docs/improvements.md`)

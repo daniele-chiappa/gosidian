@@ -209,7 +209,12 @@ const StubVersion = 3
 //
 // v24 (2026-10-05, IMP-143): sort takes several keys separated by commas,
 // for the ties of a rollup, instead of reordering the result by hand.
-const DirectivesVersion = 24
+//
+// v25 (2026-10-07, IMP-117): third-party content records where it comes
+// from (upstream, upstream_commit, upstream_version; license only as
+// information, the user decides); whether upstream moved on is checked on
+// request with git ls-remote.
+const DirectivesVersion = 25
 
 // AnchorVersion is the version of the agent-anchor template/format. It is
 // substituted into the `<!-- gosidian:anchor v=N ... -->` marker so the
