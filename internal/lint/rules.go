@@ -956,17 +956,44 @@ type mentionCandidate struct {
 // default rule set. False-positive guards: frontmatter, fenced/inline code and
 // existing wikilinks are stripped before scanning; labels under minMentionLen
 // runes are ignored; a note already linking the target is skipped for that
-// target; at most one issue per (source, target) pair.
+// target; at most one issue per (source, target) pair. And, from IMP-121 (159
+// issues on a 57-note project, a third of them noise):
+//   - index notes (type: index — README, hot.md, log.md) are not scanned: a
+//     log or an index names pages by design;
+//   - a label two or more notes share (README) is no mention: no link to
+//     propose can be the right one;
+//   - a database's template is neither scanned nor a target: "improvement"
+//     in prose does not mean the row template.
 func checkUnlinkedMentions(ctx context.Context, l *Linter, project string) ([]Issue, error) {
 	notes, err := l.notesInProject(project)
 	if err != nil {
 		return nil, err
 	}
+	schemas, _, err := dbschema.ForProject(l.index, l.vault, project)
+	if err != nil {
+		return nil, err
+	}
+	templates := map[string]bool{}
+	for _, sc := range schemas {
+		if sc.Template != "" {
+			templates[sc.Template] = true
+		}
+	}
 
-	// Build mention candidates from every note's title + basename.
-	var cands []mentionCandidate
+	// Each note's labels (title + basename), once per note, and how many
+	// notes carry each of them.
+	type labelled struct {
+		path   string
+		labels []string
+	}
+	var withLabels []labelled
+	owners := map[string]int{}
 	for _, n := range notes {
+		if templates[n.Path] {
+			continue
+		}
 		seen := map[string]struct{}{}
+		var labels []string
 		for _, label := range []string{n.Title, basenameNoExt(n.Path)} {
 			label = strings.TrimSpace(label)
 			if len([]rune(label)) < minMentionLen {
@@ -977,16 +1004,32 @@ func checkUnlinkedMentions(ctx context.Context, l *Linter, project string) ([]Is
 				continue
 			}
 			seen[key] = struct{}{}
+			labels = append(labels, label)
+			owners[key]++
+		}
+		withLabels = append(withLabels, labelled{path: n.Path, labels: labels})
+	}
+
+	// Build mention candidates from the labels only one note carries.
+	var cands []mentionCandidate
+	for _, wl := range withLabels {
+		for _, label := range wl.labels {
+			if owners[strings.ToLower(label)] > 1 {
+				continue
+			}
 			re, rerr := regexp.Compile(`(?i)\b` + regexp.QuoteMeta(label) + `\b`)
 			if rerr != nil {
 				continue
 			}
-			cands = append(cands, mentionCandidate{path: n.Path, label: label, re: re})
+			cands = append(cands, mentionCandidate{path: wl.path, label: label, re: re})
 		}
 	}
 
 	var issues []Issue
 	for _, n := range notes {
+		if templates[n.Path] || noteHasType(parser.ParseFrontmatterFields(rawFrontmatter(n)), "index") {
+			continue
+		}
 		// Resolve the set of note paths this note already links to.
 		outs, err := l.index.Outlinks(n.Path)
 		if err != nil {

@@ -182,7 +182,17 @@ Behaviour:
 > note's title/basename without linking to it. It is **advisory**
 > (`info` severity) and **not** in the default rule set — it is known
 > and selectable by name only, because it is higher-noise on a dense
-> vault. Request it explicitly when running `memory_lint`.
+> vault. Request it explicitly when running `memory_lint`. It leaves
+> out what is noise by design: index notes (`type: index` — README,
+> `hot.md`, `log.md`) are not scanned, a title or file name that two or
+> more notes share (`README`) is no mention, and a database's
+> `template` is neither scanned nor a target.
+
+> **Per-note opt-out**: a note turns a rule off for itself with
+> `lint_disable` in its frontmatter, as a list or as names separated by
+> commas — `lint_disable: [unlinked-mentions]`,
+> `lint_disable: orphan-note, unlinked-mentions`. Its issues for those
+> rules are dropped; every other note is checked as before.
 
 ## CLI reference
 

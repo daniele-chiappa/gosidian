@@ -26,8 +26,10 @@ package lint
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/gosidian/gosidian/internal/index"
+	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/gosidian/gosidian/internal/vault"
 )
 
@@ -207,10 +209,36 @@ func (l *Linter) Run(ctx context.Context, project string, enabled []string, minS
 		}
 		all = append(all, issues...)
 	}
+	all = l.dropDisabled(all)
 	if minSeverity != "" {
 		all = filterBySeverity(all, minSeverity)
 	}
 	return all, nil
+}
+
+// dropDisabled removes the issues of a note that turns their rule off with
+// `lint_disable` in its frontmatter (a list, or names separated by commas):
+// a note may opt out of a rule by hand (IMP-121, IMP-024). Each note with
+// issues is read once; one that cannot be read keeps its issues.
+func (l *Linter) dropDisabled(issues []Issue) []Issue {
+	disabled := map[string]map[string]bool{}
+	out := issues[:0]
+	for _, i := range issues {
+		off, ok := disabled[i.File]
+		if !ok {
+			off = map[string]bool{}
+			if note, err := l.vault.Load(i.File); err == nil {
+				for _, r := range parser.FrontmatterList(parser.FrontmatterRawForPath(i.File, note.Content), "lint_disable") {
+					off[strings.TrimSpace(r)] = true
+				}
+			}
+			disabled[i.File] = off
+		}
+		if !off[i.Rule] {
+			out = append(out, i)
+		}
+	}
+	return out
 }
 
 // selectRules resolves the enabled list into ruleSpec instances in stable

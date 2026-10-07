@@ -8,6 +8,27 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.66.0] — 2026-10-07 — "quieter lint"
+
+The opt-in `unlinked-mentions` lint rule leaves out what is noise by
+design, and a note can turn any lint rule off for itself. Pull the image
+and restart, nothing to migrate.
+
+### Added
+- **`lint_disable` in a note's frontmatter** — a note turns
+  `memory_lint` rules off for itself, as a list or as names separated by
+  commas (`lint_disable: [unlinked-mentions]`,
+  `lint_disable: orphan-note, unlinked-mentions`). Its issues for those
+  rules are dropped; every other note is checked as before.
+
+### Changed
+- **`unlinked-mentions` is less noisy** — on a 57-note project it gave
+  159 issues, a third of them noise by design; now 88. Index notes
+  (`type: index`: README, `hot.md`, `log.md`) are no longer scanned, a
+  title or file name that two or more notes share (`README`) is no
+  mention, since no link to propose could be the right one, and a
+  database's `template` is neither scanned nor a target.
+
 ## [2.65.0] — 2026-10-07 — "tool count"
 
 `/healthz` says how many MCP tools the server registered. Pull the image

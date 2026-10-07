@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 
@@ -525,6 +527,73 @@ func TestLint_UnlinkedMentions(t *testing.T) {
 	}
 	if !strings.Contains(issues[0].Message, "proj/parser.md") {
 		t.Errorf("message should name the target note: %q", issues[0].Message)
+	}
+}
+
+// unlinkedTargets runs unlinked-mentions on proj and returns "source→target"
+// for each issue.
+func unlinkedTargets(t *testing.T, l *Linter) []string {
+	t.Helper()
+	issues, err := l.Run(context.Background(), "proj", []string{"unlinked-mentions"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, i := range issues {
+		target := i.Message[strings.Index(i.Message, "(note ")+6 : strings.LastIndex(i.Message, ")")]
+		out = append(out, i.File+"→"+target)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// The noise IMP-121 measured: index notes as sources, labels several notes
+// share, and a database's template. A plain note naming a page still counts.
+func TestLint_UnlinkedMentions_Noise(t *testing.T) {
+	l, v, idx := newTestLinter(t)
+	seed(t, v, idx, "proj/services/gitea.md", "---\ntitle: gitea\ntags: [proj, type:memory]\n---\n\n# gitea\n")
+	seed(t, v, idx, "proj/docs/README.md", "---\ntitle: Docs index\ntags: [proj, type:index]\n---\n\n# Docs\n")
+	seed(t, v, idx, "proj/skills/README.md", "---\ntitle: Skills index\ntags: [proj, type:index]\n---\n\n# Skills\n")
+	seed(t, v, idx, "proj/docs/improvements.md", "---\ntitle: Improvements\ntags: [proj, type:index]\ntype: database\nsource: proj/docs/improvements\ntemplate: proj/docs/templates/improvement\nfields:\n  id: {type: text}\n---\n\n# Improvements\n")
+	seed(t, v, idx, "proj/docs/templates/improvement.md", "---\ntitle: improvement\n---\n\nWhich gitea repo is it about?\n")
+	// An index note (type: index, here by its field) names gitea: not scanned.
+	seed(t, v, idx, "proj/log.md", "---\ntitle: Log\ntype: index\n---\n\nSet up gitea and read the README.\n")
+	// A plain note: gitea counts, README (two notes) and improvement (the
+	// template) do not.
+	seed(t, v, idx, "proj/notes/setup.md", "---\ntitle: Setup\ntags: [proj, type:memory]\n---\n\nThe gitea runner: see the README, file an improvement.\n")
+
+	got := unlinkedTargets(t, l)
+	want := []string{"proj/notes/setup.md→proj/services/gitea.md"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("issues = %v, want %v", got, want)
+	}
+}
+
+// lint_disable in a note's frontmatter turns a rule off for that note, as a
+// list or as names separated by commas, for any rule.
+func TestLint_LintDisable(t *testing.T) {
+	l, v, idx := newTestLinter(t)
+	seed(t, v, idx, "proj/parser.md", "---\ntitle: Parser\ntags: [proj, type:memory]\n---\n\n# Parser\n")
+	seed(t, v, idx, "proj/a.md", "---\ntitle: A\ntags: [proj, type:memory]\nlint_disable: [unlinked-mentions]\n---\n\nThe Parser. [[proj/b]]\n")
+	seed(t, v, idx, "proj/b.md", "---\ntitle: B\ntags: [proj, type:memory]\nlint_disable: orphan-note, unlinked-mentions\n---\n\nThe Parser. [[proj/a]]\n")
+	seed(t, v, idx, "proj/c.md", "---\ntitle: C\ntags: [proj, type:memory]\n---\n\nThe Parser.\n")
+
+	if got := unlinkedTargets(t, l); strings.Join(got, ",") != "proj/c.md→proj/parser.md" {
+		t.Errorf("unlinked-mentions = %v, want only c", got)
+	}
+	// Another rule: c is an orphan and says nothing; a lonely note that
+	// turns orphan-note off is not reported.
+	seed(t, v, idx, "proj/lonely.md", "---\ntitle: lonely\ntags: [proj, type:memory]\nlint_disable: orphan-note\n---\n\n# lonely\n")
+	issues, err := l.Run(context.Background(), "proj", []string{"orphan-note"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var orphans []string
+	for _, i := range issues {
+		orphans = append(orphans, i.File)
+	}
+	if slices.Contains(orphans, "proj/lonely.md") || !slices.Contains(orphans, "proj/c.md") {
+		t.Errorf("orphan-note on %v: want c, not lonely", orphans)
 	}
 }
 
