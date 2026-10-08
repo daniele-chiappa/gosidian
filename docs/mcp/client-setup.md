@@ -199,7 +199,8 @@ deprecated and SSE-only. To migrate:
    (the line that bound `8765:8765`).
 3. **Unset `GOSIDIAN_MCP_ADDR`** to silence the deprecation warning at
    boot. The standalone listener will not start; clients must use the
-   web-port path.
+   web-port path. The image sets it by default up to v2.69: there, set
+   it to an empty value instead.
 
 The motivation: a single tunnel (SSH `-L 8080`, reverse proxy, or any
 other single-port forwarder) now serves both the web UI and the agent

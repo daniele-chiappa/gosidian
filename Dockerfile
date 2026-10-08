@@ -87,11 +87,12 @@ USER 65532:65532
 WORKDIR /data
 VOLUME ["/vault"]
 
+# MCP is served on the web port (/mcp). The deprecated standalone SSE
+# listener stays off unless GOSIDIAN_MCP_ADDR is set (IMP-038).
 ENV GOSIDIAN_VAULT=/vault \
-    GOSIDIAN_ADDR=:8080 \
-    GOSIDIAN_MCP_ADDR=0.0.0.0:8765
+    GOSIDIAN_ADDR=:8080
 
-EXPOSE 8080 8765
+EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD ["/gosidian","healthcheck"]

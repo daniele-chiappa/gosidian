@@ -8,6 +8,26 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.70.0] — 2026-10-08 — "single port"
+
+The Docker image no longer opens the deprecated standalone MCP port 8765:
+MCP is served on the web port only, as the binary already did. If a
+client still connects to `http://<host>:8765/sse`, move it to `/mcp` on
+the web port before you update, or keep the old listener with the
+variable below. Otherwise pull the image and restart, nothing to migrate.
+
+### Changed
+- **The image no longer opens the legacy MCP port** — the image set
+  `GOSIDIAN_MCP_ADDR=0.0.0.0:8765`, so every container started the
+  deprecated standalone SSE listener and logged its warning, although the
+  binary leaves it off and serves MCP on the web port (`/mcp`, Streamable
+  HTTP, and `/mcp/sse`). The image now leaves the variable unset and
+  exposes 8080 only. A client pointed at `http://<host>:8765/sse` stops
+  connecting: move it to `http://<host>:8080/mcp` (transport `http`, same
+  bearer token). To keep the old listener, set
+  `GOSIDIAN_MCP_ADDR: "0.0.0.0:8765"` and map the port. The example
+  `deploy/docker-compose.yml` drops the port and the variable too.
+
 ## [2.69.1] — 2026-10-07 — "plancia 0.3.2"
 
 The web UI's window manager moves to a newer
