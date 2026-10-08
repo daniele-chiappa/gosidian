@@ -46,7 +46,7 @@ working):
 | `/query` | notes by their frontmatter (see below) |
 | `/settings` | theme preset, language, git sync |
 | `/admin/*` | users, tokens, invites, audit (owner only) |
-| `/trash` | soft-deleted notes and projects (if enabled); a project comes back with the access it had: who could read it sees it, who administered it (or the owner) restores or purges it |
+| `/trash` | soft-deleted notes, folders and projects (if enabled); a note or a folder comes back to its project, for who can write there; a project comes back with the access it had: who could read it sees it, who administered it (or the owner) restores or purges it |
 
 ## Query window
 
@@ -63,6 +63,25 @@ are a table; a title opens the note. The whole query lives in the URL,
 so it survives a reload and can be shared as a link. The backend is
 `POST /api/v1/query`, scoped to the projects the account can read.
 
+## Tree context menu
+
+A right-click on a row of the sidebar tree (or the Menu key, or
+`Shift+F10`, on the focused row) opens gosidian's own menu in place of
+the browser's:
+
+- **note**: *Download* saves the same self-contained copy as the note
+  window's download button; *Delete* moves it to the trash, after a
+  confirmation. Obsidian bases and canvases, which are read-only, only
+  download.
+- **folder**: *Download* saves a zip of the folder; *Delete* moves the
+  whole folder to the trash as one entry, restored in one go. It needs
+  the trash: with the trash off the server refuses it.
+- **project**: *Download* saves the project zip. A project is deleted
+  from the Projects window, which also handles its access.
+
+*Delete* shows only where the account may write. `Esc`, a click outside
+or a scroll close the menu.
+
 ## Zip export
 
 **Projects → Export** downloads a zip of every file of a project: notes,
@@ -75,7 +94,9 @@ read the project may export it; the anonymous guest of open mode may not.
 The zip is built while it downloads, so there is no size limit on the
 server side; each account may export 10 times per 10 minutes, and every
 export is written to the audit log (`export`, with the bytes sent). The
-endpoints are `GET /api/v1/projects/{name}/export.zip` and
+endpoints are `GET /api/v1/projects/{name}/export.zip`,
+`GET /api/v1/folders/{path}/export.zip` (any folder, from the tree's
+context menu, names starting at the folder) and
 `GET /api/v1/admin/export.zip`, with the usual Bearer.
 
 ## Rendering stack

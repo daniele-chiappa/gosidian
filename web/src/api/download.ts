@@ -9,8 +9,12 @@ import client from './client'
  */
 export async function downloadFile(path: string, fallbackName: string): Promise<void> {
   const res = await client.get<Blob>(path, { responseType: 'blob' })
-  const name = filenameFrom(String(res.headers['content-disposition'] ?? '')) ?? fallbackName
-  const url = URL.createObjectURL(res.data)
+  saveBlob(res.data, filenameFrom(String(res.headers['content-disposition'] ?? '')) ?? fallbackName)
+}
+
+/** Saves a Blob under name through a synthesised <a download>. */
+export function saveBlob(blob: Blob, name: string): void {
+  const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
   a.download = name

@@ -77,7 +77,17 @@
     "new_note_here": "Nuova nota in questa cartella",
     "download_project": "Scarica progetto come zip",
     "download_vault": "Scarica tutto il vault",
-    "download_vault_help": "Scarica un archivio zip dell'intero vault (escluso .gosidian/). Solo owner."
+    "download_vault_help": "Scarica un archivio zip dell'intero vault (escluso .gosidian/). Solo owner.",
+    "menu": {
+      "label": "Azioni su {name}",
+      "download": "Scarica",
+      "download_zip": "Scarica come zip",
+      "delete": "Elimina",
+      "confirm_delete_note": "Eliminare {path}? Va nel cestino.",
+      "confirm_delete_folder": "Eliminare la cartella {path}? Va nel cestino con tutto ciò che contiene. | Eliminare la cartella {path} e la sua nota? Va nel cestino, da cui si ripristina in blocco. | Eliminare la cartella {path} e le sue {count} note? Va nel cestino, da cui si ripristina in blocco.",
+      "download_failed": "Download non riuscito",
+      "delete_failed": "Eliminazione non riuscita"
+    }
   },
   "note": {
     "print": "Stampa / Salva come PDF",

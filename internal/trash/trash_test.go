@@ -230,3 +230,78 @@ func TestDiscardNote_PrunesEmptyFolders(t *testing.T) {
 		t.Errorf("the project went too: %v", err)
 	}
 }
+
+func TestBin_DiscardFolder(t *testing.T) {
+	b, root := newBin(t)
+	write(t, root, "Work/a/docs/one.md", "1")
+	write(t, root, "Work/a/docs/sub/two.md", "2")
+	write(t, root, "Work/a/docs/attachments/pic.png", "png")
+	write(t, root, "Work/keep.md", "k")
+
+	id, notes, err := b.DiscardFolder("Work/a/docs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(notes) != 2 {
+		t.Errorf("notes = %v, want the 2 notes", notes)
+	}
+	// Work/a held only docs: it goes too, the project stays.
+	if _, err := os.Stat(filepath.Join(root, "Work", "a")); err == nil {
+		t.Error("Work/a was left on disk, empty")
+	}
+	if _, err := os.Stat(filepath.Join(root, "Work", "keep.md")); err != nil {
+		t.Errorf("the rest of the project went too: %v", err)
+	}
+
+	entries, err := b.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].OriginPath != "Work/a/docs" || !entries[0].IsDir || entries[0].IsProject() {
+		t.Fatalf("entries = %+v, want one folder entry that is not a project", entries)
+	}
+
+	restored, meta, err := b.Restore(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(restored) != 2 || meta != nil {
+		t.Errorf("restored = %v meta = %q, want the 2 notes and no meta", restored, meta)
+	}
+	if _, err := os.Stat(filepath.Join(root, "Work/a/docs/attachments/pic.png")); err != nil {
+		t.Errorf("the attachment did not come back: %v", err)
+	}
+}
+
+func TestBin_DiscardFolderRefuses(t *testing.T) {
+	b, root := newBin(t)
+	write(t, root, "Work/note.md", "n")
+	if err := os.Symlink(filepath.Join(root, "Work"), filepath.Join(root, "Work", "link")); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"Work", "Work/note.md", "Work/missing", "Work/link"} {
+		if _, _, err := b.DiscardFolder(rel); err == nil {
+			t.Errorf("DiscardFolder(%q) succeeded", rel)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "Work", "note.md")); err != nil {
+		t.Errorf("the project was touched: %v", err)
+	}
+}
+
+func TestEntry_IsProject(t *testing.T) {
+	cases := []struct {
+		e    Entry
+		want bool
+	}{
+		{Entry{OriginPath: "Work", IsDir: true}, true},
+		{Entry{OriginPath: "Work/docs", IsDir: true}, false},
+		{Entry{OriginPath: "Work/note.md"}, false},
+		{Entry{OriginPath: "note.md"}, false},
+	}
+	for _, c := range cases {
+		if got := c.e.IsProject(); got != c.want {
+			t.Errorf("%+v IsProject = %v, want %v", c.e, got, c.want)
+		}
+	}
+}

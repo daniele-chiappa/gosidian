@@ -8,6 +8,8 @@
  * Project roots carry a visibility cue (lock = private, globe = public;
  * internal draws nothing) and the "+" (new note here) shows only where
  * the account may write — both from the access store, never from the role.
+ * A right-click on a row (or the Menu key, or Shift+F10) opens the tree's
+ * context menu (IMP-150).
  */
 import type { TreeNode as TN } from '@/api/tree'
 import { computed } from 'vue'
@@ -18,12 +20,14 @@ import { useWindowsStore } from 'plancia'
 import { useAccessStore } from '@/stores/access'
 import { VISIBILITY_HELP } from '@/api/access'
 import { planciaKey } from '@/composables/planciaKey'
+import { useTreeMenu } from '@/composables/useTreeMenu'
 
 const props = defineProps<{ node: TN }>()
 const { t } = useI18n()
 const recents = useRecentlyViewed()
 const windows = useWindowsStore()
 const access = useAccessStore()
+const menu = useTreeMenu()
 
 const expandedKey = computed(() => `gosidian.tree.open:${props.node.path}`)
 
@@ -61,6 +65,27 @@ function openNote() {
   })
 }
 
+// The context menu opens at the pointer; from the keyboard, under the row.
+// The Menu key can fire both a keydown and a contextmenu (at 0,0): both
+// land on the same spot.
+function openMenuAt(row: HTMLElement, x?: number, y?: number) {
+  if (x === undefined || y === undefined || (x === 0 && y === 0)) {
+    const r = row.getBoundingClientRect()
+    x = r.left + 8
+    y = r.bottom
+  }
+  menu.open(props.node, x, y, row)
+}
+function onContextMenu(e: MouseEvent) {
+  openMenuAt(e.currentTarget as HTMLElement, e.clientX, e.clientY)
+}
+function onRowKeydown(e: KeyboardEvent) {
+  if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+    e.preventDefault()
+    openMenuAt(e.currentTarget as HTMLElement)
+  }
+}
+
 // Open the creation window pre-targeted to this folder (the + on a folder row).
 function createHere() {
   windows.open({
@@ -82,6 +107,9 @@ function createHere() {
       >
         <summary
           class="group/row flex items-center gap-1.5 py-0.5 px-1 rounded cursor-pointer hover:bg-surface-hover select-none"
+          aria-haspopup="menu"
+          @contextmenu.prevent="onContextMenu"
+          @keydown="onRowKeydown"
         >
           <span class="opacity-60 group-open:rotate-90 transition-transform">▸</span>
           <span class="flex-1 truncate">{{ node.name }}</span>
@@ -130,7 +158,10 @@ function createHere() {
     <template v-else>
       <button
         type="button"
+        aria-haspopup="menu"
         @click="openNote"
+        @contextmenu.prevent="onContextMenu"
+        @keydown="onRowKeydown"
         class="w-full flex items-center gap-1.5 py-0.5 px-2 rounded text-left text-text-muted hover:text-text hover:bg-surface-hover truncate"
       >
         <span class="opacity-50 text-xs">·</span>

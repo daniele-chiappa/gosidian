@@ -682,6 +682,72 @@ paths:
         "501":
           $ref: "#/components/responses/NotImplemented"
 
+  /api/v1/folders/{path}/export.zip:
+    get:
+      tags: [tree]
+      summary: Zip of a folder (the tree's context menu).
+      description: >-
+        Every file under the folder, as the project export: hidden files,
+        node_modules and symlinks left out, names starting at the folder
+        itself (docs/... for Work/a/docs). Any signed-in account that can
+        read the project; 10 exports per 10 minutes per account, shared with
+        the project and vault exports; audited as export.
+      parameters:
+        - in: path
+          name: path
+          required: true
+          description: Vault-relative folder path; its slashes stay as they are.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The zip, streamed.
+          content:
+            application/zip: {}
+        "403":
+          description: The anonymous guest of open mode.
+        "404":
+          description: Not a folder, or a project the account cannot read.
+        "429":
+          description: Over the export limit (Retry-After).
+
+  /api/v1/folders/{path}:
+    delete:
+      tags: [tree]
+      summary: Move a folder inside a project to the trash.
+      description: >-
+        The folder and all it holds become one trash entry, restored in one
+        go from /api/v1/trash like a note: write access on the project. A
+        project folder is deleted with DELETE /api/v1/projects/{name}.
+        Audited as delete.
+      parameters:
+        - in: path
+          name: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Trashed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  trash_id: { type: string }
+                  removed:
+                    type: array
+                    items: { type: string }
+                    description: The notes the folder held, now out of the index.
+        "400":
+          description: A project folder, a hidden path, or a folder that is, holds or sits in the server's state directory.
+        "403":
+          description: No write access on the project.
+        "404":
+          description: Not a folder, or a project the account cannot read.
+        "503":
+          description: The trash is not enabled; a folder is never deleted for good this way.
+
   /api/v1/projects:
     get:
       tags: [projects]

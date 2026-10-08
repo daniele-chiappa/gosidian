@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { listTrash, restoreTrash, purgeTrash, type TrashItem } from '@/api/trash'
+import { apiErrorMessage } from '@/api/client'
 import { useTreeStore } from '@/stores/tree'
 import { Folder, FileText, RotateCcw, Trash2 } from 'lucide-vue-next'
 
@@ -29,7 +30,9 @@ async function restore(item: TrashItem) {
     treeStore.invalidateAll()
     await load()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Restore failed'
+    // The server says why: a folder or a note recreated meanwhile, a
+    // project to restore first.
+    error.value = apiErrorMessage(e, 'Restore failed')
   }
 }
 
@@ -40,7 +43,7 @@ async function purge(item: TrashItem) {
     message.value = 'Purged.'
     await load()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Purge failed'
+    error.value = apiErrorMessage(e, 'Purge failed')
   }
 }
 

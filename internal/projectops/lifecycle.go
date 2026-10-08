@@ -238,9 +238,10 @@ func RestoreProject(v *vault.Vault, idx *index.Index, ps *projects.Store, tokens
 	return res, nil
 }
 
-// laterNotesUnder reports whether the trash holds notes discarded under
-// project name after the project entry id was: only another project with
-// the name can have trashed them. An unreadable trash counts as yes.
+// laterNotesUnder reports whether the trash holds notes (or folders)
+// discarded under project name after the project entry id was: only another
+// project with the name can have trashed them. An unreadable trash counts
+// as yes.
 func laterNotesUnder(bin *trash.Bin, id, name string) bool {
 	entries, err := bin.List()
 	if err != nil {
@@ -253,7 +254,7 @@ func laterNotesUnder(bin *trash.Bin, id, name string) bool {
 		}
 	}
 	for _, e := range entries {
-		if !e.IsDir && strings.HasPrefix(e.OriginPath, name+"/") && e.DiscardedAt.After(deletedAt) {
+		if !e.IsProject() && strings.HasPrefix(e.OriginPath, name+"/") && e.DiscardedAt.After(deletedAt) {
 			return true
 		}
 	}

@@ -56,7 +56,17 @@
     "collapse_all": "Alle einklappen",
     "download_project": "Download project as zip",
     "download_vault": "Download whole vault",
-    "download_vault_help": "Download a zip archive of the entire vault (excluding .gosidian/). Owner only."
+    "download_vault_help": "Download a zip archive of the entire vault (excluding .gosidian/). Owner only.",
+    "menu": {
+      "label": "Aktionen für {name}",
+      "download": "Herunterladen",
+      "download_zip": "Als ZIP herunterladen",
+      "delete": "Löschen",
+      "confirm_delete_note": "{path} löschen? Die Notiz kommt in den Papierkorb.",
+      "confirm_delete_folder": "Den Ordner {path} löschen? Er kommt mit allem Inhalt in den Papierkorb. | Den Ordner {path} und seine Notiz löschen? Er kommt in den Papierkorb und lässt sich dort in einem Schritt wiederherstellen. | Den Ordner {path} und seine {count} Notizen löschen? Er kommt in den Papierkorb und lässt sich dort in einem Schritt wiederherstellen.",
+      "download_failed": "Download fehlgeschlagen",
+      "delete_failed": "Löschen fehlgeschlagen"
+    }
   },
   "nav": {
     "query": "Abfrage",

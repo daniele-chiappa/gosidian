@@ -95,18 +95,7 @@ func (b *Bin) DiscardProject(name string, meta []byte) (string, []string, error)
 	}
 
 	// Collect note paths so the caller can clean the index afterwards.
-	var notes []string
-	_ = filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		if !isNotePath(p) {
-			return nil
-		}
-		rel, _ := filepath.Rel(b.vaultRoot, p)
-		notes = append(notes, filepath.ToSlash(rel))
-		return nil
-	})
+	notes := b.notesUnder(src)
 
 	id := newID(name)
 	dst := filepath.Join(b.dir, id)
@@ -142,6 +131,54 @@ func (b *Bin) DiscardProject(name string, meta []byte) (string, []string, error)
 	return id, notes, nil
 }
 
+// DiscardFolder moves a folder inside a project into the trash, with all
+// it holds, as one entry (IMP-150), and removes the folders it left empty
+// above it. Returns the trash-relative id and the note paths the folder
+// held, for the caller's index cleanup. A project folder is no folder here:
+// it goes through DiscardProject, which keeps its access with it.
+func (b *Bin) DiscardFolder(rel string) (string, []string, error) {
+	rel = filepath.ToSlash(filepath.Clean(rel))
+	if !strings.Contains(rel, "/") {
+		return "", nil, errors.New("not a folder inside a project")
+	}
+	src := filepath.Join(b.vaultRoot, filepath.FromSlash(rel))
+	st, err := os.Lstat(src)
+	if err != nil {
+		return "", nil, err
+	}
+	if !st.IsDir() {
+		return "", nil, errors.New("not a directory")
+	}
+	notes := b.notesUnder(src)
+	id := newID(rel)
+	dst := filepath.Join(b.dir, id)
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return "", nil, err
+	}
+	if err := os.Rename(src, dst); err != nil {
+		return "", nil, err
+	}
+	vault.PruneEmptyParents(b.vaultRoot, rel)
+	return id, notes, nil
+}
+
+// notesUnder returns the vault-relative paths of the notes under dir.
+func (b *Bin) notesUnder(dir string) []string {
+	var notes []string
+	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if !isNotePath(p) {
+			return nil
+		}
+		rel, _ := filepath.Rel(b.vaultRoot, p)
+		notes = append(notes, filepath.ToSlash(rel))
+		return nil
+	})
+	return notes
+}
+
 // ProjectMeta returns the meta stored with a trashed project, or nil when
 // the entry has none (a note, or a project trashed without one).
 func (b *Bin) ProjectMeta(id string) ([]byte, error) {
@@ -168,6 +205,13 @@ type Entry struct {
 	OriginPath  string // best-effort original vault-relative path
 	DiscardedAt time.Time
 	IsDir       bool
+}
+
+// IsProject reports whether the entry is a trashed project: a folder taken
+// from the vault root. A folder from inside a project (DiscardFolder) has a
+// "/" in its origin and is handled like a note.
+func (e Entry) IsProject() bool {
+	return e.IsDir && !strings.Contains(e.OriginPath, "/")
 }
 
 // List returns all current trash entries, newest first.
@@ -203,7 +247,8 @@ func (b *Bin) List() ([]Entry, error) {
 
 // Restore moves an entry back to its original location. The caller is
 // expected to reindex what comes back. Returns the list of vault-relative
-// .md paths that were restored (single entry for notes, multi for projects)
+// .md paths that were restored (single entry for notes, multi for folders
+// and projects)
 // and, for a project, the meta stored by DiscardProject (nil if none); the
 // meta file does not come back into the vault.
 func (b *Bin) Restore(id string) ([]string, []byte, error) {

@@ -8,6 +8,47 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.71.0] — 2026-10-08 — "tree menu"
+
+A right-click on the sidebar tree opens gosidian's own menu: download a
+note, a folder or a project, or move a note or a folder to the trash. Pull the image and restart, nothing
+to migrate. If you set the state directory inside the vault under a
+visible name, read the Security entry.
+
+### Added
+- **A context menu on the sidebar tree** — a right-click on a note, a
+  folder or a project (or the Menu key, or `Shift+F10`, on the focused
+  row) opens gosidian's own menu in place of the browser's. A note
+  downloads (the same self-contained copy as its window's button) and goes
+  to the trash after a confirmation. A folder downloads as a zip and goes
+  to the trash as one entry with everything it holds, restored in one go
+  by whoever can write in the project. A project downloads its zip; it is
+  still deleted from the Projects window, which also handles its access.
+  Delete shows only where the account may write, and never on an Obsidian
+  base or canvas. Deleting a folder needs the trash: with the trash off
+  the server refuses it.
+- **Folder endpoints** — `GET /api/v1/folders/{path}/export.zip` (names in
+  the archive start at the folder; same rate limit and audit as the
+  project export) and `DELETE /api/v1/folders/{path}` (into the trash; 503
+  when the trash is off, 400 on a project folder).
+
+### Changed
+- **The trash page says why a restore was refused** (a note or a folder
+  recreated in the meantime, a project to restore first) instead of
+  "Request failed with status code 400".
+- **A restore from the trash refreshes the sidebar of every open
+  session**, once the restored notes are indexed.
+
+### Security
+- **A state directory inside the vault under a visible name no longer
+  leaves in a zip** — such a folder shows up as a project, and its zip
+  export held the credentials, the configuration and the audit log for
+  whoever could read that project. A zip of the state directory, or of a
+  folder inside it, now answers 404, and a folder that holds it cannot be
+  deleted. Not affected: a state directory outside the vault, as the
+  documentation recommends (`GOSIDIAN_STATE_DIR=/data`), and the default
+  `<vault>/.gosidian`, which is hidden.
+
 ## [2.70.0] — 2026-10-08 — "single port"
 
 The Docker image no longer opens the deprecated standalone MCP port 8765:

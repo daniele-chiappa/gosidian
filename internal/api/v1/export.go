@@ -8,6 +8,7 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -86,6 +87,19 @@ func (r *Router) exportUser(w http.ResponseWriter, req *http.Request) (*RequestU
 // streamExport writes the zip of dir ("" = the vault) as it walks it: the
 // server holds one file at a time, whatever the size of the archive.
 func (r *Router) streamExport(w http.ResponseWriter, req *http.Request, user *RequestUser, dir, filename string) {
+	// The walk leaves out the state dir only below where it starts: started
+	// at the state dir itself, set inside the vault under a visible name, it
+	// would zip the credentials.
+	if dir != "" && r.inStateDir(dir) {
+		WriteError(w, http.StatusNotFound, CodeNotFound, "folder not found")
+		return
+	}
+	// Names in the archive start at the exported folder, as for a project
+	// (its folder is at the vault root): docs/… for Work/a/docs.
+	strip := ""
+	if parent := path.Dir(dir); dir != "" && parent != "." {
+		strip = parent + "/"
+	}
 	h := w.Header()
 	attach.SetInertHeaders(h)
 	h.Set("Content-Type", "application/zip")
@@ -111,7 +125,7 @@ func (r *Router) streamExport(w http.ResponseWriter, req *http.Request, user *Re
 			return nil
 		}
 		files++
-		return addZipFile(zw, filepath.Join(r.deps.Vault.Root, filepath.FromSlash(rel)), rel, info)
+		return addZipFile(zw, filepath.Join(r.deps.Vault.Root, filepath.FromSlash(rel)), strings.TrimPrefix(rel, strip), info)
 	})
 	if err == nil {
 		err = zw.Close()

@@ -10,6 +10,7 @@ import (
 	"github.com/gosidian/gosidian/internal/authz"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/projectops"
+	"github.com/gosidian/gosidian/internal/server/events"
 	"github.com/gosidian/gosidian/internal/trash"
 	"github.com/gosidian/gosidian/internal/webauth"
 )
@@ -114,7 +115,7 @@ func (r *Router) restoreTrash(w http.ResponseWriter, req *http.Request, id strin
 	}
 	princ := user.principal()
 	lvl := r.trashLevel(princ, e)
-	if e.IsDir {
+	if e.IsProject() {
 		// A project comes back as it went: admin on it, as for the delete,
 		// judged on the access stored with it (IMP-124).
 		if denyTrashLevel(w, lvl, authz.LevelAdmin) {
@@ -137,9 +138,10 @@ func (r *Router) restoreTrash(w http.ResponseWriter, req *http.Request, id strin
 		WriteJSON(w, http.StatusOK, map[string]any{"restored": res.Restored, "project": res.Name, "access_restored": res.AccessRestored})
 		return
 	}
-	// Restoring re-creates a note in its origin project — gate it on write
-	// access there (BUG-020 / per-project access). A project that is gone
-	// would come back implicitly, without its access: restore it first.
+	// Restoring re-creates a note, or a folder (IMP-150), in its origin
+	// project — gate it on write access there (BUG-020 / per-project
+	// access). A project that is gone would come back implicitly, without
+	// its access: restore it first.
 	if denyTrashLevel(w, lvl, authz.LevelWrite) {
 		return
 	}
@@ -171,6 +173,8 @@ func (r *Router) restoreTrash(w http.ResponseWriter, req *http.Request, id strin
 		}
 	}
 	r.auditNote(req, audit.ActionCreate, user, id, strings.Join(restored, ","), int64(len(restored)))
+	// After the reindex: the tree is built from the index.
+	r.publishNoteEvent(events.TopicTree, e.OriginPath, "create", nil)
 	WriteJSON(w, http.StatusOK, map[string]any{"restored": restored})
 }
 
@@ -180,11 +184,11 @@ func (r *Router) purgeTrash(w http.ResponseWriter, req *http.Request, id string,
 		WriteError(w, http.StatusNotFound, CodeNotFound, "trash entry not found")
 		return
 	}
-	// Permanently deleting a trashed note from a project the user can't
-	// write to would be a cross-project mutation; a trashed project needs
-	// admin on it, as its delete did.
+	// Permanently deleting a trashed note or folder from a project the user
+	// can't write to would be a cross-project mutation; a trashed project
+	// needs admin on it, as its delete did.
 	need := authz.LevelWrite
-	if e.IsDir {
+	if e.IsProject() {
 		need = authz.LevelAdmin
 	}
 	if denyTrashLevel(w, r.trashLevel(user.principal(), e), need) {
@@ -228,7 +232,7 @@ func (r *Router) trashLevel(p authz.Principal, e trash.Entry) authz.Level {
 	if !trash.ValidOrigin(e.OriginPath) {
 		return authz.LevelNone
 	}
-	if e.IsDir {
+	if e.IsProject() {
 		if r.deps.Projects == nil {
 			return authz.LevelNone
 		}
@@ -252,8 +256,8 @@ func (r *Router) trashLevel(p authz.Principal, e trash.Entry) authz.Level {
 	return r.levelOf(p, projectOf(e.OriginPath))
 }
 
-// trashedNoteProject returns the project folder a trashed note came from;
-// false for a note at the vault root, which has none.
+// trashedNoteProject returns the project folder a trashed note or folder
+// came from; false for a note at the vault root, which has none.
 func trashedNoteProject(origin string) (string, bool) {
 	if !strings.Contains(origin, "/") {
 		return "", false

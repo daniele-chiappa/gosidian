@@ -56,7 +56,17 @@
     "collapse_all": "Contraer todo",
     "download_project": "Download project as zip",
     "download_vault": "Download whole vault",
-    "download_vault_help": "Download a zip archive of the entire vault (excluding .gosidian/). Owner only."
+    "download_vault_help": "Download a zip archive of the entire vault (excluding .gosidian/). Owner only.",
+    "menu": {
+      "label": "Acciones sobre {name}",
+      "download": "Descargar",
+      "download_zip": "Descargar como zip",
+      "delete": "Eliminar",
+      "confirm_delete_note": "¿Eliminar {path}? Va a la papelera.",
+      "confirm_delete_folder": "¿Eliminar la carpeta {path}? Va a la papelera con todo lo que contiene. | ¿Eliminar la carpeta {path} y su nota? Va a la papelera, desde donde se restaura de una vez. | ¿Eliminar la carpeta {path} y sus {count} notas? Va a la papelera, desde donde se restaura de una vez.",
+      "download_failed": "La descarga ha fallado",
+      "delete_failed": "No se ha podido eliminar"
+    }
   },
   "nav": {
     "query": "Consulta",

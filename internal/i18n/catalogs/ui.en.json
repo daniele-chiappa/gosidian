@@ -77,7 +77,17 @@
     "new_note_here": "New note in this folder",
     "download_project": "Download project as zip",
     "download_vault": "Download whole vault",
-    "download_vault_help": "Download a zip archive of the entire vault (excluding .gosidian/). Owner only."
+    "download_vault_help": "Download a zip archive of the entire vault (excluding .gosidian/). Owner only.",
+    "menu": {
+      "label": "Actions on {name}",
+      "download": "Download",
+      "download_zip": "Download as zip",
+      "delete": "Delete",
+      "confirm_delete_note": "Delete {path}? It goes to the trash.",
+      "confirm_delete_folder": "Delete the folder {path}? It goes to the trash with all it holds. | Delete the folder {path} and its note? It goes to the trash, where it is restored in one go. | Delete the folder {path} and its {count} notes? It goes to the trash, where it is restored in one go.",
+      "download_failed": "Download failed",
+      "delete_failed": "Delete failed"
+    }
   },
   "note": {
     "print": "Print / Save as PDF",

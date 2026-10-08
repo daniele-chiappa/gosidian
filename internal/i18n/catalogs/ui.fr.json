@@ -56,7 +56,17 @@
     "collapse_all": "Tout réduire",
     "download_project": "Download project as zip",
     "download_vault": "Download whole vault",
-    "download_vault_help": "Download a zip archive of the entire vault (excluding .gosidian/). Owner only."
+    "download_vault_help": "Download a zip archive of the entire vault (excluding .gosidian/). Owner only.",
+    "menu": {
+      "label": "Actions sur {name}",
+      "download": "Télécharger",
+      "download_zip": "Télécharger en zip",
+      "delete": "Supprimer",
+      "confirm_delete_note": "Supprimer {path} ? La note va dans la corbeille.",
+      "confirm_delete_folder": "Supprimer le dossier {path} ? Il va dans la corbeille avec tout son contenu. | Supprimer le dossier {path} et sa note ? Il va dans la corbeille, d'où il se restaure d'un seul coup. | Supprimer le dossier {path} et ses {count} notes ? Il va dans la corbeille, d'où il se restaure d'un seul coup.",
+      "download_failed": "Échec du téléchargement",
+      "delete_failed": "Échec de la suppression"
+    }
   },
   "nav": {
     "query": "Requête",

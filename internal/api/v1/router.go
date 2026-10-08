@@ -144,6 +144,7 @@ func (r *Router) registerAuthed() {
 	r.mux.Handle("/api/v1/query", authed(r.handleQuery))
 	r.mux.Handle("/api/v1/graph", authed(r.handleGraph))
 	r.mux.Handle("/api/v1/tree", authed(r.handleTree))
+	r.mux.Handle("/api/v1/folders/", authed(r.handleFolderByPath))
 	r.mux.Handle("/api/v1/command-palette", authed(r.handleCommandPalette))
 
 	r.mux.Handle("/api/v1/upload", authed(r.handleUpload))

@@ -9,6 +9,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useAccessStore } from '@/stores/access'
 import { planciaKey } from '@/composables/planciaKey'
 import TreeNode from '@/components/domain/TreeNode.vue'
+import TreeContextMenu from '@/components/domain/TreeContextMenu.vue'
 import {
   RefreshCw,
   ChevronRight,
@@ -164,6 +165,7 @@ onMounted(() => {
       </ul>
       <p v-else class="text-xs text-text-muted px-1">No notes yet.</p>
     </div>
+    <TreeContextMenu />
 
     <div
       v-if="recents.entries.value.length"

@@ -27,6 +27,7 @@ import { useI18n } from 'vue-i18n'
 import { useDebounceFn } from '@vueuse/core'
 import { Printer, Download, Copy, Check, GitBranch, Camera } from 'lucide-vue-next'
 import { getNote, updateNote, deleteNote, createSnapshot, type Note } from '@/api/notes'
+import { downloadNote } from '@/api/noteDownload'
 import { renderPreviewData, type ViewData } from '@/api/preview'
 import { isConcurrencyConflict, onApiEvent, type ConcurrencyConflictDetail } from '@/api/client'
 import { useSSE } from '@/composables/useSSE'
@@ -357,37 +358,14 @@ function printNote() {
   window.print()
 }
 
-// Download the note's original source file (the raw .md / .html as stored in
-// the vault) as-is. Purely client-side: the saved content is already in
-// memory, so we wrap it in a Blob and synthesise an <a download>.
+// Download the note as a file (shared with the tree's context menu, IMP-150).
 async function downloadOriginal() {
   if (!note.value) return
-  const filename = note.value.path.split('/').pop() || note.value.title || 'note'
-  const mime = filename.toLowerCase().endsWith('.html') ? 'text/html' : 'text/markdown'
-  // Download a SELF-CONTAINED copy: image references inlined as data: URIs
-  // (server ?inline). The stored note keeps the lightweight reference for MCP
-  // reads/editing. Falls back to the in-memory content if the fetch fails.
-  let content = note.value.content
-  if (isReadOnlyFile.value) {
-    // A base or a canvas downloads as the file it is (YAML, JSON), not as
-    // what gosidian shows of it.
-    content = note.value.source ?? ''
-  } else {
-    try {
-      content = (await getNote(note.value.path, { inline: true })).content
-    } catch {
-      /* keep the raw content already loaded */
-    }
+  try {
+    await downloadNote(note.value.path, note.value)
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Download failed'
   }
-  const blob = new Blob([content], { type: `${mime};charset=utf-8` })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 // A snapshot of the note as it reads now, opened in a window of its own
