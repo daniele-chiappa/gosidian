@@ -78,10 +78,7 @@ func (r *Router) VaultFileAuthorizer() func(req *http.Request, rel string) int {
 			}
 			if d.MCPTokens != nil {
 				if mt, err := d.MCPTokens.Validate(tok); err == nil && mt.HasScope(auth.ScopeRead) {
-					if mt.AllowsPath(rel) {
-						return 0
-					}
-					return http.StatusNotFound
+					return r.mcpTokenGate(mt, rel)
 				}
 			}
 			return http.StatusUnauthorized
@@ -97,6 +94,29 @@ func (r *Router) VaultFileAuthorizer() func(req *http.Request, rel string) int {
 		}
 		return http.StatusUnauthorized
 	}
+}
+
+// mcpTokenGate is the /vault-files/ gate for an MCP token: its declared
+// scope narrowed to what the account that owns it may read now, as the MCP
+// server narrows it on every call (mcp effectiveToken). The declared scope
+// alone let a token with no project list, which every account may create
+// for itself, read the attachments of every project, and kept working for
+// a disabled owner or a revoked grant (BUG-100). Tokens without an owner
+// (CLI, admin) keep their declared scope. A project hidden from MCP is
+// refused, as by the MCP download ticket.
+func (r *Router) mcpTokenGate(mt *auth.Token, rel string) int {
+	project := projectOf(rel)
+	if !mt.AllowsPath(rel) || (r.deps.Projects != nil && r.deps.Projects.Get(project).HiddenFromMCP) {
+		return http.StatusNotFound
+	}
+	if mt.OwnerUserID == "" {
+		return 0
+	}
+	user, ok := r.deps.Auth.WebAuth.UserByID(mt.OwnerUserID)
+	if !ok || !user.Enabled() {
+		return http.StatusUnauthorized
+	}
+	return r.seeOr404(authz.Principal{UserID: user.ID, Role: user.Role, Restricted: user.Restricted}, rel)
 }
 
 // spaPrincipal resolves a SPA session token to its principal, mirroring the

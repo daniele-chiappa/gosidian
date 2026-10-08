@@ -307,6 +307,12 @@ func main() {
 	}
 
 	v := vault.New(absVault)
+	// A state dir inside the vault under a visible name would be a project
+	// with the credentials in it: the vault hides it (BUG-098).
+	v.SetStateDir(sdir)
+	if rel := v.StateDirInside(); rel != "" && !sdirDefault {
+		log.Printf("state dir: %s is inside the vault: hidden from notes, exports and git sync, but better moved outside it", sdir)
+	}
 	// One-time conversion of projects.json to the visibility + grants model
 	// (v2.30, ADR-026). Accounts that could read and write everywhere keep
 	// that access on the existing projects through explicit write grants.
@@ -422,6 +428,7 @@ func main() {
 
 	syncer := gitsync.New(absVault, cfg.Git)
 	syncer.SetProjects(projectsStore)
+	syncer.SetStateDir(v.StateDirInside())
 	syncer.SetTokenStore(gitTokenStore)
 	if err := syncer.Start(ctx); err != nil {
 		// IMP-002: gitsync init failure is non-fatal. Log loudly, mark the
@@ -480,7 +487,11 @@ func main() {
 		} else if removed > 0 {
 			log.Printf("trash: pruned %d expired entries (retention %s)", removed, cfg.Trash.Retention)
 		}
-		log.Printf("trash: enabled (retention %s)", cfg.Trash.Retention)
+		if cfg.Trash.Retention > 0 {
+			log.Printf("trash: enabled (retention %s)", cfg.Trash.Retention)
+		} else {
+			log.Printf("trash: enabled (retention 0: entries stay until purged)")
+		}
 	}
 	// MCP is always wired and mounted on the web mux at /mcp (Streamable HTTP)
 	// and /mcp/sse (legacy HTTP+SSE) — single-port
@@ -642,7 +653,6 @@ func main() {
 		GitSync:    syncer, // nil-safe; History returns "git sync disabled" when cfg off
 		ConfigPath: cfgPath,
 		OAuth:      oauthSrv, // nil when [oauth] is off: /api/v1/oauth/* answers 404
-		StateDir:   sdir,
 	})
 	srv.MountAPIv1(apiRouter)
 	srv.SetVaultFileAuthorizer(apiRouter.VaultFileAuthorizer()) // ADR-022: attachments share the API auth

@@ -23,6 +23,9 @@ type Vault struct {
 	mediaNotes bool
 	tableNotes bool
 	locks      sync.Map // canonical rel path → *sync.Mutex, see LockPath
+	// stateRel is the state dir's vault-relative path when it sits inside
+	// the vault, hidden like a dot folder (SetStateDir, BUG-098).
+	stateRel string
 }
 
 // New returns a Vault rooted at the given directory. A 128-entry LRU load
@@ -138,6 +141,9 @@ func (v *Vault) Rel(p string) (string, error) {
 	clean = strings.TrimPrefix(clean, "/")
 	if clean == "" || clean == "." {
 		return "", errors.New("empty path")
+	}
+	if v.hides(clean) {
+		return "", errors.New("invalid path")
 	}
 	return clean, nil
 }
@@ -291,11 +297,82 @@ func writeInDir(abs string, content []byte) error {
 		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 			return err
 		}
-		err := os.WriteFile(abs, content, 0o644)
+		err := writeWhole(abs, content)
 		if err == nil || attempt > 0 || !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
 	}
+}
+
+// writeWhole replaces the file at abs with content, whole or not at all
+// (BUG-106): os.WriteFile truncates first, so a full disk or a crash left an
+// empty note, which the watcher indexed and git committed, and a reader
+// could get half of one. The bytes go to a temporary file in the same
+// folder, synced, then renamed over the target. Its name is hidden and ends
+// in .tmp, which the scan, the watcher and the managed .gitignore leave out.
+// The target keeps its permissions; a hard link to it is broken, and the
+// file takes the server's owner, as any rename does. A symlink is written
+// through as before: the rename would replace the link with a file. A crash
+// can leave the temporary file behind: Scan removes it (removeStaleWrites).
+func writeWhole(abs string, content []byte) error {
+	perm := os.FileMode(0o644)
+	if st, err := os.Lstat(abs); err == nil {
+		if st.Mode()&fs.ModeSymlink != 0 {
+			return os.WriteFile(abs, content, perm)
+		}
+		perm = st.Mode().Perm()
+	}
+	f, err := os.CreateTemp(filepath.Dir(abs), writeTempPattern)
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	_, err = f.Write(content)
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Chmod(tmp, perm) // CreateTemp makes it 0600
+	}
+	if err == nil {
+		err = os.Rename(tmp, abs)
+	}
+	if err != nil {
+		_ = os.Remove(tmp)
+	}
+	return err
+}
+
+// writeTempPattern names writeWhole's temporary files.
+const writeTempPattern = ".gosidian-write-*.tmp"
+
+// removeStaleWrites removes the temporary files of saves a crash or a kill
+// cut short: hidden, they would stay for ever and keep their folder from
+// being pruned (PruneEmptyParents). Only those older than an hour go, so a
+// save on its way keeps its own.
+func (v *Vault) removeStaleWrites() {
+	cutoff := time.Now().Add(-time.Hour)
+	_ = filepath.WalkDir(v.Root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if v.skipDir(v.Root, path) {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if ok, _ := filepath.Match(writeTempPattern, d.Name()); !ok {
+			return nil
+		}
+		if info, err := d.Info(); err == nil && info.ModTime().Before(cutoff) {
+			_ = os.Remove(path)
+		}
+		return nil
+	})
 }
 
 // PruneEmptyParents removes the folders above rel that its removal left
@@ -337,8 +414,7 @@ func (v *Vault) List() ([]string, error) {
 			return err
 		}
 		if d.IsDir() {
-			name := d.Name()
-			if path != v.Root && (strings.HasPrefix(name, ".") || name == "node_modules") {
+			if v.skipDir(v.Root, path) {
 				return fs.SkipDir
 			}
 			return nil
@@ -385,7 +461,7 @@ func (v *Vault) ProjectNotes(project string) ([]NoteStat, error) {
 			return err
 		}
 		if d.IsDir() {
-			if path != root && (strings.HasPrefix(d.Name(), ".") || d.Name() == "node_modules") {
+			if v.skipDir(root, path) {
 				return fs.SkipDir
 			}
 			return nil
@@ -426,9 +502,11 @@ func (v *Vault) ScanInto(idx *index.Index) error {
 // (deleted while the server was down, or a delete whose commit a crash
 // lost), then resolves every link once all of them are in. ResolveAll runs
 // even when nothing changed, so a change to link resolution alone reaches
-// the stored links at the next start.
+// the stored links at the next start. First it removes what saves cut short
+// left behind.
 func (v *Vault) Scan(idx *index.Index) (ScanStats, error) {
 	var st ScanStats
+	v.removeStaleWrites()
 	paths, err := v.List()
 	if err != nil {
 		return st, err
@@ -499,7 +577,7 @@ func (v *Vault) Projects() ([]Project, error) {
 			continue
 		}
 		name := e.Name()
-		if strings.HasPrefix(name, ".") || name == "node_modules" {
+		if v.skipDir(v.Root, filepath.Join(v.Root, name)) {
 			continue
 		}
 		count, _ := v.countNotesIn(name)
@@ -521,8 +599,7 @@ func (v *Vault) countNotesIn(dir string) (int, error) {
 			return err
 		}
 		if d.IsDir() {
-			name := d.Name()
-			if path != root && (strings.HasPrefix(name, ".") || name == "node_modules") {
+			if v.skipDir(root, path) {
 				return fs.SkipDir
 			}
 			return nil
@@ -539,7 +616,7 @@ func (v *Vault) countNotesIn(dir string) (int, error) {
 // it, recursively. It returns the list of vault-relative paths of the .md
 // notes that were removed so the caller can purge them from the index.
 func (v *Vault) DeleteProject(name string) ([]string, error) {
-	clean, err := sanitizeProjectName(name)
+	clean, err := v.CheckProject(name)
 	if err != nil {
 		return nil, err
 	}
@@ -578,7 +655,7 @@ func (v *Vault) DeleteProject(name string) ([]string, error) {
 // sanitized name. It returns an error if the sanitized name would be invalid or
 // if the directory already exists.
 func (v *Vault) CreateProject(name string) (string, error) {
-	clean, err := sanitizeProjectName(name)
+	clean, err := v.CheckProject(name)
 	if err != nil {
 		return "", err
 	}
@@ -591,10 +668,6 @@ func (v *Vault) CreateProject(name string) (string, error) {
 	}
 	return clean, nil
 }
-
-// CheckProjectName returns name as a top-level project folder name, trimmed,
-// or why it cannot be one: the check CreateProject and RenameProject apply.
-func CheckProjectName(name string) (string, error) { return sanitizeProjectName(name) }
 
 func sanitizeProjectName(name string) (string, error) {
 	clean := strings.TrimSpace(name)
@@ -676,7 +749,11 @@ func (v *Vault) ListAttachments(project string, allowedExt map[string]bool) ([]A
 	const maxResults = 1000
 	var dirs []string
 	if project != "" {
-		dirs = []string{filepath.Join(v.Root, project, "attachments")}
+		r, err := v.Rel(project)
+		if err != nil {
+			return nil, err
+		}
+		dirs = []string{filepath.Join(v.Root, filepath.FromSlash(r), "attachments")}
 	} else {
 		// Root-level attachments
 		dirs = append(dirs, filepath.Join(v.Root, "attachments"))
@@ -686,7 +763,7 @@ func (v *Vault) ListAttachments(project string, allowedExt map[string]bool) ([]A
 			return nil, err
 		}
 		for _, e := range entries {
-			if !e.IsDir() || strings.HasPrefix(e.Name(), ".") || e.Name() == "node_modules" {
+			if !e.IsDir() || v.skipDir(v.Root, filepath.Join(v.Root, e.Name())) {
 				continue
 			}
 			dirs = append(dirs, filepath.Join(v.Root, e.Name(), "attachments"))
@@ -957,7 +1034,7 @@ func (v *Vault) MoveNote(idx *index.Index, from, toProject string) ([]string, er
 	base := filepath.Base(fromRel)
 	target := base
 	if toProject = strings.TrimSpace(toProject); toProject != "" {
-		clean, err := sanitizeProjectName(toProject)
+		clean, err := v.CheckProject(toProject)
 		if err != nil {
 			return nil, fmt.Errorf("invalid project: %w", err)
 		}
@@ -971,11 +1048,11 @@ func (v *Vault) MoveNote(idx *index.Index, from, toProject string) ([]string, er
 // the note filenames don't change; full-path wiki-links are rewritten to use
 // the new prefix.
 func (v *Vault) RenameProject(idx *index.Index, from, to string) error {
-	fromClean, err := sanitizeProjectName(from)
+	fromClean, err := v.CheckProject(from)
 	if err != nil {
 		return fmt.Errorf("source name: %w", err)
 	}
-	toClean, err := sanitizeProjectName(to)
+	toClean, err := v.CheckProject(to)
 	if err != nil {
 		return fmt.Errorf("target name: %w", err)
 	}

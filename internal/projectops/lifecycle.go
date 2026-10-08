@@ -32,7 +32,7 @@ var ErrExists = errors.New("project already exists")
 func Create(v *vault.Vault, ps *projects.Store, tokens *auth.Store, name, vis, adminUserID string) (string, error) {
 	projectMu.Lock()
 	defer projectMu.Unlock()
-	clean, err := vault.CheckProjectName(name)
+	clean, err := v.CheckProject(name)
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
@@ -97,7 +97,7 @@ type DeleteResult struct {
 func Delete(v *vault.Vault, idx *index.Index, ps *projects.Store, tokens *auth.Store, bin *trash.Bin, name string) (DeleteResult, error) {
 	projectMu.Lock()
 	defer projectMu.Unlock()
-	clean, err := vault.CheckProjectName(name)
+	clean, err := v.CheckProject(name)
 	if err != nil {
 		return DeleteResult{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
@@ -183,7 +183,7 @@ type RestoreResult struct {
 func RestoreProject(v *vault.Vault, idx *index.Index, ps *projects.Store, tokens *auth.Store, bin *trash.Bin, id, restorerID string) (RestoreResult, error) {
 	projectMu.Lock()
 	defer projectMu.Unlock()
-	clean, err := vault.CheckProjectName(trash.Origin(id))
+	clean, err := v.CheckProject(trash.Origin(id))
 	if err != nil {
 		return RestoreResult{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}

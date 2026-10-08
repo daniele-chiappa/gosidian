@@ -48,11 +48,11 @@ var projectMu sync.Mutex
 func Rename(v *vault.Vault, idx *index.Index, ps *projects.Store, tokens *auth.Store, from, to string) (int, error) {
 	projectMu.Lock()
 	defer projectMu.Unlock()
-	from, err := vault.CheckProjectName(from)
+	from, err := v.CheckProject(from)
 	if err != nil {
 		return 0, fmt.Errorf("%w: source name: %v", ErrInvalid, err)
 	}
-	to, err = vault.CheckProjectName(to)
+	to, err = v.CheckProject(to)
 	if err != nil {
 		return 0, fmt.Errorf("%w: target name: %v", ErrInvalid, err)
 	}
@@ -125,7 +125,7 @@ func scopedTokens(tokens *auth.Store, project string) int {
 }
 
 // folderExists reports whether the project folder name (already checked by
-// vault.CheckProjectName) is on disk, whatever else fails.
+// Vault.CheckProject) is on disk, whatever else fails.
 func folderExists(v *vault.Vault, name string) bool {
 	st, err := os.Stat(filepath.Join(v.Root, name))
 	return err == nil && st.IsDir()

@@ -5,7 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
+	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -22,11 +22,9 @@ func (v *Vault) Watch(ctx context.Context, idx *index.Index, onChange func()) er
 	}
 	defer w.Close()
 
-	if err := addRecursive(w, v.Root); err != nil {
+	if err := v.addRecursive(w, v.Root); err != nil {
 		return err
 	}
-
-	debounce := make(map[string]*time.Timer)
 
 	handle := func(abs string) {
 		if !v.IsNoteFile(abs) {
@@ -58,6 +56,29 @@ func (v *Vault) Watch(ctx context.Context, idx *index.Index, onChange func()) er
 		}
 	}
 
+	// One pending timer per path, dropped when it fires, so the map holds
+	// only the paths about to be handled. The timers fire on their own
+	// goroutines: mu guards the map.
+	var mu sync.Mutex
+	debounce := make(map[string]*time.Timer)
+	schedule := func(name string, wait time.Duration) {
+		mu.Lock()
+		defer mu.Unlock()
+		if t, ok := debounce[name]; ok {
+			t.Stop()
+		}
+		var t *time.Timer
+		t = time.AfterFunc(wait, func() {
+			mu.Lock()
+			if debounce[name] == t {
+				delete(debounce, name)
+			}
+			mu.Unlock()
+			handle(name)
+		})
+		debounce[name] = t
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -65,6 +86,11 @@ func (v *Vault) Watch(ctx context.Context, idx *index.Index, onChange func()) er
 		case err := <-w.Errors:
 			log.Printf("watcher error: %v", err)
 		case ev := <-w.Events:
+			// Hidden entries are no vault content (Rel refuses them), and
+			// every save goes through a hidden temporary file (writeWhole).
+			if isHidden(filepath.Base(ev.Name)) {
+				continue
+			}
 			if ev.Op&fsnotify.Create != 0 {
 				if st, err := statDir(ev.Name); err == nil && st {
 					// Add the new dir to the watcher, then walk it once and
@@ -72,7 +98,7 @@ func (v *Vault) Watch(ctx context.Context, idx *index.Index, onChange func()) er
 					// landed inside before the watch was active. fsnotify
 					// otherwise loses those CREATE events on a subdir +
 					// file race.
-					_ = addRecursive(w, ev.Name)
+					_ = v.addRecursive(w, ev.Name)
 					_ = filepath.Walk(ev.Name, func(p string, info os.FileInfo, err error) error {
 						if err != nil || info.IsDir() {
 							return nil
@@ -80,13 +106,7 @@ func (v *Vault) Watch(ctx context.Context, idx *index.Index, onChange func()) er
 						if !v.IsNoteFile(info.Name()) {
 							return nil
 						}
-						name := p
-						if t, ok := debounce[name]; ok {
-							t.Stop()
-						}
-						debounce[name] = time.AfterFunc(50*time.Millisecond, func() {
-							handle(name)
-						})
+						schedule(p, 50*time.Millisecond)
 						return nil
 					})
 				}
@@ -94,18 +114,16 @@ func (v *Vault) Watch(ctx context.Context, idx *index.Index, onChange func()) er
 			if ev.Op&(fsnotify.Create|fsnotify.Write|fsnotify.Rename|fsnotify.Remove) == 0 {
 				continue
 			}
-			name := ev.Name
-			if t, ok := debounce[name]; ok {
-				t.Stop()
-			}
-			debounce[name] = time.AfterFunc(100*time.Millisecond, func() {
-				handle(name)
-			})
+			schedule(ev.Name, 100*time.Millisecond)
 		}
 	}
 }
 
-func addRecursive(w *fsnotify.Watcher, root string) error {
+// addRecursive watches root and the folders below it, leaving out those
+// the vault skips: hidden ones, node_modules and the state dir, whose index
+// writes would otherwise wake the watcher at every change. root is the
+// vault or a folder created in it.
+func (v *Vault) addRecursive(w *fsnotify.Watcher, root string) error {
 	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -113,8 +131,7 @@ func addRecursive(w *fsnotify.Watcher, root string) error {
 		if !info.IsDir() {
 			return nil
 		}
-		name := info.Name()
-		if path != root && (strings.HasPrefix(name, ".") || name == "node_modules") {
+		if v.skipDir(v.Root, path) {
 			return filepath.SkipDir
 		}
 		return w.Add(path)

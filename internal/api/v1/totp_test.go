@@ -65,6 +65,20 @@ func TestTOTPEnrollConfirmDisenroll(t *testing.T) {
 		t.Error("secret or recovery codes not persisted after confirm")
 	}
 
+	// Enrolled, the session alone cannot swap the secret for another
+	// (BUG-101): enroll and confirm answer 409, the secret stays.
+	if rec := f.doAuthRecorder(http.MethodPost, "/api/v1/totp/enroll", "", nil); rec.code != http.StatusConflict {
+		t.Errorf("enroll while enrolled = %d want 409", rec.code)
+	}
+	other, _, _ := f.webauth.GenerateTOTPSecret(f.owner.Username, "attacker")
+	otherCode, _ := totp.GenerateCode(other, time.Now())
+	if rec := f.doAuthRecorder(http.MethodPost, "/api/v1/totp/confirm", `{"secret":"`+other+`","code":"`+otherCode+`"}`, nil); rec.code != http.StatusConflict {
+		t.Errorf("confirm while enrolled = %d want 409", rec.code)
+	}
+	if u, _ := f.webauth.UserByID(f.owner.ID); u.TOTPSec != enr.Secret {
+		t.Error("the secret was replaced")
+	}
+
 	// Disenroll (optional + not required) asks for the password (IMP-088):
 	// none or a wrong one keeps the secret; the right one → 204, cleared.
 	if rec := f.doAuthRecorder(http.MethodDelete, "/api/v1/totp", "", nil); rec.code != http.StatusBadRequest {

@@ -334,6 +334,71 @@ func TestSync_RefreshGitignore_ManagedBlock(t *testing.T) {
 	}
 }
 
+// The managed lines name one folder at the vault root, literally: a skipped
+// project docs is not every docs/ of the vault, and #private, !x and a*b are
+// names, not a comment, a negation and a pattern (BUG-107). A state dir
+// inside the vault gets its line, and leaves the index when a commit holds
+// it already (BUG-098).
+func TestSync_GitignoreNamesOneFolder(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	pstore, err := projects.Open(filepath.Join(t.TempDir(), "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"docs", "#private", "!x", "a*b"} {
+		if err := pstore.Set(name, projects.Flags{SkipGitSync: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, rel := range []string{"docs/a.md", "#private/a.md", "!x/a.md", "a*b/a.md", "aXb/a.md", "other/docs/a.md", "state/tokens.json"} {
+		full := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(rel), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := New(dir, testCfg())
+	s.SetProjects(pstore)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	s.TriggerCommit()
+	s.Flush()
+	tracked := func() string {
+		t.Helper()
+		out, err := exec.Command("git", "-C", dir, "ls-files").Output()
+		if err != nil {
+			t.Fatalf("git ls-files: %v", err)
+		}
+		return string(out)
+	}
+	if got, want := tracked(), "aXb/a.md\nother/docs/a.md\nstate/tokens.json\n"; !strings.HasSuffix(got, want) || strings.Count(got, "\n") != 4 {
+		t.Errorf("tracked =\n%s\nwant .gitignore and\n%s", got, want)
+	}
+
+	// The state dir was committed before the vault hid it.
+	s.SetStateDir("state")
+	s.TriggerCommit()
+	s.Flush()
+	if got := tracked(); strings.Contains(got, "state/") {
+		t.Errorf("the state dir is still tracked:\n%s", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "state", "tokens.json")); err != nil {
+		t.Errorf("untracking removed the file: %v", err)
+	}
+	body, _ := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	for _, line := range []string{"/state/", "/docs/", "/#private/", "/!x/", "/a\\*b/"} {
+		if !strings.Contains(string(body), "\n"+line+"\n") {
+			t.Errorf(".gitignore lacks %q:\n%s", line, body)
+		}
+	}
+}
+
 // realRemoteCorruption is what git 2.x printed on 2026-10-07 for a push to a
 // bare repository whose object files were emptied, as flush receives it
 // (IMP-056). Over a file:// remote git also repeats the remote's lines

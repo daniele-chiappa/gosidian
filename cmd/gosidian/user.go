@@ -330,7 +330,9 @@ func userAdd(args []string) {
 	if err != nil {
 		log.Fatalf("vault: %v", err)
 	}
-	switch name, err := apiv1.ProvisionPersonalProject(vault.New(abs), ps, tokens, nil, *u, false); {
+	v := vault.New(abs)
+	v.SetStateDir(stateDir)
+	switch name, err := apiv1.ProvisionPersonalProject(v, ps, tokens, nil, *u, false); {
 	case err != nil:
 		log.Printf("warning: personal project not provisioned: %v", err)
 	case name != "":

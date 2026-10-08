@@ -92,8 +92,7 @@ func (v *Vault) listFiles(project string, is func(string) bool) ([]string, error
 			return err
 		}
 		if d.IsDir() {
-			name := d.Name()
-			if path != root && (strings.HasPrefix(name, ".") || name == "node_modules") {
+			if v.skipDir(root, path) {
 				return fs.SkipDir
 			}
 			return nil

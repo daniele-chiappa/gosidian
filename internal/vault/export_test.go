@@ -21,10 +21,10 @@ func TestWalkExport(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	walk := func(dir string, exclude ...string) string {
+	walk := func(dir string) string {
 		t.Helper()
 		var got []string
-		if err := v.WalkExport(dir, exclude, func(rel string, _ fs.FileInfo) error {
+		if err := v.WalkExport(dir, func(rel string, _ fs.FileInfo) error {
 			got = append(got, rel)
 			return nil
 		}); err != nil {
@@ -32,13 +32,21 @@ func TestWalkExport(t *testing.T) {
 		}
 		return strings.Join(got, ",")
 	}
-	if got := walk("p", filepath.Join(v.Root, "p", "state")); got != "p/a.md,p/board.canvas" {
+	if got := walk(""); got != "p/a.md,p/board.canvas,p/state/tokens.json,q/b.md" {
+		t.Errorf("vault walk without a state dir = %s", got)
+	}
+	// A state dir set inside the vault is left out of every walk (BUG-098).
+	v.SetStateDir(filepath.Join(v.Root, "p", "state"))
+	if got := walk("p"); got != "p/a.md,p/board.canvas" {
 		t.Errorf("project walk = %s", got)
 	}
-	if got := walk(""); got != "p/a.md,p/board.canvas,p/state/tokens.json,q/b.md" {
-		t.Errorf("vault walk without exclude = %s", got)
+	if got := walk(""); got != "p/a.md,p/board.canvas,q/b.md" {
+		t.Errorf("vault walk = %s", got)
 	}
-	if err := v.WalkExport("../outside", nil, func(string, fs.FileInfo) error { return nil }); err == nil {
+	if err := v.WalkExport("p/state", func(string, fs.FileInfo) error { return nil }); err == nil {
+		t.Error("the state dir was walked")
+	}
+	if err := v.WalkExport("../outside", func(string, fs.FileInfo) error { return nil }); err == nil {
 		t.Error("a dir outside the vault was walked")
 	}
 }

@@ -30,7 +30,7 @@ starts again at every restart.
 | Source | When | Cost |
 |---|---|---|
 | `bridge_filename` | Co-located deploys: stage the file in the bridge dir (its path is in bootstrap `capabilities.attachments.bridge_dir`), pass the basename; the server reads and **consumes** it | ~zero tokens |
-| `source_path` | Server-resolved absolute path inside the vault, the bridge dir, or an allowed upload root (`GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS`) | ~zero tokens |
+| `source_path` | Server-resolved absolute path inside the vault, the bridge dir, or an allowed upload root (`GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS`), checked after resolving symbolic links. Inside the vault, only a path the token may read: in its project scope, not hidden (`.gosidian` with the trash, `.git`), not the state dir, not a project hidden from MCP | ~zero tokens |
 | `transfer: "http"` | **Remote agents with a shell.** No source in the call: the response carries a **single-use upload URL** (TTL 5 min, no bearer — the ticket is the credential). POST the file there and the server executes the parked intent | 1 tool call + 1 curl |
 | `url` | The file is already served somewhere the server can reach (CI artifact, internal screenshot service). Gated by the `ingest_url_allowlist` prefix allowlist (`GOSIDIAN_INGEST_URL_ALLOWLIST`), which also gates every redirect hop; empty = disabled | ~zero tokens |
 | `attachment` | The bytes are already in the vault (e.g. from a previous `/upload` POST): promote them into a table/media note without re-uploading | ~zero tokens |

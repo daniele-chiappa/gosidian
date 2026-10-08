@@ -77,7 +77,9 @@ func (s *Server) handleHTTPUpload(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusRequestEntityTooLarge, "file too large (max 10 MiB)")
 		return
 	}
-	if msg, wait := s.writeLimitViolation(r.Context(), tok, len(data)); msg != "" {
+	// The write rate only: the note size limit is not an attachment's, which
+	// has its 10 MiB cap above (BUG-104; bridge and source_path did so).
+	if msg, wait := s.writeLimitViolation(r.Context(), tok, 0); msg != "" {
 		writeRateLimited(w, http.StatusTooManyRequests, msg, wait)
 		return
 	}

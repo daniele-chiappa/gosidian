@@ -8,6 +8,111 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.71.2] — 2026-10-08 — "review fixes"
+
+The serious findings of a code review of the server and the web UI:
+access checks that let an MCP token read more than its owner may, an
+import that could remove the folder it read from, data lost on a full
+disk or by a settings save, and git sync excluding the wrong folders.
+Pull the image and restart, nothing to migrate. A few behaviours change,
+each described below: a second two-factor enrolment is refused until the
+first is disabled, a `source_path` inside the vault must be readable by
+the token, a trash retention of 0 now keeps the trash, and the vault root
+is refused as the state directory. If you set the state directory inside
+the vault with git push on, read the first Security entry.
+
+### Security
+- **A state directory inside the vault is hidden everywhere** — set under
+  a visible name (`<vault>/state`), it was a project like any other:
+  listed, open to rename and delete, and pushed by git sync with the
+  tokens in it, the push token included. The vault now treats it as a dot
+  folder: no path reaches it, no listing, index, tree or zip shows it, no
+  project operation moves or removes it or a folder that holds it,
+  nothing comes back into it from the trash, and the managed `.gitignore`
+  names it. A commit that already held it drops it from the index at the
+  next sync; the history keeps it, so rotate the tokens if it was pushed.
+  Each start logs that the state directory sits in the vault, and the
+  vault root itself is refused as one. Outside the vault (the recommended
+  layout, `/data` in Docker) nothing changes.
+- **An MCP token reads on `/vault-files/` only what its owner may read** —
+  attachments were checked against the token's declared scope alone. A
+  token with no project list, which every account may create for itself,
+  read the attachments of every project, private ones included, and a
+  token kept working after its owner was disabled or lost a grant. The
+  gate now narrows the token to the owner's current access, as the MCP
+  server does on every call, and refuses projects hidden from MCP. Tokens
+  without an owner (CLI, admin) keep their scope.
+- **Two-factor cannot be replaced with a session alone** —
+  `POST /api/v1/totp/enroll` and `/totp/confirm` overwrote an active
+  secret and its recovery codes, so a stolen session could take over the
+  account's second factor. With a secret in place they now answer 409;
+  disabling it first takes the password, as before.
+- **A `source_path` inside the vault needs the token's access** — the
+  vault is always an allowed source root, and nothing checked the token
+  against the path: a token scoped to one project could import another
+  project, private or hidden from MCP, or the trash, into its own and
+  read it there. A source inside the vault must now be in the token's
+  scope, outside hidden folders, the state directory and the projects
+  hidden from MCP, and must not hold the whole vault. The check runs on
+  the path with its symbolic links resolved, and that is the file read.
+  A bridge dir or an upload root set inside the vault stays a staging
+  place any token may import from. Package imports, notes and attachments
+  alike.
+- **`bridge_filename` cannot name the bridge dir or its parent** — `.`
+  and `..` passed as names: a package import with `.` read the whole
+  bridge dir and then removed it, and `..` did the same with the folder
+  above. Every tool that reads the bridge now refuses them; a whole path
+  still counts by its last element.
+- **Projects with git sync off stay off the remote, and only they** — the
+  managed `.gitignore` wrote `name/` for such a project, which matched a
+  folder of that name at any depth: skipping `docs` also left the `docs/`
+  of every other project out of the backup. Characters a project name may
+  hold changed the line too: `#private/` was a comment and `!x/` a
+  negation, so those projects were pushed. The lines are now anchored at
+  the vault root and escaped (`/docs/`, `/a\*b/`).
+
+### Fixed
+- **A note is saved whole or not at all** — a save truncated the file and
+  then wrote it: with a full disk or a crash in between the note stayed
+  empty, the index took it so and git sync committed it, and a reader in
+  the meantime could get half of it. Notes and attachments are now
+  written to a hidden temporary file in the same folder, synced and
+  renamed over the old one, which keeps its permissions; the scan at
+  startup removes what a crash left of one.
+- **Text typed during a save is no longer lost** — the reply of a save
+  replaced the editor's text with the stored copy and marked the note
+  clean: what was typed while the request was on its way disappeared, and
+  the window closed without asking. The stored copy now replaces the
+  draft only when nothing changed since the request left; otherwise the
+  draft stays, marked unsaved, for the next save.
+- **Settings no longer save the server configuration from defaults** —
+  the owner's controls that save on change (two-factor policy, default
+  visibility, personal projects) were shown before the settings had
+  loaded and sent the whole form: with a slow or failed load the server
+  saved git sync off, the trash off and no languages, and after a load
+  they also saved what was half-typed in the form. They now show once the
+  settings are loaded, send their own field alone, and wait for a save
+  on its way.
+- **A trash retention of 0 keeps the trash** — Settings and the
+  configuration describe 0 as "for ever", but a saved 0 became the
+  30-day default at the next start, and the prune at startup then deleted
+  for good every entry older than that. A 0 now stays 0; the default
+  applies only when the key is missing.
+- **Attachments over 1 MiB upload again over HTTP** — `POST /mcp/upload`,
+  the redemption of an upload ticket and an attachment fetched from a URL
+  checked the bytes against the note size limit (1 MiB), and answered 429
+  for a 3 MiB image the endpoint declares up to 10 MiB. Attachments now go
+  through the write rate only; their own 10 MiB cap is unchanged.
+- **List and relation cells keep a comma inside a value** — a cell
+  holding `[[people/Rossi, Mario]]`, a link alias with a comma or the
+  plain text `Rossi, Mario` was split on every comma when its editor
+  closed, even untouched, and the frontmatter got the broken pieces. A
+  value left as the editor showed it is not saved, and commas inside a
+  `[[…]]` no longer separate items.
+- **The vault watcher keeps no timer per path for ever** — its debounce
+  map held an entry for every path it had seen; entries now go when they
+  fire.
+
 ## [2.71.1] — 2026-10-08 — "light themes"
 
 Notes are readable again with the light themes, and code blocks follow

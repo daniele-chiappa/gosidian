@@ -37,9 +37,6 @@ type Deps struct {
 	GitSync     *gitsync.Sync // optional; nil disables /history
 	ConfigPath  string        // path to cfg.toml; "" disables /settings PUT
 	OAuth       *oauth.Server // optional; nil disables the consent API (IMP-092)
-	// StateDir is left out of zip exports when it sits inside the vault
-	// under a visible name (the default .gosidian/ is hidden anyway).
-	StateDir string
 }
 
 // Router owns the http.Handler tree under /api/v1/*. A separate type

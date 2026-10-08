@@ -39,8 +39,15 @@ type Sync struct {
 
 	// projects (optional) drives the per-project skip_git_sync flag: when set,
 	// refreshGitignore renders the managed block of .gitignore with one
-	// `<name>/` line per skipped project. nil = no per-project filtering.
+	// `/<name>/` line per skipped project. nil = no per-project filtering.
 	projects *projects.Store
+
+	// stateRel is the state dir's vault-relative path when it sits inside
+	// the vault ("" otherwise): one more managed line keeps the credentials
+	// off the remote (BUG-098). stateUntracked is set once a sync has taken
+	// it out of the index; the ignore line keeps it out afterwards.
+	stateRel       string
+	stateUntracked bool
 
 	// tokens (optional) is the on-disk token fallback used by authToken when
 	// the env var is unset. Allows the operator to rotate the PAT from the
@@ -99,6 +106,20 @@ func New(vaultDir string, cfg config.GitConfig) *Sync {
 func (s *Sync) SetProjects(p *projects.Store) {
 	s.mu.Lock()
 	s.projects = p
+	s.mu.Unlock()
+}
+
+// SetStateDir names the state dir's vault-relative path (vault.Vault's
+// StateDirInside) so the managed .gitignore leaves it out; "" when the state
+// dir is outside the vault. The default, .gosidian, has its line already.
+// Safe to call before Start.
+func (s *Sync) SetStateDir(rel string) {
+	if rel == ".gosidian" {
+		rel = ""
+	}
+	s.mu.Lock()
+	s.stateRel = rel
+	s.stateUntracked = false
 	s.mu.Unlock()
 }
 
@@ -411,9 +432,12 @@ func (s *Sync) refreshGitignore() error {
 		"*.swp",
 		".DS_Store",
 	)
+	if s.stateRel != "" {
+		managedLines = append(managedLines, gitignoreDir(s.stateRel))
+	}
 	if s.projects != nil {
 		for _, name := range s.projects.SkipNamesForGit() {
-			managedLines = append(managedLines, name+"/")
+			managedLines = append(managedLines, gitignoreDir(name))
 		}
 	}
 	managedLines = append(managedLines, gitignoreManagedEnd)
@@ -436,6 +460,25 @@ func (s *Sync) refreshGitignore() error {
 		return err
 	}
 	return os.Rename(tmp, path)
+}
+
+// gitignoreDir is the .gitignore line for the vault folder rel and nothing
+// else (BUG-107): anchored at the vault root, so `docs` does not match the
+// docs/ of every project, and with the pattern characters escaped, so a
+// name with `*` or `[` matches only itself. The leading slash also keeps a
+// name starting with `#` or `!` from reading as a comment or a negation.
+func gitignoreDir(rel string) string {
+	var b strings.Builder
+	b.WriteByte('/')
+	for _, r := range rel {
+		switch r {
+		case '\\', '*', '?', '[':
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	b.WriteByte('/')
+	return b.String()
 }
 
 // stripManagedBlock removes the gosidian-managed marker block (and everything
@@ -479,6 +522,15 @@ func (s *Sync) commitAndPush() error {
 	// holds Sync.mu.
 	if err := s.refreshGitignore(); err != nil {
 		return fmt.Errorf("refresh gitignore: %w", err)
+	}
+	// .gitignore does not untrack what a commit already holds: a state dir
+	// committed before the vault hid it leaves the index here, once, so the
+	// credentials stop following every change to the remote.
+	if s.stateRel != "" && !s.stateUntracked {
+		if err := s.run("git", "rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", ":(literal)"+s.stateRel); err != nil {
+			return fmt.Errorf("untrack the state dir: %w", err)
+		}
+		s.stateUntracked = true
 	}
 
 	// Detect whether there is anything to commit.

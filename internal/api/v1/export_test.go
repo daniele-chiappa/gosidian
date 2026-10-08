@@ -137,7 +137,7 @@ func TestExport_Vault(t *testing.T) {
 	f.writeRaw(t, ".gosidian/trash/1__Alpha%2Fold.md", "trashed")
 	f.writeRaw(t, "state/tokens.json", `{"secret":true}`)
 	f.writeRaw(t, "attachments/root.png", "PNG")
-	f.router.deps.StateDir = filepath.Join(f.vaultRoot, "state")
+	f.router.deps.Vault.SetStateDir(filepath.Join(f.vaultRoot, "state"))
 
 	rec := f.doAuthRecorder(http.MethodGet, "/api/v1/admin/export.zip", "", nil)
 	if rec.code != http.StatusOK {

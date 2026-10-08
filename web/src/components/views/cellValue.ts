@@ -20,9 +20,6 @@ const EDITABLE = new Set([
   'relation',
 ])
 
-/** List-valued types: the API takes them as a list of strings. */
-const LISTS = new Set(['multi-select', 'list'])
-
 /** Whether the reader may edit this cell from the view. */
 export function isEditable(col: ViewColumn, row: ViewRow): boolean {
   return (
@@ -60,6 +57,49 @@ export function expectValue(row: ViewRow, col: ViewColumn): FieldValue {
   return v
 }
 
+/** The text a field's editor starts from: a list joined, as shown. */
+export function editorText(v: string | string[] | undefined): string {
+  return Array.isArray(v) ? v.join(', ') : (v ?? '')
+}
+
+/**
+ * The items of a list typed as text: split on the commas outside a
+ * [[wikilink]], whose path or alias may hold one (BUG-110).
+ */
+export function splitItems(raw: string): string[] {
+  const out: string[] = []
+  let start = 0
+  for (const i of topLevelCommas(raw)) {
+    out.push(raw.slice(start, i))
+    start = i + 1
+  }
+  out.push(raw.slice(start))
+  return out.map((s) => s.trim()).filter(Boolean)
+}
+
+/** Where the last item of a list typed as text begins. */
+export function lastItemStart(raw: string): number {
+  const commas = topLevelCommas(raw)
+  return commas.length ? commas[commas.length - 1]! + 1 : 0
+}
+
+function topLevelCommas(raw: string): number[] {
+  const out: number[] = []
+  let depth = 0
+  for (let i = 0; i < raw.length; i++) {
+    if (raw.startsWith('[[', i)) {
+      depth++
+      i++
+    } else if (depth > 0 && raw.startsWith(']]', i)) {
+      depth--
+      i++
+    } else if (depth === 0 && raw[i] === ',') {
+      out.push(i)
+    }
+  }
+  return out
+}
+
 /** What a cell's editor asks the API to do with a field. */
 export type Change = { set: FieldValue } | { unset: true } | { error: 'not_a_number' }
 
@@ -67,6 +107,9 @@ export type Change = { set: FieldValue } | { unset: true } | { error: 'not_a_num
  * toChange turns what an editor holds into a change: the input's text, the
  * checked state of a checkbox, or the options picked in a multi-select. An
  * empty value removes the key, so the frontmatter keeps no empty fields.
+ * Text left as the editor showed it keeps the current value as it is: an
+ * editor opened and left used to save a list split anew, so a value with a
+ * comma inside came back in pieces (BUG-110).
  */
 export function toChange(
   col: ViewColumn,
@@ -77,6 +120,7 @@ export function toChange(
   if (Array.isArray(input)) return input.length ? { set: input } : { unset: true }
   const raw = String(input).trim()
   if (raw === '') return { unset: true }
+  if (current !== undefined && raw === editorText(current).trim()) return { set: current }
   switch (col.type) {
     case 'number': {
       const n = Number(raw)
@@ -84,10 +128,7 @@ export function toChange(
     }
     case 'list':
     case 'relation': {
-      const items = raw
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean)
+      const items = splitItems(raw)
       // A relation holding one link stays a single value, as it was written.
       if (col.type === 'relation' && items.length === 1 && !Array.isArray(current))
         return { set: items[0] ?? '' }
@@ -104,9 +145,4 @@ export function shownValue(change: Change): string | string[] | undefined {
   if (v === null) return undefined
   if (Array.isArray(v)) return v
   return String(v)
-}
-
-/** Whether the editor of col edits a list of values. */
-export function isListType(col: ViewColumn): boolean {
-  return !!col.type && LISTS.has(col.type)
 }

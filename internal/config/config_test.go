@@ -374,3 +374,27 @@ func TestShrinkGuard(t *testing.T) {
 		t.Error("a percent that is not a number was accepted")
 	}
 }
+
+// A retention of 0 keeps the trash for ever: saved, it stays 0 at the next
+// start instead of becoming the 30-day default (BUG-105).
+func TestTrashRetention(t *testing.T) {
+	dir := t.TempDir()
+	cfg, err := Load(filepath.Join(dir, "nope.toml"))
+	if err != nil || cfg.Trash.Retention != 30*24*time.Hour {
+		t.Fatalf("default = %v, %v", cfg.Trash.Retention, err)
+	}
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte("[trash]\nenabled = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err = Load(path); err != nil || cfg.Trash.Retention != 30*24*time.Hour {
+		t.Fatalf("a file without the key = %v, %v", cfg.Trash.Retention, err)
+	}
+	cfg.Trash.Retention = 0
+	if err := Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err = Load(path); err != nil || cfg.Trash.Retention != 0 {
+		t.Errorf("a saved 0 reloads as %v, %v", cfg.Trash.Retention, err)
+	}
+}

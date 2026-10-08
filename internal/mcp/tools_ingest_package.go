@@ -59,16 +59,16 @@ func (s *Server) ingestPackage(ctx context.Context, project string, req mcp.Call
 	)
 	switch {
 	case bridge != "":
-		if s.bridgeDir == "" {
-			return mcp.NewToolResultError("bridge_filename given but no bridge dir is configured (set GOSIDIAN_MCP_BRIDGE_DIR)"), nil
-		}
-		consume = filepath.Join(s.bridgeDir, filepath.Base(bridge))
-		entries, skipped, err = readPackagePath(consume, lim)
-	case source != "":
-		if err := s.checkPackageSource(source); err != nil {
+		if consume, err = s.bridgePath(bridge); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		entries, skipped, err = readPackagePath(filepath.Clean(source), lim)
+		entries, skipped, err = readPackagePath(consume, lim)
+	case source != "":
+		real, srcErr := s.checkSource(ctx, source)
+		if srcErr != nil {
+			return mcp.NewToolResultError(srcErr.Error()), nil
+		}
+		entries, skipped, err = readPackagePath(real, lim)
 	case data != "":
 		raw, decErr := base64.StdEncoding.DecodeString(data)
 		if decErr != nil {
@@ -113,32 +113,6 @@ func readPackagePath(p string, lim pkgimport.Limits) ([]pkgimport.Entry, []pkgim
 		return pkgimport.ReadZip(raw, lim)
 	}
 	return nil, nil, fmt.Errorf("%q is neither a folder nor a .zip", filepath.Base(p))
-}
-
-// checkPackageSource checks a source_path of a package: absolute, inside an
-// allowed root, and still inside it once symbolic links are resolved.
-func (s *Server) checkPackageSource(p string) error {
-	clean := filepath.Clean(p)
-	if !filepath.IsAbs(clean) {
-		return errors.New("source_path must be absolute")
-	}
-	real, err := filepath.EvalSymlinks(clean)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("source_path %q does not exist on the server", p)
-		}
-		return fmt.Errorf("source_path: %w", err)
-	}
-	for _, root := range s.effectiveUploadRoots() {
-		root = filepath.Clean(root)
-		if rr, err := filepath.EvalSymlinks(root); err == nil {
-			root = rr
-		}
-		if real == root || strings.HasPrefix(real, root+string(filepath.Separator)) {
-			return nil
-		}
-	}
-	return fmt.Errorf("source_path %q is not inside the vault, the bridge dir or an allowed upload root (GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS)", p)
 }
 
 // packageDest checks the destination folder: inside the project, and

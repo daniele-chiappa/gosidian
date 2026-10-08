@@ -28,6 +28,7 @@ import { useDebounceFn } from '@vueuse/core'
 import { Printer, Download, Copy, Check, GitBranch, Camera } from 'lucide-vue-next'
 import { getNote, updateNote, deleteNote, createSnapshot, type Note } from '@/api/notes'
 import { downloadNote } from '@/api/noteDownload'
+import { draftAfterSave } from '@/views/noteDraft'
 import { renderPreviewData, type ViewData } from '@/api/preview'
 import { isConcurrencyConflict, onApiEvent, type ConcurrencyConflictDetail } from '@/api/client'
 import { useSSE } from '@/composables/useSSE'
@@ -257,13 +258,15 @@ async function save() {
   saving.value = true
   error.value = null
   try {
+    const sent = draft.value
     const updated = await updateNote(note.value.path, {
-      content: draft.value,
+      content: sent,
       ifMatch: note.value.etag,
     })
     note.value = updated
-    draft.value = updated.content
-    dirty.value = false
+    const after = draftAfterSave(sent, draft.value, updated.content)
+    draft.value = after.draft
+    dirty.value = after.dirty
     lastSavedAt.value = new Date().toLocaleTimeString()
     remoteChanged.value = false
     // Our own save's event may arrive before this reply: not a remote change.
@@ -285,10 +288,12 @@ async function forceOverwrite() {
   saving.value = true
   error.value = null
   try {
-    const updated = await updateNote(note.value.path, { content: draft.value })
+    const sent = draft.value
+    const updated = await updateNote(note.value.path, { content: sent })
     note.value = updated
-    draft.value = updated.content
-    dirty.value = false
+    const after = draftAfterSave(sent, draft.value, updated.content)
+    draft.value = after.draft
+    dirty.value = after.dirty
     lastSavedAt.value = new Date().toLocaleTimeString()
     conflict.value = null
   } catch (e) {

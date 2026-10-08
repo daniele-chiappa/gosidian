@@ -56,3 +56,49 @@ func TestWatcher_NewSubdirRace(t *testing.T) {
 		t.Errorf("watcher did not index fresh/note.md after subdir race")
 	}
 }
+
+// A save renames a temporary file over the note (BUG-106): the watcher sees
+// the note change, not the temporary file, and a state dir inside the vault
+// stays out of the index (BUG-098).
+func TestWatcher_SaveByRename(t *testing.T) {
+	v := newTestVault(t)
+	write(t, v.Root, "p/n.md", "# old")
+	write(t, v.Root, "state/x.md", "# state")
+	v.SetStateDir(filepath.Join(v.Root, "state"))
+	idx := openIndex(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- v.Watch(ctx, idx, nil)
+	}()
+	time.Sleep(150 * time.Millisecond) // readiness, as above
+
+	if err := v.Save("p/n.md", []byte("---\ntitle: new\n---\n\nsaved whole")); err != nil {
+		t.Fatal(err)
+	}
+	write(t, v.Root, "state/y.md", "# state")
+	deadline := time.Now().Add(2 * time.Second)
+	var title string
+	for time.Now().Before(deadline) {
+		if n, _ := idx.Note("p/n.md"); n != nil && n.Title == "new" {
+			title = n.Title
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	if title != "new" {
+		t.Errorf("the watcher did not index the saved note")
+	}
+	for _, p := range []string{"state/x.md", "state/y.md"} {
+		if n, _ := idx.Note(p); n != nil {
+			t.Errorf("%s is indexed", p)
+		}
+	}
+	if all, _ := idx.AllNotes(); len(all) != 1 {
+		t.Errorf("index holds %d notes, want only p/n.md", len(all))
+	}
+}

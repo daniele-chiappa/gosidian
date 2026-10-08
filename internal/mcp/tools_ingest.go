@@ -272,10 +272,10 @@ func (s *Server) ingestNoteFromSource(ctx context.Context, project, ext, fnForEx
 	bridgeFilename := strings.TrimSpace(req.GetString("bridge_filename", ""))
 	switch {
 	case bridgeFilename != "":
-		if s.bridgeDir == "" {
-			return mcp.NewToolResultError("bridge_filename given but no bridge dir is configured (set GOSIDIAN_MCP_BRIDGE_DIR)"), nil
+		staged, pathErr := s.bridgePath(bridgeFilename)
+		if pathErr != nil {
+			return mcp.NewToolResultError(pathErr.Error()), nil
 		}
-		staged := filepath.Join(s.bridgeDir, filepath.Base(bridgeFilename))
 		content, err = os.ReadFile(staged)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
@@ -288,7 +288,11 @@ func (s *Server) ingestNoteFromSource(ctx context.Context, project, ext, fnForEx
 		if err := attach.ValidateSourcePath(sourcePath, s.effectiveUploadRoots()); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		content, err = os.ReadFile(filepath.Clean(sourcePath))
+		real, srcErr := s.checkSource(ctx, sourcePath)
+		if srcErr != nil {
+			return mcp.NewToolResultError(srcErr.Error()), nil
+		}
+		content, err = os.ReadFile(real)
 		if err != nil {
 			return mcp.NewToolResultErrorFromErr("read source file", err), nil
 		}
@@ -422,7 +426,9 @@ func (s *Server) ingestRaw(ctx context.Context, in ingestIntent, data []byte) (*
 	if errRes != nil {
 		return errRes, nil
 	}
-	if errRes := s.checkWriteLimits(ctx, tok, len(data)); errRes != nil {
+	// The write rate, not the note size limit (BUG-104): attach.Store caps
+	// the bytes.
+	if errRes := s.checkWriteLimits(ctx, tok, 0); errRes != nil {
 		return errRes, nil
 	}
 	refund, refusal := s.reserveUpload(tok, int64(len(data)))

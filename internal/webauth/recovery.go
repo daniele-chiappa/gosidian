@@ -33,6 +33,11 @@ const (
 // account without a TOTP secret: codes only make sense as a fallback for one.
 var ErrTOTPNotEnrolled = errors.New("two-factor is not enrolled")
 
+// ErrTOTPAlreadyEnrolled is returned when an enrolment targets an account
+// that has a TOTP secret already: replacing it takes the password, through
+// disabling it first (BUG-101).
+var ErrTOTPAlreadyEnrolled = errors.New("two-factor is already enrolled: disable it first, with the password")
+
 // RecoveryCode is one stored recovery code. The plaintext is shown to the
 // user exactly once, at generation.
 type RecoveryCode struct {
@@ -119,7 +124,9 @@ func newRecoveryCodes() (plain []string, stored []RecoveryCode, err error) {
 
 // EnrollTOTP activates secret for userID and mints the account's first set of
 // recovery codes in the same save, so an enrolled account never exists without
-// its fallback. Returns the plaintext codes (shown once).
+// its fallback. Returns the plaintext codes (shown once). An account with a
+// secret already gets ErrTOTPAlreadyEnrolled: a session alone, maybe a stolen
+// one, must not swap the second factor for one of its choosing.
 func (s *Store) EnrollTOTP(userID, secret string) ([]string, error) {
 	if secret == "" {
 		return nil, errors.New("totp secret required")
@@ -132,6 +139,9 @@ func (s *Store) EnrollTOTP(userID, secret string) ([]string, error) {
 	defer s.mu.Unlock()
 	for i := range s.file.Users {
 		if s.file.Users[i].ID == userID {
+			if s.file.Users[i].TOTPSec != "" {
+				return nil, ErrTOTPAlreadyEnrolled
+			}
 			s.file.Users[i].TOTPSec = secret
 			s.file.Users[i].RecoveryCodes = stored
 			if err := s.saveLocked(); err != nil {

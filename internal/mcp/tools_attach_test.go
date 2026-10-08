@@ -271,7 +271,7 @@ func TestMCP_UploadAttachmentFromSourcePath(t *testing.T) {
 
 	// The vault root (dir) is always an implicit allowed root.
 	// Create a file inside the vault to upload from.
-	srcFile := filepath.Join(dir, ".uploads", "report.pdf")
+	srcFile := filepath.Join(dir, "uploads", "report.pdf")
 	os.MkdirAll(filepath.Dir(srcFile), 0o755)
 	os.WriteFile(srcFile, pdfBytes(), 0o644)
 
@@ -313,7 +313,7 @@ func TestMCP_UploadAttachmentFromSourcePathWithProject(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	srcFile := filepath.Join(dir, ".uploads", "data.xlsx")
+	srcFile := filepath.Join(dir, "uploads", "data.xlsx")
 	os.MkdirAll(filepath.Dir(srcFile), 0o755)
 	os.WriteFile(srcFile, xlsxBytes(), 0o644)
 
@@ -454,7 +454,7 @@ func TestMCP_UploadResourceFromSourcePath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	srcFile := filepath.Join(dir, ".uploads", "doc.pdf")
+	srcFile := filepath.Join(dir, "uploads", "doc.pdf")
 	os.MkdirAll(filepath.Dir(srcFile), 0o755)
 	os.WriteFile(srcFile, pdfBytes(), 0o644)
 

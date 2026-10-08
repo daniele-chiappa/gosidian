@@ -270,8 +270,9 @@ func NormalizeLangs(langs []string) []string {
 
 // TrashConfig opts the trash bin in. When enabled, deleting a note or a
 // project moves the contents into <vault>/.gosidian/trash/<timestamp>/...
-// instead of removing them from disk. RetentionDays prunes entries older
-// than the cutoff at server startup. Zero retention disables auto-pruning.
+// instead of removing them from disk. Retention prunes entries older than
+// the cutoff at server startup: 30 days when unset, and zero keeps every
+// entry until it is purged by hand.
 type TrashConfig struct {
 	Enabled   bool          `toml:"enabled"`
 	Retention time.Duration `toml:"retention"`
@@ -364,6 +365,9 @@ func Default() *Config {
 	cfg.Webauth.AutoOwner = true
 	cfg.MCP.ShrinkGuardPercent = 10
 	cfg.MCP.ShrinkGuardMinBytes = 1024
+	// Here too, as 0 means "forever": applyDefaults turned a saved 0 into
+	// 30 days at the next start, and the prune emptied the trash (BUG-105).
+	cfg.Trash.Retention = 30 * 24 * time.Hour
 	cfg.applyDefaults()
 	return cfg
 }
@@ -762,9 +766,6 @@ func (c *Config) applyDefaults() {
 	}
 	if c.OAuth.ClientIdleTTL == 0 {
 		c.OAuth.ClientIdleTTL = 90 * 24 * time.Hour
-	}
-	if c.Trash.Retention == 0 {
-		c.Trash.Retention = 30 * 24 * time.Hour
 	}
 	if c.Automations.Interval <= 0 {
 		c.Automations.Interval = 5 * time.Minute

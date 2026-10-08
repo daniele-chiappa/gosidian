@@ -87,12 +87,14 @@ func (r *Router) exportUser(w http.ResponseWriter, req *http.Request) (*RequestU
 // streamExport writes the zip of dir ("" = the vault) as it walks it: the
 // server holds one file at a time, whatever the size of the archive.
 func (r *Router) streamExport(w http.ResponseWriter, req *http.Request, user *RequestUser, dir, filename string) {
-	// The walk leaves out the state dir only below where it starts: started
-	// at the state dir itself, set inside the vault under a visible name, it
-	// would zip the credentials.
-	if dir != "" && r.inStateDir(dir) {
-		WriteError(w, http.StatusNotFound, CodeNotFound, "folder not found")
-		return
+	// Checked before the headers go: the walk refuses the same paths, but
+	// only once the 200 is out. The vault refuses the state dir among them
+	// (BUG-098).
+	if dir != "" {
+		if _, err := r.deps.Vault.Rel(dir); err != nil {
+			WriteError(w, http.StatusNotFound, CodeNotFound, "folder not found")
+			return
+		}
 	}
 	// Names in the archive start at the exported folder, as for a project
 	// (its folder is at the vault root): docs/… for Work/a/docs.
@@ -112,7 +114,7 @@ func (r *Router) streamExport(w http.ResponseWriter, req *http.Request, user *Re
 	cw := &countingWriter{w: w}
 	zw := zip.NewWriter(cw)
 	files, skipped := 0, 0
-	err := r.deps.Vault.WalkExport(dir, []string{r.deps.StateDir}, func(rel string, info fs.FileInfo) error {
+	err := r.deps.Vault.WalkExport(dir, func(rel string, info fs.FileInfo) error {
 		if err := req.Context().Err(); err != nil {
 			return err // the client went away: stop reading the vault
 		}

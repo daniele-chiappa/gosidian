@@ -90,7 +90,7 @@ func (r *Router) deleteFolder(w http.ResponseWriter, req *http.Request, dir stri
 		WriteError(w, http.StatusNotFound, CodeNotFound, "folder not found")
 		return
 	}
-	if r.inStateDir(clean) || r.holdsStateDir(clean) {
+	if r.deps.Vault.HoldsStateDir(clean) {
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "the folder holds the server's state directory")
 		return
 	}
@@ -117,41 +117,4 @@ func (r *Router) deleteFolder(w http.ResponseWriter, req *http.Request, dir stri
 func (r *Router) folderExists(rel string) bool {
 	st, err := os.Lstat(filepath.Join(r.deps.Vault.Root, filepath.FromSlash(rel)))
 	return err == nil && st.IsDir()
-}
-
-// inStateDir reports whether the vault folder rel is the state directory
-// or sits inside it, and holdsStateDir whether rel holds it: both possible
-// when the state dir is set inside the vault under a visible name
-// (ADR-023). Its credentials and audit log must never leave in a zip or go
-// to the trash with a folder.
-func (r *Router) inStateDir(rel string) bool {
-	dir, state, ok := r.stateDirPair(rel)
-	return ok && within(dir, state)
-}
-
-func (r *Router) holdsStateDir(rel string) bool {
-	dir, state, ok := r.stateDirPair(rel)
-	return ok && within(state, dir)
-}
-
-// stateDirPair returns the absolute paths of the vault folder rel and of
-// the state dir; false when there is no state dir to compare with.
-func (r *Router) stateDirPair(rel string) (dir, state string, ok bool) {
-	if r.deps.StateDir == "" {
-		return "", "", false
-	}
-	state, err := filepath.Abs(r.deps.StateDir)
-	if err != nil {
-		return "", "", false
-	}
-	dir, err = filepath.Abs(filepath.Join(r.deps.Vault.Root, filepath.FromSlash(rel)))
-	if err != nil {
-		return "", "", false
-	}
-	return dir, state, true
-}
-
-// within reports whether path child is parent or lies under it.
-func within(child, parent string) bool {
-	return child == parent || strings.HasPrefix(child, parent+string(filepath.Separator))
 }

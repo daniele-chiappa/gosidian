@@ -149,6 +149,12 @@ func (r *Router) restoreTrash(w http.ResponseWriter, req *http.Request, id strin
 		WriteError(w, http.StatusConflict, CodeConflict, "project "+project+" does not exist: restore it first")
 		return
 	}
+	// Trashed before the state dir was set there, it would come back into
+	// the credentials (BUG-098).
+	if _, err := r.deps.Vault.Rel(e.OriginPath); err != nil || r.deps.Vault.HoldsStateDir(e.OriginPath) {
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "the origin is in the server's state directory")
+		return
+	}
 	restored, _, err := r.deps.Trash.Restore(id)
 	if err != nil {
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())

@@ -522,6 +522,12 @@ paths:
                 $ref: "#/components/schemas/TotpEnrollResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: The account has two-factor already; DELETE /api/v1/totp, with the password, comes first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/v1/totp/confirm:
     post:
@@ -548,6 +554,12 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: The account has two-factor already; the secret is not replaced.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /api/v1/totp/recovery-codes:
     post:

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { getSettings, updateSettings, type Settings } from '@/api/settings'
+import { getSettings, updateSettings, type Settings, type UpdateSettings } from '@/api/settings'
 import { apiErrorMessage } from '@/api/client'
 import PasswordChange from '@/components/domain/PasswordChange.vue'
 import { useAuthStore } from '@/stores/auth'
@@ -204,6 +204,28 @@ async function save() {
   }
 }
 
+// The owner controls that save on change send their own field alone
+// (BUG-109): the whole draft carried the form's half-made edits below, or,
+// before the settings had loaded, its placeholders (git and trash off,
+// retention 0, no languages), and the server saved them. The form's
+// fields keep what is typed in them. While a save is on its way they are
+// disabled: its reply would put back the value they replace.
+type OwnerToggle = Pick<UpdateSettings, 'totp_mode' | 'default_visibility' | 'personal_projects'>
+async function saveToggle(patch: OwnerToggle) {
+  if (!data.value || saving.value) return
+  saving.value = true
+  error.value = null
+  message.value = null
+  try {
+    data.value = await updateSettings(withoutEnvFields(patch))
+    message.value = 'Saved.'
+  } catch (e) {
+    error.value = apiErrorMessage(e, 'Save failed')
+  } finally {
+    saving.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -238,13 +260,13 @@ onMounted(load)
 
     <fieldset class="rounded border border-border bg-surface p-4 space-y-3 mb-6">
       <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">Two-factor (TOTP)</legend>
-      <label v-if="auth.isOwner" class="block text-sm">
+      <label v-if="auth.isOwner && data" class="block text-sm">
         <span class="text-text-muted">Global policy</span>
         <select
           v-model="draft.totp_mode"
-          :disabled="fromEnv('totp_mode')"
+          :disabled="saving || fromEnv('totp_mode')"
           class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
-          @change="save"
+          @change="saveToggle({ totp_mode: draft.totp_mode })"
         >
           <option value="off">Off — two-factor disabled</option>
           <option value="optional">Optional — users may enable it</option>
@@ -252,7 +274,7 @@ onMounted(load)
         </select>
         <span class="text-xs text-text-muted">Per-user overrides are set in Admin → Users.</span>
       </label>
-      <hr v-if="auth.isOwner" class="border-border" />
+      <hr v-if="auth.isOwner && data" class="border-border" />
       <template v-if="auth.user?.totp_enrolled">
         <p class="text-sm text-success">Two-factor authentication is enabled for your account.</p>
         <p class="text-sm text-text-muted">
@@ -331,14 +353,15 @@ onMounted(load)
       <TotpEnroll v-else @done="onTotpEnrolled" />
     </fieldset>
 
-    <fieldset v-if="auth.isOwner" class="rounded border border-border bg-surface p-4 space-y-3 mb-6">
+    <fieldset v-if="auth.isOwner && data" class="rounded border border-border bg-surface p-4 space-y-3 mb-6">
       <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">Project access</legend>
       <label class="block text-sm">
         <span class="text-text-muted">Default visibility for new projects</span>
         <select
           v-model="draft.default_visibility"
+          :disabled="saving"
           class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
-          @change="save"
+          @change="saveToggle({ default_visibility: draft.default_visibility })"
         >
           <option value="private">Private — only accounts with a grant (and the owner)</option>
           <option value="internal">Internal — every member can read; writing takes a grant</option>
@@ -353,8 +376,9 @@ onMounted(load)
         <input
           v-model="draft.personal_projects"
           type="checkbox"
+          :disabled="saving"
           class="mt-1"
-          @change="save"
+          @change="saveToggle({ personal_projects: draft.personal_projects })"
         />
         <span>
           <span class="block">Personal project for new accounts</span>

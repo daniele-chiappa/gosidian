@@ -91,10 +91,10 @@ func (s *Server) storeAttachmentFromRequest(ctx context.Context, project, filena
 	// passes only its basename. We resolve it under the bridge dir (an allowed
 	// root), store it, then consume the staged copy. Near-zero token cost.
 	if bridgeFilename != "" {
-		if s.bridgeDir == "" {
-			return nil, 0, mcp.NewToolResultError("bridge_filename given but no bridge dir is configured (set GOSIDIAN_MCP_BRIDGE_DIR)")
+		staged, err := s.bridgePath(bridgeFilename)
+		if err != nil {
+			return nil, 0, mcp.NewToolResultError(err.Error())
 		}
-		staged := filepath.Join(s.bridgeDir, filepath.Base(bridgeFilename))
 		if filename == "" {
 			filename = filepath.Base(bridgeFilename)
 		}
@@ -142,14 +142,18 @@ func (s *Server) storeAttachmentFromRequest(ctx context.Context, project, filena
 		if errRes != nil {
 			return nil, 0, errRes
 		}
+		real, err := s.checkSource(ctx, sourcePath)
+		if err != nil {
+			return nil, 0, mcp.NewToolResultError(err.Error())
+		}
 		if errRes := s.checkWriteLimits(ctx, tok, 0); errRes != nil {
 			return nil, 0, errRes
 		}
-		refund, errRes := s.reserveFileUpload(tok, sourcePath)
+		refund, errRes := s.reserveFileUpload(tok, real)
 		if errRes != nil {
 			return nil, 0, errRes
 		}
-		res, err := attach.StoreFromPath(s.vault, sourcePath, filename, project, s.effectiveUploadRoots())
+		res, err := attach.StoreFromPath(s.vault, real, filename, project, s.sourceRoots())
 		if err != nil {
 			refund()
 			return nil, 0, mcp.NewToolResultError(err.Error())
@@ -199,7 +203,7 @@ func (s *Server) storeAttachmentFromRequest(ctx context.Context, project, filena
 // tell anything about a file the caller may not upload. A file that cannot
 // be read reserves nothing and fails in the store, with its own error.
 func (s *Server) reserveFileUpload(tok *auth.Token, path string) (func(), *mcp.CallToolResult) {
-	if attach.ValidateSourcePath(path, s.effectiveUploadRoots()) != nil {
+	if attach.ValidateSourcePath(path, s.sourceRoots()) != nil {
 		return func() {}, nil
 	}
 	fi, err := os.Stat(filepath.Clean(path))

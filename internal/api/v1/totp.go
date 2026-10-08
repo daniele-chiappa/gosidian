@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -40,6 +41,8 @@ type totpEnrollResponse struct {
 
 // handleTOTPEnroll generates a fresh secret + provisioning URI. The secret is
 // NOT persisted until the user confirms a valid code via handleTOTPConfirm.
+// An account enrolled already gets 409, as at the confirmation: the secret
+// changes only after DELETE /totp, which takes the password (BUG-101).
 func (r *Router) handleTOTPEnroll(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
 		WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
@@ -52,6 +55,10 @@ func (r *Router) handleTOTPEnroll(w http.ResponseWriter, req *http.Request) {
 	}
 	if user.isAnonymous() {
 		WriteError(w, http.StatusForbidden, CodeAuthForbidden, "anonymous session has no account to manage")
+		return
+	}
+	if full, ok := r.deps.Auth.WebAuth.UserByID(user.ID); ok && full.TOTPSec != "" {
+		WriteError(w, http.StatusConflict, CodeConflict, webauth.ErrTOTPAlreadyEnrolled.Error())
 		return
 	}
 	secret, uri, err := r.deps.Auth.WebAuth.GenerateTOTPSecret(user.Username, "gosidian")
@@ -112,6 +119,10 @@ func (r *Router) handleTOTPConfirm(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	codes, err := r.deps.Auth.WebAuth.EnrollTOTP(user.ID, body.Secret)
+	if errors.Is(err, webauth.ErrTOTPAlreadyEnrolled) {
+		WriteError(w, http.StatusConflict, CodeConflict, err.Error())
+		return
+	}
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
 		return

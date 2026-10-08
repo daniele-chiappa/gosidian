@@ -132,6 +132,68 @@ func TestVaultFiles_Authorizer_OpenModeAndMCPTokens(t *testing.T) {
 	}
 }
 
+// An MCP token reaches the attachments its owner may read now, not every
+// path its declared scope allows: a token with no project list, which any
+// account may create, used to read every project, and a token kept working
+// after a revoked grant or a disabled owner (BUG-100).
+func TestVaultFiles_MCPTokenFollowsItsOwner(t *testing.T) {
+	f := newNotesFixture(t)
+	fn := f.router.VaultFileAuthorizer()
+	const rel = "scratch/attachments/a.png"
+	const other = "other/attachments/b.png"
+	mcp, err := auth.Open(filepath.Join(t.TempDir(), "tokens.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.router.deps.Auth.MCPTokens = mcp
+	bob, err := f.webauth.AddUser("bob", "bob-Pass123!", webauth.RoleMember)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.projects.SetMember("scratch", bob.ID, projects.LevelRead); err != nil {
+		t.Fatal(err)
+	}
+	inherit, _, err := mcp.Create("bob-inherit", nil, []string{auth.ScopeRead}, 0, bob.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scoped, _, err := mcp.Create("bob-scoped", []string{"scratch"}, []string{auth.ScopeRead}, 0, bob.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fn(vfReq(rel, inherit, ""), rel); got != 0 {
+		t.Errorf("inherit token on a granted project: got %d, want allow", got)
+	}
+	if got := fn(vfReq(other, inherit, ""), other); got != http.StatusNotFound {
+		t.Errorf("inherit token on a private project: got %d, want 404", got)
+	}
+
+	if err := f.projects.Set("scratch", projects.Flags{Visibility: projects.VisibilityPrivate, HiddenFromMCP: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := fn(vfReq(rel, scoped, ""), rel); got != http.StatusNotFound {
+		t.Errorf("project hidden from MCP: got %d, want 404", got)
+	}
+	if err := f.projects.Set("scratch", projects.Flags{Visibility: projects.VisibilityPrivate}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.projects.RemoveMember("scratch", bob.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := fn(vfReq(rel, scoped, ""), rel); got != http.StatusNotFound {
+		t.Errorf("scoped token after the grant went: got %d, want 404", got)
+	}
+	if err := f.projects.SetMember("scratch", bob.ID, projects.LevelRead); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.webauth.DisableUser(bob.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := fn(vfReq(rel, scoped, ""), rel); got != http.StatusUnauthorized {
+		t.Errorf("token of a disabled owner: got %d, want 401", got)
+	}
+}
+
 func TestVaultFiles_CookieLifecycle(t *testing.T) {
 	f := newNotesFixture(t)
 	fn := f.router.VaultFileAuthorizer()

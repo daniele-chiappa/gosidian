@@ -15,23 +15,17 @@ import { useI18n } from 'vue-i18n'
 import { useDebounceFn } from '@vueuse/core'
 import type { ViewColumn } from '@/api/preview'
 import { suggestNoteTitles, type NoteTitleHit } from '@/api/noteTitles'
-import { isListType } from './cellValue'
+import { editorText, lastItemStart } from './cellValue'
 
 const props = defineProps<{ column: ViewColumn; value?: string | string[]; label: string }>()
 const emit = defineEmits<{ commit: [input: string | string[]]; cancel: [] }>()
 const { t } = useI18n()
 
+// A multi-select picks options; every other editor holds text, a list as
+// its items joined (toChange splits it back, and keeps it when untouched).
 const v = props.value
 const draft = ref<string | string[]>(
-  isListType(props.column)
-    ? Array.isArray(v)
-      ? [...v]
-      : v
-        ? [v]
-        : []
-    : Array.isArray(v)
-      ? v.join(', ')
-      : (v ?? ''),
+  props.column.type === 'multi-select' ? (Array.isArray(v) ? [...v] : v ? [v] : []) : editorText(v),
 )
 
 function focusOnMount(el: unknown) {
@@ -61,9 +55,9 @@ function onFocusOut(e: FocusEvent) {
   emit('commit', draft.value)
 }
 
-// Relation: suggestions for the text after the last comma.
+// Relation: suggestions for the text after the last comma outside a link.
 const suggestions = ref<NoteTitleHit[]>([])
-const lastSegment = (s: string) => (s.split(',').pop() ?? '').trim()
+const lastSegment = (s: string) => s.slice(lastItemStart(s)).trim()
 const suggest = useDebounceFn(async (q: string) => {
   if (!q || q.startsWith('[[')) {
     suggestions.value = []
@@ -83,9 +77,9 @@ function onRelationInput(e: Event) {
 
 function pick(hit: NoteTitleHit) {
   const link = `[[${hit.path.replace(/\.md$/, '')}]]`
-  const segments = String(draft.value).split(',')
-  segments[segments.length - 1] = (segments.length > 1 ? ' ' : '') + link
-  draft.value = segments.join(',')
+  const text = String(draft.value)
+  const start = lastItemStart(text)
+  draft.value = text.slice(0, start) + (start > 0 ? ' ' : '') + link
   suggestions.value = []
   // Back to the input, so picking a note does not count as leaving it.
   relationInput?.focus()

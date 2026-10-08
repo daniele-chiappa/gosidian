@@ -161,6 +161,25 @@ describe('ViewTable', () => {
     expect(patch).not.toHaveBeenCalled()
   })
 
+  // BUG-110: an editor opened and left saved its text split anew on every
+  // comma, a link's included.
+  it('saves nothing when a list or relation cell is left as it was', async () => {
+    const v = view()
+    const row = v.rows![0]!
+    v.columns!.push({ name: 'see', type: 'relation' }, { name: 'tags', type: 'list' })
+    row.fields.see = '[[people/Rossi, Mario]]'
+    row.fields.tags = ['Rossi, Mario']
+    const w = mountTable(v)
+    for (const field of ['see', 'tags']) {
+      await w.find(`tbody tr td[data-field="${field}"] button`).trigger('click')
+      await w.find(`tbody tr td[data-field="${field}"] input`).trigger('blur')
+      await w.find(`tbody tr td[data-field="${field}"]`).trigger('focusout')
+      await flushPromises()
+    }
+    expect(patch).not.toHaveBeenCalled()
+    expect(row.fields).toMatchObject({ see: '[[people/Rossi, Mario]]', tags: ['Rossi, Mario'] })
+  })
+
   it('says when no note matches, and when the table is cut', () => {
     expect(
       mountTable({ as: 'table', total: 0, rows: [], columns: [{ name: 'title' }] }).text(),

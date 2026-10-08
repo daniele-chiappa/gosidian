@@ -4,7 +4,9 @@ import {
   displayValue,
   expectValue,
   isEditable,
+  lastItemStart,
   shownValue,
+  splitItems,
   toChange,
 } from '@/components/views/cellValue'
 
@@ -46,6 +48,34 @@ describe('cell values', () => {
       set: ['[[p/a]]'],
     })
     expect(toChange(col('due', 'date'), '2026-10-10')).toEqual({ set: '2026-10-10' })
+  })
+
+  // BUG-110: a comma inside a link, or in a value nobody edited, is not a
+  // separator.
+  it('splits a list on the commas outside its links', () => {
+    expect(splitItems('[[people/Rossi, Mario]], [[x|a, b]] ,, plain')).toEqual([
+      '[[people/Rossi, Mario]]',
+      '[[x|a, b]]',
+      'plain',
+    ])
+    expect(lastItemStart('[[a, b]], Ro')).toBe(9)
+    expect(lastItemStart('[[a, b')).toBe(0)
+    expect(toChange(col('related', 'relation'), '[[people/Rossi, Mario]]')).toEqual({
+      set: '[[people/Rossi, Mario]]',
+    })
+    expect(toChange(col('notes', 'list'), '[[a, b]], c')).toEqual({ set: ['[[a, b]]', 'c'] })
+  })
+
+  it('keeps a value its editor showed and nobody changed', () => {
+    expect(toChange(col('related', 'relation'), 'Rossi, Mario', 'Rossi, Mario')).toEqual({
+      set: 'Rossi, Mario',
+    })
+    expect(toChange(col('notes', 'list'), ' Rossi, Mario ', ['Rossi, Mario'])).toEqual({
+      set: ['Rossi, Mario'],
+    })
+    expect(toChange(col('notes', 'list'), 'Rossi, Mario, Verdi', ['Rossi, Mario'])).toEqual({
+      set: ['Rossi', 'Mario', 'Verdi'],
+    })
   })
 
   it('shows a change as the index reads it', () => {

@@ -194,13 +194,11 @@ func (s *Server) handleIngestTicketRedeem(w http.ResponseWriter, r *http.Request
 		writeJSONError(w, http.StatusRequestEntityTooLarge, "file too large (max 10 MiB)")
 		return
 	}
-	// A package is a .zip, whose notes are checked one by one against the
-	// note size limit: only the write rate applies to the upload itself.
-	limitSize := len(data)
-	if tk.Intent.As == "package" {
-		limitSize = 0
-	}
-	if msg, wait := s.writeLimitViolation(r.Context(), tok, limitSize); msg != "" {
+	// Only the write rate applies to the upload itself: a note is checked
+	// against the note size limit when it is written, the notes of a
+	// package one by one, and an attachment has its own 10 MiB cap, which
+	// the note limit used to replace (BUG-104).
+	if msg, wait := s.writeLimitViolation(r.Context(), tok, 0); msg != "" {
 		writeRateLimited(w, http.StatusTooManyRequests, msg, wait)
 		return
 	}

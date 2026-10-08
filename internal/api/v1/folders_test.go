@@ -80,24 +80,53 @@ func TestFolders_ExportRefuses(t *testing.T) {
 	}
 }
 
-// A state dir set inside the vault under a visible name shows up as a
-// project folder. The walk left it out only below where it started, so the
-// zip of that "project" held the credentials (BUG-098).
+// A note or a folder trashed from where the state dir is now set does not
+// come back into it (BUG-098).
+func TestTrash_RestoreIntoTheStateDir(t *testing.T) {
+	f := newNotesFixture(t)
+	f.router.deps.Trash = trash.New(f.vaultRoot, -1)
+	f.seedNote(t, "Alpha/state/x.md", "# x")
+	f.seedNote(t, "Alpha/held/y.md", "# y")
+	for _, p := range []string{"/api/v1/notes/Alpha/state/x.md", "/api/v1/folders/Alpha/held"} {
+		if rec := f.doAuthRecorder(http.MethodDelete, p, "", nil); rec.code != http.StatusOK && rec.code != http.StatusNoContent {
+			t.Fatalf("delete %s = %d %s", p, rec.code, rec.body)
+		}
+	}
+	f.router.deps.Vault.SetStateDir(filepath.Join(f.vaultRoot, "Alpha", "state"))
+	owner := map[string]string{"Authorization": "Bearer " + f.bearer}
+	id := f.trashIDFor(t, "Alpha/state/x.md", owner)
+	if rec := f.doAuthRecorder(http.MethodPost, "/api/v1/trash/"+url.PathEscape(id)+"/restore", "", nil); rec.code != http.StatusBadRequest {
+		t.Errorf("restore into the state dir = %d %s, want 400", rec.code, rec.body)
+	}
+	f.router.deps.Vault.SetStateDir(filepath.Join(f.vaultRoot, "Alpha", "held", "state"))
+	id = f.trashIDFor(t, "Alpha/held", owner)
+	if rec := f.doAuthRecorder(http.MethodPost, "/api/v1/trash/"+url.PathEscape(id)+"/restore", "", nil); rec.code != http.StatusBadRequest {
+		t.Errorf("restore of a folder holding the state dir = %d %s, want 400", rec.code, rec.body)
+	}
+}
+
+// A state dir set inside the vault under a visible name showed up as a
+// project folder, and the zip of that "project" held the credentials
+// (BUG-098). The vault hides it now: no project, no folder, no entry.
 func TestExport_StateDirInsideTheVault(t *testing.T) {
 	f := newNotesFixture(t)
 	f.seedNote(t, "Alpha/a.md", "# a")
 	f.writeRaw(t, "state/tokens.json", `{"secret":true}`)
 	f.writeRaw(t, "Alpha/inner/auth.json", `{"secret":true}`)
-	f.router.deps.StateDir = filepath.Join(f.vaultRoot, "state")
+	f.router.deps.Vault.SetStateDir(filepath.Join(f.vaultRoot, "state"))
 
-	for _, p := range []string{"/api/v1/projects/state/export.zip", "/api/v1/folders/state/export.zip"} {
-		if rec := f.doAuthRecorder(http.MethodGet, p, "", nil); rec.code != http.StatusNotFound {
-			t.Errorf("%s = %d, want 404", p, rec.code)
+	for p, want := range map[string]int{
+		"/api/v1/projects/state/export.zip": http.StatusNotFound,
+		// Refused like a hidden folder: not a vault path.
+		"/api/v1/folders/state/export.zip": http.StatusBadRequest,
+	} {
+		if rec := f.doAuthRecorder(http.MethodGet, p, "", nil); rec.code != want {
+			t.Errorf("%s = %d, want %d", p, rec.code, want)
 		}
 	}
 
 	// Below a folder that holds it, the walk leaves it out.
-	f.router.deps.StateDir = filepath.Join(f.vaultRoot, "Alpha", "inner")
+	f.router.deps.Vault.SetStateDir(filepath.Join(f.vaultRoot, "Alpha", "inner"))
 	rec := f.doAuthRecorder(http.MethodGet, "/api/v1/projects/Alpha/export.zip", "", nil)
 	if rec.code != http.StatusOK {
 		t.Fatalf("project export = %d %s", rec.code, rec.body)
@@ -105,8 +134,8 @@ func TestExport_StateDirInsideTheVault(t *testing.T) {
 	if names, _ := zipEntries(t, rec.body); strings.Join(names, ",") != "Alpha/a.md" {
 		t.Errorf("entries = %v, want only Alpha/a.md", names)
 	}
-	if rec := f.doAuthRecorder(http.MethodGet, "/api/v1/folders/Alpha/inner/export.zip", "", nil); rec.code != http.StatusNotFound {
-		t.Errorf("zip of the state dir = %d, want 404", rec.code)
+	if rec := f.doAuthRecorder(http.MethodGet, "/api/v1/folders/Alpha/inner/export.zip", "", nil); rec.code != http.StatusBadRequest {
+		t.Errorf("zip of the state dir = %d, want 400", rec.code)
 	}
 }
 
@@ -187,7 +216,7 @@ func TestFolders_DeleteRefuses(t *testing.T) {
 	f.setVisibility(t, "Alpha", projects.VisibilityInternal)
 	_, reader := f.memberUser(t, "reader")
 	f.writeRaw(t, "Alpha/held/state/tokens.json", `{"secret":true}`)
-	f.router.deps.StateDir = filepath.Join(f.vaultRoot, "Alpha", "held", "state")
+	f.router.deps.Vault.SetStateDir(filepath.Join(f.vaultRoot, "Alpha", "held", "state"))
 
 	cases := []struct {
 		name, path, bearer string // bearer "" = the owner

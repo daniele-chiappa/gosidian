@@ -24,6 +24,18 @@ func TestResolve_Precedence(t *testing.T) {
 	}
 }
 
+// The vault root as the state dir would make the credentials vault files
+// (BUG-098); a folder inside the vault is the vault's to hide.
+func TestResolve_RefusesTheVaultRoot(t *testing.T) {
+	vault := t.TempDir()
+	if _, _, err := Resolve(vault, vault+"/", ""); err == nil {
+		t.Error("the vault root was accepted as the state dir")
+	}
+	if dir, _, err := Resolve(vault, filepath.Join(vault, "state"), ""); err != nil || dir != filepath.Join(vault, "state") {
+		t.Errorf("a folder inside the vault: dir=%q err=%v", dir, err)
+	}
+}
+
 func seedLegacy(t *testing.T, legacy string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(legacy, "templates", "minimal"), 0o755); err != nil {

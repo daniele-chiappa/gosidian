@@ -50,7 +50,9 @@ var Files = []string{
 
 // Resolve picks the state directory: flag value, then env value, then the
 // default <vault>/.gosidian. isDefault reports whether the default applies
-// (in which case no migration ever runs).
+// (in which case no migration ever runs). The vault root itself is refused:
+// the credentials would be vault files, zipped and pushed with the notes
+// (BUG-098). A folder inside the vault is accepted, and the vault hides it.
 func Resolve(vault, flagValue, envValue string) (dir string, isDefault bool, err error) {
 	v := strings.TrimSpace(flagValue)
 	if v == "" {
@@ -62,6 +64,9 @@ func Resolve(vault, flagValue, envValue string) (dir string, isDefault bool, err
 	abs, err := filepath.Abs(v)
 	if err != nil {
 		return "", false, fmt.Errorf("state dir %q: %w", v, err)
+	}
+	if root, err := filepath.Abs(vault); err == nil && root == abs {
+		return "", false, fmt.Errorf("state dir %q is the vault root: set a folder outside the vault, or leave it unset for <vault>/%s", v, DefaultSubdir)
 	}
 	return abs, false, nil
 }

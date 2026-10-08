@@ -48,7 +48,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_AUTOMATIONS_INTERVAL` | `automations.interval` | `5m` (how often the rules run) |
 | `GOSIDIAN_AUTOMATIONS_TIMEZONE` | `automations.timezone` | empty (the server's local zone; an IANA zone such as `Europe/Rome` for the days and times of the rules) |
 | `GOSIDIAN_TRASH_ENABLED` | `trash.enabled` | `false` |
-| `GOSIDIAN_TRASH_RETENTION` | `trash.retention` | `720h` |
+| `GOSIDIAN_TRASH_RETENTION` | `trash.retention` | `720h`; `0` keeps entries until purged |
 | `GOSIDIAN_LOGIN_SESSION_TTL` | `webauth.session_ttl` | `24h` |
 | `GOSIDIAN_LOGIN_WINDOW` | `webauth.login_window` | `15m` |
 | `GOSIDIAN_LOGIN_MAX_FAILURES` | `webauth.login_max_failures` | `5` |
@@ -218,6 +218,13 @@ releases. Set `--state-dir` (or `GOSIDIAN_STATE_DIR`) to move it **out of
 the vault root** — the recommended layout: nothing that resolves inside the
 vault can reach the credential store, and the vault's git repository never
 contains it, by construction rather than by `.gitignore`.
+
+A state dir set inside the vault is accepted and hidden like a dot folder,
+whatever its name: no note, project, attachment or zip entry comes from it,
+no project operation moves or removes it or a folder holding it, and the
+managed `.gitignore` names it (a commit that already holds it drops it from
+the index, though the history keeps it: rotate the tokens if it was
+pushed). The log says so at every start. The vault root itself is refused.
 
 On the first start with a custom state dir, the known files are moved from
 `<vault>/.gosidian/` into it (rename, or copy+remove across filesystems);

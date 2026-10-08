@@ -33,7 +33,7 @@ func (v *Vault) ProjectAttachments(project string, allowedExt map[string]bool) (
 			return err
 		}
 		if d.IsDir() {
-			if p != root && (strings.HasPrefix(d.Name(), ".") || d.Name() == "node_modules") {
+			if v.skipDir(root, p) {
 				return fs.SkipDir
 			}
 			return nil
