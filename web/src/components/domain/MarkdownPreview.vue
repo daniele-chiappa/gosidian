@@ -44,7 +44,7 @@ const store = useWindowsStore()
 const openWindow = inject<(spec: OpenSpec) => string>('openWindow', (s) => store.open(s))
 const root = ref<HTMLElement | null>(null)
 const proseClass =
-  'prose prose-invert max-w-none prose-pre:bg-bg-elevated prose-pre:border prose-pre:border-border prose-code:before:hidden prose-code:after:hidden'
+  'prose max-w-none prose-pre:bg-bg-elevated prose-pre:border prose-pre:border-border prose-code:before:hidden prose-code:after:hidden'
 
 const sanitized = computed(() => sanitizePreviewHtml(props.html))
 

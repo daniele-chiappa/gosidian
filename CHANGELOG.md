@@ -8,6 +8,27 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.71.1] — 2026-10-08 — "light themes"
+
+Notes are readable again with the light themes, and code blocks follow
+the theme. Pull the image and restart, nothing to migrate.
+
+### Fixed
+- **Notes are readable with the light themes** — the note typography was
+  always the dark one, so with Catppuccin Latte or Solarized Light
+  headings, bold and body text were light on a light page: in the note
+  window, in database rows and in the editor preview. It now takes its
+  colours from the active theme's tokens, the custom theme included.
+- **Code blocks follow the theme** — highlighted code carried a fixed dark
+  palette as inline styles with every theme. The server now marks the
+  tokens with classes and the web UI colours them from the theme:
+  keywords, strings, numbers, names and comments each take one of the
+  theme's colours.
+
+### Added
+- **`web/design.md`** — the web UI's design system as the code has it:
+  tokens, type, controls, motion, and what is not tokenised yet.
+
 ## [2.71.0] — 2026-10-08 — "tree menu"
 
 A right-click on the sidebar tree opens gosidian's own menu: download a

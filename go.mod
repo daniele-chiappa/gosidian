@@ -4,6 +4,7 @@ go 1.27.0
 
 require (
 	github.com/BurntSushi/toml v1.6.0
+	github.com/alecthomas/chroma/v2 v2.2.0
 	github.com/boombuler/barcode v1.1.0
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/go-ldap/ldap/v3 v3.4.14
@@ -20,7 +21,6 @@ require (
 
 require (
 	github.com/Azure/go-ntlmssp v0.1.1 // indirect
-	github.com/alecthomas/chroma/v2 v2.2.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dlclark/regexp2 v1.11.0 // indirect

@@ -1,0 +1,42 @@
+/*
+ * Highlighted code (IMP-154). The server marks code tokens with chroma's
+ * classes instead of inline colours (internal/parser/markdown.go); this file
+ * paints them from the preset's tokens, so code blocks follow every theme,
+ * light, dark and custom. The block itself takes the prose `pre` colours
+ * (tailwind.config.ts).
+ */
+.chroma .err {
+  color: rgb(var(--color-danger));
+}
+.chroma :is(.k, .kc, .kd, .kn, .kp, .kr, .kt, .nt) {
+  color: rgb(var(--color-accent));
+}
+.chroma :is(.s, .sa, .sb, .sc, .dl, .sd, .s2, .se, .sh, .si, .sx, .sr, .s1, .ss) {
+  color: rgb(var(--color-success));
+}
+.chroma :is(.m, .mb, .mf, .mh, .mi, .il, .mo) {
+  color: rgb(var(--color-warning));
+}
+.chroma :is(.nf, .fm, .nc, .nb, .bp, .nd, .ne, .na) {
+  color: rgb(var(--color-info));
+}
+.chroma :is(.c, .ch, .cm, .c1, .cs, .cp, .cpf) {
+  color: rgb(var(--color-text-muted));
+  font-style: italic;
+}
+.chroma .gd {
+  color: rgb(var(--color-danger));
+}
+.chroma .gi {
+  color: rgb(var(--color-success));
+}
+.chroma :is(.gh, .gu) {
+  color: rgb(var(--color-accent));
+  font-weight: 600;
+}
+.chroma .ge {
+  font-style: italic;
+}
+.chroma .gs {
+  font-weight: 600;
+}

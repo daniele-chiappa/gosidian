@@ -52,6 +52,33 @@ export default {
         sans: ['system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
         mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'monospace'],
       },
+      // Note typography from the preset's tokens (IMP-154): `prose` follows
+      // every theme, so no `prose-invert`, which painted light text on the
+      // light presets.
+      typography: {
+        DEFAULT: {
+          css: {
+            '--tw-prose-body': 'rgb(var(--color-text))',
+            '--tw-prose-headings': 'rgb(var(--color-text))',
+            '--tw-prose-lead': 'rgb(var(--color-text-muted))',
+            '--tw-prose-links': 'rgb(var(--color-text))',
+            '--tw-prose-bold': 'rgb(var(--color-text))',
+            '--tw-prose-counters': 'rgb(var(--color-text-muted))',
+            '--tw-prose-bullets': 'rgb(var(--color-text-muted))',
+            '--tw-prose-hr': 'rgb(var(--color-border))',
+            '--tw-prose-quotes': 'rgb(var(--color-text))',
+            '--tw-prose-quote-borders': 'rgb(var(--color-border-strong))',
+            '--tw-prose-captions': 'rgb(var(--color-text-muted))',
+            '--tw-prose-kbd': 'rgb(var(--color-text))',
+            '--tw-prose-kbd-shadows': 'rgb(var(--color-border-strong) / 0.5)',
+            '--tw-prose-code': 'rgb(var(--color-text))',
+            '--tw-prose-pre-code': 'rgb(var(--color-text))',
+            '--tw-prose-pre-bg': 'rgb(var(--color-bg-elevated))',
+            '--tw-prose-th-borders': 'rgb(var(--color-border-strong))',
+            '--tw-prose-td-borders': 'rgb(var(--color-border))',
+          },
+        },
+      },
     },
   },
   plugins: [forms, typography],

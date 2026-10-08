@@ -144,9 +144,13 @@ func TestRenderer_SyntaxHighlighting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// chroma emits <span> wrappers with inline style for the dark theme.
-	if !strings.Contains(out, "<span") || !strings.Contains(out, "style=") {
-		t.Errorf("expected highlighted spans in output, got: %s", out)
+	// chroma marks the tokens with classes the SPA colours from the
+	// preset's tokens; an inline colour would ignore the theme (IMP-154).
+	if !strings.Contains(out, `class="chroma"`) || !strings.Contains(out, `<span class="kd">func</span>`) {
+		t.Errorf("expected chroma classes in output, got: %s", out)
+	}
+	if strings.Contains(out, "style=") {
+		t.Errorf("highlighted code carries inline colours: %s", out)
 	}
 }
 
