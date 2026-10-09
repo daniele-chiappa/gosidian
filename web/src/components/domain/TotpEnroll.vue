@@ -54,7 +54,7 @@ async function confirm() {
       v-if="!secret"
       type="button"
       :disabled="busy"
-      class="rounded bg-accent text-accent-fg px-3 py-2 text-sm hover:bg-accent-hover disabled:opacity-60"
+      class="h-control rounded bg-accent text-accent-fg px-3 text-sm hover:bg-accent-hover disabled:opacity-60"
       @click="start"
     >
       {{ t('totp.setup_button') }}
@@ -89,13 +89,13 @@ async function confirm() {
         inputmode="numeric"
         autocomplete="one-time-code"
         :placeholder="t('totp.code_placeholder')"
-        class="w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
+        class="h-control py-0 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
         @keyup.enter="confirm"
       />
       <button
         type="button"
         :disabled="busy"
-        class="rounded bg-accent text-accent-fg px-3 py-2 text-sm hover:bg-accent-hover disabled:opacity-60"
+        class="h-control rounded bg-accent text-accent-fg px-3 text-sm hover:bg-accent-hover disabled:opacity-60"
         @click="confirm"
       >
         {{ t('totp.confirm_button') }}

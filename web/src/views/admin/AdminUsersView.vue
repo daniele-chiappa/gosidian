@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
+import { Check, Copy, Dices, Eye, EyeOff, ShieldCheck } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { resetUserPassword } from '@/api/password'
 import {
@@ -19,6 +20,7 @@ import { errorText } from '@/api/errors'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
 import DateTime from '@/components/primitives/DateTime.vue'
 import { formatDateTime } from '@/api/format'
+import { confirmAction } from '@/composables/useConfirm'
 
 const users = ref<AdminUser[]>([])
 const { t, te } = useI18n()
@@ -232,7 +234,8 @@ async function load() {
 }
 
 async function disable(u: AdminUser) {
-  if (!confirm(t('admin.users.confirm_disable', { user: u.username }))) return
+  if (!(await confirmAction(t('admin.users.confirm_disable', { user: u.username }), { confirmLabel: t('common.disable_button') })))
+    return
   try {
     await disableUser(u.id)
     await load()
@@ -245,7 +248,7 @@ async function changeRole(u: AdminUser, role: string, select?: HTMLSelectElement
   if ((role !== 'member' && role !== 'guest') || role === u.role) return
   // Read-only revokes every MCP token of the account: asked first, as an
   // arrow key on the select was enough (BUG-116, S6-9).
-  if (role === 'guest' && !confirm(t('users.confirm_guest', { user: u.username }))) {
+  if (role === 'guest' && !(await confirmAction(t('users.confirm_guest', { user: u.username })))) {
     if (select) select.value = u.role
     return
   }
@@ -297,10 +300,7 @@ async function changeTotpPolicy(u: AdminUser, policy: string) {
 // leaves policy and sessions alone (a required policy re-enrols the user at
 // the next login).
 async function resetTotp(u: AdminUser) {
-  if (
-    !confirm(t('admin.users.confirm_totp_reset', { user: u.username }))
-  )
-    return
+  if (!(await confirmAction(t('admin.users.confirm_totp_reset', { user: u.username })))) return
   try {
     await resetUserTOTP(u.id)
     await load()
@@ -320,7 +320,7 @@ onMounted(load)
         <h3 class="text-sm font-semibold">{{ t('admin.users.new') }}</h3>
         <button
           type="button"
-          class="text-xs px-2 py-1 rounded bg-accent text-accent-fg hover:bg-accent-hover"
+          class="h-control-sm text-xs px-2 rounded bg-accent text-accent-fg hover:bg-accent-hover"
           @click="showCreate ? (showCreate = false) : ((created = null), (showCreate = true))"
         >
           {{ showCreate ? t('common.cancel') : t('admin.users.new_button') }}
@@ -349,7 +349,7 @@ onMounted(load)
             type="text"
             autocomplete="off"
             required
-            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
+            class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
           />
         </label>
 
@@ -361,26 +361,29 @@ onMounted(load)
               :type="showPassword ? 'text' : 'password'"
               autocomplete="new-password"
               required
-              class="w-full rounded bg-bg-elevated border border-border px-3 py-2 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-focus"
+              class="h-control py-0 w-full rounded bg-bg-elevated border border-border px-3 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-focus"
             />
             <button
               type="button"
               class="px-2 rounded border border-border text-xs hover:bg-surface-hover"
               :title="showPassword ? t('admin.users.hide') : t('admin.users.show')"
+              :aria-label="showPassword ? t('admin.users.hide') : t('admin.users.show')"
               @click="showPassword = !showPassword"
-            >{{ showPassword ? '🙈' : '👁' }}</button>
+            ><component :is="showPassword ? EyeOff : Eye" class="h-4 w-4" aria-hidden="true" /></button>
             <button
               type="button"
               class="px-2 rounded border border-border text-xs hover:bg-surface-hover"
               :title="t('admin.users.generate')"
+              :aria-label="t('admin.users.generate')"
               @click="generatePassword"
-            >🎲</button>
+            ><Dices class="h-4 w-4" aria-hidden="true" /></button>
             <button
               type="button"
               class="px-2 rounded border border-border text-xs hover:bg-surface-hover"
               :title="copied ? t('common.copied') : t('common.copy')"
+              :aria-label="copied ? t('common.copied') : t('common.copy')"
               @click="copyPassword"
-            >{{ copied ? '✓' : '⧉' }}</button>
+            ><component :is="copied ? Check : Copy" class="h-4 w-4" aria-hidden="true" /></button>
           </div>
         </label>
 
@@ -388,7 +391,7 @@ onMounted(load)
           <span class="text-text-muted text-xs">{{ t('admin.users.role') }}</span>
           <select
             v-model="newUser.role"
-            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
+            class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
           >
             <option value="member">{{ roleLabel('member') }} — {{ t('admin.users.member_hint') }}</option>
             <option value="guest">{{ roleLabel('guest') }} — {{ t('admin.users.guest_hint') }}</option>
@@ -399,7 +402,7 @@ onMounted(load)
           <span class="text-text-muted text-xs">{{ t('admin.users.totp_policy') }}</span>
           <select
             v-model="newUser.totp_policy"
-            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
+            class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
           >
             <option value="">{{ t('admin.users.totp_inherit') }}</option>
             <option value="enabled">{{ t('admin.users.totp_required') }}</option>
@@ -426,7 +429,7 @@ onMounted(load)
           <button
             type="submit"
             :disabled="creating"
-            class="rounded bg-accent text-accent-fg px-3 py-2 text-sm hover:bg-accent-hover disabled:opacity-60"
+            class="h-control rounded bg-accent text-accent-fg px-3 text-sm hover:bg-accent-hover disabled:opacity-60"
           >
             {{ creating ? t('signup.creating') : t('admin.users.create') }}
           </button>
@@ -444,7 +447,7 @@ onMounted(load)
       <!-- Scrolls inside its box in a narrow window (IMP-156, M7). -->
 
       <table class="w-full text-sm">
-        <thead class="text-text-muted text-xs uppercase tracking-wide">
+        <thead class="text-text-muted text-xs [&_th]:font-medium">
           <tr>
             <th class="text-left py-2 px-3">{{ t('common.username') }}</th>
             <th class="text-left py-2 px-3">{{ t('admin.users.role') }}</th>
@@ -462,12 +465,12 @@ onMounted(load)
             <td class="py-2 px-3">
               <span
                 v-if="u.role === 'owner' || u.disabled_at"
-                class="text-xs px-2 py-0.5 rounded"
+                class="h-control-sm text-xs px-2 rounded"
                 :class="u.role === 'owner' ? 'bg-accent/20 text-accent' : 'border border-border'"
               >{{ roleLabel(u.role) }}</span>
               <select
                 v-else
-                class="text-xs rounded bg-bg-elevated border border-border px-2 py-1 focus:outline-none focus:ring-1 focus:ring-focus"
+                class="h-control-sm py-0 text-xs rounded bg-bg-elevated border border-border px-2 focus:outline-none focus:ring-1 focus:ring-focus"
                 :value="u.role"
                 @change="changeRole(u, ($event.target as HTMLSelectElement).value, $event.target as HTMLSelectElement)"
               >
@@ -479,7 +482,7 @@ onMounted(load)
               <div class="flex items-center gap-2">
                 <select
                   v-if="u.role !== 'owner' && !u.disabled_at"
-                  class="text-xs rounded bg-bg-elevated border border-border px-2 py-1 focus:outline-none focus:ring-1 focus:ring-focus"
+                  class="h-control-sm py-0 text-xs rounded bg-bg-elevated border border-border px-2 focus:outline-none focus:ring-1 focus:ring-focus"
                   :value="u.totp_policy || ''"
                   @change="changeTotpPolicy(u, ($event.target as HTMLSelectElement).value)"
                 >
@@ -488,13 +491,19 @@ onMounted(load)
                   <option value="disabled">{{ t('admin.users.totp_exempt') }}</option>
                 </select>
                 <span v-else class="text-xs text-text-muted whitespace-nowrap">{{ t(`admin.users.totp_policy_name.${u.totp_policy || 'inherit'}`) }}</span>
-                <span v-if="u.totp_enrolled" class="text-xs text-success" :title="t('admin.users.totp_enrolled')">●</span>
+                <span
+                  v-if="u.totp_enrolled"
+                  class="shrink-0 text-success"
+                  role="img"
+                  :title="t('admin.users.totp_enrolled')"
+                  :aria-label="t('admin.users.totp_enrolled')"
+                ><ShieldCheck class="h-4 w-4" aria-hidden="true" /></span>
                 <!-- The owner's own two-factor comes off from Settings, with
                      the password: the server refuses it here. -->
                 <button
                   v-if="u.totp_enrolled && !u.disabled_at && u.role !== 'owner'"
                   type="button"
-                  class="text-xs px-2 py-0.5 rounded text-warning hover:bg-surface-hover"
+                  class="h-control-sm text-xs px-2 rounded text-warning hover:bg-surface-hover"
                   :title="t('admin.users.totp_reset_hint')"
                   @click="resetTotp(u)"
                 >{{ t('admin.users.totp_reset') }}</button>
@@ -506,7 +515,7 @@ onMounted(load)
                 <button
                   v-if="u.role !== 'owner' && !u.disabled_at"
                   type="button"
-                  class="text-xs px-2 py-0.5 rounded border border-border hover:bg-surface-hover"
+                  class="h-control-sm text-xs px-2 rounded border border-border hover:bg-surface-hover"
                   :title="expanded === u.id ? t('admin.users.hide_access_hint') : t('admin.users.view_access_hint')"
                   @click="toggleAccess(u)"
                 >{{ expanded === u.id ? t('admin.users.hide_access') : t('admin.users.view_access') }}</button>
@@ -562,14 +571,14 @@ onMounted(load)
               <button
                 v-if="!u.disabled_at && u.role !== 'owner' && u.auth_source !== 'ldap'"
                 type="button"
-                class="text-xs px-2 py-1 rounded hover:bg-surface-hover"
+                class="h-control-sm text-xs px-2 rounded hover:bg-surface-hover"
                 :data-reset-password="u.username"
                 @click="openReset(u)"
               >{{ t('password.reset_title') }}</button>
               <button
                 v-if="!u.disabled_at && u.role !== 'owner'"
                 type="button"
-                class="text-xs px-2 py-1 rounded text-danger hover:bg-surface-hover"
+                class="h-control-sm text-xs px-2 rounded text-danger hover:bg-surface-hover"
                 @click="disable(u)"
               >{{ t('admin.users.disable') }}</button>
             </td>
@@ -586,14 +595,15 @@ onMounted(load)
                       type="text"
                       autocomplete="off"
                       name="temporary-password"
-                      class="w-56 rounded bg-bg-elevated border border-border px-2 py-1 font-mono"
+                      class="h-control py-0 w-56 rounded bg-bg-elevated border border-border px-2 font-mono"
                     />
                     <button
                       type="button"
-                      class="rounded border border-border px-2 py-1 hover:bg-surface-hover"
+                      class="h-control rounded border border-border px-2 hover:bg-surface-hover"
                       :title="t('admin.users.generate')"
+                      :aria-label="t('admin.users.generate')"
                       @click="generateResetPassword"
-                    >⟳</button>
+                    ><Dices class="h-4 w-4" aria-hidden="true" /></button>
                   </span>
                 </label>
                 <label class="block text-xs">
@@ -603,13 +613,13 @@ onMounted(load)
                     type="password"
                     autocomplete="current-password"
                     name="owner-password"
-                    class="mt-1 w-56 rounded bg-bg-elevated border border-border px-2 py-1"
+                    class="h-control py-0 mt-1 w-56 rounded bg-bg-elevated border border-border px-2"
                   />
                 </label>
                 <button
                   type="submit"
                   :disabled="resetBusy || resetPassword.length < 8 || !resetOwnerPassword"
-                  class="rounded bg-accent text-accent-fg px-3 py-1 text-xs hover:bg-accent-hover disabled:opacity-60"
+                  class="h-control rounded bg-accent text-accent-fg px-3 text-xs hover:bg-accent-hover disabled:opacity-60"
                 >{{ t('password.reset_submit') }}</button>
                 <ErrorMessage v-if="resetError" :text="resetError" class="text-xs" />
               </form>

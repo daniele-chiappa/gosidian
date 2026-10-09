@@ -22,6 +22,7 @@ import { commitField } from './fieldSave'
 import FieldEditor from './FieldEditor.vue'
 import FieldValueView from './FieldValue.vue'
 import { Pencil } from 'lucide-vue-next'
+import { fieldLabel } from '@/components/views/fieldLabel'
 
 const props = defineProps<{ path: string; etag?: string }>()
 const { t } = useI18n()
@@ -135,7 +136,7 @@ async function commit(col: ViewColumn, input: string | boolean | string[]) {
     data-properties
   >
     <header class="mb-2 flex flex-wrap items-baseline gap-x-2 text-xs text-text-muted">
-      <span class="font-semibold uppercase tracking-wide">{{ t('views.properties') }}</span>
+      <span class="font-semibold">{{ t('views.properties') }}</span>
       <span>
         {{ t('views.row_of') }}
         <a
@@ -148,24 +149,26 @@ async function commit(col: ViewColumn, input: string | boolean | string[]) {
       </span>
       <span v-if="!data.writable">· {{ t('views.read_only') }}</span>
     </header>
-    <dl class="m-0 grid grid-cols-[minmax(7rem,max-content)_1fr] items-baseline gap-x-4 gap-y-1">
+    <!-- Top-aligned rows of one line height: a value that wraps keeps its
+         label on its first line. -->
+    <dl class="m-0 grid grid-cols-[minmax(7rem,max-content)_1fr] items-start gap-x-4 gap-y-1">
       <template v-for="c in columns" :key="c.name">
-        <dt class="text-text-muted">{{ c.name }}</dt>
-        <dd class="m-0 min-h-[1.5rem]" :data-field="c.name">
+        <dt class="leading-6 text-text-muted" :title="c.name">{{ fieldLabel(c.name) }}</dt>
+        <dd class="m-0 min-h-[1.5rem] leading-6" :data-field="c.name">
           <input
             v-if="c.type === 'checkbox'"
             type="checkbox"
             class="rounded-sm border-border bg-bg-elevated text-accent focus:ring-focus"
             :checked="row.fields[c.name] === 'true'"
             :disabled="!editable(c) || saving"
-            :aria-label="t('views.edit', { field: c.name })"
+            :aria-label="t('views.edit', { field: fieldLabel(c.name) })"
             @change="commit(c, ($event.target as HTMLInputElement).checked)"
           />
           <FieldEditor
             v-else-if="editing?.col === c.name"
             :column="c"
             :value="valueOf(c)"
-            :label="t('views.edit', { field: c.name })"
+            :label="t('views.edit', { field: fieldLabel(c.name) })"
             @commit="commit(c, $event)"
             @cancel="editing = null"
           />
@@ -177,7 +180,7 @@ async function commit(col: ViewColumn, input: string | boolean | string[]) {
             <button
               type="button"
               class="rounded p-0.5 text-text-muted hover:bg-surface-hover hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
-              :aria-label="t('views.edit', { field: c.name })"
+              :aria-label="t('views.edit', { field: fieldLabel(c.name) })"
               :disabled="saving"
               @click="startEdit(c)"
             >
@@ -188,7 +191,7 @@ async function commit(col: ViewColumn, input: string | boolean | string[]) {
             v-else-if="editable(c)"
             type="button"
             class="-mx-1 w-full cursor-text rounded px-1 text-left hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
-            :aria-label="t('views.edit', { field: c.name })"
+            :aria-label="t('views.edit', { field: fieldLabel(c.name) })"
             :disabled="saving"
             @click="startEdit(c)"
           >
@@ -202,10 +205,10 @@ async function commit(col: ViewColumn, input: string | boolean | string[]) {
     <p v-if="authors" class="mb-0 mt-2 text-xs text-text-muted" data-authors>{{ authors }}</p>
     <template v-if="others.length">
       <p class="mb-1 mt-3 text-xs text-text-muted">{{ t('views.not_declared') }}</p>
-      <dl class="m-0 grid grid-cols-[minmax(7rem,max-content)_1fr] items-baseline gap-x-4 gap-y-1">
+      <dl class="m-0 grid grid-cols-[minmax(7rem,max-content)_1fr] items-start gap-x-4 gap-y-1">
         <template v-for="c in others" :key="c.name">
-          <dt class="text-text-muted">{{ c.name }}</dt>
-          <dd class="m-0" :data-field="c.name">
+          <dt class="leading-6 text-text-muted" :title="c.name">{{ fieldLabel(c.name) }}</dt>
+          <dd class="m-0 leading-6" :data-field="c.name">
             <FieldValueView :value="valueOf(c)" :links="row.links?.[c.name]" />
           </dd>
         </template>

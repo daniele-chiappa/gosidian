@@ -18,7 +18,7 @@ import { useWindowsStore, type OpenSpec } from 'plancia'
 import type { CanvasCard, CanvasData } from '@/api/notes'
 import { planciaKey, base } from '@/composables/planciaKey'
 import MarkdownPreview from './MarkdownPreview.vue'
-import { bounds, colorOf, edgeShape, fit, zoomAt } from './canvasGeometry'
+import { READABLE_FIT, bounds, colorOf, edgeShape, fit, zoomAt } from './canvasGeometry'
 import { isWebURL } from './noteLinks'
 
 // path: the canvas, which the relative links of its text cards start from.
@@ -82,14 +82,19 @@ const transform = computed(
   () => `translate(${view.value.tx}px, ${view.value.ty}px) scale(${view.value.k})`,
 )
 
+// A canvas opens no smaller than READABLE_FIT, from its top left corner when
+// it does not fit: shrunk to the window its cards could not be read. The fit
+// button shows the whole canvas, however small, until the reader moves.
+let whole = false
 function fitView() {
   const el = viewport.value
-  if (el) view.value = fit(plane.value, el.clientWidth, el.clientHeight)
+  if (el) view.value = fit(plane.value, el.clientWidth, el.clientHeight, whole ? 0 : READABLE_FIT)
 }
 
 /** The fit button: the whole canvas again, and resizes fit it again. */
 function refit() {
   moved = false
+  whole = true
   fitView()
 }
 
@@ -97,6 +102,7 @@ function zoomBy(factor: number) {
   const el = viewport.value
   if (!el) return
   moved = true
+  whole = false
   view.value = zoomAt(view.value, factor, { x: el.clientWidth / 2, y: el.clientHeight / 2 })
 }
 
@@ -109,11 +115,13 @@ function onWheel(e: WheelEvent) {
     if (scroller && scroller.scrollHeight > scroller.clientHeight + 1) return
     e.preventDefault()
     moved = true
+    whole = false
     view.value = { ...view.value, tx: view.value.tx - e.deltaX, ty: view.value.ty - e.deltaY }
     return
   }
   e.preventDefault()
   moved = true
+  whole = false
   const r = el.getBoundingClientRect()
   view.value = zoomAt(view.value, Math.exp(-e.deltaY * 0.0015), {
     x: e.clientX - r.left,
@@ -134,6 +142,7 @@ function onPointerDown(e: PointerEvent) {
 function onPointerMove(e: PointerEvent) {
   if (!drag || e.pointerId !== drag.id) return
   moved = true
+  whole = false
   view.value = { ...view.value, tx: drag.tx + e.clientX - drag.x, ty: drag.ty + e.clientY - drag.y }
 }
 function onPointerUp(e: PointerEvent) {

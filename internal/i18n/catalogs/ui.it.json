@@ -94,7 +94,8 @@
     },
     "private_project": "Progetto privato",
     "public_project": "Progetto pubblico",
-    "hidden_hint": "Nascosto agli MCP"
+    "hidden_hint": "Nascosto agli MCP",
+    "in_progress": "In corso"
   },
   "note": {
     "print": "Stampa / Salva come PDF",
@@ -292,7 +293,8 @@
     "z_recency": "Z: recenza",
     "renderer": "Resa del grafo",
     "no_data": "Ancora nessun dato.",
-    "load_failed": "Impossibile leggere il grafo"
+    "load_failed": "Impossibile leggere il grafo",
+    "links_title": "Legami · {name}"
   },
   "projects_page": {
     "h1": "Progetti",
@@ -640,7 +642,7 @@
   },
   "projects": {
     "title": "Progetti",
-    "intro": "Le cartelle di primo livello del vault. La visibilità dice chi legge un progetto: privato (gli account con un permesso), interno (ogni utente) o pubblico (ogni account, anche in sola lettura); per scrivere e amministrare serve sempre un permesso, a un account o a un team (Accesso). Su ogni riga c'è il tuo livello. I flag: skip-git lascia il progetto fuori dalla sincronizzazione git; hidden lo tiene fuori dalla portata degli agent MCP; globals unisce al bootstrap le skill e gli agent globali condivisi; anchors scrive al bootstrap gli agent del vault come file di subagent locali (servono i rispettivi interruttori del server, sbiaditi se spenti); tag-vocab lascia al progetto estendere il vocabolario dei tag del lint da memory/conventions.md; lean-read dà un bootstrap più corto ai token che non possono scrivere; mirror lascia a chi legge una copia in sola lettura del progetto (le note escono dal server, ogni sincronizzazione è registrata).",
+    "intro": "La visibilità dice chi legge un progetto: privato (gli account con un permesso), interno (ogni utente) o pubblico (ogni account, anche in sola lettura). Per scrivere serve sempre un permesso (Accesso).",
     "new_placeholder": "nuovo-progetto",
     "open_graph": "Apri il grafo del progetto",
     "notes": "nessuna nota | {n} nota | {n} note",
@@ -680,6 +682,16 @@
       "lean_off": "Clic per dare ai token che qui non scrivono un bootstrap ridotto: solo le direttive di lettura.",
       "mirror_on": "Mirror acceso: i token che leggono il progetto possono tenerne una copia in sola lettura sulla loro macchina (gosidian mirror sync); ogni sincronizzazione è registrata. Clic per spegnere.",
       "mirror_off": "Clic per lasciare ai token che leggono il progetto una copia in sola lettura sulla loro macchina: letture più economiche per gli agent, ma le note escono dal server."
+    },
+    "legend": {
+      "title": "Cosa fanno i flag",
+      "skip_git": "lascia il progetto fuori dalla sincronizzazione git.",
+      "hidden": "lo tiene fuori dalla portata degli agent MCP.",
+      "globals": "unisce al bootstrap le skill e gli agent globali condivisi; serve il suo interruttore sul server, ed è sbiadito finché è spento.",
+      "anchors": "scrive al bootstrap gli agent del vault come file di subagent locali; serve il suo interruttore sul server, ed è sbiadito finché è spento.",
+      "tag_vocab": "lascia al progetto estendere il vocabolario dei tag del lint da memory/conventions.md.",
+      "lean_read": "dà un bootstrap più corto ai token che non possono scrivere.",
+      "mirror": "lascia a chi legge una copia in sola lettura del progetto: le note escono dal server, e ogni sincronizzazione è registrata."
     }
   },
   "members": {
@@ -874,7 +886,8 @@
       "empty": "Nessuna riga dell'audit corrisponde ai filtri.",
       "when": "Quando",
       "size": "Dimensione",
-      "load_failed": "Impossibile leggere l'audit"
+      "load_failed": "Impossibile leggere l'audit",
+      "actor_column": "Chi"
     },
     "users": {
       "new": "Nuovo utente",
@@ -990,5 +1003,11 @@
   },
   "editor": {
     "upload_failed": "Caricamento non riuscito"
+  },
+  "dialog": {
+    "confirm_title": "Confermi?",
+    "confirm": "Conferma",
+    "ok": "OK",
+    "error_title": "Qualcosa è andato storto"
   }
 }

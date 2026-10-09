@@ -57,16 +57,16 @@ const baseItems = computed<PaletteItem[]>(() => {
     items.push({
       kind: 'project',
       label: p.name,
-      detail: `${p.noteCount} notes`,
+      detail: t('projects.notes', { n: p.noteCount }, p.noteCount),
       open: { type: 'projects', key: planciaKey('projects'), title: t('nav.projects'), props: { project: p.name } },
     })
   }
-  for (const t of dataset.value.tags) {
+  for (const tag of dataset.value.tags) {
     items.push({
       kind: 'tag',
-      label: '#' + t.tag,
-      detail: `${t.count} notes`,
-      open: { type: 'tags', key: planciaKey('tags', t.tag), title: '#' + t.tag, props: { tag: t.tag } },
+      label: '#' + tag.tag,
+      detail: t('projects.notes', { n: tag.count }, tag.count),
+      open: { type: 'tags', key: planciaKey('tags', tag.tag), title: '#' + tag.tag, props: { tag: tag.tag } },
     })
   }
   return items
@@ -102,6 +102,9 @@ const filtered = computed<PaletteItem[]>(() => {
 // is no list at all, so a newer request that fails leaves something to show.
 let fetchSeq = 0
 const itemKey = (i: PaletteItem) => i.kind + ':' + (i.path ?? i.label)
+// The kind shows only when the list mixes kinds: a badge "note" on every
+// row of a list of notes said nothing.
+const mixedKinds = computed(() => new Set(filtered.value.map((i) => i.kind)).size > 1)
 async function refreshDataset() {
   const seq = ++fetchSeq
   try {
@@ -211,8 +214,9 @@ onUnmounted(() => {
             @mouseenter="selected = idx"
           >
             <span
-              class="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-bg-elevated text-text-muted"
-            >{{ item.kind }}</span>
+              v-if="mixedKinds"
+              class="text-xs px-1.5 py-0.5 rounded bg-bg-elevated text-text-muted"
+            >{{ t(`palette.category_${item.kind}`) }}</span>
             <span class="flex-1 truncate">{{ item.label }}</span>
             <span
               v-if="item.detail"

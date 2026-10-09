@@ -15,6 +15,7 @@ import { useAccessStore } from '@/stores/access'
 import { errorText } from '@/api/errors'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
 import { formatDateTime } from '@/api/format'
+import { confirmAction } from '@/composables/useConfirm'
 
 const auth = useAuthStore()
 const access = useAccessStore()
@@ -88,7 +89,7 @@ async function create() {
 }
 
 async function revoke(tok: MCPToken) {
-  if (!confirm(tr('my_tokens.confirm_revoke', { name: tok.name }))) return
+  if (!(await confirmAction(tr('my_tokens.confirm_revoke', { name: tok.name }), { confirmLabel: tr('common.revoke') }))) return
   try {
     await revokeMyToken(tok.id)
     await load()
@@ -118,7 +119,7 @@ onMounted(() => {
       <p class="text-sm font-semibold text-success">{{ tr('my_tokens.created') }}</p>
       <code class="block bg-bg-elevated rounded px-3 py-2 font-mono text-sm break-all select-all">{{ fresh.token }}</code>
       <p class="text-xs text-text-muted">{{ fresh.usage_hint }}</p>
-      <button type="button" class="text-xs px-2 py-1 rounded border border-border hover:bg-surface-hover" @click="fresh = null">{{ tr('common.dismiss') }}</button>
+      <button type="button" class="h-control-sm text-xs px-2 rounded border border-border hover:bg-surface-hover" @click="fresh = null">{{ tr('common.dismiss') }}</button>
     </div>
 
     <form class="grid grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-2" @submit.prevent="create">
@@ -129,12 +130,12 @@ onMounted(() => {
           type="text"
           :placeholder="tr('my_tokens.name_placeholder')"
           required
-          class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
+          class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
         />
       </label>
       <label class="text-sm">
         <span class="text-text-muted text-xs">{{ tr('my_tokens.projects') }}</span>
-        <select v-model="draft.mode" class="mt-1 w-full rounded bg-bg-elevated border border-border px-2 py-2">
+        <select v-model="draft.mode" class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-2">
           <option value="inherit">{{ tr('my_tokens.inherit') }}</option>
           <option value="custom">{{ tr('my_tokens.custom') }}</option>
         </select>
@@ -144,7 +145,7 @@ onMounted(() => {
         <select
           :value="draft.write && canWrite ? 'rw' : 'r'"
           :disabled="!canWrite"
-          class="mt-1 w-full rounded bg-bg-elevated border border-border px-2 py-2 disabled:opacity-60"
+          class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-2 disabled:opacity-60"
           @change="draft.write = ($event.target as HTMLSelectElement).value === 'rw'"
         >
           <option value="r">{{ tr('my_tokens.read_only') }}</option>
@@ -159,14 +160,14 @@ onMounted(() => {
       </label>
       <label class="text-sm">
         <span class="text-text-muted text-xs">{{ tr('my_tokens.profile') }}</span>
-        <select v-model="draft.profile" class="mt-1 w-full rounded bg-bg-elevated border border-border px-2 py-2">
+        <select v-model="draft.profile" class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-2">
           <option value="">{{ tr('my_tokens.profile_full') }}</option>
           <option value="core">{{ tr('my_tokens.profile_core') }}</option>
         </select>
       </label>
       <label class="text-sm">
         <span class="text-text-muted text-xs">{{ tr('my_tokens.ttl') }}</span>
-        <input v-model.number="draft.ttlDays" type="number" min="0" class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2" />
+        <input v-model.number="draft.ttlDays" type="number" min="0" class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3" />
       </label>
       <label class="text-sm col-span-full">
         <span class="text-text-muted text-xs">{{ tr('password.confirm_action') }}</span>
@@ -176,14 +177,14 @@ onMounted(() => {
           autocomplete="current-password"
           required
           data-token-password
-          class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
+          class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
         />
       </label>
       <div class="col-span-full">
         <button
           type="submit"
           :disabled="busy || !draft.name || !password"
-          class="rounded bg-accent text-accent-fg px-3 py-2 text-sm hover:bg-accent-hover disabled:opacity-60"
+          class="h-control rounded bg-accent text-accent-fg px-3 text-sm hover:bg-accent-hover disabled:opacity-60"
         >{{ tr('my_tokens.create') }}</button>
       </div>
     </form>
@@ -208,7 +209,7 @@ onMounted(() => {
         <span class="text-xs" :class="tok.expired ? 'text-warning' : 'text-text-muted'" :title="tok.expires_at || undefined">{{
           tok.expires_at ? tr('my_tokens.expires', { when: formatDateTime(tok.expires_at) }) : tr('my_tokens.no_expiry')
         }}</span>
-        <button type="button" class="text-xs px-2 py-1 rounded text-danger hover:bg-surface-hover" @click="revoke(tok)">{{ tr('common.revoke') }}</button>
+        <button type="button" class="h-control-sm text-xs px-2 rounded text-danger hover:bg-surface-hover" @click="revoke(tok)">{{ tr('common.revoke') }}</button>
       </li>
       <li v-if="tokens.length === 0" class="text-xs text-text-muted">{{ tr('my_tokens.none') }}</li>
     </ul>

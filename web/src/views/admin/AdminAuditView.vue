@@ -60,25 +60,25 @@ onMounted(load)
       v-model.trim="filters.actor"
       type="text"
       :placeholder="t('admin.audit.actor')"
-      class="rounded bg-bg-elevated border border-border px-2 py-1.5"
+      class="h-control py-0 rounded bg-bg-elevated border border-border px-2"
     />
     <input
       v-model.trim="filters.action"
       type="text"
       :placeholder="t('admin.audit.action_placeholder')"
-      class="rounded bg-bg-elevated border border-border px-2 py-1.5"
+      class="h-control py-0 rounded bg-bg-elevated border border-border px-2"
     />
     <input
       v-model.trim="filters.source"
       type="text"
       :placeholder="t('admin.audit.source_placeholder')"
-      class="rounded bg-bg-elevated border border-border px-2 py-1.5"
+      class="h-control py-0 rounded bg-bg-elevated border border-border px-2"
     />
     <input
       v-model.trim="filters.path_prefix"
       type="text"
       :placeholder="t('admin.audit.path_placeholder')"
-      class="rounded bg-bg-elevated border border-border px-2 py-1.5"
+      class="h-control py-0 rounded bg-bg-elevated border border-border px-2"
     />
     <div class="flex flex-wrap gap-1">
       <input
@@ -86,16 +86,16 @@ onMounted(load)
         type="number"
         min="10"
         max="500"
-        class="w-20 shrink-0 rounded bg-bg-elevated border border-border px-2 py-1.5"
+        class="h-control py-0 w-20 shrink-0 rounded bg-bg-elevated border border-border px-2"
         :aria-label="t('admin.audit.limit')"
       />
       <button
         type="submit"
-        class="px-3 py-1.5 rounded bg-accent text-accent-fg hover:bg-accent-hover text-xs"
+        class="h-control px-3 rounded bg-accent text-accent-fg hover:bg-accent-hover text-xs"
       >{{ t('admin.audit.apply') }}</button>
       <button
         type="button"
-        class="px-3 py-1.5 rounded border border-border hover:bg-surface-hover text-xs"
+        class="h-control px-3 rounded border border-border hover:bg-surface-hover text-xs"
         @click="reset"
       >{{ t('graph.reset') }}</button>
     </div>
@@ -108,11 +108,11 @@ onMounted(load)
 
   <div v-else class="rounded border border-border overflow-x-auto">
     <table class="w-full text-xs font-mono">
-      <thead class="text-text-muted uppercase tracking-wide bg-bg-elevated">
+      <thead class="text-text-muted [&_th]:font-medium bg-bg-elevated">
         <tr>
           <th class="text-left py-2 px-2">{{ t('admin.audit.when') }}</th>
           <th class="text-left py-2 px-2">{{ t('admin.audit.source') }}</th>
-          <th class="text-left py-2 px-2">{{ t('admin.audit.actor') }}</th>
+          <th class="text-left py-2 px-2">{{ t('admin.audit.actor_column') }}</th>
           <th class="text-left py-2 px-2">{{ t('admin.audit.action') }}</th>
           <th class="text-left py-2 px-2">{{ t('admin.audit.path') }}</th>
           <th class="text-right py-2 px-2">{{ t('admin.audit.size') }}</th>

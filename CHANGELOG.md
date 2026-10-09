@@ -8,6 +8,68 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.73.0] — 2026-10-09 — "web UI details"
+
+The low findings of a graphic review of the web UI: hierarchy, control
+sizes, capitals, icons and dialogs. Pull the image and restart, nothing to
+migrate; the API is unchanged. Confirmations now open in gosidian's own
+dialog instead of the browser's, and the design rules behind these changes
+are written in `web/design.md`.
+
+### Changed
+- **Confirmations in gosidian's own dialog** — deleting a note, a folder,
+  a project or a team, revoking a token, a session or an invite, disabling
+  an account, renaming a project and the tree menu's error notice used the
+  browser's `confirm()`, `prompt()` and `alert()`, which followed neither
+  the theme nor the language of the buttons (16 places). They open in a
+  themed dialog in the user's language, with the focus kept inside: Enter
+  confirms, Esc cancels, and a destructive action has a red confirm button.
+  Closing a window with unsaved changes still asks with the browser's
+  dialog.
+- **Headings are not repeated** — a view no longer repeats its window's
+  title in a heading (search, query, trash, tags, settings, admin,
+  projects, history, new note, access): the heading stays for screen
+  readers. A note's header holds its toolbar, where it named the note a
+  second time. Window titles are translated and carry no symbol: "History
+  · …", "Links · …", "Graph · …", "Access · …".
+- **Two control heights** — inputs, selects and buttons are 32 px high in
+  a form and 28 px in a toolbar, a banner or a list row, where they went
+  from 28 to 44 px by view.
+- **Weight instead of capitals** — section titles, the legends of
+  Settings, the properties panel and table heads use normal case with
+  weight. The command palette names an entry's kind, translated, only when
+  the list mixes kinds.
+- **Projects** opens with one line on visibility; the flags are explained
+  in a "What the flags do" legend, closed at first, and in each chip's
+  tooltip, where twelve lines of help came before the list.
+- **The properties panel** names a field in words (`open_plans` reads
+  "Open plans", the key in the tooltip) and keeps a label on the first line
+  of a value that wraps.
+- **A large canvas opens at a readable scale** — no less than half size,
+  from its top left corner, where it was shrunk until the cards could not
+  be read. The fit button still shows it whole.
+- **The system font stays**, a choice now recorded in `web/design.md`.
+
+### Fixed
+- Icons are all Lucide: the Unicode glyphs and emoji (the tree's arrows
+  and dots, ×, ✓, ●, ⟳, the eye and the die of the account forms) are gone.
+  A closed folder inside an open one no longer shows its chevron turned.
+- The shortcut hint reads Ctrl+K outside Apple systems, where it showed ⌘K
+  to everyone; the palette's note counts are translated.
+- A search hit's excerpt drops the markdown marks: asterisks, heading
+  marks, list dashes, link targets.
+- Cancel in New note looks like a button; the View/Edit toggle shows only
+  where the note can be edited, where a canvas, a base or a reader saw a
+  lone View button.
+- In Admin → Teams the Add button of a grant no longer runs out of the
+  team's card.
+
+### Accessibility
+- The flag chips of Projects say whether they are on (`aria-pressed`); the
+  in-progress dot of the tree has a name for screen readers.
+- A disabled control shows the `not-allowed` cursor, besides its opacity.
+- With `prefers-reduced-motion`, transitions and animations end at once.
+
 ## [2.72.3] — 2026-10-09 — "web UI polish"
 
 The low findings of the same code review on the web UI side: notes the

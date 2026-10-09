@@ -48,7 +48,7 @@ function open() {
   <button
     v-if="enabled && count > 0"
     type="button"
-    class="px-2 py-0.5 rounded text-xs border border-border hover:bg-surface-hover inline-flex items-center gap-1"
+    class="h-control-sm px-2 rounded text-xs border border-border hover:bg-surface-hover inline-flex items-center gap-1"
     :title="`${count} new self-improvement insight(s) to review`"
     @click="open"
   >

@@ -8,6 +8,7 @@ import { useWindowsStore } from 'plancia'
 import { planciaKey } from '@/composables/planciaKey'
 import { roleLabel } from '@/api/access'
 import { resetSessionState } from '@/composables/useSessionReset'
+import { shortcutLabel } from '@/composables/platform'
 import { Search, LogOut, LogIn, Columns2, SquareStack } from 'lucide-vue-next'
 import InsightsBadge from '@/components/layout/InsightsBadge.vue'
 
@@ -18,6 +19,7 @@ const auth = useAuthStore()
 const access = useAccessStore()
 const ui = useUIStore()
 const windows = useWindowsStore()
+const paletteKeys = shortcutLabel('K')
 
 function openSearch() {
   windows.open({ type: 'search', key: planciaKey('search'), title: t('nav.search') })
@@ -41,12 +43,12 @@ async function handleLogout() {
       <span class="font-semibold tracking-tight">gosidian</span>
       <button
         type="button"
-        class="text-xs text-text-muted hover:text-text px-2 py-0.5 rounded border border-border ml-3 inline-flex items-center gap-1"
+        class="h-control-sm text-xs text-text-muted hover:text-text px-2 rounded border border-border ml-3 inline-flex items-center gap-1"
         @click="openSearch"
       >
         <Search class="w-3 h-3" />
         <span>{{ t('nav.search') }}</span>
-        <kbd class="opacity-60">⌘K</kbd>
+        <kbd class="opacity-60">{{ paletteKeys }}</kbd>
       </button>
 
       <!-- plancia layout toggle: niri strip ↔ tabs (persisted in the UI store) -->
@@ -54,7 +56,7 @@ async function handleLogout() {
         <button
           type="button"
           :class="[
-            'px-1.5 py-1 inline-flex items-center',
+            'h-control-sm px-1.5 inline-flex items-center',
             ui.planciaViewMode === 'strip'
               ? 'bg-accent/20 text-accent'
               : 'text-text-muted hover:text-text hover:bg-surface-hover',
@@ -69,7 +71,7 @@ async function handleLogout() {
         <button
           type="button"
           :class="[
-            'px-1.5 py-1 inline-flex items-center border-l border-border',
+            'h-control-sm px-1.5 inline-flex items-center border-l border-border',
             ui.planciaViewMode === 'tabs'
               ? 'bg-accent/20 text-accent'
               : 'text-text-muted hover:text-text hover:bg-surface-hover',
@@ -103,7 +105,7 @@ async function handleLogout() {
       <button
         v-if="auth.isAnonymous"
         type="button"
-        class="px-2 py-1 rounded text-xs hover:bg-surface-hover inline-flex items-center gap-1"
+        class="h-control-sm px-2 rounded text-xs hover:bg-surface-hover inline-flex items-center gap-1"
         @click="router.push('/login')"
       >
         <LogIn class="w-3 h-3" />
@@ -112,7 +114,7 @@ async function handleLogout() {
       <button
         v-else
         type="button"
-        class="px-2 py-1 rounded text-xs hover:bg-surface-hover inline-flex items-center gap-1"
+        class="h-control-sm px-2 rounded text-xs hover:bg-surface-hover inline-flex items-center gap-1"
         @click="handleLogout"
       >
         <LogOut class="w-3 h-3" />

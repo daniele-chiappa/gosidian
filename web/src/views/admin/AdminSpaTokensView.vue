@@ -5,6 +5,7 @@ import { listSpaTokens, revokeSpaToken, type SpaToken } from '@/api/admin'
 import { errorText } from '@/api/errors'
 import DateTime from '@/components/primitives/DateTime.vue'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
+import { confirmAction } from '@/composables/useConfirm'
 
 const { t } = useI18n()
 
@@ -29,7 +30,8 @@ async function load() {
 }
 
 async function revoke(tok: SpaToken) {
-  if (!confirm(t('admin.sessions.confirm_revoke', { id: tok.id.slice(0, 8) }))) return
+  if (!(await confirmAction(t('admin.sessions.confirm_revoke', { id: tok.id.slice(0, 8) }), { confirmLabel: t('common.revoke') })))
+    return
   try {
     await revokeSpaToken(tok.id)
     await load()
@@ -52,7 +54,7 @@ onMounted(load)
     <!-- Scrolls inside its box in a narrow window (IMP-156, M7). -->
 
     <table class="w-full text-sm">
-      <thead class="text-text-muted text-xs uppercase tracking-wide">
+      <thead class="text-text-muted text-xs [&_th]:font-medium">
         <tr>
           <th class="text-left py-2 px-3">{{ t('admin.col.user') }}</th>
           <th class="text-left py-2 px-3">{{ t('admin.col.user_agent') }}</th>
@@ -78,7 +80,7 @@ onMounted(load)
           <td class="py-2 px-3 text-right">
             <button
               type="button"
-              class="text-xs px-2 py-1 rounded text-danger hover:bg-surface-hover"
+              class="h-control-sm text-xs px-2 rounded text-danger hover:bg-surface-hover"
               @click="revoke(tok)"
             >{{ t('common.revoke') }}</button>
           </td>

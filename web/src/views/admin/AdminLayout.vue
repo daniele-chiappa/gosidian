@@ -50,17 +50,8 @@ async function exportZip() {
 
 <template>
   <div class="p-6 max-w-6xl mx-auto">
-    <div class="flex items-center gap-3 mb-1">
-      <h1 class="text-2xl font-semibold flex-1">{{ t('admin.title') }}</h1>
-      <button
-        v-if="auth.isOwner"
-        type="button"
-        class="text-sm px-3 py-1.5 rounded border border-border hover:bg-surface-hover disabled:opacity-50"
-        :title="t('admin.export_hint')"
-        :disabled="exporting"
-        @click="exportZip"
-      >{{ exporting ? t('projects.exporting') : t('admin.export') }}</button>
-    </div>
+    <!-- The window's title bar shows the name: the heading is for screen readers. -->
+    <h1 class="sr-only">{{ t('admin.title') }}</h1>
     <ErrorMessage v-if="exportError" :text="exportError" class="text-sm mb-3" />
     <p v-if="!auth.isOwner" class="text-danger text-sm mb-6">
       {{ t('admin.owner_only') }}
@@ -76,6 +67,13 @@ async function exportZip() {
           :class="active === tab.key ? 'border-accent text-accent' : 'border-transparent hover:text-text'"
           @click="active = tab.key"
         >{{ t(`admin.tab.${tab.key}`) }}</button>
+        <button
+          type="button"
+          class="ml-auto mb-1 h-control-sm self-center rounded border border-border px-3 hover:bg-surface-hover disabled:opacity-50"
+          :title="t('admin.export_hint')"
+          :disabled="exporting"
+          @click="exportZip"
+        >{{ exporting ? t('projects.exporting') : t('admin.export') }}</button>
       </nav>
 
       <component :is="current()" />

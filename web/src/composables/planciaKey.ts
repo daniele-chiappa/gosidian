@@ -21,7 +21,7 @@ import { i18n } from '@/locales'
 
 // Window titles in the user's language (IMP-155, M2), read when a window
 // is rebuilt from the address.
-const tr = (key: string) => i18n.global.t(key)
+const tr = (key: string, named: Record<string, unknown> = {}) => i18n.global.t(key, named)
 // A section the catalogue does not know keeps its own name.
 const trOr = (key: string, fallback: string) => (i18n.global.te(key) ? i18n.global.t(key) : fallback)
 import { queryArgFromProps, queryPropsFromArg } from './queryArg'
@@ -123,7 +123,7 @@ const baseCodec: PlanciaCodec = createArgCodec({
       props: graphPropsFromArg,
       title: (a) => {
         if (!a) return tr('nav.graph')
-        if (!a.includes('=')) return `↳ ${base(a)}`
+        if (!a.includes('=')) return tr('graph.links_title', { name: base(a) })
         const p = new URLSearchParams(a).get('p')
         return p ? `${tr('nav.graph')} · ${p}` : tr('nav.graph')
       },

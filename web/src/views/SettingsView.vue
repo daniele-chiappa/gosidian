@@ -238,7 +238,8 @@ onMounted(load)
 
 <template>
   <div class="p-8 max-w-3xl mx-auto">
-    <h1 class="text-2xl font-semibold mb-1">{{ t('settings_view.title') }}</h1>
+    <!-- The window's title bar shows the name: the heading is for screen readers. -->
+    <h1 class="sr-only">{{ t('settings_view.title') }}</h1>
     <p
       v-if="!auth.isOwner"
       class="text-sm text-text-muted mb-6"
@@ -251,7 +252,7 @@ onMounted(load)
       class="rounded border border-border bg-surface p-4 space-y-3 mb-6"
       data-password-section
     >
-      <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">
+      <legend class="px-2 text-sm font-semibold">
         {{ t('password.section') }}
       </legend>
       <p v-if="isLdap" class="text-sm text-text-muted">
@@ -266,13 +267,13 @@ onMounted(load)
     </fieldset>
 
     <fieldset class="rounded border border-border bg-surface p-4 space-y-3 mb-6">
-      <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">{{ t('settings_view.totp') }}</legend>
+      <legend class="px-2 text-sm font-semibold">{{ t('settings_view.totp') }}</legend>
       <label v-if="auth.isOwner && data" class="block text-sm">
         <span class="text-text-muted">{{ t('settings_view.totp_policy') }}</span>
         <select
           v-model="draft.totp_mode"
           :disabled="saving || fromEnv('totp_mode')"
-          class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
+          class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
           @change="saveToggle({ totp_mode: draft.totp_mode })"
         >
           <option value="off">{{ t('settings_view.totp_off') }}</option>
@@ -296,7 +297,7 @@ onMounted(load)
           <button
             v-if="!regenOpen"
             type="button"
-            class="rounded border border-border px-3 py-2 text-sm hover:bg-surface-hover"
+            class="h-control rounded border border-border px-3 text-sm hover:bg-surface-hover"
             @click="regenOpen = true"
           >{{ t('settings_view.regen_open') }}</button>
           <div v-else class="space-y-2">
@@ -309,18 +310,18 @@ onMounted(load)
                 inputmode="numeric"
                 autocomplete="one-time-code"
                 placeholder="123 456"
-                class="w-40 rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
+                class="h-control py-0 w-40 rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
                 @keyup.enter="regenerate"
               />
               <button
                 type="button"
                 :disabled="regenBusy || !regenCode"
-                class="rounded bg-accent text-accent-fg px-3 py-2 text-sm hover:bg-accent-hover disabled:opacity-60"
+                class="h-control rounded bg-accent text-accent-fg px-3 text-sm hover:bg-accent-hover disabled:opacity-60"
                 @click="regenerate"
               >{{ t('settings_view.regen') }}</button>
               <button
                 type="button"
-                class="rounded border border-border px-3 py-2 text-sm hover:bg-surface-hover"
+                class="h-control rounded border border-border px-3 text-sm hover:bg-surface-hover"
                 @click="cancelRegen"
               >{{ t('common.cancel') }}</button>
             </div>
@@ -329,7 +330,7 @@ onMounted(load)
         <button
           v-if="!disableOpen"
           type="button"
-          class="rounded border border-border px-3 py-2 text-sm hover:bg-surface-hover"
+          class="h-control rounded border border-border px-3 text-sm hover:bg-surface-hover"
           @click="disableOpen = true"
         >{{ t('settings_view.totp_disable_open') }}</button>
         <div v-else class="flex flex-wrap items-end gap-2" data-totp-disable>
@@ -339,19 +340,19 @@ onMounted(load)
               v-model="disablePassword"
               type="password"
               autocomplete="current-password"
-              class="mt-1 w-56 rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
+              class="h-control py-0 mt-1 w-56 rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
               @keyup.enter="disableTotp"
             />
           </label>
           <button
             type="button"
             :disabled="!disablePassword"
-            class="rounded bg-danger text-white px-3 py-2 text-sm disabled:opacity-60"
+            class="h-control rounded bg-danger text-white px-3 text-sm disabled:opacity-60"
             @click="disableTotp"
           >{{ t('settings_view.totp_disable') }}</button>
           <button
             type="button"
-            class="rounded border border-border px-3 py-2 text-sm hover:bg-surface-hover"
+            class="h-control rounded border border-border px-3 text-sm hover:bg-surface-hover"
             @click="disableOpen = false; disablePassword = ''"
           >{{ t('common.cancel') }}</button>
         </div>
@@ -361,13 +362,13 @@ onMounted(load)
     </fieldset>
 
     <fieldset v-if="auth.isOwner && data" class="rounded border border-border bg-surface p-4 space-y-3 mb-6">
-      <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">{{ t('settings_view.project_access') }}</legend>
+      <legend class="px-2 text-sm font-semibold">{{ t('settings_view.project_access') }}</legend>
       <label class="block text-sm">
         <span class="text-text-muted">{{ t('settings_view.default_visibility') }}</span>
         <select
           v-model="draft.default_visibility"
           :disabled="saving"
-          class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
+          class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
           @change="saveToggle({ default_visibility: draft.default_visibility })"
         >
           <option value="private">{{ visibilityLabel('private') }}</option>
@@ -397,17 +398,17 @@ onMounted(load)
     </fieldset>
 
     <fieldset v-if="!auth.isOwner && !auth.isAnonymous" class="rounded border border-border bg-surface p-4 space-y-3 mb-6">
-      <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">{{ t('settings_view.my_tokens') }}</legend>
+      <legend class="px-2 text-sm font-semibold">{{ t('settings_view.my_tokens') }}</legend>
       <MyTokens />
     </fieldset>
 
     <fieldset class="rounded border border-border bg-surface p-4 space-y-3 mb-6">
-      <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">{{ t('settings_view.appearance') }}</legend>
+      <legend class="px-2 text-sm font-semibold">{{ t('settings_view.appearance') }}</legend>
       <label class="block text-sm">
         <span class="text-text-muted">{{ t('settings_view.theme') }}</span>
         <select
           :value="ui.preset"
-          class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2"
+          class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3"
           @change="ui.setPreset(($event.target as HTMLSelectElement).value as ThemePreset)"
         >
           <option v-for="p in presetOptions" :key="p.value" :value="p.value">
@@ -419,7 +420,7 @@ onMounted(load)
         <span class="text-text-muted">{{ t('settings_view.language') }}</span>
         <select
           :value="ui.locale"
-          class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2"
+          class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3"
           @change="ui.setLocale(($event.target as HTMLSelectElement).value as LocaleCode)"
         >
           <option v-for="l in enabledLocaleOptions" :key="l.value" :value="l.value">
@@ -445,7 +446,7 @@ onMounted(load)
         <code class="font-mono text-xs">{{ envOverrides.join(', ') }}</code>.
       </p>
       <fieldset class="rounded border border-border bg-surface p-4 space-y-3">
-        <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">{{ t('settings_view.git') }}</legend>
+        <legend class="px-2 text-sm font-semibold">{{ t('settings_view.git') }}</legend>
         <label class="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
@@ -459,7 +460,7 @@ onMounted(load)
           <input
             v-model.trim="draft.git.remote"
             :disabled="!auth.isOwner || fromEnv('git.remote')"
-            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2"
+            class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3"
           />
         </label>
         <div class="grid grid-cols-2 gap-3">
@@ -468,7 +469,7 @@ onMounted(load)
             <input
               v-model.trim="draft.git.branch"
               :disabled="!auth.isOwner || fromEnv('git.branch')"
-              class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2"
+              class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3"
             />
           </label>
           <label class="block text-sm">
@@ -478,7 +479,7 @@ onMounted(load)
               :disabled="!auth.isOwner || fromEnv('git.debounce_ms')"
               type="number"
               min="1000"
-              class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2"
+              class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3"
             />
           </label>
         </div>
@@ -496,13 +497,13 @@ onMounted(load)
             v-model.trim="draft.git.token_env"
             :disabled="!auth.isOwner || fromEnv('git.token_env')"
             placeholder="GITEA_TOKEN"
-            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 font-mono"
+            class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3 font-mono"
           />
         </label>
       </fieldset>
 
       <fieldset class="rounded border border-border bg-surface p-4 space-y-3">
-        <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">{{ t('trash.title') }}</legend>
+        <legend class="px-2 text-sm font-semibold">{{ t('trash.title') }}</legend>
         <label class="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
@@ -518,13 +519,13 @@ onMounted(load)
             :disabled="!auth.isOwner || fromEnv('trash.retention_ms')"
             type="number"
             min="0"
-            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2"
+            class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3"
           />
         </label>
       </fieldset>
 
       <fieldset class="rounded border border-border bg-surface p-4 space-y-3">
-        <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">{{ t('settings_view.languages') }}</legend>
+        <legend class="px-2 text-sm font-semibold">{{ t('settings_view.languages') }}</legend>
         <div class="text-sm">
           <span class="text-text-muted">{{ t('settings_view.languages_offered') }}</span>
           <div class="mt-1 flex flex-wrap gap-x-4 gap-y-1">
@@ -544,7 +545,7 @@ onMounted(load)
           <select
             v-model="draft.i18n.default_lang"
             :disabled="!auth.isOwner || fromEnv('i18n.default_lang')"
-            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2"
+            class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3"
           >
             <option v-for="l in defaultLangOptions" :key="l.value" :value="l.value">
               {{ l.label }}
@@ -560,7 +561,7 @@ onMounted(load)
         <button
           type="submit"
           :disabled="!auth.isOwner || saving"
-          class="px-4 py-2 rounded bg-accent text-accent-fg hover:bg-accent-hover disabled:opacity-50"
+          class="h-control px-4 rounded bg-accent text-accent-fg hover:bg-accent-hover disabled:opacity-50"
         >{{ saving ? t('note.saving') : t('common.save') }}</button>
         <p v-if="message" class="text-sm text-success">{{ message }}</p>
       </div>

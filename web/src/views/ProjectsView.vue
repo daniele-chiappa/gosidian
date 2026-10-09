@@ -18,6 +18,7 @@ import { useWindowsStore, type OpenSpec } from 'plancia'
 import { Lock, Globe, Users, UsersRound } from 'lucide-vue-next'
 import { errorText } from '@/api/errors'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
+import { askText, confirmAction } from '@/composables/useConfirm'
 
 const { t } = useI18n()
 
@@ -46,7 +47,7 @@ function openProjectGraph(name: string) {
   openWindow({
     type: 'graph',
     key: 'graph:project:' + name,
-    title: `Graph · ${name}`,
+    title: `${t('nav.graph')} · ${name}`,
     props: { project: name },
   })
 }
@@ -56,7 +57,7 @@ function openProjectAccess(name: string) {
   openWindow({
     type: 'project-members',
     key: 'project-members:' + name,
-    title: `Access · ${name}`,
+    title: t('members.title', { project: name }),
     props: { project: name },
   })
 }
@@ -137,7 +138,7 @@ async function loadMasters() {
 }
 
 async function rename(p: Project) {
-  const newSlug = prompt(t('projects.rename_prompt', { name: p.name }), p.name)
+  const newSlug = (await askText(t('projects.rename_prompt', { name: p.name }), p.name, { confirmLabel: t('projects.rename') }))?.trim()
   if (!newSlug || newSlug === p.name) return
   try {
     await updateProject(p.name, { new_name: newSlug })
@@ -164,7 +165,8 @@ async function exportZip(p: Project) {
 }
 
 async function destroy(p: Project) {
-  if (!confirm(t('projects.confirm_delete', { name: p.name, count: p.note_count }))) return
+  if (!(await confirmAction(t('projects.confirm_delete', { name: p.name, count: p.note_count }), { confirmLabel: t('common.delete') })))
+    return
   try {
     await deleteProject(p.name)
     await refresh()
@@ -174,6 +176,9 @@ async function destroy(p: Project) {
   }
 }
 
+/** The flag chips, in the order of the row, for the legend. */
+const FLAG_NAMES = ['skip-git', 'hidden', 'globals', 'anchors', 'tag-vocab', 'lean-read', 'mirror'] as const
+
 onMounted(() => {
   load()
   loadMasters()
@@ -182,10 +187,24 @@ onMounted(() => {
 
 <template>
   <div class="p-8 max-w-4xl mx-auto">
-    <h1 class="text-2xl font-semibold mb-1">{{ t('projects.title') }}</h1>
-    <p class="text-sm text-text-muted mb-6">
-      {{ t('projects.intro') }}
-    </p>
+    <!-- The window's title bar names the view, the heading is for screen
+         readers; the flags' meaning is in the legend and in each chip's
+         tooltip. -->
+    <h1 class="sr-only">{{ t('projects.title') }}</h1>
+    <div class="mb-6 space-y-2">
+      <p class="text-sm text-text-muted">
+        {{ t('projects.intro') }}
+      </p>
+      <details v-if="projects.some((p) => p.access === 'admin')" class="text-sm" data-flags-legend>
+        <summary class="cursor-pointer text-text-muted hover:text-text">{{ t('projects.legend.title') }}</summary>
+        <dl class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-text-muted">
+          <template v-for="f in FLAG_NAMES" :key="f">
+            <dt class="font-mono text-xs text-text">{{ f }}</dt>
+            <dd>{{ t(`projects.legend.${f.replace('-', '_')}`) }}</dd>
+          </template>
+        </dl>
+      </details>
+    </div>
 
     <form
       v-if="auth.canWrite && (auth.isOwner || access.canCreateProjects)"
@@ -196,11 +215,11 @@ onMounted(() => {
         v-model.trim="newName"
         type="text"
         :placeholder="t('projects.new_placeholder')"
-        class="flex-1 rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
+        class="h-control py-0 flex-1 rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
       />
       <button
         type="submit"
-        class="px-3 py-2 rounded bg-accent text-accent-fg hover:bg-accent-hover"
+        class="h-control px-3 rounded bg-accent text-accent-fg hover:bg-accent-hover"
       >{{ t('common.create') }}</button>
     </form>
 
@@ -240,7 +259,7 @@ onMounted(() => {
         <!-- Visibility: a selector for project admins, a badge for everyone else -->
         <select
           v-if="p.access === 'admin'"
-          class="text-xs rounded bg-bg-elevated border border-border px-2 py-1"
+          class="h-control-sm py-0 text-xs rounded bg-bg-elevated border border-border px-2"
           :value="p.visibility"
           :title="visibilityHelp(p.visibility)"
           @change="changeVisibility(p, ($event.target as HTMLSelectElement).value)"
@@ -261,7 +280,7 @@ onMounted(() => {
         <!-- Grants: accounts + teams; opens the Access window -->
         <button
           type="button"
-          class="text-xs px-2 py-1 rounded border border-border inline-flex items-center gap-1 hover:bg-surface-hover"
+          class="h-control-sm text-xs px-2 rounded border border-border inline-flex items-center gap-1 hover:bg-surface-hover"
           :title="accessTitle(p)"
           @click="openProjectAccess(p.name)"
         >
@@ -275,7 +294,7 @@ onMounted(() => {
         <button
           v-if="!auth.isAnonymous"
           type="button"
-          class="text-xs px-2 py-1 rounded border border-border hover:bg-surface-hover disabled:opacity-50"
+          class="h-control-sm text-xs px-2 rounded border border-border hover:bg-surface-hover disabled:opacity-50"
           :title="t('projects.export_hint')"
           :disabled="exporting !== null"
           @click="exportZip(p)"
@@ -284,67 +303,74 @@ onMounted(() => {
         <template v-if="p.access === 'admin'">
           <button
             type="button"
-            class="text-xs px-2 py-1 rounded"
+            class="h-control-sm text-xs px-2 rounded"
             :class="p.skip_git_sync ? 'bg-warning/20 text-warning' : 'border border-border'"
             :title="p.skip_git_sync ? t('projects.flag.git_on') : t('projects.flag.git_off')"
+            :aria-pressed="!!p.skip_git_sync"
             @click="apply(p, { skip_git_sync: !p.skip_git_sync }, 'skip-git')"
           >skip-git</button>
           <button
             type="button"
-            class="text-xs px-2 py-1 rounded"
+            class="h-control-sm text-xs px-2 rounded"
             :class="p.hidden_from_mcp ? 'bg-warning/20 text-warning' : 'border border-border'"
             :title="p.hidden_from_mcp ? t('projects.flag.hidden_on') : t('projects.flag.hidden_off')"
+            :aria-pressed="!!p.hidden_from_mcp"
             @click="apply(p, { hidden_from_mcp: !p.hidden_from_mcp }, 'hidden')"
           >hidden</button>
           <button
             type="button"
-            class="text-xs px-2 py-1 rounded"
+            class="h-control-sm text-xs px-2 rounded"
             :class="[
               p.use_globals ? 'bg-accent/20 text-accent' : 'border border-border',
               globalsMaster ? '' : 'opacity-50',
             ]"
             :title="globalsTitle(p)"
+            :aria-pressed="!!p.use_globals"
             @click="apply(p, { use_globals: !p.use_globals }, 'globals')"
           >globals</button>
           <button
             type="button"
-            class="text-xs px-2 py-1 rounded"
+            class="h-control-sm text-xs px-2 rounded"
             :class="[
               p.use_anchors ? 'bg-accent/20 text-accent' : 'border border-border',
               anchorsMaster ? '' : 'opacity-50',
             ]"
             :title="anchorsTitle(p)"
+            :aria-pressed="!!p.use_anchors"
             @click="apply(p, { use_anchors: !p.use_anchors }, 'anchors')"
           >anchors</button>
           <button
             type="button"
-            class="text-xs px-2 py-1 rounded"
+            class="h-control-sm text-xs px-2 rounded"
             :class="p.use_tag_vocabulary ? 'bg-accent/20 text-accent' : 'border border-border'"
             :title="p.use_tag_vocabulary ? t('projects.flag.vocab_on') : t('projects.flag.vocab_off')"
+            :aria-pressed="!!p.use_tag_vocabulary"
             @click="apply(p, { use_tag_vocabulary: !p.use_tag_vocabulary }, 'tag-vocab')"
           >tag-vocab</button>
           <button
             type="button"
-            class="text-xs px-2 py-1 rounded"
+            class="h-control-sm text-xs px-2 rounded"
             :class="p.lean_read_bootstrap ? 'bg-accent/20 text-accent' : 'border border-border'"
             :title="p.lean_read_bootstrap ? t('projects.flag.lean_on') : t('projects.flag.lean_off')"
+            :aria-pressed="!!p.lean_read_bootstrap"
             @click="apply(p, { lean_read_bootstrap: !p.lean_read_bootstrap }, 'lean-read')"
           >lean-read</button>
           <button
             type="button"
-            class="text-xs px-2 py-1 rounded"
+            class="h-control-sm text-xs px-2 rounded"
             :class="p.allow_local_mirror ? 'bg-accent/20 text-accent' : 'border border-border'"
             :title="p.allow_local_mirror ? t('projects.flag.mirror_on') : t('projects.flag.mirror_off')"
+            :aria-pressed="!!p.allow_local_mirror"
             @click="apply(p, { allow_local_mirror: !p.allow_local_mirror }, 'mirror')"
           >mirror</button>
           <button
             type="button"
-            class="text-xs px-2 py-1 rounded hover:bg-surface-hover"
+            class="h-control-sm text-xs px-2 rounded hover:bg-surface-hover"
             @click="rename(p)"
           >{{ t('projects.rename') }}</button>
           <button
             type="button"
-            class="text-xs px-2 py-1 rounded text-danger hover:bg-surface-hover"
+            class="h-control-sm text-xs px-2 rounded text-danger hover:bg-surface-hover"
             @click="destroy(p)"
           >{{ t('common.delete') }}</button>
         </template>

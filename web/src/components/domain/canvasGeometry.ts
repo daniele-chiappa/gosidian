@@ -142,11 +142,19 @@ export function colorOf(c?: string): string | undefined {
   return /^#[0-9a-fA-F]{3}([0-9a-fA-F]{3})?$/.test(c) ? c : undefined
 }
 
-/** The scale and offset that show the whole plane in a viewport, never above 1:1. */
-export function fit(b: Bounds, vw: number, vh: number): { k: number; tx: number; ty: number } {
+/** The smallest scale a canvas opens at: below it the cards cannot be read. */
+export const READABLE_FIT = 0.5
+
+/**
+ * The scale and offset that show the whole plane in a viewport, never above
+ * 1:1 and never below minK. A plane that does not fit at minK starts from
+ * its top left corner, on the axis it overflows; it is centered otherwise.
+ */
+export function fit(b: Bounds, vw: number, vh: number, minK = 0): { k: number; tx: number; ty: number } {
   if (!b.width || !b.height || !vw || !vh) return { k: 1, tx: 0, ty: 0 }
-  const k = Math.min(vw / b.width, vh / b.height, 1)
-  return { k, tx: (vw - b.width * k) / 2, ty: (vh - b.height * k) / 2 }
+  const k = Math.max(Math.min(vw / b.width, vh / b.height, 1), Math.min(minK, 1))
+  const along = (view: number, size: number) => (size * k > view ? 0 : (view - size * k) / 2)
+  return { k, tx: along(vw, b.width), ty: along(vh, b.height) }
 }
 
 /** Zoom by factor around a viewport point, keeping it still; k within [min, max]. */

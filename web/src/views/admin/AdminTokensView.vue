@@ -14,6 +14,7 @@ import {
 import { errorText } from '@/api/errors'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
 import DateTime from '@/components/primitives/DateTime.vue'
+import { confirmAction } from '@/composables/useConfirm'
 
 const { t } = useI18n()
 
@@ -85,7 +86,7 @@ async function create() {
 }
 
 async function revoke(tok: MCPToken) {
-  if (!confirm(t('my_tokens.confirm_revoke', { name: tok.name }))) return
+  if (!(await confirmAction(t('my_tokens.confirm_revoke', { name: tok.name }), { confirmLabel: t('common.revoke') }))) return
   try {
     await revokeMCPToken(tok.id)
     await load()
@@ -138,7 +139,7 @@ onMounted(load)
     <p class="text-xs text-text-muted">{{ fresh.usage_hint }}</p>
     <button
       type="button"
-      class="text-xs px-2 py-1 rounded border border-border hover:bg-surface-hover"
+      class="h-control-sm text-xs px-2 rounded border border-border hover:bg-surface-hover"
       @click="dismissFresh"
     >{{ t('common.dismiss') }}</button>
   </div>
@@ -151,19 +152,19 @@ onMounted(load)
       v-model.trim="draft.name"
       type="text"
       :placeholder="t('admin.tokens.name_placeholder')"
-      class="rounded bg-bg-elevated border border-border px-3 py-2"
+      class="h-control py-0 rounded bg-bg-elevated border border-border px-3"
     />
     <input
       v-model.trim="draft.project"
       type="text"
       :placeholder="t('search.project_placeholder')"
-      class="rounded bg-bg-elevated border border-border px-3 py-2"
+      class="h-control py-0 rounded bg-bg-elevated border border-border px-3"
     />
     <input
       v-model.trim="draft.scopes"
       type="text"
       :placeholder="t('admin.tokens.scopes_placeholder')"
-      class="rounded bg-bg-elevated border border-border px-3 py-2"
+      class="h-control py-0 rounded bg-bg-elevated border border-border px-3"
     />
     <input
       v-model="draft.password"
@@ -172,12 +173,12 @@ onMounted(load)
       :placeholder="t('admin.tokens.password_placeholder')"
       :aria-label="t('password.confirm_action')"
       data-token-password
-      class="rounded bg-bg-elevated border border-border px-3 py-2"
+      class="h-control py-0 rounded bg-bg-elevated border border-border px-3"
     />
     <button
       type="submit"
       :disabled="creating"
-      class="px-3 py-2 rounded bg-accent text-accent-fg hover:bg-accent-hover disabled:opacity-60"
+      class="h-control px-3 rounded bg-accent text-accent-fg hover:bg-accent-hover disabled:opacity-60"
     >{{ t('common.create') }}</button>
   </form>
 
@@ -189,7 +190,7 @@ onMounted(load)
     <!-- Scrolls inside its box in a narrow window (IMP-156, M7). -->
 
     <table class="w-full text-sm">
-      <thead class="text-text-muted text-xs uppercase tracking-wide">
+      <thead class="text-text-muted text-xs [&_th]:font-medium">
         <tr>
           <th class="text-left py-2 px-3">{{ t('admin.col.name') }}</th>
           <th class="text-left py-2 px-3">{{ t('admin.col.owner') }}</th>
@@ -235,7 +236,7 @@ onMounted(load)
           <td class="py-2 px-3">
             <button
               type="button"
-              class="text-xs px-2 py-1 rounded border border-border hover:bg-surface-hover"
+              class="h-control-sm text-xs px-2 rounded border border-border hover:bg-surface-hover"
               :class="tok.self_improve_opt_in ? 'text-success' : 'text-text-muted'"
               :title="tok.self_improve_opt_in ? t('admin.tokens.optin_on') : t('admin.tokens.optin_off')"
               @click="toggleOptIn(tok)"
@@ -244,7 +245,7 @@ onMounted(load)
           <td class="py-2 px-3 text-right">
             <button
               type="button"
-              class="text-xs px-2 py-1 rounded text-danger hover:bg-surface-hover"
+              class="h-control-sm text-xs px-2 rounded text-danger hover:bg-surface-hover"
               @click="revoke(tok)"
             >{{ t('common.revoke') }}</button>
           </td>

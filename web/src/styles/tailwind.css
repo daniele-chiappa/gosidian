@@ -3,11 +3,34 @@
 @tailwind utilities;
 
 /*
- * Component-layer rules that benefit from cascading + Tailwind utility
- * composition arrive here. Phase 0 keeps it empty; Phase 3 and Phase 4
- * extend with editor-specific styles (CodeMirror gutter, sidebar resize
- * handle, etc.).
+ * A disabled control says so with the cursor too, not only with the opacity
+ * each component gives it.
  */
+@layer base {
+  button:disabled,
+  input:disabled,
+  select:disabled,
+  textarea:disabled,
+  [aria-disabled='true'] {
+    cursor: not-allowed;
+  }
+}
+
+/*
+ * Less motion for whoever asks the system for it: transitions and
+ * animations end at once (a spinner stops, the tree's chevron turns without
+ * moving). plancia's own windows, sidebar and dialogs follow the same query.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 
 /*
  * Print scope (IMP-052). NoteView marks the rendered markdown <article> with

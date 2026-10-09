@@ -9,6 +9,7 @@ import { useWindowsStore, type OpenSpec } from 'plancia'
 import { planciaKey } from '@/composables/planciaKey'
 import { errorText } from '@/api/errors'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
+import { plainSnippet } from '@/views/searchSnippet'
 
 const { t } = useI18n()
 
@@ -70,7 +71,8 @@ onMounted(() => {
 
 <template>
   <div class="p-6 max-w-3xl mx-auto">
-    <h1 class="text-xl font-semibold mb-4">{{ t('search.title') }}</h1>
+    <!-- The window's title bar shows the name: the heading is for screen readers. -->
+    <h1 class="sr-only">{{ t('search.title') }}</h1>
 
     <div class="flex gap-2 mb-6">
       <input
@@ -78,13 +80,13 @@ onMounted(() => {
         type="search"
         autofocus
         :placeholder="t('search.placeholder')"
-        class="flex-1 rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
+        class="h-control py-0 flex-1 rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
       />
       <input
         v-model="project"
         type="text"
         :placeholder="t('search.project_placeholder')"
-        class="w-48 min-w-0 shrink rounded bg-bg-elevated border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
+        class="h-control py-0 w-48 min-w-0 shrink rounded bg-bg-elevated border border-border px-3 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
       />
     </div>
 
@@ -114,7 +116,7 @@ onMounted(() => {
         <p
           v-if="hit.snippet"
           class="text-sm text-text-muted mt-2 line-clamp-2"
-        >{{ hit.snippet }}</p>
+        >{{ plainSnippet(hit.snippet) }}</p>
       </li>
     </ul>
   </div>

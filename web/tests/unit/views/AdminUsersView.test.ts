@@ -16,6 +16,7 @@ vi.mock('@/api/admin', () => ({
   createPersonalProject: vi.fn(),
 }))
 vi.mock('@/api/password', () => ({ resetUserPassword: vi.fn() }))
+vi.mock('@/composables/useConfirm', () => ({ confirmAction: vi.fn() }))
 vi.mock('@/api/access', async (orig) => ({
   ...(await orig<typeof import('@/api/access')>()),
   getUserAccess: vi.fn(),
@@ -23,6 +24,7 @@ vi.mock('@/api/access', async (orig) => ({
 
 import { listUsers, updateUserRole } from '@/api/admin'
 import { getUserAccess } from '@/api/access'
+import { confirmAction } from '@/composables/useConfirm'
 import AdminUsersView from '@/views/admin/AdminUsersView.vue'
 
 const user = (id: string, role = 'member'): AdminUser => ({
@@ -76,7 +78,7 @@ describe('AdminUsersView', () => {
   it('refreshes the open preview after a change of role', async () => {
     vi.mocked(getUserAccess).mockResolvedValueOnce(access('Before')).mockResolvedValueOnce(access('After'))
     vi.mocked(updateUserRole).mockResolvedValue(undefined as never)
-    window.confirm = vi.fn(() => true)
+    vi.mocked(confirmAction).mockResolvedValue(true)
     const w = mountView()
     await flushPromises()
     await viewButton(w, 0).trigger('click')
@@ -88,8 +90,7 @@ describe('AdminUsersView', () => {
   })
 
   it('asks before making an account read-only, which revokes its tokens (BUG-116, S6-9)', async () => {
-    const confirm = vi.fn(() => false)
-    window.confirm = confirm
+    const confirm = vi.mocked(confirmAction).mockResolvedValue(false)
     const w = mountView()
     await flushPromises()
     const select = w.findAll('select')[0]!
@@ -100,7 +101,7 @@ describe('AdminUsersView', () => {
     expect(updateUserRole).not.toHaveBeenCalled()
     expect((select.element as HTMLSelectElement).value).toBe('member')
 
-    confirm.mockReturnValue(true)
+    confirm.mockResolvedValue(true)
     await select.setValue('guest')
     await flushPromises()
     expect(updateUserRole).toHaveBeenCalledWith('alice', 'guest')

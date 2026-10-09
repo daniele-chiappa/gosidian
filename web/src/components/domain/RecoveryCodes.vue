@@ -33,14 +33,14 @@ async function copyAll() {
     <div class="flex items-center gap-2">
       <button
         type="button"
-        class="rounded border border-border px-3 py-2 text-sm hover:bg-surface-hover"
+        class="h-control rounded border border-border px-3 text-sm hover:bg-surface-hover"
         @click="copyAll"
       >
         {{ copied ? t('totp.recovery_copied') : t('totp.recovery_copy') }}
       </button>
       <button
         type="button"
-        class="rounded bg-accent text-accent-fg px-3 py-2 text-sm hover:bg-accent-hover"
+        class="h-control rounded bg-accent text-accent-fg px-3 text-sm hover:bg-accent-hover"
         @click="emit('done')"
       >
         {{ t('totp.recovery_saved_button') }}

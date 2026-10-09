@@ -25,6 +25,7 @@ import { deleteNote } from '@/api/notes'
 import { exportProject } from '@/api/projects'
 import type { TreeNode } from '@/api/tree'
 import { errorText } from '@/api/errors'
+import { confirmAction, showNotice } from '@/composables/useConfirm'
 
 interface Item {
   key: 'download' | 'delete'
@@ -69,7 +70,7 @@ async function activate(item: Item) {
   try {
     await item.run(n)
   } catch (e) {
-    window.alert(
+    void showNotice(
       item.key === 'download'
         ? errorText(e, t, t('tree.menu.download_failed'))
         : errorText(e, t, t('tree.menu.delete_failed')),
@@ -78,14 +79,15 @@ async function activate(item: Item) {
 }
 
 async function removeNote(n: TreeNode) {
-  if (!window.confirm(t(access.deleteNoteKey, { path: n.path }))) return
+  if (!(await confirmAction(t(access.deleteNoteKey, { path: n.path }), { confirmLabel: t('common.delete') }))) return
   await deleteNote(n.path)
   afterDelete([n.path])
 }
 
 async function removeFolder(n: TreeNode) {
   const count = n.note_count ?? 0
-  if (!window.confirm(t('tree.menu.confirm_delete_folder', { path: n.path, count }, count))) return
+  if (!(await confirmAction(t('tree.menu.confirm_delete_folder', { path: n.path, count }, count), { confirmLabel: t('common.delete') })))
+    return
   const res = await deleteFolder(n.path)
   afterDelete(res.removed)
 }

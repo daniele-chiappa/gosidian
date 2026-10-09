@@ -57,7 +57,8 @@ watch(path, load)
         class="text-sm text-text-muted hover:text-text"
         @click="openNote"
       >{{ t('history.note') }}</button>
-      <h1 class="text-xl font-semibold">{{ t('history.title') }}</h1>
+      <!-- The window's title bar names it: the heading is for screen readers. -->
+      <h1 class="sr-only">{{ t('history.title') }}</h1>
       <span class="font-mono text-sm text-text-muted truncate">{{ path }}</span>
     </header>
 

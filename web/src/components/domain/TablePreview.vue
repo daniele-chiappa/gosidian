@@ -198,7 +198,7 @@ const metaLabel = computed(() => {
         <div class="mt-2 flex items-center gap-3 text-xs text-text-muted">
           <template v-if="totalPages > 1">
             <button
-              class="px-2 py-1 rounded border border-border disabled:opacity-40"
+              class="h-control-sm px-2 rounded border border-border disabled:opacity-40"
               :disabled="page === 0"
               @click="page--"
             >
@@ -206,7 +206,7 @@ const metaLabel = computed(() => {
             </button>
             <span>{{ t('table.page_of', { page: page + 1, total: totalPages }) }}</span>
             <button
-              class="px-2 py-1 rounded border border-border disabled:opacity-40"
+              class="h-control-sm px-2 rounded border border-border disabled:opacity-40"
               :disabled="page >= totalPages - 1"
               @click="page++"
             >

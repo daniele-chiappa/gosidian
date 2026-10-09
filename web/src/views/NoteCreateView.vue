@@ -103,22 +103,23 @@ async function submit() {
 
 <template>
   <div class="p-6 max-w-xl mx-auto">
-    <h1 class="text-lg font-semibold mb-1">{{ t('note_create.title') }}</h1>
+    <!-- The window's title bar names it: the heading is for screen readers. -->
+    <h1 class="sr-only">{{ t('note_create.title') }}</h1>
     <p class="text-sm text-text-muted mb-5">
       {{ t('note_create.location_prefix') }} <span class="font-mono">{{ folder || t('note_create.root') }}/</span>
     </p>
 
     <!-- Kind toggle -->
-    <div class="inline-flex rounded border border-border overflow-hidden text-sm mb-4">
+    <div class="inline-flex h-control rounded border border-border overflow-hidden text-sm mb-4">
       <button
         type="button"
-        class="px-3 py-1"
+        class="px-3"
         :class="kind === 'markdown' ? 'bg-accent text-accent-fg' : 'hover:bg-surface-hover'"
         @click="kind = 'markdown'"
       >{{ t('note_create.kind_markdown') }}</button>
       <button
         type="button"
-        class="px-3 py-1"
+        class="px-3"
         :class="kind === 'image' ? 'bg-accent text-accent-fg' : 'hover:bg-surface-hover'"
         @click="kind = 'image'"
       >{{ t('note_create.kind_image') }}</button>
@@ -134,7 +135,7 @@ async function submit() {
           v-model="name"
           type="text"
           :placeholder="t('note_create.name_placeholder')"
-          class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
+          class="mt-1 h-control py-0 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
         >
         <span
           v-if="slug"
@@ -148,7 +149,7 @@ async function submit() {
           v-model="title"
           type="text"
           :placeholder="slug || t('note_create.title_placeholder')"
-          class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
+          class="mt-1 h-control py-0 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
         >
       </label>
 
@@ -178,12 +179,12 @@ async function submit() {
       <div class="flex gap-2 pt-1">
         <button
           type="submit"
-          class="px-3 py-2 rounded bg-accent text-accent-fg hover:bg-accent-hover disabled:opacity-50"
+          class="h-control px-3 rounded bg-accent text-accent-fg hover:bg-accent-hover disabled:opacity-50"
           :disabled="!slug || creating"
         >{{ creating ? t('note_create.submitting') : t('note_create.submit') }}</button>
         <button
           type="button"
-          class="px-3 py-2 rounded hover:bg-surface-hover"
+          class="h-control px-3 rounded border border-border hover:bg-surface-hover"
           @click="emit('close')"
         >{{ t('note_create.cancel') }}</button>
       </div>

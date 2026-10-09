@@ -253,7 +253,7 @@ onMounted(async () => {
           type="number"
           min="1"
           max="6"
-          class="mt-1 w-full rounded bg-bg border border-border px-2 py-1.5 text-sm"
+          class="h-control py-0 mt-1 w-full rounded bg-bg border border-border px-2 text-sm"
         >
       </label>
       <label class="block text-sm">
@@ -263,7 +263,7 @@ onMounted(async () => {
           type="number"
           min="0"
           max="20"
-          class="mt-1 w-full rounded bg-bg border border-border px-2 py-1.5 text-sm"
+          class="h-control py-0 mt-1 w-full rounded bg-bg border border-border px-2 text-sm"
         >
       </label>
       <label class="block text-sm">
@@ -273,13 +273,13 @@ onMounted(async () => {
           type="number"
           min="0"
           max="2000"
-          class="mt-1 w-full rounded bg-bg border border-border px-2 py-1.5 text-sm"
+          class="h-control py-0 mt-1 w-full rounded bg-bg border border-border px-2 text-sm"
         >
       </label>
 
       <button
         type="button"
-        class="w-full text-xs px-2 py-1 rounded border border-border hover:bg-surface-hover"
+        class="h-control w-full text-xs px-2 rounded border border-border hover:bg-surface-hover"
         @click="reset"
       >
         {{ t('graph.reset') }}
@@ -321,7 +321,7 @@ onMounted(async () => {
       <select
         v-if="mode === '3d'"
         v-model="zMode"
-        class="absolute top-3 right-24 z-10 rounded border border-border bg-bg-elevated text-xs text-text-muted px-1.5 py-1"
+        class="h-control-sm py-0 absolute top-3 right-24 z-10 rounded border border-border bg-bg-elevated text-xs text-text-muted px-1.5"
         :aria-label="t('graph.z_mode')"
       >
         <option value="free">
@@ -341,7 +341,7 @@ onMounted(async () => {
       >
         <button
           type="button"
-          class="px-2 py-1"
+          class="h-control-sm px-2"
           :class="mode === '2d' ? 'bg-surface-hover text-text font-semibold' : 'text-text-muted hover:bg-surface-hover'"
           @click="setMode('2d')"
         >
@@ -349,7 +349,7 @@ onMounted(async () => {
         </button>
         <button
           type="button"
-          class="px-2 py-1 border-l border-border"
+          class="h-control-sm px-2 border-l border-border"
           :class="mode === '3d' ? 'bg-surface-hover text-text font-semibold' : 'text-text-muted hover:bg-surface-hover'"
           @click="setMode('3d')"
         >

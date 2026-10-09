@@ -35,9 +35,11 @@ vi.mock('@/stores/access', () => ({
   }),
 }))
 vi.mock('@/stores/tree', () => ({ useTreeStore: () => tree }))
+vi.mock('@/composables/useConfirm', () => ({ confirmAction: vi.fn(), showNotice: vi.fn() }))
 vi.mock('plancia', () => ({ useWindowsStore: () => windows }))
 
 import { deleteNote } from '@/api/notes'
+import { confirmAction, showNotice } from '@/composables/useConfirm'
 import { deleteFolder, exportFolder } from '@/api/folders'
 import { exportProject } from '@/api/projects'
 import { downloadNote } from '@/api/noteDownload'
@@ -127,8 +129,7 @@ describe('TreeContextMenu', () => {
       { id: 'w3', type: 'note', dirty: false, props: { path: 'Alpha/keep.md' } },
     ]
     vi.mocked(deleteFolder).mockResolvedValue({ trash_id: 'x', removed: ['Alpha/sub/a.md', 'Alpha/sub/b.md'] })
-    const confirm = vi.fn(() => true)
-    window.confirm = confirm
+    const confirm = vi.mocked(confirmAction).mockResolvedValue(true)
     await openOn(folder)
     expect(labels()).toEqual(['Download as zip', 'Delete'])
     await click(1)
@@ -142,8 +143,7 @@ describe('TreeContextMenu', () => {
   it('says a delete is for good without the trash, and offers none on a folder (BUG-116, S6-3)', async () => {
     writable.add('Alpha')
     accessState.trash = false
-    const confirm = vi.fn(() => false)
-    window.confirm = confirm
+    const confirm = vi.mocked(confirmAction).mockResolvedValue(false)
     await openOn(note)
     await click(1)
     expect(String((confirm.mock.calls[0] as unknown[])[0])).toContain('for good')
@@ -154,7 +154,7 @@ describe('TreeContextMenu', () => {
 
   it('does nothing when the confirmation is declined', async () => {
     writable.add('Alpha')
-    window.confirm = vi.fn(() => false)
+    vi.mocked(confirmAction).mockResolvedValue(false)
     await openOn(note)
     await click(1)
     expect(deleteNote).not.toHaveBeenCalled()
@@ -162,9 +162,8 @@ describe('TreeContextMenu', () => {
 
   it('says why a delete failed', async () => {
     writable.add('Alpha')
-    window.confirm = vi.fn(() => true)
-    const alert = vi.fn()
-    window.alert = alert
+    vi.mocked(confirmAction).mockResolvedValue(true)
+    const alert = vi.mocked(showNotice)
     vi.mocked(deleteNote).mockRejectedValue(new Error('locked'))
     await openOn(note)
     await click(1)

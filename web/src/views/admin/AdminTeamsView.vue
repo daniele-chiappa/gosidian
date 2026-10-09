@@ -6,6 +6,7 @@
  */
 import { useI18n } from 'vue-i18n'
 import { computed, onMounted, reactive, ref } from 'vue'
+import { X } from 'lucide-vue-next'
 import {
   listTeams,
   createTeam,
@@ -23,6 +24,7 @@ import { useAccessStore } from '@/stores/access'
 import { roleLabel } from '@/api/access'
 import { errorText } from '@/api/errors'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
+import { confirmAction } from '@/composables/useConfirm'
 
 const { t } = useI18n()
 
@@ -126,7 +128,8 @@ async function saveEdit(team: Team) {
 }
 
 async function destroy(team: Team) {
-  if (!confirm(t('admin.teams.confirm_delete', { name: team.name, n: team.grants.length }))) return
+  if (!(await confirmAction(t('admin.teams.confirm_delete', { name: team.name, n: team.grants.length }), { confirmLabel: t('common.delete') })))
+    return
   await run(t('admin.teams.delete_failed'), async () => {
     await deleteTeam(team.id)
     teams.value = teams.value.filter((x) => x.id !== team.id)
@@ -210,7 +213,7 @@ onMounted(load)
             type="text"
             :placeholder="t('admin.teams.name')"
             required
-            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
+            class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
           />
         </label>
         <label class="text-sm flex-[2] min-w-[12rem]">
@@ -218,13 +221,13 @@ onMounted(load)
           <input
             v-model.trim="newTeam.description"
             type="text"
-            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
+            class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
           />
         </label>
         <button
           type="submit"
           :disabled="creating || !newTeam.name"
-          class="rounded bg-accent text-accent-fg px-3 py-2 text-sm hover:bg-accent-hover disabled:opacity-60"
+          class="h-control rounded bg-accent text-accent-fg px-3 text-sm hover:bg-accent-hover disabled:opacity-60"
         >{{ t('admin.teams.create') }}</button>
       </form>
     </section>
@@ -247,16 +250,16 @@ onMounted(load)
                 v-model.trim="editDraft.name"
                 type="text"
                 required
-                class="rounded bg-bg-elevated border border-border px-2 py-1 text-sm"
+                class="h-control-sm py-0 rounded bg-bg-elevated border border-border px-2 text-sm"
               />
               <input
                 v-model.trim="editDraft.description"
                 type="text"
                 :placeholder="t('admin.teams.description')"
-                class="flex-1 rounded bg-bg-elevated border border-border px-2 py-1 text-sm"
+                class="h-control-sm py-0 min-w-0 flex-1 rounded bg-bg-elevated border border-border px-2 text-sm"
               />
-              <button type="submit" class="text-xs px-2 py-1 rounded bg-accent text-accent-fg">{{ t('common.save') }}</button>
-              <button type="button" class="text-xs px-2 py-1 rounded border border-border" @click="editing = null">{{ t('common.cancel') }}</button>
+              <button type="submit" class="h-control-sm text-xs px-2 rounded bg-accent text-accent-fg">{{ t('common.save') }}</button>
+              <button type="button" class="h-control-sm text-xs px-2 rounded border border-border" @click="editing = null">{{ t('common.cancel') }}</button>
             </form>
           </template>
           <template v-else>
@@ -267,12 +270,12 @@ onMounted(load)
         <button
           v-if="editing !== team.id"
           type="button"
-          class="text-xs px-2 py-1 rounded hover:bg-surface-hover"
+          class="h-control-sm text-xs px-2 rounded hover:bg-surface-hover"
           @click="startEdit(team)"
         >{{ t('projects.rename') }}</button>
         <button
           type="button"
-          class="text-xs px-2 py-1 rounded text-danger hover:bg-surface-hover"
+          class="h-control-sm text-xs px-2 rounded text-danger hover:bg-surface-hover"
           @click="destroy(team)"
         >{{ t('common.delete') }}</button>
       </div>
@@ -280,7 +283,7 @@ onMounted(load)
       <div class="grid gap-4 md:grid-cols-2">
         <!-- Accounts -->
         <div>
-          <h4 class="text-xs uppercase tracking-wide text-text-muted mb-2">{{ t('members.accounts', { n: team.users.length }) }}</h4>
+          <h4 class="text-sm font-semibold mb-2">{{ t('members.accounts', { n: team.users.length }) }}</h4>
           <ul class="space-y-1 mb-2">
             <li
               v-for="u in team.users"
@@ -291,17 +294,18 @@ onMounted(load)
               <span class="text-[10px] uppercase text-text-muted">{{ roleLabel(u.role) }}</span>
               <button
                 type="button"
-                class="text-xs px-1.5 rounded text-danger hover:bg-surface-hover"
+                class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-danger hover:bg-surface-hover"
                 :title="t('admin.teams.remove_account')"
+                :aria-label="t('admin.teams.remove_account')"
                 @click="dropUser(team, u.id)"
-              >×</button>
+              ><X class="h-3.5 w-3.5" aria-hidden="true" /></button>
             </li>
             <li v-if="team.users.length === 0" class="text-xs text-text-muted">{{ t('admin.teams.no_accounts') }}</li>
           </ul>
           <form class="flex gap-2" @submit.prevent="addUser(team)">
             <select
               v-model="addUserDraft[team.id]"
-              class="flex-1 rounded bg-bg-elevated border border-border px-2 py-1 text-sm"
+              class="h-control-sm py-0 min-w-0 flex-1 rounded bg-bg-elevated border border-border px-2 text-sm"
             >
               <option value="">{{ t('admin.teams.add_account') }}</option>
               <option v-for="u in candidatesFor(team)" :key="u.id" :value="u.id">{{ u.username }} ({{ roleLabel(u.role) }})</option>
@@ -309,14 +313,14 @@ onMounted(load)
             <button
               type="submit"
               :disabled="!addUserDraft[team.id]"
-              class="text-xs px-2 py-1 rounded border border-border hover:bg-surface-hover disabled:opacity-50"
+              class="h-control-sm text-xs px-2 rounded border border-border hover:bg-surface-hover disabled:opacity-50"
             >{{ t('admin.teams.add') }}</button>
           </form>
         </div>
 
         <!-- Grants -->
         <div>
-          <h4 class="text-xs uppercase tracking-wide text-text-muted mb-2">{{ t('admin.teams.grants', { n: team.grants.length }) }}</h4>
+          <h4 class="text-sm font-semibold mb-2">{{ t('admin.teams.grants', { n: team.grants.length }) }}</h4>
           <ul class="space-y-1 mb-2">
             <li
               v-for="g in team.grants"
@@ -326,7 +330,7 @@ onMounted(load)
               <span class="flex-1 truncate font-medium">{{ g.project }}</span>
               <span class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded" :class="levelClass(g.level)">{{ g.level }}</span>
               <select
-                class="text-xs rounded bg-bg-elevated border border-border px-1 py-0.5"
+                class="h-control-sm py-0 text-xs rounded bg-bg-elevated border border-border px-1"
                 :value="g.level"
                 @change="changeGrant(team, g.project, ($event.target as HTMLSelectElement).value)"
               >
@@ -334,31 +338,32 @@ onMounted(load)
               </select>
               <button
                 type="button"
-                class="text-xs px-1.5 rounded text-danger hover:bg-surface-hover"
+                class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded text-danger hover:bg-surface-hover"
                 :title="t('admin.teams.remove_grant')"
+                :aria-label="t('admin.teams.remove_grant')"
                 @click="dropGrant(team, g.project)"
-              >×</button>
+              ><X class="h-3.5 w-3.5" aria-hidden="true" /></button>
             </li>
             <li v-if="team.grants.length === 0" class="text-xs text-text-muted">{{ t('admin.teams.no_grants') }}</li>
           </ul>
           <form class="flex gap-2" @submit.prevent="addGrant(team)">
             <select
               v-model="grantDraft(team).project"
-              class="flex-1 rounded bg-bg-elevated border border-border px-2 py-1 text-sm"
+              class="h-control-sm py-0 min-w-0 flex-1 rounded bg-bg-elevated border border-border px-2 text-sm"
             >
               <option value="">{{ t('admin.teams.grant_project') }}</option>
               <option v-for="p in projectsFor(team)" :key="p.name" :value="p.name">{{ p.name }}</option>
             </select>
             <select
               v-model="grantDraft(team).level"
-              class="rounded bg-bg-elevated border border-border px-2 py-1 text-sm"
+              class="h-control-sm py-0 rounded bg-bg-elevated border border-border px-2 text-sm"
             >
               <option v-for="l in LEVELS" :key="l" :value="l">{{ t(`members.level_name.${l}`) }}</option>
             </select>
             <button
               type="submit"
               :disabled="!grantDraft(team).project"
-              class="text-xs px-2 py-1 rounded border border-border hover:bg-surface-hover disabled:opacity-50"
+              class="h-control-sm text-xs px-2 rounded border border-border hover:bg-surface-hover disabled:opacity-50"
             >{{ t('admin.teams.add') }}</button>
           </form>
         </div>

@@ -60,6 +60,14 @@ describe('PropertiesPanel', () => {
     expect(w.find('dd[data-field="extra"]').text()).toBe('x')
   })
 
+  it('names a field in words, the key in its tooltip, and labels its editor so', async () => {
+    const w = await mountPanel(fields())
+    const status = w.find('dt[title="status"]')
+    expect(status.text()).toBe('Status')
+    expect(w.find('dd[data-field="status"] button').attributes('aria-label')).toBe('Edit Status')
+    expect(w.find('dt[title="extra"]').text()).toBe('Extra')
+  })
+
   it('saves a field with the value it showed as expect', async () => {
     patch.mockResolvedValue({} as never)
     const w = await mountPanel(fields())

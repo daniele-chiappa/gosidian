@@ -70,4 +70,23 @@ describe('CommandPalette', () => {
     expect(selectedText()).toBe(before)
     w.unmount()
   })
+  it('names the kind of an entry only when the list mixes kinds', async () => {
+    vi.mocked(fetchCommandPalette).mockResolvedValue({
+      notes: [{ path: 'p/alpha.md', title: 'alpha' }],
+      projects: [{ name: 'alpine', noteCount: 3 }],
+      tags: [],
+    } as CommandPaletteData)
+    const w = mount(CommandPalette, { global: { plugins: [i18n()] }, attachTo: document.body })
+    ctrlK()
+    await flushPromises()
+    const rows = () =>
+      [...document.body.querySelectorAll('li')].map((li) => [...li.children].map((c) => c.textContent?.trim()).join(' '))
+    expect(rows()).toEqual(['note alpha p/alpha.md', 'project alpine 3 notes'])
+    const input = document.body.querySelector('input')!
+    input.value = 'alpha'
+    input.dispatchEvent(new Event('input'))
+    await flushPromises()
+    expect(rows()).toEqual(['alpha p/alpha.md'])
+    w.unmount()
+  })
 })

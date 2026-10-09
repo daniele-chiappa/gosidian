@@ -14,6 +14,7 @@ import { useWindowsStore } from 'plancia'
 import { useTreeStore } from '@/stores/tree'
 import { useAccessStore } from '@/stores/access'
 import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
+import { cancelAll } from '@/composables/useConfirm'
 
 const LAST_USER_KEY = 'gosidian.lastUser'
 /** Must match the storageKey passed to usePlanciaSync in AppShell. */
@@ -24,6 +25,7 @@ export function resetSessionState(): void {
   useAccessStore().reset()
   useRecentlyViewed().clear()
   useWindowsStore().reset()
+  cancelAll()
   try {
     localStorage.removeItem(PLANCIA_STORAGE_KEY)
   } catch {

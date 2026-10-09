@@ -8,6 +8,7 @@ import {
   edgeShape,
   facingSide,
   fit,
+  READABLE_FIT,
   zoomAt,
 } from '@/components/domain/canvasGeometry'
 
@@ -77,5 +78,16 @@ describe('canvas geometry', () => {
     const v = zoomAt({ k: 1, tx: 0, ty: 0 }, 2, { x: 100, y: 100 })
     expect(v).toEqual({ k: 2, tx: -100, ty: -100 })
     expect(zoomAt({ k: 2.5, tx: 0, ty: 0 }, 2, { x: 0, y: 0 }).k).toBe(3)
+  })
+
+  it('opens a large canvas at a readable scale, from its top left corner', () => {
+    const b = { minX: 0, minY: 0, width: 8000, height: 1000 }
+    // The whole plane would be 1/8: it stops at the floor, and starts at the
+    // left where it overflows, centered where it fits.
+    expect(fit(b, 1000, 1000, READABLE_FIT)).toEqual({ k: 0.5, tx: 0, ty: 250 })
+    expect(fit({ ...b, height: 6000 }, 1000, 1000, READABLE_FIT)).toEqual({ k: 0.5, tx: 0, ty: 0 })
+    // Above the floor nothing changes, and the floor never zooms past 1:1.
+    expect(fit({ ...b, width: 1500 }, 1000, 1000, READABLE_FIT).k).toBeCloseTo(2 / 3)
+    expect(fit({ ...b, width: 100, height: 100 }, 1000, 1000, 2).k).toBe(1)
   })
 })

@@ -94,7 +94,8 @@
     },
     "private_project": "Private project",
     "public_project": "Public project",
-    "hidden_hint": "Hidden from MCP"
+    "hidden_hint": "Hidden from MCP",
+    "in_progress": "In progress"
   },
   "note": {
     "print": "Print / Save as PDF",
@@ -292,7 +293,8 @@
     "z_recency": "Z: recency",
     "renderer": "Graph renderer",
     "no_data": "No data yet.",
-    "load_failed": "The graph could not be read"
+    "load_failed": "The graph could not be read",
+    "links_title": "Links · {name}"
   },
   "projects_page": {
     "h1": "Projects",
@@ -640,7 +642,7 @@
   },
   "projects": {
     "title": "Projects",
-    "intro": "The top-level folders of the vault. Visibility says who reads a project: private (accounts with a grant), internal (every user) or public (every account, read-only ones included); writing and administering always take a grant, to an account or a team (Access). Your own level shows on each row. The flags: skip-git leaves the project out of git sync; hidden keeps it out of reach of MCP agents; globals merges the shared global skills and agents at bootstrap; anchors writes the vault's agents as local subagent files at bootstrap (both need their switch on the server, dimmed when off); tag-vocab lets the project extend the tag vocabulary of the lint from memory/conventions.md; lean-read gives tokens that cannot write a shorter bootstrap; mirror lets readers keep a read-only copy of the project (the notes leave the server, every sync is audited).",
+    "intro": "Visibility says who reads a project: private (accounts with a grant), internal (every user) or public (every account, read-only ones included). Writing always takes a grant (Access).",
     "new_placeholder": "new-project",
     "open_graph": "Open the project graph",
     "notes": "no notes | {n} note | {n} notes",
@@ -680,6 +682,16 @@
       "lean_off": "Click to give tokens that cannot write here a lean bootstrap: reading directives only.",
       "mirror_on": "Mirror on: tokens that can read this project may keep a read-only copy of its notes on their machine (gosidian mirror sync); every sync is audited. Click to turn off.",
       "mirror_off": "Click to let tokens that can read this project keep a read-only copy of its notes on their machine: cheaper reading for agents, but the notes leave the server."
+    },
+    "legend": {
+      "title": "What the flags do",
+      "skip_git": "leaves the project out of git sync.",
+      "hidden": "keeps it out of reach of MCP agents.",
+      "globals": "merges the shared global skills and agents at bootstrap; it needs its switch on the server, and is dimmed while that is off.",
+      "anchors": "writes the vault's agents as local subagent files at bootstrap; it needs its switch on the server, and is dimmed while that is off.",
+      "tag_vocab": "lets the project extend the lint's tag vocabulary from memory/conventions.md.",
+      "lean_read": "gives tokens that cannot write a shorter bootstrap.",
+      "mirror": "lets readers keep a read-only copy of the project: the notes leave the server, and every sync is audited."
     }
   },
   "members": {
@@ -874,7 +886,8 @@
       "empty": "No audit entry matches the filters.",
       "when": "When",
       "size": "Size",
-      "load_failed": "The audit could not be read"
+      "load_failed": "The audit could not be read",
+      "actor_column": "Actor"
     },
     "users": {
       "new": "New user",
@@ -990,5 +1003,11 @@
   },
   "editor": {
     "upload_failed": "Upload failed"
+  },
+  "dialog": {
+    "confirm_title": "Are you sure?",
+    "confirm": "Confirm",
+    "ok": "OK",
+    "error_title": "Something went wrong"
   }
 }

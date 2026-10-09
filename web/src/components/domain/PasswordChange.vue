@@ -58,7 +58,7 @@ async function submit() {
         type="password"
         autocomplete="current-password"
         name="current-password"
-        class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
+        class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
       />
     </label>
     <label class="block text-sm">
@@ -68,7 +68,7 @@ async function submit() {
         type="password"
         autocomplete="new-password"
         name="new-password"
-        class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
+        class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
       />
     </label>
     <label class="block text-sm">
@@ -78,7 +78,7 @@ async function submit() {
         type="password"
         autocomplete="new-password"
         name="confirm-password"
-        class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
+        class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
       />
     </label>
     <p v-if="problem" class="text-xs text-warning">
@@ -88,7 +88,7 @@ async function submit() {
     <button
       type="submit"
       :disabled="!ready"
-      class="rounded bg-accent text-accent-fg px-3 py-2 text-sm hover:bg-accent-hover disabled:opacity-60"
+      class="h-control rounded bg-accent text-accent-fg px-3 text-sm hover:bg-accent-hover disabled:opacity-60"
     >
       {{ busy ? t('password.saving') : t('password.submit') }}
     </button>

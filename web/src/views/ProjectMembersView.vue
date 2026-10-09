@@ -130,7 +130,8 @@ onMounted(load)
 
 <template>
   <div class="p-6 max-w-xl mx-auto">
-    <h2 class="text-lg font-semibold mb-1">{{ t('members.title', { project: props.project }) }}</h2>
+    <!-- The window's title bar names it: the heading is for screen readers. -->
+    <h1 class="sr-only">{{ t('members.title', { project: props.project }) }}</h1>
     <p class="text-sm text-text-muted mb-1">
       {{ t('members.intro') }}
     </p>
@@ -149,7 +150,7 @@ onMounted(load)
 
     <template v-if="view">
       <!-- Accounts -->
-      <h3 class="text-xs uppercase tracking-wide text-text-muted mb-2">{{ t('members.accounts', { n: view.users.length }) }}</h3>
+      <h3 class="text-sm font-semibold mb-2">{{ t('members.accounts', { n: view.users.length }) }}</h3>
       <ul class="space-y-2 mb-3">
         <li
           v-for="m in view.users"
@@ -160,7 +161,7 @@ onMounted(load)
           <span class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded" :class="levelClass(m.level)">{{ m.level }}</span>
           <template v-if="canAdmin">
             <select
-              class="text-xs rounded bg-bg-elevated border border-border px-2 py-1"
+              class="h-control-sm py-0 text-xs rounded bg-bg-elevated border border-border px-2"
               :value="m.level"
               :title="levelHelp(m.level)"
               @change="changeUser(m, ($event.target as HTMLSelectElement).value)"
@@ -169,7 +170,7 @@ onMounted(load)
             </select>
             <button
               type="button"
-              class="text-xs px-2 py-1 rounded text-danger hover:bg-surface-hover"
+              class="h-control-sm text-xs px-2 rounded text-danger hover:bg-surface-hover"
               @click="dropUser(m)"
             >{{ t('members.remove') }}</button>
           </template>
@@ -179,26 +180,26 @@ onMounted(load)
       <form v-if="canAdmin && view.candidates" class="flex items-end gap-2 mb-6" @submit.prevent="grantUser">
         <label class="flex-1 text-sm">
           <span class="text-text-muted text-xs">{{ t('members.add_account') }}</span>
-          <select v-model="addUser" class="mt-1 w-full rounded bg-bg-elevated border border-border px-2 py-2">
+          <select v-model="addUser" class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-2">
             <option value="">{{ t('members.select_account') }}</option>
             <option v-for="u in view.candidates.users" :key="u.id" :value="u.id">{{ u.username }} ({{ roleLabel(u.role) }})</option>
           </select>
         </label>
         <label class="text-sm">
           <span class="text-text-muted text-xs">{{ t('members.level') }}</span>
-          <select v-model="addUserLevel" class="mt-1 rounded bg-bg-elevated border border-border px-2 py-2" :title="levelHelp(addUserLevel)">
+          <select v-model="addUserLevel" class="h-control py-0 mt-1 rounded bg-bg-elevated border border-border px-2" :title="levelHelp(addUserLevel)">
             <option v-for="l in LEVELS" :key="l" :value="l">{{ t(`members.level_name.${l}`) }}</option>
           </select>
         </label>
         <button
           type="submit"
           :disabled="busy || !addUser"
-          class="rounded bg-accent text-accent-fg px-3 py-2 text-sm hover:bg-accent-hover disabled:opacity-60"
+          class="h-control rounded bg-accent text-accent-fg px-3 text-sm hover:bg-accent-hover disabled:opacity-60"
         >{{ t('members.add') }}</button>
       </form>
 
       <!-- Teams -->
-      <h3 class="text-xs uppercase tracking-wide text-text-muted mb-2">{{ t('members.teams', { n: view.teams.length }) }}</h3>
+      <h3 class="text-sm font-semibold mb-2">{{ t('members.teams', { n: view.teams.length }) }}</h3>
       <ul class="space-y-2 mb-3">
         <li
           v-for="g in view.teams"
@@ -209,7 +210,7 @@ onMounted(load)
           <span class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded" :class="levelClass(g.level)">{{ g.level }}</span>
           <template v-if="canAdmin">
             <select
-              class="text-xs rounded bg-bg-elevated border border-border px-2 py-1"
+              class="h-control-sm py-0 text-xs rounded bg-bg-elevated border border-border px-2"
               :value="g.level"
               :title="levelHelp(g.level)"
               @change="changeTeam(g, ($event.target as HTMLSelectElement).value)"
@@ -218,7 +219,7 @@ onMounted(load)
             </select>
             <button
               type="button"
-              class="text-xs px-2 py-1 rounded text-danger hover:bg-surface-hover"
+              class="h-control-sm text-xs px-2 rounded text-danger hover:bg-surface-hover"
               @click="dropTeam(g)"
             >{{ t('members.remove') }}</button>
           </template>
@@ -228,21 +229,21 @@ onMounted(load)
       <form v-if="canAdmin && view.candidates" class="flex items-end gap-2" @submit.prevent="grantTeam">
         <label class="flex-1 text-sm">
           <span class="text-text-muted text-xs">{{ t('members.add_team') }}</span>
-          <select v-model="addTeam" class="mt-1 w-full rounded bg-bg-elevated border border-border px-2 py-2">
+          <select v-model="addTeam" class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-2">
             <option value="">{{ t('members.select_team') }}</option>
             <option v-for="t in view.candidates.teams" :key="t.id" :value="t.id">{{ t.name }}</option>
           </select>
         </label>
         <label class="text-sm">
           <span class="text-text-muted text-xs">{{ t('members.level') }}</span>
-          <select v-model="addTeamLevel" class="mt-1 rounded bg-bg-elevated border border-border px-2 py-2" :title="levelHelp(addTeamLevel)">
+          <select v-model="addTeamLevel" class="h-control py-0 mt-1 rounded bg-bg-elevated border border-border px-2" :title="levelHelp(addTeamLevel)">
             <option v-for="l in LEVELS" :key="l" :value="l">{{ t(`members.level_name.${l}`) }}</option>
           </select>
         </label>
         <button
           type="submit"
           :disabled="busy || !addTeam"
-          class="rounded bg-accent text-accent-fg px-3 py-2 text-sm hover:bg-accent-hover disabled:opacity-60"
+          class="h-control rounded bg-accent text-accent-fg px-3 text-sm hover:bg-accent-hover disabled:opacity-60"
         >{{ t('members.add') }}</button>
       </form>
       <p v-if="canAdmin && view.candidates && view.candidates.teams.length === 0 && view.teams.length === 0" class="text-xs text-text-muted mt-2">

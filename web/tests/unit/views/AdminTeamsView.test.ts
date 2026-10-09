@@ -70,7 +70,7 @@ describe('AdminTeamsView', () => {
     expect(setTeamGrant).toHaveBeenCalledWith('t1', 'p', 'write')
     // The level badge, not the option of the select that names it too.
     expect(w.findAll('li span').some((s) => s.text() === 'write')).toBe(true)
-    await w.findAll('li button').find((b) => b.text() === '×')!.trigger('click')
+    await w.findAll('li button').find((b) => b.attributes('aria-label') === 'Remove from the team')!.trigger('click')
     await flushPromises()
     expect(w.text()).not.toContain('alice')
     expect(listTeams).toHaveBeenCalledTimes(1)

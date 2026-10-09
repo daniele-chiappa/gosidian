@@ -22,8 +22,13 @@ scrollable strip.
 - **Direct links**: the window's link button opens an *ego-graph* — the
   one-hop neighbourhood of that note — as its own window.
 - **Edit in place**: a note window has a View/Edit toggle; the editor
-  mounts lazily in the same window (hidden for read-only users).
+  mounts lazily in the same window. Where nothing can be edited (a
+  read-only account, a base, a canvas) there is no toggle.
 - **Navigate** focus between windows with `Alt-←` / `Alt-→`.
+- **Confirm**: a delete, a revoke or a rename asks in gosidian's own
+  dialog, in the language of the UI: `Enter` confirms, `Esc` cancels.
+  Closing a window with unsaved changes still asks with the browser's
+  dialog.
 
 The open windows + focus are encoded in the URL (`?w=…&f=…`), so a
 workspace is shareable and survives reload; when the URL is empty the

@@ -12,9 +12,9 @@
  * context menu (IMP-150).
  */
 import type { TreeNode as TN } from '@/api/tree'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Plus, Lock, Globe } from 'lucide-vue-next'
+import { ChevronRight, Dot, Plus, Lock, Globe } from 'lucide-vue-next'
 import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
 import { useWindowsStore } from 'plancia'
 import { useAccessStore } from '@/stores/access'
@@ -39,6 +39,7 @@ const visibility = computed(() =>
 )
 
 function toggleExpanded(open: boolean) {
+  isOpen.value = open
   try {
     localStorage.setItem(expandedKey.value, open ? '1' : '0')
   } catch {
@@ -52,6 +53,9 @@ function persistedOpen(): boolean {
     return false
   }
 }
+// The chevron follows this folder's own state: a group-open: class matched
+// any open folder above it, and turned the chevrons of closed subfolders.
+const isOpen = ref(persistedOpen())
 
 function openNote() {
   if (props.node.is_dir) return
@@ -101,9 +105,8 @@ function createHere() {
   <li class="text-sm">
     <template v-if="node.is_dir">
       <details
-        :open="persistedOpen()"
+        :open="isOpen"
         @toggle="toggleExpanded(($event.target as HTMLDetailsElement).open)"
-        class="group"
       >
         <summary
           class="group/row flex items-center gap-1.5 py-0.5 px-1 rounded cursor-pointer hover:bg-surface-hover select-none"
@@ -111,7 +114,11 @@ function createHere() {
           @contextmenu.prevent="onContextMenu"
           @keydown="onRowKeydown"
         >
-          <span class="opacity-60 group-open:rotate-90 transition-transform">▸</span>
+          <ChevronRight
+            class="h-3.5 w-3.5 shrink-0 opacity-60 transition-transform"
+            :class="{ 'rotate-90': isOpen }"
+            aria-hidden="true"
+          />
           <span class="flex-1 truncate">{{ node.name }}</span>
           <Lock
             v-if="visibility === 'private'"
@@ -164,13 +171,15 @@ function createHere() {
         @keydown="onRowKeydown"
         class="w-full flex items-center gap-1.5 py-0.5 px-2 rounded text-left text-text-muted hover:text-text hover:bg-surface-hover truncate"
       >
-        <span class="opacity-50 text-xs">·</span>
+        <Dot class="h-3.5 w-3.5 shrink-0 opacity-50" aria-hidden="true" />
         <span class="truncate">{{ node.name.replace(/\.md$/, '') }}</span>
         <span
           v-if="node.in_progress"
-          class="text-[10px] text-info ml-auto"
+          class="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-info"
+          role="img"
           title="status:in-progress"
-        >●</span>
+          :aria-label="t('tree.in_progress')"
+        />
       </button>
     </template>
   </li>

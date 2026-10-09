@@ -7,6 +7,7 @@ import { Folder, FileText, RotateCcw, Trash2 } from 'lucide-vue-next'
 import { errorText } from '@/api/errors'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
 import DateTime from '@/components/primitives/DateTime.vue'
+import { confirmAction } from '@/composables/useConfirm'
 
 const { t } = useI18n()
 
@@ -42,7 +43,7 @@ async function restore(item: TrashItem) {
 }
 
 async function purge(item: TrashItem) {
-  if (!confirm(t('trash.confirm_purge', { path: item.origin_path }))) return
+  if (!(await confirmAction(t('trash.confirm_purge', { path: item.origin_path }), { confirmLabel: t('common.delete') }))) return
   try {
     await purgeTrash(item.id)
     message.value = t('trash.purged')
@@ -57,7 +58,8 @@ onMounted(load)
 
 <template>
   <div class="p-8 max-w-4xl mx-auto">
-    <h1 class="text-2xl font-semibold mb-1">{{ t('trash.title') }}</h1>
+    <!-- The window's title bar shows the name: the heading is for screen readers. -->
+    <h1 class="sr-only">{{ t('trash.title') }}</h1>
     <p class="text-sm text-text-muted mb-6">
       {{ t('trash.intro') }}
     </p>
@@ -82,12 +84,12 @@ onMounted(load)
         <DateTime class="text-xs text-text-muted whitespace-nowrap" :value="item.discarded_at" />
         <button
           type="button"
-          class="text-xs px-2 py-1 rounded border border-border hover:bg-surface-hover inline-flex items-center gap-1"
+          class="h-control-sm text-xs px-2 rounded border border-border hover:bg-surface-hover inline-flex items-center gap-1"
           @click="restore(item)"
         ><RotateCcw class="w-3 h-3" /> {{ t('trash.restore') }}</button>
         <button
           type="button"
-          class="text-xs px-2 py-1 rounded text-danger hover:bg-surface-hover inline-flex items-center gap-1"
+          class="h-control-sm text-xs px-2 rounded text-danger hover:bg-surface-hover inline-flex items-center gap-1"
           @click="purge(item)"
         ><Trash2 class="w-3 h-3" /> {{ t('trash.purge') }}</button>
       </li>

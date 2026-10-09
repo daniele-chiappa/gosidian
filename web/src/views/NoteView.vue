@@ -62,6 +62,7 @@ import { planciaKey, base } from '@/composables/planciaKey'
 import { useAccessStore } from '@/stores/access'
 import { useTreeStore } from '@/stores/tree'
 import { useWindowsStore, type OpenSpec } from 'plancia'
+import { confirmAction } from '@/composables/useConfirm'
 
 const CodeMirrorEditor = defineAsyncComponent(
   () => import('@/components/editor/CodeMirrorEditor.vue'),
@@ -383,7 +384,7 @@ async function destroy() {
   if (!note.value) return
   // Without the trash the delete is for good, and the question says so
   // (BUG-116, S6-3).
-  if (!confirm(t(access.deleteNoteKey, { path: note.value.path }))) return
+  if (!(await confirmAction(t(access.deleteNoteKey, { path: note.value.path }), { confirmLabel: t('common.delete') }))) return
   try {
     await deleteNote(note.value.path)
     treeStore.refresh()
@@ -500,7 +501,7 @@ function openHistory() {
   openWindow({
     type: 'history',
     key: planciaKey('history', note.value.path),
-    title: `⏱ ${note.value.title || note.value.path}`,
+    title: `${t('history.title')} · ${note.value.title || note.value.path}`,
     props: { path: note.value.path },
   })
 }
@@ -569,19 +570,24 @@ watch(path, load)
       ref="headerEl"
       class="flex items-center gap-2 border-b border-border bg-bg-elevated px-4 py-2"
     >
-      <!-- The title gives way first (IMP-156, M5): it shrinks and ellipsises,
-           the controls keep their size. -->
-      <span class="min-w-0 flex-1 truncate font-semibold" :title="note?.title || note?.path || path">
-        {{ note?.title || note?.path || path }}
-      </span>
-      <span v-if="dirty" class="shrink-0 text-xs text-warning" :title="t('note.unsaved')">●</span>
+      <!-- Only the toolbar: the window's title bar names the note, and its
+           content opens with the heading. The save state comes first. -->
+      <span
+        v-if="dirty"
+        class="h-2 w-2 shrink-0 rounded-full bg-warning"
+        role="img"
+        :title="t('note.unsaved')"
+        :aria-label="t('note.unsaved')"
+      />
       <span v-else-if="lastSavedAt && !compact" class="shrink-0 text-xs text-success">
         {{ t('note.saved_at', { time: lastSavedAt }) }}
       </span>
+      <span class="flex-1" />
 
-      <!-- View / Edit toggle (Edit hidden for read-only users) -->
+      <!-- View / Edit toggle, only where the note can be edited: alone, the
+           View button of a canvas, a base or a reader's note chose nothing. -->
       <div
-        v-if="note"
+        v-if="note && access.canWrite(props.path) && !isReadOnlyFile"
         class="inline-flex h-control-sm shrink-0 overflow-hidden rounded border border-border text-xs"
       >
         <button
@@ -594,7 +600,6 @@ watch(path, load)
           {{ t('note.view') }}
         </button>
         <button
-          v-if="access.canWrite(props.path) && !isReadOnlyFile"
           type="button"
           class="px-2 disabled:cursor-not-allowed disabled:opacity-50"
           :class="mode === 'edit' ? 'bg-accent text-accent-fg' : 'hover:bg-surface-hover'"
@@ -675,12 +680,12 @@ watch(path, load)
     >
       <span class="text-warning">{{ t('note.conflict_banner') }}</span>
       <div class="flex-1" />
-      <button type="button" class="rounded px-2 py-1 hover:bg-surface-hover" @click="reloadRemote">
+      <button type="button" class="h-control-sm rounded px-2 hover:bg-surface-hover" @click="reloadRemote">
         {{ t('note.reload_remote') }}
       </button>
       <button
         type="button"
-        class="rounded bg-accent px-2 py-1 text-accent-fg hover:bg-accent-hover"
+        class="h-control-sm rounded bg-accent px-2 text-accent-fg hover:bg-accent-hover"
         @click="forceOverwrite"
       >
         {{ t('note.overwrite') }}
@@ -694,7 +699,7 @@ watch(path, load)
     >
       <span class="text-warning">{{ t('note.changed_elsewhere') }}</span>
       <div class="flex-1" />
-      <button type="button" class="rounded px-2 py-1 hover:bg-surface-hover" @click="reloadRemote">
+      <button type="button" class="h-control-sm rounded px-2 hover:bg-surface-hover" @click="reloadRemote">
         {{ t('note.reload_remote') }}
       </button>
     </div>
@@ -718,7 +723,7 @@ watch(path, load)
     >
       <ErrorMessage :text="error" class="min-w-0" />
       <div class="flex-1" />
-      <button type="button" class="rounded px-2 py-1 hover:bg-surface-hover" @click="error = null">
+      <button type="button" class="h-control-sm rounded px-2 hover:bg-surface-hover" @click="error = null">
         {{ t('common.dismiss') }}
       </button>
     </div>

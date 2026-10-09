@@ -26,7 +26,7 @@
  *   - Click an entry → commit valueKey(entry) verbatim (overwrites
  *     the typed query so the visible value matches what's applied).
  *   - Esc / Enter / blur outside → close.
- *   - × button clears the value and reopens the dropdown.
+ *   - the clear button (an X) empties the value and reopens the dropdown.
  *   - Keyboard, as an ARIA combobox: ↓ opens the list and moves down, ↑
  *     up, Home and End to the first and last entry while one is active,
  *     Enter picks the active entry (or keeps the typed text), Esc and Tab
@@ -36,6 +36,7 @@
 import { useI18n } from 'vue-i18n'
 import { computed, nextTick, ref, useId, useTemplateRef, watch } from 'vue'
 import { onClickOutside } from '@vueuse/core'
+import { X } from 'lucide-vue-next'
 
 const { t } = useI18n()
 
@@ -177,7 +178,7 @@ function commitAndClose() {
         :aria-expanded="open && filtered.length > 0"
         :aria-controls="listId"
         :aria-activedescendant="open && active >= 0 ? optionId(active) : undefined"
-        class="w-full rounded bg-bg border border-border pl-2 pr-7 py-1.5 text-sm"
+        class="h-control py-0 w-full rounded bg-bg border border-border pl-2 pr-7 text-sm"
         @focus="open = true"
         @input="onInput"
         @keydown="onKeydown"
@@ -185,10 +186,11 @@ function commitAndClose() {
       <button
         v-if="query"
         type="button"
-        class="absolute right-1 top-1/2 -translate-y-1/2 text-text-muted hover:text-text px-1 text-xs"
+        class="absolute right-1 top-1/2 -translate-y-1/2 text-text-muted hover:text-text px-1"
         :title="t('select.clear')"
+        :aria-label="t('select.clear')"
         @click="clear"
-      >×</button>
+      ><X class="h-3.5 w-3.5" aria-hidden="true" /></button>
     </div>
     <ul
       v-if="open && filtered.length"

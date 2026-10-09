@@ -50,7 +50,7 @@ describe('plancia codec round-trip', () => {
     expect(codec.decode(ego)).toEqual({
       type: 'graph',
       key: 'graph:p/n.md',
-      title: '↳ n',
+      title: 'Links · n',
       props: { focus: 'p/n.md', depth: 1 },
     })
   })

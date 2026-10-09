@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Network } from 'lucide-vue-next'
+import { Network, TriangleAlert } from 'lucide-vue-next'
 import {
   Plancia,
   PlanciaSidebar,
@@ -14,6 +14,7 @@ import {
 import TopBar from './TopBar.vue'
 import Sidebar from './Sidebar.vue'
 import CommandPalette from './CommandPalette.vue'
+import ConfirmHost from '@/components/primitives/ConfirmHost.vue'
 import TotpEnroll from '@/components/domain/TotpEnroll.vue'
 import PasswordChange from '@/components/domain/PasswordChange.vue'
 import { windowRegistry } from '@/components/plancia/windowRegistry'
@@ -75,7 +76,7 @@ function openLinks(win: WindowInstance): void {
   openWindow({
     type: 'graph',
     key: `graph:${path}`,
-    title: `↳ ${win.title || path}`,
+    title: t('graph.links_title', { name: win.title || path }),
     props: { focus: path, depth: 1 },
   })
 }
@@ -121,20 +122,20 @@ function openSettings(): void {
       role="status"
       class="flex items-center gap-3 border-b border-border bg-bg-elevated px-4 py-2 text-sm"
     >
-      <span class="text-warning" aria-hidden="true">●</span>
+      <TriangleAlert class="h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
       <span class="flex-1">
         {{ t('totp.recovery_used_banner', { n: auth.user?.recovery_codes_remaining ?? 0 }) }}
       </span>
       <button
         type="button"
-        class="rounded border border-border px-2 py-1 text-xs hover:bg-surface-hover"
+        class="h-control-sm rounded border border-border px-2 text-xs hover:bg-surface-hover"
         @click="openSettings"
       >
         {{ t('totp.recovery_used_open_settings') }}
       </button>
       <button
         type="button"
-        class="rounded px-2 py-1 text-xs text-text-muted hover:bg-surface-hover"
+        class="h-control-sm rounded px-2 text-xs text-text-muted hover:bg-surface-hover"
         @click="auth.dismissRecoveryNotice()"
       >
         {{ t('totp.recovery_used_dismiss') }}
@@ -228,5 +229,6 @@ function openSettings(): void {
     </div>
 
     <CommandPalette />
+    <ConfirmHost />
   </div>
 </template>

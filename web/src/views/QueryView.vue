@@ -5,6 +5,7 @@
  *  open as sibling windows. */
 import { useI18n } from 'vue-i18n'
 import { computed, inject, onMounted, ref } from 'vue'
+import { X } from 'lucide-vue-next'
 import { runQuery, type QueryCondition, type QueryNote, type QueryOp } from '@/api/query'
 import { listProjects } from '@/api/projects'
 import { QUERY_OPS } from '@/composables/queryArg'
@@ -182,9 +183,8 @@ onMounted(async () => {
 
 <template>
   <div class="p-6 max-w-5xl mx-auto">
-    <h1 class="text-xl font-semibold mb-1">
-      {{ t('query.title') }}
-    </h1>
+    <!-- The window's title bar shows the name: the heading is for screen readers. -->
+    <h1 class="sr-only">{{ t('query.title') }}</h1>
     <p class="text-sm text-text-muted mb-4">
       {{ t('query.intro') }}
     </p>
@@ -225,7 +225,7 @@ onMounted(async () => {
           v-model="project"
           list="query-projects"
           :placeholder="t('query.project_placeholder')"
-          class="w-56 rounded bg-bg-elevated border border-border px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
+          class="h-control py-0 w-56 rounded bg-bg-elevated border border-border px-2 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
         >
       </div>
 
@@ -240,12 +240,12 @@ onMounted(async () => {
           list="query-fields"
           :placeholder="t('query.field')"
           :aria-label="t('query.field')"
-          class="w-44 rounded bg-bg-elevated border border-border px-2 py-1 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-focus"
+          class="h-control py-0 w-44 rounded bg-bg-elevated border border-border px-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-focus"
         >
         <select
           v-model="r.op"
           :aria-label="t('query.operator')"
-          class="rounded bg-bg-elevated border border-border px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
+          class="h-control py-0 rounded bg-bg-elevated border border-border px-2 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
         >
           <option
             v-for="op in QUERY_OPS"
@@ -259,7 +259,7 @@ onMounted(async () => {
           v-if="r.op === 'exists'"
           v-model="r.value"
           :aria-label="t('query.value')"
-          class="rounded bg-bg-elevated border border-border px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
+          class="h-control py-0 rounded bg-bg-elevated border border-border px-2 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
         >
           <option value="true">
             true
@@ -273,22 +273,22 @@ onMounted(async () => {
           v-model="r.value"
           :placeholder="r.op === 'in' ? 'a, b, c' : t('query.value')"
           :aria-label="t('query.value')"
-          class="flex-1 min-w-40 rounded bg-bg-elevated border border-border px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
+          class="h-control py-0 flex-1 min-w-40 rounded bg-bg-elevated border border-border px-2 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
         >
         <button
           type="button"
-          class="px-2 py-1 text-sm rounded hover:bg-surface-hover text-text-muted"
+          class="h-control px-2 text-sm rounded hover:bg-surface-hover text-text-muted"
           :aria-label="t('query.remove_condition', { n: i + 1 })"
           @click="removeRow(i)"
         >
-          ×
+          <X class="h-4 w-4" aria-hidden="true" />
         </button>
       </div>
 
       <div class="flex flex-wrap gap-2 items-center">
         <button
           type="button"
-          class="px-2 py-1 text-sm rounded border border-border hover:bg-surface-hover"
+          class="h-control px-2 text-sm rounded border border-border hover:bg-surface-hover"
           @click="addRow"
         >
           {{ t('query.add_condition') }}
@@ -304,12 +304,12 @@ onMounted(async () => {
             list="query-sort"
             :placeholder="t('query.sort_placeholder')"
             :title="t('query.sort_hint')"
-            class="w-56 rounded bg-bg-elevated border border-border px-2 py-1 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-focus"
+            class="h-control py-0 w-56 rounded bg-bg-elevated border border-border px-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-focus"
           >
           <select
             v-model="order"
             :aria-label="t('query.order')"
-            class="rounded bg-bg-elevated border border-border px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
+            class="h-control py-0 rounded bg-bg-elevated border border-border px-2 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
           >
             <option value="">
               {{ t('query.order_default') }}
@@ -331,12 +331,12 @@ onMounted(async () => {
             id="query-fields-input"
             v-model="fieldsText"
             :placeholder="t('query.fields_placeholder')"
-            class="w-56 rounded bg-bg-elevated border border-border px-2 py-1 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-focus"
+            class="h-control py-0 w-56 rounded bg-bg-elevated border border-border px-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-focus"
           >
         </span>
         <button
           type="submit"
-          class="ml-auto px-3 py-1 text-sm rounded bg-accent text-accent-fg hover:bg-accent-hover disabled:opacity-60"
+          class="h-control ml-auto px-3 text-sm rounded bg-accent text-accent-fg hover:bg-accent-hover disabled:opacity-60"
           :disabled="loading"
         >
           {{ t('query.run') }}

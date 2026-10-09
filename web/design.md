@@ -34,11 +34,15 @@ through the Tailwind names in `tailwind.config.ts` (`bg-surface`,
 }
 ```
 - Fonts · `font-sans` system-ui stack, `font-mono` ui-monospace stack; no
-  web font (strict CSP), no display face
-- Type · Tailwind scale; `text-xs` and `text-sm` carry the UI, `text-lg` to
-  `text-2xl` the window headings, `prose` (typography plugin) the notes,
-  its colours read from these tokens in `tailwind.config.ts` (no
-  `prose-invert`)
+  web font (strict CSP), no display face. A choice, confirmed on
+  2026-10-09: the UI reads as the system's own, with nothing to download
+  or license; it changes from one machine to another, and that is accepted
+- Type · Tailwind scale; `text-xs` and `text-sm` carry the UI; weight marks
+  a section title or a legend (`font-semibold`) and a table head
+  (`font-medium`), never capitals: small status badges (a level, a role)
+  and the sidebar's MENU, VAULT and RECENT keep theirs. `prose` (typography
+  plugin) sets the notes, its colours read from these tokens in
+  `tailwind.config.ts` (no `prose-invert`)
 - Code · the server marks highlighted tokens with chroma classes;
   `src/styles/code.css` paints them: keywords accent, strings success,
   numbers warning, names info, comments text-muted
@@ -46,7 +50,14 @@ through the Tailwind names in `tailwind.config.ts` (`bg-surface`,
 - Focus · `focus:ring-focus` (2 px); `--color-focus` is the accent unless
   a preset sets its own
 - Controls · two heights: 32 px (`h-control`) for inputs, selects and
-  buttons in a form, 28 px (`h-control-sm`) in window toolbars
+  buttons in a form, 28 px (`h-control-sm`) in window toolbars, banners and
+  the actions of a list row, with `py-0` on an input or a select (the
+  forms plugin pads them, and the text was cut); menus, tabs and list rows
+  keep their padding
+- Disabled · the native attribute, an opacity and the `not-allowed`
+  cursor (a base rule in `src/styles/tailwind.css`)
+- Headings · a window's title bar names it: a view has no visible `h1`,
+  only a `sr-only` one for screen readers
 - Not tokenised · motion durations and easings (Tailwind defaults),
   z-index (plancia sidebar 40, dialogs 50, menus 60)
 - plancia · its core variables map to these tokens in
@@ -54,15 +65,24 @@ through the Tailwind names in `tailwind.config.ts` (`bg-surface`,
 
 ## CTA voice
 - Primary · `bg-accent text-accent-fg hover:bg-accent-hover`, `rounded`,
-  compact in window toolbars (`px-2 py-1 text-xs`)
+  compact in window toolbars (`h-control-sm px-2 text-xs`)
 - Secondary · `border border-border hover:bg-surface-hover`, same radius
-- Destructive · `text-danger`, no fill
-- Icons · Lucide only, 14–16 px
+- Destructive · `text-danger`, no fill; filled (`bg-danger text-bg`) only
+  as the confirm button of a confirmation
+- Icons · Lucide only, 14–16 px; no Unicode glyph or emoji as an icon. The
+  shortcut hint reads ⌘K on an Apple system, Ctrl+K elsewhere
+- Dialogs · confirmations, questions and error notices go through
+  `confirmAction()`, `askText()` and `showNotice()`
+  (`src/composables/useConfirm.ts`) and the one `ConfirmHost`, a
+  `PlanciaModal`: never the browser's `confirm()`, `prompt()` or
+  `alert()`
 
 ## Motion stance
 - Silent: colour and opacity on hover, the tree's disclosure arrow turns;
   no entrances
-- Reduced-motion fallback · not declared yet
+- Reduced-motion fallback · `prefers-reduced-motion: reduce` ends every
+  transition and animation at once (`src/styles/tailwind.css`); plancia's
+  windows, sidebar and dialogs follow the same query
 
 ## Exports
 `src/styles/tokens.css` is the source of truth; `tailwind.config.ts`,

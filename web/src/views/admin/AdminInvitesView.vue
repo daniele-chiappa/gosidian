@@ -6,6 +6,7 @@ import { errorText } from '@/api/errors'
 import DateTime from '@/components/primitives/DateTime.vue'
 import { formatDateTime } from '@/api/format'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
+import { confirmAction } from '@/composables/useConfirm'
 
 const { t } = useI18n()
 
@@ -47,7 +48,8 @@ async function create() {
 }
 
 async function destroy(iv: Invite) {
-  if (!confirm(t('admin.invites.confirm_revoke', { id: iv.token.slice(0, 8) }))) return
+  if (!(await confirmAction(t('admin.invites.confirm_revoke', { id: iv.token.slice(0, 8) }), { confirmLabel: t('common.revoke') })))
+    return
   try {
     await deleteInvite(iv.token)
     await load()
@@ -74,7 +76,7 @@ onMounted(load)
     <p class="text-xs text-text-muted">{{ t('admin.invites.expires', { when: formatDateTime(fresh.expires_at) }) }}</p>
     <button
       type="button"
-      class="text-xs px-2 py-1 rounded border border-border hover:bg-surface-hover"
+      class="h-control-sm text-xs px-2 rounded border border-border hover:bg-surface-hover"
       @click="dismissFresh"
     >{{ t('common.dismiss') }}</button>
   </div>
@@ -89,13 +91,13 @@ onMounted(load)
         v-model.number="ttlHours"
         type="number"
         min="1"
-        class="rounded bg-bg-elevated border border-border px-3 py-2 w-32"
+        class="h-control py-0 rounded bg-bg-elevated border border-border px-3 w-32"
       />
     </label>
     <button
       type="submit"
       :disabled="creating"
-      class="px-3 py-2 rounded bg-accent text-accent-fg hover:bg-accent-hover disabled:opacity-60"
+      class="h-control px-3 rounded bg-accent text-accent-fg hover:bg-accent-hover disabled:opacity-60"
     >{{ t('admin.invites.create') }}</button>
   </form>
 
@@ -109,7 +111,7 @@ onMounted(load)
     <!-- Scrolls inside its box in a narrow window (IMP-156, M7). -->
 
     <table class="w-full text-sm">
-      <thead class="text-text-muted text-xs uppercase tracking-wide">
+      <thead class="text-text-muted text-xs [&_th]:font-medium">
         <tr>
           <th class="text-left py-2 px-3">{{ t('admin.col.token') }}</th>
           <th class="text-left py-2 px-3">{{ t('admin.col.created_by') }}</th>
@@ -147,7 +149,7 @@ onMounted(load)
             <button
               v-if="iv.pending"
               type="button"
-              class="text-xs px-2 py-1 rounded text-danger hover:bg-surface-hover"
+              class="h-control-sm text-xs px-2 rounded text-danger hover:bg-surface-hover"
               @click="destroy(iv)"
             >{{ t('common.revoke') }}</button>
           </td>
