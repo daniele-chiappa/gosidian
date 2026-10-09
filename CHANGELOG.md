@@ -8,7 +8,7 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
-## [2.72.1] — 2026-10-09 — "server fixes"
+## [2.72.2] — 2026-10-09 — "server fixes"
 
 The low findings of the same code review on the server side: accounts
 and OAuth, the API, the MCP tools, databases and the index, the vault and
@@ -18,7 +18,9 @@ credentials no longer shows the vault path, the note count or git sync's
 last error; `gosidian mirror sync` writes its index to
 `<project>/.gosidian-index.md`; an OAuth issuer with a path stops the
 server at start; `cache_size = 0` turns the vault cache off; and the
-example compose files run the container read-only, with no capability.
+example compose files run the container read-only, with no capability. The
+2.72.1 tag was never released: its build stopped at the formatting
+check of a test, and 2.72.2 carries the same code.
 
 ### Security
 - **`/healthz` keeps its details for the owner** — without credentials
