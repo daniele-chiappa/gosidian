@@ -16,7 +16,7 @@ import { useI18n } from 'vue-i18n'
 import { Maximize, Minus, Plus } from 'lucide-vue-next'
 import { useWindowsStore, type OpenSpec } from 'plancia'
 import type { CanvasCard, CanvasData } from '@/api/notes'
-import { planciaKey } from '@/composables/planciaKey'
+import { planciaKey, base } from '@/composables/planciaKey'
 import MarkdownPreview from './MarkdownPreview.vue'
 import { bounds, colorOf, edgeShape, fit, zoomAt } from './canvasGeometry'
 import { isWebURL } from './noteLinks'
@@ -68,7 +68,7 @@ function openNote(c: CanvasCard) {
   openWindow({
     type: 'note',
     key: planciaKey('note', c.path),
-    title: c.title || (c.path.split('/').pop() ?? c.path).replace(/\.md$/, ''),
+    title: c.title || base(c.path),
     props: { path: c.path },
   })
 }

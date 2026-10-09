@@ -69,7 +69,8 @@
     "loading": "Caricamento…",
     "vault": "Vault",
     "back": "Indietro",
-    "dismiss": "Chiudi"
+    "dismiss": "Chiudi",
+    "retry": "Riprova"
   },
   "tree": {
     "filter_placeholder": "Filtra note…",
@@ -133,7 +134,10 @@
     "overwrite_failed": "Sovrascrittura non riuscita",
     "delete_failed": "Eliminazione non riuscita",
     "download_failed": "Download non riuscito",
-    "html_frame": "Nota HTML"
+    "html_frame": "Nota HTML",
+    "too_large": "Questa nota supera 1 MiB, più di quanto la web UI può salvare: si apre in sola lettura. Modificala con un editor o tramite git.",
+    "too_large_to_save": "Il testo supera 1 MiB e la web UI non può salvarlo. Accorcialo o dividilo in più note.",
+    "preview_failed": "Non è stato possibile creare l'anteprima"
   },
   "note_create": {
     "title": "Nuova nota",

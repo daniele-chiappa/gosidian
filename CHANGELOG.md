@@ -8,6 +8,70 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.72.3] — 2026-10-09 — "web UI polish"
+
+The low findings of the same code review on the web UI side: notes the
+editor cannot take, the sign-in, the lists of Settings and Admin, the
+command palette, the graph's pickers and the sidebar. Pull the image and
+restart, nothing to migrate; the API is unchanged. A note larger than
+1 MiB, written by git or an import, now opens read-only in the web UI
+instead of failing to open.
+
+### Fixed
+- **Notes and the editor**:
+  - a note larger than the 1 MiB the web UI can send back opens
+    read-only, with a line that says why and Edit disabled: a markdown
+    note as its text, without a preview, an HTML note in its frame. Its
+    preview failed, and the whole note with it. Edit it with an editor or
+    through git;
+  - a preview that fails on any other note leaves the note open, with the
+    reason where the preview would be, and its editor still works; a
+    draft over 1 MiB is refused before it is sent;
+  - the window title of an HTML note leaves out `.html` wherever the
+    window opens from;
+  - a property panel, the row views and a CSV table show the reply to the
+    last request only, where a slow reply could land over a newer one.
+- **Sign-in and Settings**:
+  - the requests that fail together when a session ends send the browser
+    to the sign-in once, with the address it was on: the next ones wrapped
+    the sign-in's own address, and the deep link was lost after signing in;
+  - the sign-in shows the two-factor field, optional, when the server's
+    configuration cannot be read: hidden, an account with two factors
+    could not sign in;
+  - a toggle of Settings that the server refuses shows the saved value
+    again, not the one tried;
+  - creating an MCP token or an invite takes one click at a time: a second
+    click before the reply minted a second token, and the secret of the
+    first, shown once, was lost.
+- **Lists, Tags and Admin**:
+  - the lists of Admin (accounts, tokens, sessions, invites), the tokens of
+    Settings and the Projects list stay in place while they reload after
+    an action, where they went down and back up and took focus and scroll
+    with them; an action's error shows above the list instead of in its
+    place;
+  - Admin → Teams changes the team it acted on, where every action read
+    the teams, the accounts and the projects again; a rename refused keeps
+    its form and what was typed;
+  - in Tags, an error on a tag's notes no longer takes the place of the
+    list for good; both errors have a Try again, and a tag picked later
+    wins over a reply that lands late.
+- **Palette, graph and sidebar**:
+  - the command palette (Ctrl+K) shows the list it has and reads it again
+    at each opening, keeping the entry the keyboard is on: it was read
+    once, and a note created later never showed until a reload;
+  - the pickers of the graph (project, tag, focus) work as a combobox from
+    the keyboard: ↓ and ↑ move through the entries, Home and End go to the
+    first and last, Enter picks, Esc and Tab close, and a screen reader
+    hears the entry;
+  - the sidebar's resize handle captures the pointer: over an HTML note's
+    frame or outside the page the drag stayed on after the button was
+    released;
+  - the images an HTML note inlines are kept in one cache for the tab, up
+    to 32 MiB, the least used first out: each window kept its images
+    without a limit while it was open.
+- **Accessibility**: the conflict banner of a note is announced to screen
+  readers as an alert, the "changed elsewhere" one as a status.
+
 ## [2.72.2] — 2026-10-09 — "server fixes"
 
 The low findings of the same code review on the server side: accounts

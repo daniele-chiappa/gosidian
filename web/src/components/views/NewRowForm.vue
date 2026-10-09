@@ -17,7 +17,7 @@ import axios from 'axios'
 import { useWindowsStore, type OpenSpec } from 'plancia'
 import { createRow, getNewRow, type FieldValue, type NewRow } from '@/api/notes'
 import type { ViewColumn } from '@/api/preview'
-import { planciaKey } from '@/composables/planciaKey'
+import { planciaKey, base } from '@/composables/planciaKey'
 import { toChange } from './cellValue'
 
 const props = defineProps<{
@@ -118,7 +118,7 @@ function open(path: string) {
   const spec: OpenSpec = {
     type: 'note',
     key: planciaKey('note', path),
-    title: (path.split('/').pop() ?? path).replace(/\.md$/, ''),
+    title: base(path),
     props: { path },
   }
   if (openWindow) openWindow(spec)

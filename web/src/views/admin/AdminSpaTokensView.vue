@@ -10,6 +10,9 @@ const { t } = useI18n()
 
 const tokens = ref<SpaToken[]>([])
 const loading = ref(false)
+// Only the first load puts "Loading…" in place of the list: a reload after
+// an action took the whole list down and back, focus and scroll with it.
+const loaded = ref(false)
 const error = ref<string | null>(null)
 
 async function load() {
@@ -17,6 +20,7 @@ async function load() {
   error.value = null
   try {
     tokens.value = await listSpaTokens()
+    loaded.value = true
   } catch (e) {
     error.value = errorText(e, t, t('admin.sessions.load_failed'))
   } finally {
@@ -38,8 +42,9 @@ onMounted(load)
 </script>
 
 <template>
-  <p v-if="loading" class="text-text-muted">{{ t('common.loading') }}</p>
-  <ErrorMessage v-else-if="error" :text="error" />
+  <ErrorMessage v-if="error && loaded" :text="error" class="mb-3" />
+  <p v-if="loading && !loaded" class="text-text-muted">{{ t('common.loading') }}</p>
+  <ErrorMessage v-else-if="error && !loaded" :text="error" />
 
   <p v-else-if="!tokens.length" class="text-text-muted text-sm">{{ t('admin.sessions.empty') }}</p>
 

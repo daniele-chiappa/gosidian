@@ -105,22 +105,27 @@ function sniffDelimiter(text: string): string {
   return delim
 }
 
+// Only the file of the last request is shown: the CSV asked for before
+// could land after it.
+let seq = 0
 async function load() {
   if (props.media.broken) return
+  const mine = ++seq
   loading.value = true
   loadError.value = false
   try {
     const res = await fetch(props.media.url)
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const text = await res.text()
+    if (mine !== seq) return
     const parsed = parseCSV(text, sniffDelimiter(text))
     header.value = parsed[0] ?? []
     rows.value = parsed.slice(1)
     page.value = 0
   } catch {
-    loadError.value = true
+    if (mine === seq) loadError.value = true
   } finally {
-    loading.value = false
+    if (mine === seq) loading.value = false
   }
 }
 watch(() => props.media.url, load, { immediate: true })

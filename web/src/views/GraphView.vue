@@ -18,7 +18,7 @@ import { listTags, type TagCount } from '@/api/tags'
 import { suggestNoteTitles, type NoteTitleHit } from '@/api/noteTitles'
 import SearchSelect from '@/components/primitives/SearchSelect.vue'
 import { useWindowsStore, type OpenSpec } from 'plancia'
-import { planciaKey } from '@/composables/planciaKey'
+import { planciaKey, base } from '@/composables/planciaKey'
 import { useUIStore, type GraphRenderMode } from '@/stores/ui'
 import type { ZMode } from '@/components/graph/adapter'
 import { errorText } from '@/api/errors'
@@ -110,8 +110,6 @@ function syncWindow() {
   store.setTitle(w.id, project.value ? `${t('nav.graph')} · ${project.value}` : t('nav.graph'))
 }
 const hadInitialFilter = Boolean(project.value || tag.value || focus.value)
-const base = (p: string) => (p.split('/').pop() ?? p).replace(/\.md$/, '')
-
 const params = computed(() => ({
   project: project.value || undefined,
   tag: tag.value || undefined,

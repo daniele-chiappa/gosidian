@@ -28,8 +28,11 @@ import { queryArgFromProps, queryPropsFromArg } from './queryArg'
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null)
 
-/** Note path → display title: last segment without the `.md` suffix. */
-export const base = (p: string): string => (p.split('/').pop() ?? p).replace(/\.md$/, '')
+/** Note path → display title: last segment without the `.md` or `.html` suffix. */
+export const base = (p: string): string => (p.split('/').pop() ?? p).replace(/\.(md|html)$/i, '')
+
+/** Note path → its deep link, `/notes/<path>` with each segment escaped. */
+export const noteHref = (p: string): string => '/notes/' + p.split('/').map(encodeURIComponent).join('/')
 
 /** Stable de-dup key (decoded). Use this when opening windows from the app so a
  *  hydrated window de-dups against a later open of the same target. Mirrors the

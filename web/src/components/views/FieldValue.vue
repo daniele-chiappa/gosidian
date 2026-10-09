@@ -6,7 +6,7 @@
  */
 import { computed, inject } from 'vue'
 import { useWindowsStore, type OpenSpec } from 'plancia'
-import { planciaKey } from '@/composables/planciaKey'
+import { planciaKey, noteHref, base } from '@/composables/planciaKey'
 import type { ViewLink } from '@/api/preview'
 
 const props = defineProps<{ value?: string | string[]; links?: ViewLink[] }>()
@@ -36,17 +36,13 @@ const parts = computed<Part[]>(() => {
   return out
 })
 
-function noteHref(path: string): string {
-  return '/notes/' + path.split('/').map(encodeURIComponent).join('/')
-}
-
 function open(e: MouseEvent, path: string) {
   if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return
   e.preventDefault()
   const spec: OpenSpec = {
     type: 'note',
     key: planciaKey('note', path),
-    title: (path.split('/').pop() ?? path).replace(/\.md$/, ''),
+    title: base(path),
     props: { path },
   }
   if (openWindow) openWindow(spec)

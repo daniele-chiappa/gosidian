@@ -19,8 +19,8 @@ export interface CommandPaletteData {
 }
 
 /**
- * GET /api/v1/command-palette — full dataset for Cmd+K. The SPA
- * caches it after the first open and revalidates on focus.
+ * GET /api/v1/command-palette — full dataset for Cmd+K. The palette keeps
+ * the last one and reads it again at each opening.
  */
 export async function fetchCommandPalette(): Promise<CommandPaletteData> {
   const { data } = await client.get<CommandPaletteData>('/command-palette')

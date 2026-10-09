@@ -33,6 +33,18 @@ rendered with a `broken` style so authors notice typos immediately.
 - **History** (`/notes/<path>/history`) lists previous states captured
   by git sync when enabled — with a one-click `restore` action.
 
+## Notes over 1 MiB
+
+The web UI sends a note's text to the server to preview it and to save
+it, and the server takes at most 1 MiB in such a request. A larger note,
+which only git, an editor on the disk or an import can write, opens
+**read-only**, with a line above it that says why and **Edit** disabled:
+a markdown note shows its text in the editor, without a preview, and an
+HTML note keeps its frame. Edit it where it was written. A draft that grows past
+1 MiB is refused when you save, with the same reason, and stays in the
+editor. A preview that fails on a note of any size leaves the note open,
+with the reason where the preview would be.
+
 ## Print / Save as PDF
 
 In **view mode**, a **Print** button appears in the note's header — but
@@ -67,7 +79,9 @@ affordances (maximize, minimize, close, drag, resize).
 `Cmd+K` / `Ctrl+K` opens a fuzzy finder across notes, projects, tags,
 and built-in actions (go to graph, create note, …). Keyboard-first:
 arrow keys to select, `Enter` to run, `Esc` to close. Recent
-selections are remembered for quick re-access.
+selections are remembered for quick re-access. The list it shows comes
+from the server at each opening; the one it has shows while the new one
+arrives.
 
 ## Not supported in-editor
 

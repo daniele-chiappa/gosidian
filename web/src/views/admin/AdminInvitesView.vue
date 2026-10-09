@@ -11,8 +11,13 @@ const { t } = useI18n()
 
 const invites = ref<Invite[]>([])
 const loading = ref(false)
+// Only the first load puts "Loading…" in place of the list: a reload after
+// an action took the whole list down and back, focus and scroll with it.
+const loaded = ref(false)
 const error = ref<string | null>(null)
 const fresh = ref<Invite | null>(null)
+// One invite per click: a second one before the reply hid the first link.
+const creating = ref(false)
 const ttlHours = ref(24)
 
 async function load() {
@@ -20,6 +25,7 @@ async function load() {
   error.value = null
   try {
     invites.value = await listInvites()
+    loaded.value = true
   } catch (e) {
     error.value = errorText(e, t, t('admin.invites.load_failed'))
   } finally {
@@ -28,11 +34,15 @@ async function load() {
 }
 
 async function create() {
+  if (creating.value) return
+  creating.value = true
   try {
     fresh.value = await createInvite(ttlHours.value > 0 ? ttlHours.value * 3600 * 1000 : undefined)
     await load()
   } catch (e) {
     error.value = errorText(e, t, t('my_tokens.create_failed'))
+  } finally {
+    creating.value = false
   }
 }
 
@@ -84,12 +94,14 @@ onMounted(load)
     </label>
     <button
       type="submit"
-      class="px-3 py-2 rounded bg-accent text-accent-fg hover:bg-accent-hover"
+      :disabled="creating"
+      class="px-3 py-2 rounded bg-accent text-accent-fg hover:bg-accent-hover disabled:opacity-60"
     >{{ t('admin.invites.create') }}</button>
   </form>
 
-  <p v-if="loading" class="text-text-muted">{{ t('common.loading') }}</p>
-  <ErrorMessage v-else-if="error" :text="error" />
+  <ErrorMessage v-if="error && loaded" :text="error" class="mb-3" />
+  <p v-if="loading && !loaded" class="text-text-muted">{{ t('common.loading') }}</p>
+  <ErrorMessage v-else-if="error && !loaded" :text="error" />
 
   <p v-else-if="!invites.length" class="text-text-muted text-sm">{{ t('admin.invites.empty') }}</p>
 

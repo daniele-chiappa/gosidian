@@ -94,4 +94,14 @@ describe('SettingsView owner controls (BUG-109)', () => {
     await flushPromises()
     expect((policy(w)!.element as HTMLSelectElement).disabled).toBe(false)
   })
+
+  it('shows the saved value again when a toggle is refused', async () => {
+    vi.mocked(getSettings).mockResolvedValue(structuredClone(settings))
+    vi.mocked(updateSettings).mockRejectedValue(new Error('refused'))
+    const w = mountView()
+    await flushPromises()
+    await policy(w)!.setValue('required')
+    await flushPromises()
+    expect((policy(w)!.element as HTMLSelectElement).value).toBe('optional')
+  })
 })

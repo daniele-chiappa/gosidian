@@ -5,7 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { onMounted, ref, watch, computed, inject } from 'vue'
 import { getHistory, type HistoryEntry } from '@/api/history'
 import { useWindowsStore, type OpenSpec } from 'plancia'
-import { planciaKey } from '@/composables/planciaKey'
+import { planciaKey, base } from '@/composables/planciaKey'
 import { errorText } from '@/api/errors'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
 import DateTime from '@/components/primitives/DateTime.vue'
@@ -40,7 +40,7 @@ function openNote() {
   openWindow({
     type: 'note',
     key: planciaKey('note', path.value),
-    title: (path.value.split('/').pop() ?? path.value).replace(/\.md$/, ''),
+    title: base(path.value),
     props: { path: path.value },
   })
 }

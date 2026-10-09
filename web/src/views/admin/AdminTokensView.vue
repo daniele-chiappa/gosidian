@@ -22,8 +22,14 @@ const users = ref<Map<string, AdminUser>>(new Map())
 // false when the user list could not be read: labels then avoid guessing.
 const usersLoaded = ref(false)
 const loading = ref(false)
+// Only the first load puts "Loading…" in place of the list: a reload after
+// an action took the whole list down and back, focus and scroll with it.
+const loaded = ref(false)
 const error = ref<string | null>(null)
 const fresh = ref<MCPTokenCreated | null>(null)
+// A second click before the reply minted a second token, and the secret of
+// the first, shown once, was lost.
+const creating = ref(false)
 
 const draft = reactive<{ name: string; project: string; scopes: string; ttl_ms: number; password: string }>({
   name: '',
@@ -48,6 +54,7 @@ async function load() {
     tokens.value = list
     usersLoaded.value = accounts !== null
     users.value = new Map((accounts ?? []).map((u) => [u.id, u]))
+    loaded.value = true
   } catch (e) {
     error.value = errorText(e, t, t('my_tokens.load_failed'))
   } finally {
@@ -56,7 +63,8 @@ async function load() {
 }
 
 async function create() {
-  if (!draft.name.trim() || !draft.password) return
+  if (creating.value || !draft.name.trim() || !draft.password) return
+  creating.value = true
   try {
     fresh.value = await createMCPToken({
       name: draft.name.trim(),
@@ -71,6 +79,7 @@ async function create() {
   } catch (e) {
     error.value = errorText(e, t, t('my_tokens.create_failed'))
   } finally {
+    creating.value = false
     draft.password = ''
   }
 }
@@ -167,12 +176,14 @@ onMounted(load)
     />
     <button
       type="submit"
-      class="px-3 py-2 rounded bg-accent text-accent-fg hover:bg-accent-hover"
+      :disabled="creating"
+      class="px-3 py-2 rounded bg-accent text-accent-fg hover:bg-accent-hover disabled:opacity-60"
     >{{ t('common.create') }}</button>
   </form>
 
-  <p v-if="loading" class="text-text-muted">{{ t('common.loading') }}</p>
-  <ErrorMessage v-else-if="error" :text="error" />
+  <ErrorMessage v-if="error && loaded" :text="error" class="mb-3" />
+  <p v-if="loading && !loaded" class="text-text-muted">{{ t('common.loading') }}</p>
+  <ErrorMessage v-else-if="error && !loaded" :text="error" />
 
   <div v-else class="overflow-x-auto">
     <!-- Scrolls inside its box in a narrow window (IMP-156, M7). -->

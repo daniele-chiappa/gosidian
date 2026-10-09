@@ -102,3 +102,27 @@ describe('FieldValue', () => {
     w.unmount()
   })
 })
+
+describe('PropertiesPanel replies', () => {
+  beforeEach(() => get.mockReset())
+
+  it('keeps the fields of the last note asked when an older answer lands later', async () => {
+    let releaseOld: (f: RowFields) => void = () => {}
+    get.mockImplementation((path: string) =>
+      path === 'p/docs/tasks/T-1.md'
+        ? new Promise((r) => (releaseOld = r))
+        : Promise.resolve(fields({ values: { id: 'T-2', status: 'done' } })),
+    )
+    const i18n = createI18n({ legacy: false, locale: 'en', messages: { en: enUI } })
+    const w = mount(PropertiesPanel, {
+      props: { path: 'p/docs/tasks/T-1.md', etag: 'e1' },
+      global: { plugins: [i18n], provide: { openWindow: vi.fn() } },
+    })
+    await w.setProps({ path: 'p/docs/tasks/T-2.md', etag: 'e2' })
+    await flushPromises()
+    releaseOld(fields({ values: { id: 'T-1', status: 'todo' } }))
+    await flushPromises()
+    expect(w.text()).toContain('T-2')
+    expect(w.text()).not.toContain('T-1')
+  })
+})

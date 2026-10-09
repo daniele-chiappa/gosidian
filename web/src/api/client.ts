@@ -72,10 +72,16 @@ client.interceptors.response.use(
     if (status === 401) {
       const auth = useAuthStore()
       auth.clear()
-      const next = encodeURIComponent(window.location.pathname + window.location.search)
-      // Lazy router import to avoid the auth/api/router cycle.
-      const { router } = await import('@/router')
-      await router.push(`/login?next=${next}`)
+      // Several requests fail together when a session ends: the first one
+      // sends the browser to the login page, and the others must not wrap
+      // that page's own address in a new next=, which lost the deep link
+      // after the sign-in (S6-11).
+      if (window.location.pathname !== '/login') {
+        const next = encodeURIComponent(window.location.pathname + window.location.search)
+        // Lazy router import to avoid the auth/api/router cycle.
+        const { router } = await import('@/router')
+        await router.push(`/login?next=${next}`)
+      }
       return Promise.reject(err)
     }
 

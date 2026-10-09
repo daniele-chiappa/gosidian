@@ -20,12 +20,13 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { FieldValue } from '@/api/notes'
 import type { ViewColumn, ViewData, ViewRow } from '@/api/preview'
-import { cellValue, expectValue, isEditable, shownValue, toChange } from './cellValue'
-import { saveField } from './fieldSave'
+import { cellValue, expectValue, isEditable } from './cellValue'
+import { commitField } from './fieldSave'
 import FieldEditor from './FieldEditor.vue'
 import FieldValueView from './FieldValue.vue'
 import NewRowForm from './NewRowForm.vue'
 import { Pencil, Plus } from 'lucide-vue-next'
+import { noteHref } from '@/composables/planciaKey'
 
 const props = defineProps<{ view: ViewData }>()
 const { t } = useI18n()
@@ -53,10 +54,6 @@ const cellKey = (row: ViewRow, col: ViewColumn) => `${row.path}\u0000${col.name}
 const isEditing = (row: ViewRow, col: ViewColumn) =>
   editing.value?.path === row.path && editing.value?.col === col.name
 
-function noteHref(path: string): string {
-  return '/notes/' + path.split('/').map(encodeURIComponent).join('/')
-}
-
 function startEdit(row: ViewRow, col: ViewColumn) {
   if (!isEditable(col, row) || col.type === 'checkbox' || saving.value) return
   editing.value = { path: row.path, col: col.name, from: expectValue(row, col) }
@@ -72,8 +69,6 @@ function setField(row: ViewRow, name: string, v: string | string[] | undefined) 
   else row.fields[name] = v
 }
 
-const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
-
 async function commit(row: ViewRow, col: ViewColumn, input: string | boolean | string[]) {
   // A checkbox commits without an editor; any other cell only while open.
   let seen = expectValue(row, col)
@@ -82,25 +77,15 @@ async function commit(row: ViewRow, col: ViewColumn, input: string | boolean | s
     seen = editing.value.from
     editing.value = null
   }
-  const before = row.fields[col.name]
-  const change = toChange(col, input, before)
-  if ('error' in change) {
-    message.value = t('views.not_a_number', { field: col.name })
-    return
+  const target = {
+    path: row.path,
+    col,
+    before: row.fields[col.name],
+    set: (v: string | string[] | undefined) => setField(row, col.name, v),
+    saving: (on: boolean) => (saving.value = on ? cellKey(row, col) : null),
   }
-  const shown = shownValue(change)
-  if (same(shown, seen)) return
-
-  setField(row, col.name, shown)
-  saving.value = cellKey(row, col)
-  const res = await saveField(row.path, col, seen, change, t)
-  saving.value = null
-  if (res.ok) {
-    message.value = ''
-    return
-  }
-  setField(row, col.name, res.conflict ? res.current : before)
-  message.value = res.message
+  const msg = await commitField(target, seen, input, t)
+  if (msg !== null) message.value = msg
 }
 </script>
 

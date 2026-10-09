@@ -1,8 +1,8 @@
 <script setup lang="ts">
 /**
- * CommandPalette — Cmd+K (or Ctrl+K) overlay. Fetches the dataset
- * once per session, scores entries client-side with a tiny fuzzy
- * matcher, boosts recently-viewed paths, and routes on enter.
+ * CommandPalette — Cmd+K (or Ctrl+K) overlay. Shows the dataset it has at
+ * once and reads it again at each opening, scores entries client-side with
+ * a tiny fuzzy matcher, boosts recently-viewed paths, and routes on enter.
  *
  * The matcher is intentionally simple (case-insensitive substring
  * with positional bonus) rather than a full Levenshtein/Smith-
@@ -98,19 +98,36 @@ const filtered = computed<PaletteItem[]>(() => {
     .map((x) => x.item)
 })
 
+// The answer to the last opening wins; an older one is kept only while there
+// is no list at all, so a newer request that fails leaves something to show.
+let fetchSeq = 0
+const itemKey = (i: PaletteItem) => i.kind + ':' + (i.path ?? i.label)
+async function refreshDataset() {
+  const seq = ++fetchSeq
+  try {
+    const d = await fetchCommandPalette()
+    if (seq !== fetchSeq && dataset.value) return
+    // The entry the keyboard is on stays selected, wherever the new list
+    // puts it: Enter opened whatever came to sit at its old place.
+    const kept = filtered.value[selected.value]
+    dataset.value = d
+    const i = kept ? filtered.value.findIndex((x) => itemKey(x) === itemKey(kept)) : -1
+    selected.value = i >= 0 ? i : 0
+  } catch {
+    // Not fatal: the palette keeps the list it has, or none, and the next
+    // opening asks again.
+  }
+}
+
 async function show() {
   open.value = true
   query.value = ''
   selected.value = 0
-  if (!dataset.value) {
-    try {
-      dataset.value = await fetchCommandPalette()
-    } catch {
-      // Dataset fetch failure isn't fatal — the palette stays open
-      // with whatever data we have. The user sees an empty list and
-      // can close + retry.
-    }
-  }
+  // The list was read once a session: a note created later never showed
+  // until a reload. The one it has shows at once, and the server's comes
+  // in behind it.
+  if (dataset.value) void refreshDataset()
+  else await refreshDataset()
   await nextTick()
   inputEl.value?.focus()
 }
@@ -150,6 +167,10 @@ function onKey(e: KeyboardEvent) {
 watch(query, () => {
   selected.value = 0
 })
+// A list read again while the palette is open can be shorter.
+watch(filtered, (items) => {
+  if (selected.value >= items.length) selected.value = Math.max(items.length - 1, 0)
+})
 
 onMounted(() => {
   window.addEventListener('keydown', onKey)
@@ -181,7 +202,7 @@ onUnmounted(() => {
         <ul class="max-h-[50vh] overflow-auto">
           <li
             v-for="(item, idx) in filtered"
-            :key="item.kind + ':' + (item.path ?? item.label)"
+            :key="itemKey(item)"
             :class="[
               'flex items-center gap-3 px-4 py-2 cursor-pointer',
               idx === selected ? 'bg-surface-hover' : 'hover:bg-surface-hover',

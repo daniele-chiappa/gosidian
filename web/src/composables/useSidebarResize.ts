@@ -43,6 +43,7 @@ export function useSidebarResize() {
   }
 
   let raf = 0
+  let handle: HTMLElement | null = null
   function onMove(e: PointerEvent) {
     if (!dragging.value) return
     const next = Math.max(MIN, Math.min(MAX, e.clientX))
@@ -55,10 +56,17 @@ export function useSidebarResize() {
     if (!dragging.value) return
     dragging.value = false
     persist(width.value)
-    document.removeEventListener('pointermove', onMove)
-    document.removeEventListener('pointerup', onUp)
+    unlisten()
     document.body.style.cursor = ''
     document.body.style.userSelect = ''
+  }
+
+  function unlisten() {
+    document.removeEventListener('pointermove', onMove)
+    document.removeEventListener('pointerup', onUp)
+    document.removeEventListener('pointercancel', onUp)
+    handle?.removeEventListener('lostpointercapture', onUp)
+    handle = null
   }
 
   function startDrag(e: PointerEvent) {
@@ -66,8 +74,19 @@ export function useSidebarResize() {
     dragging.value = true
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
+    // The handle captures the pointer: over an iframe (an HTML note) or
+    // outside the page the pointerup never reached the document, and the
+    // drag stayed on (S7-15). A capture lost or a pointer cancelled ends it.
+    handle = e.currentTarget instanceof HTMLElement ? e.currentTarget : null
+    try {
+      handle?.setPointerCapture(e.pointerId)
+    } catch {
+      // a pointer the browser no longer tracks: the document still listens
+    }
+    handle?.addEventListener('lostpointercapture', onUp)
     document.addEventListener('pointermove', onMove)
     document.addEventListener('pointerup', onUp)
+    document.addEventListener('pointercancel', onUp)
   }
 
   function reset() {
@@ -76,8 +95,7 @@ export function useSidebarResize() {
   }
 
   onUnmounted(() => {
-    document.removeEventListener('pointermove', onMove)
-    document.removeEventListener('pointerup', onUp)
+    unlisten()
     if (raf) cancelAnimationFrame(raf)
   })
 

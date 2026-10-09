@@ -23,6 +23,9 @@ const { t } = useI18n()
 
 const projects = ref<Project[]>([])
 const loading = ref(false)
+// Only the first load puts "Loading…" in place of the list: a reload after
+// an action took the whole list down and back, focus and scroll with it.
+const loaded = ref(false)
 const error = ref<string | null>(null)
 const newName = ref('')
 const treeStore = useTreeStore()
@@ -63,6 +66,7 @@ async function load() {
   error.value = null
   try {
     projects.value = await listProjects()
+    loaded.value = true
   } catch (e) {
     error.value = errorText(e, t, t('projects.load_failed'))
   } finally {
@@ -200,10 +204,10 @@ onMounted(() => {
       >{{ t('common.create') }}</button>
     </form>
 
-    <p v-if="loading" class="text-text-muted">{{ t('common.loading') }}</p>
+    <p v-if="loading && !loaded" class="text-text-muted">{{ t('common.loading') }}</p>
     <ErrorMessage v-if="error" :text="error" class="mb-3" />
 
-    <ul v-if="!loading" class="space-y-2">
+    <ul v-if="loaded" class="space-y-2">
       <li
         v-for="p in projects"
         :key="p.name"

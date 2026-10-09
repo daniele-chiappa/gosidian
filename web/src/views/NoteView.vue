@@ -42,6 +42,7 @@ import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
 import { getNote, updateNote, deleteNote, createSnapshot, type Note } from '@/api/notes'
 import { downloadNote } from '@/api/noteDownload'
 import { draftAfterSave } from '@/views/noteDraft'
+import { tooLargeToSend } from '@/views/noteSize'
 import { renderPreviewData, type ViewData } from '@/api/preview'
 import axios from 'axios'
 import { isConcurrencyConflict, onApiEvent, type ConcurrencyConflictDetail } from '@/api/client'
@@ -57,7 +58,7 @@ import MediaPreview from '@/components/domain/MediaPreview.vue'
 import TablePreview from '@/components/domain/TablePreview.vue'
 import CanvasPreview from '@/components/domain/CanvasPreview.vue'
 import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
-import { planciaKey } from '@/composables/planciaKey'
+import { planciaKey, base } from '@/composables/planciaKey'
 import { useAccessStore } from '@/stores/access'
 import { useTreeStore } from '@/stores/tree'
 import { useWindowsStore, type OpenSpec } from 'plancia'
@@ -94,6 +95,15 @@ async function renderInto(md: string, notePath: string) {
   const r = await renderPreviewData(md, notePath)
   previewHTML.value = r.html
   previewViews.value = r.views
+  previewError.value = null
+}
+// A preview that failed: the note stays open, with the reason where the
+// preview would be (S6-13).
+const previewError = ref<string | null>(null)
+function previewFailed(e: unknown) {
+  previewHTML.value = ''
+  previewViews.value = []
+  previewError.value = errorText(e, t, t('note.preview_failed'))
 }
 const loading = ref(false)
 const saving = ref(false)
@@ -141,6 +151,10 @@ const isCanvas = computed(
 )
 // A base or a canvas: shown, never edited here.
 const isReadOnlyFile = computed(() => isBase.value || isCanvas.value)
+// A note the server would not take back from the web UI (noteSize.ts):
+// its text, read-only, with no preview.
+const tooLarge = computed(() => !!note.value && !isReadOnlyFile.value && tooLargeToSend(note.value.content))
+const canEdit = computed(() => access.canWrite(props.path) && !isReadOnlyFile.value && !tooLarge.value)
 const project = computed(() => {
   const parts = path.value.split('/')
   return parts.length > 1 ? parts[0] : undefined
@@ -179,12 +193,18 @@ async function load() {
     emit('title', fetched.title || fetched.path)
     // HTML notes bypass the markdown renderer; the iframe shows raw content,
     // and a canvas draws its cards, rendered by the server.
-    if (isHtml.value || isCanvas.value) {
+    previewError.value = null
+    if (isHtml.value || isCanvas.value || tooLarge.value) {
       previewHTML.value = ''
       previewViews.value = []
+      if (tooLarge.value) mode.value = 'view'
     } else {
-      await renderInto(fetched.content, fetched.path)
-      void scrollToAnchor()
+      try {
+        await renderInto(fetched.content, fetched.path)
+        void scrollToAnchor()
+      } catch (e) {
+        previewFailed(e)
+      }
     }
     dirty.value = false
   } catch (e) {
@@ -290,19 +310,29 @@ watch(
 )
 
 function enterEdit() {
-  if (!access.canWrite(props.path)) return
+  if (!canEdit.value) return
   mode.value = 'edit'
 }
 async function enterView() {
   mode.value = 'view'
   // View shows the saved content; the draft stays in memory for re-editing.
-  if (note.value && !isHtml.value) await renderInto(note.value.content, note.value.path)
+  if (!note.value || isHtml.value || tooLarge.value) return
+  try {
+    await renderInto(note.value.content, note.value.path)
+  } catch (e) {
+    previewFailed(e)
+  }
 }
 
 async function save() {
   if (!note.value || !dirty.value || saving.value) return
-  saving.value = true
   error.value = null
+  // The server would refuse it with a bare "body too large".
+  if (tooLargeToSend(draft.value)) {
+    error.value = t('note.too_large_to_save')
+    return
+  }
+  saving.value = true
   try {
     const sent = draft.value
     const updated = await updateNote(note.value.path, {
@@ -433,7 +463,7 @@ async function snapshot() {
     openWindow({
       type: 'note',
       key: planciaKey('note', snap.path),
-      title: (snap.path.split('/').pop() ?? snap.path).replace(/\.md$/, ''),
+      title: base(snap.path),
       props: { path: snap.path },
     })
   } catch (e) {
@@ -492,7 +522,7 @@ const LAYOUTS: { key: EditorLayout; icon: typeof Eye }[] = [
 
 const actions = computed<OverflowItem[]>(() => {
   const out: OverflowItem[] = []
-  if (note.value && mode.value === 'view' && !isHtml.value && !isMedia.value && !isCanvas.value)
+  if (note.value && mode.value === 'view' && !isHtml.value && !isMedia.value && !isCanvas.value && !tooLarge.value)
     out.push({ key: 'print', label: t('note.print'), icon: Printer, run: printNote })
   out.push({ key: 'download', label: t('note.download'), icon: Download, disabled: !note.value, run: downloadOriginal })
   out.push({
@@ -566,9 +596,11 @@ watch(path, load)
         <button
           v-if="access.canWrite(props.path) && !isReadOnlyFile"
           type="button"
-          class="px-2"
+          class="px-2 disabled:cursor-not-allowed disabled:opacity-50"
           :class="mode === 'edit' ? 'bg-accent text-accent-fg' : 'hover:bg-surface-hover'"
           :aria-pressed="mode === 'edit'"
+          :disabled="tooLarge"
+          :title="tooLarge ? t('note.too_large') : undefined"
           @click="enterEdit"
         >
           {{ t('note.edit') }}
@@ -635,9 +667,11 @@ watch(path, load)
       <OverflowMenu v-else-if="note" class="shrink-0" :items="actions" :label="t('note.more_actions')" />
     </header>
 
+    <!-- Announced to screen readers (S6-14): the save was refused. -->
     <div
       v-if="conflict"
       class="flex flex-wrap items-center gap-2 border-b border-warning/40 bg-warning/10 px-4 py-2 text-xs"
+      role="alert"
     >
       <span class="text-warning">{{ t('note.conflict_banner') }}</span>
       <div class="flex-1" />
@@ -656,12 +690,22 @@ watch(path, load)
     <div
       v-if="remoteChanged && !conflict"
       class="flex flex-wrap items-center gap-2 border-b border-warning/40 bg-warning/10 px-4 py-2 text-xs"
+      role="status"
     >
       <span class="text-warning">{{ t('note.changed_elsewhere') }}</span>
       <div class="flex-1" />
       <button type="button" class="rounded px-2 py-1 hover:bg-surface-hover" @click="reloadRemote">
         {{ t('note.reload_remote') }}
       </button>
+    </div>
+
+    <div
+      v-if="tooLarge"
+      class="border-b border-warning/40 bg-warning/10 px-4 py-2 text-xs text-warning"
+      role="status"
+      data-note-too-large
+    >
+      {{ t('note.too_large') }}
     </div>
 
     <!-- A save, delete or download that failed: a banner above the editor,
@@ -713,6 +757,13 @@ watch(path, load)
         </p>
         <HTMLPreview :html="note.content" :path="note.path" />
       </template>
+      <!-- A media or table note whose caption could not be rendered -->
+      <ErrorMessage
+        v-if="previewError && (isMedia || isTable)"
+        :text="previewError"
+        class="px-6 pt-4 text-sm"
+        data-preview-error
+      />
       <!-- Image media note (ADR-013): image + rendered caption -->
       <MediaPreview
         v-else-if="isMedia && note && note.media"
@@ -735,6 +786,10 @@ watch(path, load)
         :caption-html="previewHTML"
         :note-path="note.path"
       />
+      <!-- A note too large to preview or save here: its text, read-only -->
+      <div v-else-if="tooLarge && note" class="h-full min-h-0" data-note-text>
+        <CodeMirrorEditor :model-value="note.content" :project="project" readonly />
+      </div>
       <!-- Markdown note: prose-rendered preview -->
       <article v-else ref="articleEl" class="p-6 max-w-3xl mx-auto">
         <p v-if="note" class="text-xs text-text-muted font-mono mb-6">
@@ -743,6 +798,7 @@ watch(path, load)
         </p>
         <!-- A row of a database: its fields, editable (IMP-127 phase 5) -->
         <PropertiesPanel v-if="note && !isBase" :path="note.path" :etag="note.etag" />
+        <ErrorMessage v-if="previewError" :text="previewError" class="mb-4 text-sm" data-preview-error />
         <MarkdownPreview :html="previewHTML" :views="previewViews" :note-path="note?.path" />
         <!-- A row of a database: the views its schema declares (IMP-139) -->
         <RowViews v-if="note && !isBase" :path="note.path" :etag="note.etag" />
@@ -778,6 +834,7 @@ watch(path, load)
       </div>
       <div v-if="layout !== 'editor'" class="overflow-auto p-4 max-w-none">
         <HTMLPreview v-if="isHtml" :html="draft" :path="note.path" />
+        <ErrorMessage v-else-if="previewError" :text="previewError" class="text-sm" data-preview-error />
         <MarkdownPreview
           v-else
           :html="previewHTML"

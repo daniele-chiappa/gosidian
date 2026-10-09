@@ -72,19 +72,31 @@ async function load() {
   }
 }
 
-/** Grants changed: reload the list and our own per-project levels. */
-async function refresh() {
-  await load()
-  void access.load()
+// Each change answers with the team as it is now, or with nothing for a
+// removal: the list changes in place, where every action read the teams,
+// the accounts and the projects again and drew the whole list anew.
+const byName = (a: Team, b: Team) => {
+  const x = a.name.toLowerCase()
+  const y = b.name.toLowerCase()
+  return x < y ? -1 : x > y ? 1 : 0
+}
+function putTeam(next: Team) {
+  const i = teams.value.findIndex((x) => x.id === next.id)
+  if (i >= 0) teams.value[i] = next
+  else teams.value.push(next)
+  teams.value.sort(byName)
 }
 
-async function run(label: string, fn: () => Promise<unknown>) {
+/** Runs a change; our own per-project levels follow it. */
+async function run(label: string, fn: () => Promise<unknown>): Promise<boolean> {
   error.value = null
   try {
     await fn()
-    await refresh()
+    void access.load()
+    return true
   } catch (e) {
     error.value = errorText(e, t, label)
+    return false
   }
 }
 
@@ -92,7 +104,7 @@ async function submitCreate() {
   if (!newTeam.name.trim()) return
   creating.value = true
   await run(t('admin.teams.create_failed'), async () => {
-    await createTeam(newTeam.name.trim(), newTeam.description.trim())
+    putTeam(await createTeam(newTeam.name.trim(), newTeam.description.trim()))
     newTeam.name = ''
     newTeam.description = ''
   })
@@ -106,35 +118,44 @@ function startEdit(team: Team) {
 }
 
 async function saveEdit(team: Team) {
-  await run(t('admin.teams.rename_failed'), () =>
-    updateTeam(team.id, { name: editDraft.name.trim(), description: editDraft.description.trim() }),
+  const ok = await run(t('admin.teams.rename_failed'), async () =>
+    putTeam(await updateTeam(team.id, { name: editDraft.name.trim(), description: editDraft.description.trim() })),
   )
-  editing.value = null
+  // A refused rename keeps the form, with what was typed in it.
+  if (ok) editing.value = null
 }
 
 async function destroy(team: Team) {
   if (!confirm(t('admin.teams.confirm_delete', { name: team.name, n: team.grants.length }))) return
-  await run(t('admin.teams.delete_failed'), () => deleteTeam(team.id))
+  await run(t('admin.teams.delete_failed'), async () => {
+    await deleteTeam(team.id)
+    teams.value = teams.value.filter((x) => x.id !== team.id)
+  })
 }
 
 async function addUser(team: Team) {
   const id = addUserDraft[team.id]
   if (!id) return
   await run(t('members.add_account_failed'), async () => {
-    await addTeamUser(team.id, id)
+    putTeam(await addTeamUser(team.id, id))
     addUserDraft[team.id] = ''
   })
 }
 
 async function dropUser(team: Team, userId: string) {
-  await run(t('admin.teams.remove_account_failed'), () => removeTeamUser(team.id, userId))
+  await run(t('admin.teams.remove_account_failed'), async () => {
+    await removeTeamUser(team.id, userId)
+    // The team as it is now: another change may have replaced it meanwhile.
+    const cur = teams.value.find((x) => x.id === team.id)
+    if (cur) cur.users = cur.users.filter((u) => u.id !== userId)
+  })
 }
 
 async function addGrant(team: Team) {
   const d = addGrantDraft[team.id]
   if (!d?.project) return
   await run(t('admin.teams.add_grant_failed'), async () => {
-    await setTeamGrant(team.id, d.project, d.level)
+    putTeam(await setTeamGrant(team.id, d.project, d.level))
     d.project = ''
     d.level = 'read'
   })
@@ -142,11 +163,15 @@ async function addGrant(team: Team) {
 
 async function changeGrant(team: Team, project: string, level: string) {
   if (!LEVELS.includes(level as GrantLevel)) return
-  await run(t('members.change_failed'), () => setTeamGrant(team.id, project, level as GrantLevel))
+  await run(t('members.change_failed'), async () => putTeam(await setTeamGrant(team.id, project, level as GrantLevel)))
 }
 
 async function dropGrant(team: Team, project: string) {
-  await run(t('members.remove_failed'), () => removeTeamGrant(team.id, project))
+  await run(t('members.remove_failed'), async () => {
+    await removeTeamGrant(team.id, project)
+    const cur = teams.value.find((x) => x.id === team.id)
+    if (cur) cur.grants = cur.grants.filter((g) => g.project !== project)
+  })
 }
 
 function grantDraft(team: Team): { project: string; level: GrantLevel } {
@@ -204,7 +229,7 @@ onMounted(load)
       </form>
     </section>
 
-    <p v-if="loading" class="text-text-muted">{{ t('common.loading') }}</p>
+    <p v-if="loading && !teams.length" class="text-text-muted">{{ t('common.loading') }}</p>
     <ErrorMessage v-if="error" :text="error" class="text-sm" />
     <p v-if="empty" class="text-sm text-text-muted">{{ t('admin.teams.empty') }}</p>
 

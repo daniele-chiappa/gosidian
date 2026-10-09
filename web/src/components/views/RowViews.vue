@@ -23,11 +23,16 @@ const { t } = useI18n()
 
 const data = ref<RowViews | null>(null)
 
+// Only the answer to the last request is kept: the one for the path or the
+// etag before could land after it and show another note's views.
+let seq = 0
 async function load() {
+  const mine = ++seq
   try {
-    data.value = await getRowViews(props.path)
+    const got = await getRowViews(props.path)
+    if (mine === seq) data.value = got
   } catch {
-    data.value = null
+    if (mine === seq) data.value = null
   }
 }
 watch(() => [props.path, props.etag], load, { immediate: true })

@@ -20,7 +20,10 @@ const openWindow = inject<(spec: OpenSpec) => string>('openWindow', (s) => store
 const tags = ref<TagCount[]>([])
 const notes = ref<NoteSummary[]>([])
 const loading = ref(false)
+// The list and a tag's notes fail apart: an error on the notes took the
+// place of the list for good (S6-12).
 const error = ref<string | null>(null)
+const notesError = ref<string | null>(null)
 const selectedTag = ref<string>(props.tag ?? '')
 
 async function loadTags() {
@@ -35,15 +38,22 @@ async function loadTags() {
   }
 }
 
+// Only the answer for the last tag picked is shown.
+let notesSeq = 0
 async function loadNotes(tag: string) {
+  const seq = ++notesSeq
+  notesError.value = null
   if (!tag) {
     notes.value = []
     return
   }
   try {
-    notes.value = await notesByTag(tag)
+    const got = await notesByTag(tag)
+    if (seq === notesSeq) notes.value = got
   } catch (e) {
-    error.value = errorText(e, t, t('tags.notes_failed'))
+    if (seq !== notesSeq) return
+    notes.value = []
+    notesError.value = errorText(e, t, t('tags.notes_failed'))
   }
 }
 
@@ -71,7 +81,12 @@ watch(selectedTag, (t) => {
     <aside class="w-56 shrink-0">
       <h1 class="text-xl font-semibold mb-3">{{ t('tags.title') }}</h1>
       <p v-if="loading" class="text-text-muted text-sm">{{ t('common.loading') }}</p>
-      <ErrorMessage v-else-if="error" :text="error" class="text-sm" />
+      <div v-else-if="error" class="space-y-2">
+        <ErrorMessage :text="error" class="text-sm" />
+        <button type="button" class="text-sm text-accent hover:underline" @click="loadTags">
+          {{ t('common.retry') }}
+        </button>
+      </div>
       <ul v-else class="space-y-1">
         <li v-for="t in tags" :key="t.tag">
           <button
@@ -92,7 +107,13 @@ watch(selectedTag, (t) => {
         <h2 class="text-lg font-semibold mb-3">
           {{ t('tags.notes_tagged') }} <span class="text-accent">#{{ selectedTag }}</span>
         </h2>
-        <ul v-if="notes.length" class="space-y-2">
+        <div v-if="notesError" class="space-y-2">
+          <ErrorMessage :text="notesError" class="text-sm" />
+          <button type="button" class="text-sm text-accent hover:underline" @click="loadNotes(selectedTag)">
+            {{ t('common.retry') }}
+          </button>
+        </div>
+        <ul v-else-if="notes.length" class="space-y-2">
           <li
             v-for="n in notes"
             :key="n.path"

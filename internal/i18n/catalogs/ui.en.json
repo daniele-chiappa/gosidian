@@ -69,7 +69,8 @@
     "loading": "Loading…",
     "vault": "Vault",
     "back": "Back",
-    "dismiss": "Dismiss"
+    "dismiss": "Dismiss",
+    "retry": "Try again"
   },
   "tree": {
     "filter_placeholder": "Filter notes…",
@@ -133,7 +134,10 @@
     "overwrite_failed": "Overwrite failed",
     "delete_failed": "Delete failed",
     "download_failed": "Download failed",
-    "html_frame": "HTML note"
+    "html_frame": "HTML note",
+    "too_large": "This note is larger than 1 MiB, more than the web UI can save: it opens read-only. Edit it with an editor or through git.",
+    "too_large_to_save": "The text is larger than 1 MiB, which the web UI cannot save. Shorten it, or split it into several notes.",
+    "preview_failed": "The preview could not be made"
   },
   "note_create": {
     "title": "New note",

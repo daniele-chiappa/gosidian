@@ -1,7 +1,7 @@
 import axios from 'axios'
 import { patchFrontmatter, type FieldValue, type PatchFrontmatterBody } from '@/api/notes'
 import type { ViewColumn } from '@/api/preview'
-import type { Change } from './cellValue'
+import { shownValue, toChange, type Change } from './cellValue'
 
 type T = (key: string, values?: Record<string, unknown>) => string
 
@@ -32,6 +32,47 @@ export async function saveField(
   } catch (e) {
     return failure(e, col, t)
   }
+}
+
+/** The field commitField writes: where it is saved and how it shows. */
+export interface FieldTarget {
+  path: string
+  col: ViewColumn
+  /** The value shown before the edit. */
+  before: string | string[] | undefined
+  set: (v: string | string[] | undefined) => void
+  saving: (on: boolean) => void
+}
+
+const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
+
+/**
+ * commitField writes what an editor gave for one field, the same way for a
+ * cell of a table view and for the property panel of a row: shown at once,
+ * saved against `seen`, the value the editor opened on, and put back, or
+ * set to what someone else wrote meanwhile, when the save is refused.
+ * Resolves to the message to show: '' after a save, null when there was
+ * nothing to write.
+ */
+export async function commitField(
+  target: FieldTarget,
+  seen: FieldValue,
+  input: string | boolean | string[],
+  t: T,
+): Promise<string | null> {
+  const { col, before } = target
+  const change = toChange(col, input, before)
+  if ('error' in change) return t('views.not_a_number', { field: col.name })
+  const shown = shownValue(change)
+  if (same(shown, seen)) return null
+
+  target.set(shown)
+  target.saving(true)
+  const res = await saveField(target.path, col, seen, change, t)
+  target.saving(false)
+  if (res.ok) return ''
+  target.set(res.conflict ? res.current : before)
+  return res.message
 }
 
 function failure(e: unknown, col: ViewColumn, t: T): SaveResult {

@@ -16,9 +16,9 @@ import { useI18n } from 'vue-i18n'
 import { useWindowsStore, type OpenSpec } from 'plancia'
 import { getRowFields, type FieldValue, type RowFields } from '@/api/notes'
 import type { ViewColumn, ViewRow } from '@/api/preview'
-import { planciaKey } from '@/composables/planciaKey'
-import { isEditable, shownValue, toChange } from './cellValue'
-import { saveField } from './fieldSave'
+import { planciaKey, noteHref, base } from '@/composables/planciaKey'
+import { isEditable } from './cellValue'
+import { commitField } from './fieldSave'
 import FieldEditor from './FieldEditor.vue'
 import FieldValueView from './FieldValue.vue'
 import { Pencil } from 'lucide-vue-next'
@@ -32,11 +32,16 @@ const editing = ref<{ col: string; from: FieldValue } | null>(null)
 const saving = ref(false)
 const message = ref('')
 
+// Only the answer to the last request is kept: the one for the path or the
+// etag before could land after it and show another note's fields.
+let seq = 0
 async function load() {
+  const mine = ++seq
   try {
-    data.value = await getRowFields(props.path)
+    const got = await getRowFields(props.path)
+    if (mine === seq) data.value = got
   } catch {
-    data.value = null
+    if (mine === seq) data.value = null
   }
 }
 watch(() => [props.path, props.etag], load, { immediate: true })
@@ -74,7 +79,7 @@ const authors = computed(() =>
 )
 
 const databaseTitle = computed(() =>
-  (data.value?.database?.split('/').pop() ?? '').replace(/\.md$/, ''),
+  base(data.value?.database ?? ''),
 )
 
 function openDatabase(e: MouseEvent) {
@@ -103,8 +108,6 @@ function setValue(name: string, v: string | string[] | undefined) {
   else data.value.values[name] = v
 }
 
-const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
-
 async function commit(col: ViewColumn, input: string | boolean | string[]) {
   let seen = seenOf(col)
   if (col.type !== 'checkbox') {
@@ -112,28 +115,16 @@ async function commit(col: ViewColumn, input: string | boolean | string[]) {
     seen = editing.value.from
     editing.value = null
   }
-  const before = row.value.fields[col.name]
-  const change = toChange(col, input, before)
-  if ('error' in change) {
-    message.value = t('views.not_a_number', { field: col.name })
-    return
+  const target = {
+    path: props.path,
+    col,
+    before: row.value.fields[col.name],
+    set: (v: string | string[] | undefined) => setValue(col.name, v),
+    saving: (on: boolean) => (saving.value = on),
   }
-  const shown = shownValue(change)
-  if (same(shown, seen)) return
-
-  setValue(col.name, shown)
-  saving.value = true
-  const res = await saveField(props.path, col, seen, change, t)
-  saving.value = false
-  if (res.ok) {
-    message.value = ''
-    return
-  }
-  setValue(col.name, res.conflict ? res.current : before)
-  message.value = res.message
+  const msg = await commitField(target, seen, input, t)
+  if (msg !== null) message.value = msg
 }
-
-const noteHref = (path: string) => '/notes/' + path.split('/').map(encodeURIComponent).join('/')
 </script>
 
 <template>

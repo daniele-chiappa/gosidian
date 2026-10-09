@@ -121,6 +121,9 @@ function viaLabel(via: string[]): string {
     .join(' + ')
 }
 const loading = ref(false)
+// Only the first load puts "Loading…" in place of the list: a reload after
+// an action took the whole list down and back, focus and scroll with it.
+const loaded = ref(false)
 const error = ref<string | null>(null)
 
 // --- Create user form ---
@@ -218,6 +221,7 @@ async function load() {
   error.value = null
   try {
     users.value = await listUsers()
+    loaded.value = true
   } catch (e) {
     error.value = errorText(e, t, t('admin.users.load_failed'))
   } finally {
@@ -432,8 +436,9 @@ onMounted(load)
     </section>
 
     <p v-if="resetNotice" class="text-xs text-success" data-reset-notice>{{ resetNotice }}</p>
-    <p v-if="loading" class="text-text-muted">{{ t('common.loading') }}</p>
-    <ErrorMessage v-else-if="error" :text="error" />
+    <ErrorMessage v-if="error && loaded" :text="error" class="mb-3" />
+    <p v-if="loading && !loaded" class="text-text-muted">{{ t('common.loading') }}</p>
+    <ErrorMessage v-else-if="error && !loaded" :text="error" />
 
     <div v-else class="overflow-x-auto">
       <!-- Scrolls inside its box in a narrow window (IMP-156, M7). -->

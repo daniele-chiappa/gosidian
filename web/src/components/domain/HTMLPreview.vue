@@ -41,9 +41,10 @@
 import { useI18n } from 'vue-i18n'
 import { inject, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useWindowsStore, type OpenSpec } from 'plancia'
-import { planciaKey } from '@/composables/planciaKey'
+import { planciaKey, base } from '@/composables/planciaKey'
 import { hasScheme, linkTarget, resolveRelative } from './noteLinks'
 import { buildSrcdoc as buildDoc } from './htmlNoteDoc'
+import { inlinedImages } from './dataUrlCache'
 
 const { t } = useI18n()
 
@@ -71,7 +72,7 @@ function vaultImageURL(src: string): string | null {
   return p && `/${p}`.includes('/attachments/') ? `/vault-files/${p}` : null
 }
 
-const dataUrlCache = new Map<string, string>()
+const dataUrlCache = inlinedImages
 
 async function toDataUrl(url: string): Promise<string | null> {
   const cached = dataUrlCache.get(url)
@@ -131,7 +132,7 @@ function followLink(href: string) {
   openWindow({
     type: 'note',
     key: planciaKey('note', target.path),
-    title: (target.path.split('/').pop() ?? target.path).replace(/\.(md|html)$/i, ''),
+    title: base(target.path),
     props: { path: target.path },
   })
 }

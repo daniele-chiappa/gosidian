@@ -223,6 +223,11 @@ async function saveToggle(patch: OwnerToggle) {
     message.value = t('settings_view.saved')
   } catch (e) {
     error.value = errorText(e, t, t('note.save_failed'))
+    // The control shows the saved value again, not the one refused.
+    const s = data.value
+    if (s && 'totp_mode' in patch) draft.totp_mode = s.totp_mode ?? 'off'
+    if (s && 'default_visibility' in patch) draft.default_visibility = s.default_visibility || 'private'
+    if (s && 'personal_projects' in patch) draft.personal_projects = s.personal_projects ?? true
   } finally {
     saving.value = false
   }

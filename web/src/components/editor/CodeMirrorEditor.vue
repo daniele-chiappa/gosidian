@@ -1,22 +1,22 @@
 <script setup lang="ts">
 /**
- * CodeMirrorEditor — Phase 4 markdown editor wrapping CodeMirror 6.
+ * CodeMirrorEditor — the markdown editor, a wrapper around CodeMirror 6.
  *
- * Scope chiuso v2.0 (vedi plan):
- *   - markdown lang + foldGutter + searchKeymap + history + multi-cursor
- *   - wikilink autocomplete: trigger su `[[<prefix>` debounced 200ms
- *     hitting /api/v1/note-titles?q=
- *   - paste/drop file upload via /api/v1/attach → splice markdown
- *     embed at cursor position
- *   - theme legge `--color-bg`, `--color-text`, ecc. dai CSS vars
+ *   - markdown language, fold gutter, search keymap, history, multi-cursor;
+ *   - wikilink completion: typing `[[<prefix>` asks /api/v1/note-titles?q=;
+ *   - a file pasted or dropped is uploaded through /api/v1/attach and its
+ *     markdown embed goes in at the cursor;
+ *   - the theme reads `--color-bg`, `--color-text` and the other CSS
+ *     variables (editor/theme.ts);
+ *   - `readonly` shows the text without letting it change (a note too large
+ *     to save from the web UI, S6-13).
  *
- * Out of scope: vim mode, LSP, live collab cursors (v2.1+).
+ * Not here: vim mode, LSP, live collaboration cursors.
  *
- * v-model contract: emette `update:modelValue` su ogni edit. La save
- * (Ctrl+S) e il dirty-tracking restano nel parent, qui esponiamo solo
- * il content. La concurrency conflict UI (412) è gestita dal
- * ConflictDialog root-level — qui ci limitiamo a accettare il nuovo
- * content quando il parent re-passa modelValue.
+ * v-model contract: `update:modelValue` on every edit. Saving (Ctrl+S) and
+ * dirty tracking stay in the parent, which also owns the conflict UI of a
+ * 412; this component takes the new content when the parent passes it
+ * again.
  */
 import { useI18n } from 'vue-i18n'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -57,10 +57,12 @@ interface Props {
   modelValue: string
   placeholder?: string
   project?: string
+  readonly?: boolean
 }
 const props = withDefaults(defineProps<Props>(), {
   placeholder: 'Markdown…',
   project: undefined,
+  readonly: false,
 })
 const emit = defineEmits<{
   (e: 'update:modelValue', value: string): void
@@ -69,6 +71,8 @@ const emit = defineEmits<{
 const host = ref<HTMLDivElement | null>(null)
 let view: EditorView | null = null
 const themeCompartment = new Compartment()
+const readonlyCompartment = new Compartment()
+const readonlyExt = (on: boolean) => EditorState.readOnly.of(on)
 
 const cmTheme = EditorView.theme(editorThemeSpec, { dark: false })
 
@@ -79,6 +83,8 @@ const cmTheme = EditorView.theme(editorThemeSpec, { dark: false })
 async function wikilinkSource(
   ctx: CompletionContext,
 ): Promise<CompletionResult | null> {
+  // Read-only: Ctrl+Space and a click on a suggestion would still write it.
+  if (ctx.state.readOnly) return null
   // Look back from cursor for the most recent `[[` and ensure no `]]`
   // closes it before the cursor — otherwise we're not inside an open
   // wikilink. matchBefore won't help here because we need a multi-char
@@ -170,11 +176,14 @@ function buildState(initial: string): EditorState {
         indentWithTab,
       ]),
       themeCompartment.of(cmTheme),
+      readonlyCompartment.of(readonlyExt(props.readonly)),
     ],
   })
 }
 
 function handlePaste(event: ClipboardEvent, _view: EditorView): boolean {
+  // Read-only: CodeMirror's own handler refuses it, and no upload starts.
+  if (props.readonly) return false
   const items = event.clipboardData?.items
   if (!items) return false
   for (const item of items) {
@@ -191,6 +200,7 @@ function handlePaste(event: ClipboardEvent, _view: EditorView): boolean {
 }
 
 function handleDrop(event: DragEvent, _view: EditorView): boolean {
+  if (props.readonly) return false
   const files = event.dataTransfer?.files
   if (!files || files.length === 0) return false
   event.preventDefault()
@@ -262,6 +272,11 @@ watch(
       changes: { from: 0, to: current.length, insert: next },
     })
   },
+)
+
+watch(
+  () => props.readonly,
+  (on) => view?.dispatch({ effects: readonlyCompartment.reconfigure(readonlyExt(on)) }),
 )
 
 defineExpose({

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { WindowInstance } from 'plancia'
-import { codec, planciaKey, base } from '@/composables/planciaKey'
+import { codec, planciaKey, base, noteHref } from '@/composables/planciaKey'
 
 // codec.encode reads only `type`/`props` from a window; build a minimal stub.
 const win = (type: string, props: Record<string, unknown> = {}): WindowInstance =>
@@ -81,9 +81,15 @@ describe('plancia codec round-trip', () => {
     expect(codec.key({ type: 'note', props: { path: 'a/b.md' } })).toBe('note:a/b.md')
   })
 
-  it('base strips the directory and .md suffix', () => {
+  it('base strips the directory and the .md or .html suffix', () => {
     expect(base('gosidian/hot.md')).toBe('hot')
     expect(base('top.md')).toBe('top')
     expect(base('no-ext')).toBe('no-ext')
+    expect(base('p/report.HTML')).toBe('report')
+    expect(base('p/data.csv')).toBe('data.csv')
+  })
+
+  it('noteHref escapes each segment of the path', () => {
+    expect(noteHref('p/a b/c#d.md')).toBe('/notes/p/a%20b/c%23d.md')
   })
 })

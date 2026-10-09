@@ -22,6 +22,7 @@ vi.mock('@/composables/useSessionReset', async (orig) => ({
 
 import LoginView from '@/views/LoginView.vue'
 import { signup } from '@/api/signup'
+import { getAuthConfig } from '@/api/totp'
 import { withoutWorkspace } from '@/composables/useSessionReset'
 
 function mountView() {
@@ -116,5 +117,25 @@ describe('LoginView sign-up from an invite (BUG-099)', () => {
     await fill(w, 'carol-password-1', 'carol-password-1')
     expect(w.text()).toContain('already exists')
     expect(w.find('[data-signup]').exists()).toBe(true)
+  })
+})
+
+describe('LoginView two-factor field', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    route.query = {}
+  })
+
+  it('shows the code field when the configuration cannot be read', async () => {
+    vi.mocked(getAuthConfig).mockRejectedValueOnce(new Error('down'))
+    const w = mountView()
+    await flushPromises()
+    expect(w.find("input[autocomplete='one-time-code']").exists()).toBe(true)
+  })
+
+  it('leaves it out when the server says two factors are off', async () => {
+    const w = mountView()
+    await flushPromises()
+    expect(w.find("input[autocomplete='one-time-code']").exists()).toBe(false)
   })
 })

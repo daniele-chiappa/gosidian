@@ -24,6 +24,9 @@ const { t: tr } = useI18n()
 const password = ref('')
 const tokens = ref<MCPToken[]>([])
 const loading = ref(false)
+// Only the first load puts "Loading…" in place of the list: a reload after
+// an action took the whole list down and back, focus and scroll with it.
+const loaded = ref(false)
 const error = ref<string | null>(null)
 const fresh = ref<MCPTokenCreated | null>(null)
 const busy = ref(false)
@@ -45,6 +48,7 @@ async function load() {
   error.value = null
   try {
     tokens.value = await listMyTokens()
+    loaded.value = true
   } catch (e) {
     error.value = errorText(e, tr, tr('my_tokens.load_failed'))
   } finally {
@@ -53,7 +57,9 @@ async function load() {
 }
 
 async function create() {
-  if (!draft.name.trim() || !password.value) return
+  // A second click before the reply minted a second token, and the secret
+  // of the first, shown once, was lost.
+  if (busy.value || !draft.name.trim() || !password.value) return
   if (draft.mode === 'custom' && draft.projects.length === 0) {
     error.value = tr('my_tokens.pick_one')
     return
@@ -182,10 +188,10 @@ onMounted(() => {
       </div>
     </form>
 
-    <p v-if="loading" class="text-text-muted text-sm">{{ tr('common.loading') }}</p>
+    <p v-if="loading && !loaded" class="text-text-muted text-sm">{{ tr('common.loading') }}</p>
     <ErrorMessage v-if="error" :text="error" class="text-sm" />
 
-    <ul v-if="!loading" class="space-y-1">
+    <ul v-if="loaded" class="space-y-1">
       <li
         v-for="tok in tokens"
         :key="tok.id"

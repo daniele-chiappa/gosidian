@@ -22,6 +22,7 @@ import { saveField } from './fieldSave'
 import FieldValueView from './FieldValue.vue'
 import NewRowForm from './NewRowForm.vue'
 import { MoveRight, Plus } from 'lucide-vue-next'
+import { noteHref } from '@/composables/planciaKey'
 
 const props = defineProps<{ view: ViewData }>()
 const { t } = useI18n()
@@ -64,10 +65,6 @@ const addingIn = ref<string | null>(null) // the column whose new-row form is op
 
 const label = (value: string) => value || t('views.no_value')
 const canMove = (row: ViewRow) => row.writable && !!group.value.type && saving.value === null
-
-function noteHref(path: string): string {
-  return '/notes/' + path.split('/').map(encodeURIComponent).join('/')
-}
 
 /** The value the group_by field takes in a column. */
 function valueFor(column: string): FieldValue {

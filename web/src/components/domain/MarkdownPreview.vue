@@ -34,7 +34,7 @@
 import { computed, inject, ref } from 'vue'
 import { sanitizePreviewHtml } from './sanitizePreview'
 import { useWindowsStore, type OpenSpec } from 'plancia'
-import { planciaKey } from '@/composables/planciaKey'
+import { planciaKey, base } from '@/composables/planciaKey'
 import type { ViewData } from '@/api/preview'
 import ViewTable from '@/components/views/ViewTable.vue'
 import ViewBoard from '@/components/views/ViewBoard.vue'
@@ -126,7 +126,7 @@ function openNote(path: string, anchor: string | null) {
   const id = openWindow({
     type: 'note',
     key,
-    title: (path.split('/').pop() ?? path).replace(/\.(md|html)$/, ''),
+    title: base(path),
     props,
   })
   if (anchor && id) store.identify(id, key, props)

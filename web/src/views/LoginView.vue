@@ -78,7 +78,9 @@ onMounted(async () => {
     showTotp.value = cfg.totp
     ldapEnabled.value = cfg.ldap
   } catch {
-    showTotp.value = false
+    // Without the configuration the field shows, optional (its hint says
+    // so): hidden, an account with two factors could not sign in.
+    showTotp.value = true
   }
 })
 

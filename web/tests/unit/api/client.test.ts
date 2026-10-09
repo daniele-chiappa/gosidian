@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import type { InternalAxiosRequestConfig } from 'axios'
 import client, { isConcurrencyConflict, onApiEvent } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
+
+// The 401 handler imports the router lazily; a stub records where it goes.
+const routerPush = vi.hoisted(() => vi.fn(() => Promise.resolve()))
+vi.mock('@/router', () => ({ router: { push: routerPush } }))
 
 // We exercise the interceptors via axios's request adapter by
 // stubbing it — we don't need a real network. Each test sets up a
@@ -96,5 +101,28 @@ describe('api/client interceptors', () => {
       }),
     )
     off()
+  })
+
+  // S6-11: the requests that fail together when a session ends send the
+  // browser to the login page once, and the page's own requests do not wrap
+  // its address in a new next=.
+  it('sends a 401 to the login page with the deep link, and only once', async () => {
+    const unauthorized = (config: InternalAxiosRequestConfig) =>
+      Promise.reject({
+        config,
+        response: { status: 401, statusText: 'Unauthorized', headers: {}, config, data: {} },
+        isAxiosError: true,
+      })
+    setAdapter(unauthorized)
+    routerPush.mockClear()
+    window.history.replaceState({}, '', '/notes/p/x?w=1')
+    await client.get('/me').catch(() => undefined)
+    expect(routerPush).toHaveBeenCalledWith(`/login?next=${encodeURIComponent('/notes/p/x?w=1')}`)
+
+    routerPush.mockClear()
+    window.history.replaceState({}, '', `/login?next=${encodeURIComponent('/notes/p/x?w=1')}`)
+    await client.get('/auth-config').catch(() => undefined)
+    expect(routerPush).not.toHaveBeenCalled()
+    window.history.replaceState({}, '', '/')
   })
 })
