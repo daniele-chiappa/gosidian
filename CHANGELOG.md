@@ -8,6 +8,61 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.72.0] — 2026-10-09 — "web UI in Italian"
+
+The first part of a graphic review of the web UI: the editor follows the
+theme, the whole interface is translated into English and Italian,
+errors say what happened, and the note and admin windows fit a window
+of their default size. Pull the image and restart, nothing to migrate.
+German, French and Spanish keep their translations and show English for
+the new strings until someone translates them (see CONTRIBUTING.md).
+
+### Added
+- **The interface in Italian throughout** — with the language set to
+  Italian, login, search, query, trash, projects, access, tags, history,
+  graph, settings, tokens, the admin pages, the window titles, the menus
+  and the command palette were half in English. Every string is now in
+  the catalogues, English and Italian; a unit test checks that every key
+  the web UI names exists in both.
+- **Errors that say what happened** — a failed request reads as a
+  sentence in the user's language ("You do not have access.", "Wrong
+  password or code.", "The server is not available: try again in a
+  moment."), with the server's own message under it, where 47 places
+  showed "Request failed with status code N". The sentence comes from
+  the server's error code when there is one, else from the status.
+- **A page for a note that does not exist** — a link to a missing note
+  opens a page with "Create it here" (for a markdown note, where the
+  account may write) and Close, instead of an error under a working
+  toolbar.
+- **Two token families** in `tokens.css` and `web/design.md`:
+  `--color-focus` (the focus rings, the accent unless a preset sets its
+  own) and the control heights `--control-h` (32 px) and
+  `--control-h-sm` (28 px, window toolbars), with the Tailwind names
+  `ring-focus`, `h-control` and `h-control-sm`.
+
+### Changed
+- **Dates and sizes as people read them** — dates show in the language
+  and time zone of the browser ("9 Oct 2026, 08:42"), the ISO form in the
+  tooltip; sizes in KB and MB; a note's etag moved from its metadata line
+  to a tooltip.
+- **The note window fits a narrow window** — the four editor layouts
+  are icons with tooltips, the title gives way first, and in a narrower
+  window the secondary actions (print, download, copy, snapshot,
+  history) move into a ⋯ menu. A preview beside or under the editor uses
+  the smaller type scale.
+- **The admin pages fit their window** — their forms lay out by the
+  window's width instead of the screen's, and their tables scroll inside
+  their box: the users' actions, the token placeholders and the audit's
+  Apply no longer fall outside the window.
+- **modernc.org/sqlite 1.60.1** (from 1.59.0), with modernc.org/libc
+  1.77.1.
+
+### Fixed
+- **The editor follows the theme** — CodeMirror took the theme tokens as
+  colours, and the fallbacks never applied: its background, gutter,
+  cursor, selection, active line and suggestions had no colour of their
+  own, and the text read only because it inherited one.
+
 ## [2.71.4] — 2026-10-09 — "web UI fixes"
 
 The medium findings of the same code review in the web UI, and the

@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { createI18n } from 'vue-i18n'
+import enUI from '@catalogs/ui.en.json'
 
 vi.mock('plancia', async (orig) => ({
   ...(await orig<typeof import('plancia')>()),
@@ -14,7 +16,7 @@ describe('HTMLPreview (BUG-117, S7-12)', () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>((r) => (release = r))))
     const w = mount(HTMLPreview, {
       props: { html: '<p>v1</p><img src="/vault-files/p/attachments/a.png">', path: 'p/n.html' },
-      global: { provide: { openWindow: vi.fn() } },
+      global: { plugins: [createI18n({ legacy: false, locale: 'en', messages: { en: enUI } })], provide: { openWindow: vi.fn() } },
     })
     await flushPromises()
     await w.setProps({ html: '<p>v2</p>' })

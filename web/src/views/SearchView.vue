@@ -1,11 +1,16 @@
 <script setup lang="ts">
 /** SearchView — full-text search as a plancia window. Local query state (the
  *  plancia owns the URL); hits open as note windows. */
+import { useI18n } from 'vue-i18n'
 import { ref, watch, onMounted, inject } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
 import { search, type SearchHit } from '@/api/search'
 import { useWindowsStore, type OpenSpec } from 'plancia'
 import { planciaKey } from '@/composables/planciaKey'
+import { errorText } from '@/api/errors'
+import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
+
+const { t } = useI18n()
 
 const props = defineProps<{ q?: string; project?: string }>()
 
@@ -39,7 +44,7 @@ async function run(q: string, p: string) {
     lastSubmitted.value = q
   } catch (e) {
     if (mine !== gen) return
-    error.value = e instanceof Error ? e.message : 'Search failed'
+    error.value = errorText(e, t, t('search.failed'))
     hits.value = []
   } finally {
     if (mine === gen) loading.value = false
@@ -65,31 +70,33 @@ onMounted(() => {
 
 <template>
   <div class="p-6 max-w-3xl mx-auto">
-    <h1 class="text-xl font-semibold mb-4">Search</h1>
+    <h1 class="text-xl font-semibold mb-4">{{ t('search.title') }}</h1>
 
     <div class="flex gap-2 mb-6">
       <input
         v-model="query"
         type="search"
         autofocus
-        placeholder="Full-text search…"
-        class="flex-1 rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+        :placeholder="t('search.placeholder')"
+        class="flex-1 rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
       />
       <input
         v-model="project"
         type="text"
-        placeholder="project filter (optional)"
-        class="w-48 rounded bg-bg-elevated border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+        :placeholder="t('search.project_placeholder')"
+        class="w-48 min-w-0 shrink rounded bg-bg-elevated border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
       />
     </div>
 
-    <p v-if="loading" class="text-text-muted text-sm">Searching…</p>
-    <p v-else-if="error" class="text-danger text-sm">{{ error }}</p>
+    <p v-if="loading" class="text-text-muted text-sm">{{ t('search.searching') }}</p>
+    <ErrorMessage v-else-if="error" :text="error" class="text-sm" />
     <p
       v-else-if="lastSubmitted && hits.length === 0"
       class="text-text-muted text-sm"
     >
-      No matches for <strong class="font-mono">{{ lastSubmitted }}</strong>.
+      <i18n-t keypath="search.no_matches" scope="global">
+        <template #query><strong class="font-mono">{{ lastSubmitted }}</strong></template>
+      </i18n-t>
     </p>
 
     <ul v-if="hits.length" class="space-y-3">

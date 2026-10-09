@@ -12,6 +12,15 @@
  * Tailwind can compose alpha modifiers via `rgb(var(--color-x) / <alpha-value>)`.
  */
 
+/* --- Shared by every preset (IMP-154) -------------------------------- */
+/* Focus: the accent unless a preset says otherwise. Control heights: a
+   control (input, select, button) and the denser one of window toolbars. */
+:root {
+  --color-focus: var(--color-accent);
+  --control-h: 2rem;
+  --control-h-sm: 1.75rem;
+}
+
 /* --- Catppuccin Mocha (dark, default) -------------------------------- */
 :root,
 [data-preset='catppuccin-mocha'] {

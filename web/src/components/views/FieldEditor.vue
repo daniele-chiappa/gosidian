@@ -149,7 +149,7 @@ const inputType = (type?: string) =>
       <input
         :ref="i === 0 ? focusOnMount : undefined"
         type="checkbox"
-        class="rounded-sm border-border bg-bg-elevated text-accent focus:ring-accent"
+        class="rounded-sm border-border bg-bg-elevated text-accent focus:ring-focus"
         :checked="Array.isArray(draft) && draft.includes(o)"
         @change="toggleOption(o, ($event.target as HTMLInputElement).checked)"
       />

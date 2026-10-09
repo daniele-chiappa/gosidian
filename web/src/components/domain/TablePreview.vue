@@ -161,7 +161,7 @@ const metaLabel = computed(() => {
       {{ t('table.load_error') }}: <span class="ml-1 font-mono">{{ media.path }}</span>
     </div>
     <template v-else>
-      <p v-if="loading" class="text-text-muted text-sm">Loading…</p>
+      <p v-if="loading" class="text-text-muted text-sm">{{ t('common.loading') }}</p>
       <template v-else>
         <div class="overflow-x-auto rounded border border-border">
           <table class="w-full text-sm border-collapse">

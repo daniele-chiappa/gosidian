@@ -44,13 +44,17 @@ import { findHeading } from './headings'
 import { linkTarget } from './noteLinks'
 
 // notePath: the note the HTML belongs to, which relative links start from.
-const props = defineProps<{ html: string; views?: ViewData[]; notePath?: string }>()
+// compact: a pane beside or under the editor, set in the smaller type scale
+// (IMP-156, M6): a page-sized h1 took seven lines in 280 px.
+const props = defineProps<{ html: string; views?: ViewData[]; notePath?: string; compact?: boolean }>()
 
 const store = useWindowsStore()
 const openWindow = inject<(spec: OpenSpec) => string>('openWindow', (s) => store.open(s))
 const root = ref<HTMLElement | null>(null)
-const proseClass =
-  'gosidian-preview prose max-w-none prose-pre:bg-bg-elevated prose-pre:border prose-pre:border-border prose-code:before:hidden prose-code:after:hidden'
+const proseClass = computed(
+  () =>
+    `gosidian-preview ${props.compact ? 'prose prose-sm' : 'prose'} max-w-none prose-pre:bg-bg-elevated prose-pre:border prose-pre:border-border prose-code:before:hidden prose-code:after:hidden`,
+)
 
 const sanitized = computed(() => sanitizePreviewHtml(props.html))
 

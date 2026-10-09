@@ -2,10 +2,15 @@
 /** TagsView — tag browser as a plancia window. The selected tag is local
  *  state (initialised from the `tag` window prop); picking a tag on the left
  *  browses within this window, picking a note opens it as a sibling window. */
+import { useI18n } from 'vue-i18n'
 import { onMounted, ref, watch, inject } from 'vue'
 import { listTags, notesByTag, type TagCount, type NoteSummary } from '@/api/tags'
 import { useWindowsStore, type OpenSpec } from 'plancia'
 import { planciaKey } from '@/composables/planciaKey'
+import { errorText } from '@/api/errors'
+import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
+
+const { t } = useI18n()
 
 const props = defineProps<{ tag?: string }>()
 
@@ -24,7 +29,7 @@ async function loadTags() {
   try {
     tags.value = await listTags()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to load tags'
+    error.value = errorText(e, t, t('tags.load_failed'))
   } finally {
     loading.value = false
   }
@@ -38,7 +43,7 @@ async function loadNotes(tag: string) {
   try {
     notes.value = await notesByTag(tag)
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to load notes for tag'
+    error.value = errorText(e, t, t('tags.notes_failed'))
   }
 }
 
@@ -62,11 +67,11 @@ watch(selectedTag, (t) => {
 </script>
 
 <template>
-  <div class="p-6 grid gap-8 grid-cols-1 md:grid-cols-3">
-    <aside class="md:col-span-1">
-      <h1 class="text-xl font-semibold mb-3">Tags</h1>
-      <p v-if="loading" class="text-text-muted text-sm">Loading…</p>
-      <p v-else-if="error" class="text-danger text-sm">{{ error }}</p>
+  <div class="flex flex-wrap gap-8 p-6">
+    <aside class="w-56 shrink-0">
+      <h1 class="text-xl font-semibold mb-3">{{ t('tags.title') }}</h1>
+      <p v-if="loading" class="text-text-muted text-sm">{{ t('common.loading') }}</p>
+      <ErrorMessage v-else-if="error" :text="error" class="text-sm" />
       <ul v-else class="space-y-1">
         <li v-for="t in tags" :key="t.tag">
           <button
@@ -82,10 +87,10 @@ watch(selectedTag, (t) => {
       </ul>
     </aside>
 
-    <section class="md:col-span-2">
+    <section class="min-w-[16rem] flex-1">
       <template v-if="selectedTag">
         <h2 class="text-lg font-semibold mb-3">
-          Notes tagged <span class="text-accent">#{{ selectedTag }}</span>
+          {{ t('tags.notes_tagged') }} <span class="text-accent">#{{ selectedTag }}</span>
         </h2>
         <ul v-if="notes.length" class="space-y-2">
           <li
@@ -101,10 +106,10 @@ watch(selectedTag, (t) => {
             <p class="text-xs text-text-muted font-mono">{{ n.path }}</p>
           </li>
         </ul>
-        <p v-else class="text-text-muted text-sm">No notes tagged with this label.</p>
+        <p v-else class="text-text-muted text-sm">{{ t('tags.no_notes') }}</p>
       </template>
       <p v-else class="text-text-muted text-sm">
-        Pick a tag on the left to see the notes that carry it.
+        {{ t('tags.pick') }}
       </p>
     </section>
   </div>

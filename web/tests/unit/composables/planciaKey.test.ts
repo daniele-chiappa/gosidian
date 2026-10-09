@@ -38,6 +38,11 @@ describe('plancia codec round-trip', () => {
     })
   })
 
+  it('titles an admin section by the catalogue, an unknown one by its name (review)', () => {
+    expect(codec.decode('admin:teams')?.title).toBe('Admin · Teams')
+    expect(codec.decode('admin:foo')?.title).toBe('Admin · foo')
+  })
+
   it('graph focus uses the focus prop; bare graph is the global graph', () => {
     expect(codec.encode(win('graph'))).toBe('graph')
     const ego = codec.encode(win('graph', { focus: 'p/n.md', depth: 1 }))!

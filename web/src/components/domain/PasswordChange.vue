@@ -8,7 +8,8 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { changePassword } from '@/api/password'
-import { apiErrorMessage } from '@/api/client'
+import { errorText } from '@/api/errors'
+import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
 
 const MIN_LENGTH = 8
 
@@ -41,7 +42,7 @@ async function submit() {
     current.value = next.value = confirm.value = ''
     emit('done', closed)
   } catch (e) {
-    error.value = apiErrorMessage(e, t('password.failed'))
+    error.value = errorText(e, t, t('password.failed'))
   } finally {
     busy.value = false
   }
@@ -57,7 +58,7 @@ async function submit() {
         type="password"
         autocomplete="current-password"
         name="current-password"
-        class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+        class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
       />
     </label>
     <label class="block text-sm">
@@ -67,7 +68,7 @@ async function submit() {
         type="password"
         autocomplete="new-password"
         name="new-password"
-        class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+        class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
       />
     </label>
     <label class="block text-sm">
@@ -77,15 +78,13 @@ async function submit() {
         type="password"
         autocomplete="new-password"
         name="confirm-password"
-        class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+        class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
       />
     </label>
     <p v-if="problem" class="text-xs text-warning">
       {{ problem }}
     </p>
-    <p v-if="error" class="text-sm text-danger">
-      {{ error }}
-    </p>
+    <ErrorMessage v-if="error" :text="error" class="text-sm" />
     <button
       type="submit"
       :disabled="!ready"

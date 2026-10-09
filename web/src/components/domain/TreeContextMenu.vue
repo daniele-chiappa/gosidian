@@ -19,13 +19,12 @@ import { useWindowsStore } from 'plancia'
 import { useTreeMenu } from '@/composables/useTreeMenu'
 import { useAccessStore } from '@/stores/access'
 import { useTreeStore } from '@/stores/tree'
-import { apiErrorMessage } from '@/api/client'
-import { downloadErrorMessage } from '@/api/download'
 import { deleteFolder, exportFolder } from '@/api/folders'
 import { downloadNote, isReadOnlyNotePath } from '@/api/noteDownload'
 import { deleteNote } from '@/api/notes'
 import { exportProject } from '@/api/projects'
 import type { TreeNode } from '@/api/tree'
+import { errorText } from '@/api/errors'
 
 interface Item {
   key: 'download' | 'delete'
@@ -72,8 +71,8 @@ async function activate(item: Item) {
   } catch (e) {
     window.alert(
       item.key === 'download'
-        ? downloadErrorMessage(e, t('tree.menu.download_failed'))
-        : apiErrorMessage(e, t('tree.menu.delete_failed')),
+        ? errorText(e, t, t('tree.menu.download_failed'))
+        : errorText(e, t, t('tree.menu.delete_failed')),
     )
   }
 }

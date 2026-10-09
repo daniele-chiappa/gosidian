@@ -38,11 +38,14 @@
  * images under an attachments/ folder are inlined like /vault-files ones.
  * The iframe still has no network and no same-origin access.
  */
+import { useI18n } from 'vue-i18n'
 import { inject, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useWindowsStore, type OpenSpec } from 'plancia'
 import { planciaKey } from '@/composables/planciaKey'
 import { hasScheme, linkTarget, resolveRelative } from './noteLinks'
 import { buildSrcdoc as buildDoc } from './htmlNoteDoc'
+
+const { t } = useI18n()
 
 const props = defineProps<{ html: string; path?: string }>()
 
@@ -185,7 +188,7 @@ watch(
     :srcdoc="srcdoc"
     sandbox="allow-scripts"
     referrerpolicy="no-referrer"
-    title="HTML note"
+    :title="t('note.html_frame')"
     class="w-full min-h-[70vh] h-full border-0 bg-white"
   />
 </template>

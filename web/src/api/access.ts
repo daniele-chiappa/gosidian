@@ -1,3 +1,4 @@
+import { i18n } from '@/locales'
 import client from './client'
 
 /** Who may read a project. Write and admin always come from a grant. */
@@ -29,15 +30,25 @@ export interface AccessView {
   projects: AccessProject[]
 }
 
-/** Human labels for the stored role values. */
-export const ROLE_LABEL: Record<string, string> = {
-  owner: 'Admin',
-  member: 'User',
-  guest: 'Read-only',
+// Labels in the user's language (IMP-155): the catalogue's `access.*`
+// keys, read through the global i18n so a template that calls these follows
+// a change of language.
+const tr = (key: string) => i18n.global.t(key)
+const ROLES = new Set(['owner', 'member', 'guest'])
+
+/** The human label of a stored role value. */
+export function roleLabel(role: string | undefined): string {
+  return role && ROLES.has(role) ? tr(`access.role.${role}`) : (role ?? '')
 }
 
-export function roleLabel(role: string | undefined): string {
-  return (role && ROLE_LABEL[role]) || role || ''
+/** The label of a visibility: Public, Internal, Private. */
+export function visibilityLabel(v: Visibility | string): string {
+  return tr(`access.visibility.${v}`)
+}
+
+/** What a visibility means, for a tooltip. */
+export function visibilityHelp(v: Visibility | string): string {
+  return tr(`access.visibility_help.${v}`)
 }
 
 /** The caller's own effective access to every project they may read. */
@@ -53,15 +64,3 @@ export async function getUserAccess(userId: string): Promise<AccessView> {
 }
 
 export const LEVEL_RANK: Record<AccessLevel, number> = { none: 0, read: 1, write: 2, admin: 3 }
-
-export const VISIBILITY_LABEL: Record<Visibility, string> = {
-  public: 'Public',
-  internal: 'Internal',
-  private: 'Private',
-}
-
-export const VISIBILITY_HELP: Record<Visibility, string> = {
-  public: 'Public — readable by every signed-in account, guests included. Writing still takes a grant.',
-  internal: 'Internal — readable by every member account. Writing still takes a grant.',
-  private: 'Private — only accounts holding a grant (and the owner) can see it.',
-}

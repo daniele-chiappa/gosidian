@@ -4,6 +4,7 @@
  * project covers all of them; the account's effective level is the highest
  * of its direct grant and its teams' grants, capped by the role. Owner-only.
  */
+import { useI18n } from 'vue-i18n'
 import { computed, onMounted, reactive, ref } from 'vue'
 import {
   listTeams,
@@ -20,6 +21,10 @@ import { listUsers, type AdminUser } from '@/api/admin'
 import { listProjects, type GrantLevel, type Project } from '@/api/projects'
 import { useAccessStore } from '@/stores/access'
 import { roleLabel } from '@/api/access'
+import { errorText } from '@/api/errors'
+import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
+
+const { t } = useI18n()
 
 const access = useAccessStore()
 const teams = ref<Team[]>([])
@@ -40,13 +45,13 @@ const addGrantDraft = reactive<Record<string, { project: string; level: GrantLev
 const editing = ref<string | null>(null)
 const editDraft = reactive({ name: '', description: '' })
 
-function candidatesFor(t: Team): AdminUser[] {
-  const have = new Set(t.users.map((u) => u.id))
+function candidatesFor(team: Team): AdminUser[] {
+  const have = new Set(team.users.map((u) => u.id))
   return users.value.filter((u) => u.role !== 'owner' && !u.disabled_at && !have.has(u.id))
 }
 
-function projectsFor(t: Team): Project[] {
-  const have = new Set(t.grants.map((g) => g.project))
+function projectsFor(team: Team): Project[] {
+  const have = new Set(team.grants.map((g) => g.project))
   return projects.value.filter((p) => !have.has(p.name))
 }
 
@@ -61,7 +66,7 @@ async function load() {
     users.value = u
     projects.value = p
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to load'
+    error.value = errorText(e, t, t('admin.teams.load_failed'))
   } finally {
     loading.value = false
   }
@@ -79,14 +84,14 @@ async function run(label: string, fn: () => Promise<unknown>) {
     await fn()
     await refresh()
   } catch (e) {
-    error.value = e instanceof Error ? `${label}: ${e.message}` : `${label} failed`
+    error.value = errorText(e, t, label)
   }
 }
 
 async function submitCreate() {
   if (!newTeam.name.trim()) return
   creating.value = true
-  await run('Create team', async () => {
+  await run(t('admin.teams.create_failed'), async () => {
     await createTeam(newTeam.name.trim(), newTeam.description.trim())
     newTeam.name = ''
     newTeam.description = ''
@@ -94,61 +99,61 @@ async function submitCreate() {
   creating.value = false
 }
 
-function startEdit(t: Team) {
-  editing.value = t.id
-  editDraft.name = t.name
-  editDraft.description = t.description ?? ''
+function startEdit(team: Team) {
+  editing.value = team.id
+  editDraft.name = team.name
+  editDraft.description = team.description ?? ''
 }
 
-async function saveEdit(t: Team) {
-  await run('Rename team', () =>
-    updateTeam(t.id, { name: editDraft.name.trim(), description: editDraft.description.trim() }),
+async function saveEdit(team: Team) {
+  await run(t('admin.teams.rename_failed'), () =>
+    updateTeam(team.id, { name: editDraft.name.trim(), description: editDraft.description.trim() }),
   )
   editing.value = null
 }
 
-async function destroy(t: Team) {
-  if (!confirm(`Delete team "${t.name}"? Its ${t.grants.length} grant(s) go with it; the accounts stay.`)) return
-  await run('Delete team', () => deleteTeam(t.id))
+async function destroy(team: Team) {
+  if (!confirm(t('admin.teams.confirm_delete', { name: team.name, n: team.grants.length }))) return
+  await run(t('admin.teams.delete_failed'), () => deleteTeam(team.id))
 }
 
-async function addUser(t: Team) {
-  const id = addUserDraft[t.id]
+async function addUser(team: Team) {
+  const id = addUserDraft[team.id]
   if (!id) return
-  await run('Add account', async () => {
-    await addTeamUser(t.id, id)
-    addUserDraft[t.id] = ''
+  await run(t('members.add_account_failed'), async () => {
+    await addTeamUser(team.id, id)
+    addUserDraft[team.id] = ''
   })
 }
 
-async function dropUser(t: Team, userId: string) {
-  await run('Remove account', () => removeTeamUser(t.id, userId))
+async function dropUser(team: Team, userId: string) {
+  await run(t('admin.teams.remove_account_failed'), () => removeTeamUser(team.id, userId))
 }
 
-async function addGrant(t: Team) {
-  const d = addGrantDraft[t.id]
+async function addGrant(team: Team) {
+  const d = addGrantDraft[team.id]
   if (!d?.project) return
-  await run('Add grant', async () => {
-    await setTeamGrant(t.id, d.project, d.level)
+  await run(t('admin.teams.add_grant_failed'), async () => {
+    await setTeamGrant(team.id, d.project, d.level)
     d.project = ''
     d.level = 'read'
   })
 }
 
-async function changeGrant(t: Team, project: string, level: string) {
+async function changeGrant(team: Team, project: string, level: string) {
   if (!LEVELS.includes(level as GrantLevel)) return
-  await run('Change grant', () => setTeamGrant(t.id, project, level as GrantLevel))
+  await run(t('members.change_failed'), () => setTeamGrant(team.id, project, level as GrantLevel))
 }
 
-async function dropGrant(t: Team, project: string) {
-  await run('Remove grant', () => removeTeamGrant(t.id, project))
+async function dropGrant(team: Team, project: string) {
+  await run(t('members.remove_failed'), () => removeTeamGrant(team.id, project))
 }
 
-function grantDraft(t: Team): { project: string; level: GrantLevel } {
-  let d = addGrantDraft[t.id]
+function grantDraft(team: Team): { project: string; level: GrantLevel } {
+  let d = addGrantDraft[team.id]
   if (!d) {
     d = { project: '', level: 'read' }
-    addGrantDraft[t.id] = d
+    addGrantDraft[team.id] = d
   }
   return d
 }
@@ -167,55 +172,52 @@ onMounted(load)
 <template>
   <div class="space-y-4">
     <p class="text-sm text-text-muted">
-      A team gives every account in it the same level on the projects it is granted.
-      An account's effective level is the highest of its direct grant and its teams'
-      grants, capped by its role. Project admins can also grant a team from
-      Projects → Access.
+      {{ t('admin.teams.intro') }}
     </p>
 
     <!-- Create -->
     <section class="rounded-lg border border-border p-4">
       <form class="flex flex-wrap items-end gap-2" @submit.prevent="submitCreate">
         <label class="text-sm flex-1 min-w-[10rem]">
-          <span class="text-text-muted text-xs">New team</span>
+          <span class="text-text-muted text-xs">{{ t('admin.teams.new') }}</span>
           <input
             v-model.trim="newTeam.name"
             type="text"
-            placeholder="name"
+            :placeholder="t('admin.teams.name')"
             required
-            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
           />
         </label>
         <label class="text-sm flex-[2] min-w-[12rem]">
-          <span class="text-text-muted text-xs">Description (optional)</span>
+          <span class="text-text-muted text-xs">{{ t('admin.teams.description_optional') }}</span>
           <input
             v-model.trim="newTeam.description"
             type="text"
-            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
           />
         </label>
         <button
           type="submit"
           :disabled="creating || !newTeam.name"
           class="rounded bg-accent text-accent-fg px-3 py-2 text-sm hover:bg-accent-hover disabled:opacity-60"
-        >+ Create team</button>
+        >{{ t('admin.teams.create') }}</button>
       </form>
     </section>
 
-    <p v-if="loading" class="text-text-muted">Loading…</p>
-    <p v-if="error" class="text-danger text-sm">{{ error }}</p>
-    <p v-if="empty" class="text-sm text-text-muted">No teams yet.</p>
+    <p v-if="loading" class="text-text-muted">{{ t('common.loading') }}</p>
+    <ErrorMessage v-if="error" :text="error" class="text-sm" />
+    <p v-if="empty" class="text-sm text-text-muted">{{ t('admin.teams.empty') }}</p>
 
     <section
-      v-for="t in teams"
-      :key="t.id"
+      v-for="team in teams"
+      :key="team.id"
       class="rounded-lg border border-border p-4 space-y-3"
     >
       <!-- Header: name / description / actions -->
       <div class="flex items-start gap-3">
         <div class="flex-1 min-w-0">
-          <template v-if="editing === t.id">
-            <form class="flex flex-wrap gap-2" @submit.prevent="saveEdit(t)">
+          <template v-if="editing === team.id">
+            <form class="flex flex-wrap gap-2" @submit.prevent="saveEdit(team)">
               <input
                 v-model.trim="editDraft.name"
                 type="text"
@@ -225,38 +227,38 @@ onMounted(load)
               <input
                 v-model.trim="editDraft.description"
                 type="text"
-                placeholder="description"
+                :placeholder="t('admin.teams.description')"
                 class="flex-1 rounded bg-bg-elevated border border-border px-2 py-1 text-sm"
               />
-              <button type="submit" class="text-xs px-2 py-1 rounded bg-accent text-accent-fg">Save</button>
-              <button type="button" class="text-xs px-2 py-1 rounded border border-border" @click="editing = null">Cancel</button>
+              <button type="submit" class="text-xs px-2 py-1 rounded bg-accent text-accent-fg">{{ t('common.save') }}</button>
+              <button type="button" class="text-xs px-2 py-1 rounded border border-border" @click="editing = null">{{ t('common.cancel') }}</button>
             </form>
           </template>
           <template v-else>
-            <h3 class="font-semibold">{{ t.name }}</h3>
-            <p v-if="t.description" class="text-xs text-text-muted">{{ t.description }}</p>
+            <h3 class="font-semibold">{{ team.name }}</h3>
+            <p v-if="team.description" class="text-xs text-text-muted">{{ team.description }}</p>
           </template>
         </div>
         <button
-          v-if="editing !== t.id"
+          v-if="editing !== team.id"
           type="button"
           class="text-xs px-2 py-1 rounded hover:bg-surface-hover"
-          @click="startEdit(t)"
-        >Rename</button>
+          @click="startEdit(team)"
+        >{{ t('projects.rename') }}</button>
         <button
           type="button"
           class="text-xs px-2 py-1 rounded text-danger hover:bg-surface-hover"
-          @click="destroy(t)"
-        >Delete</button>
+          @click="destroy(team)"
+        >{{ t('common.delete') }}</button>
       </div>
 
       <div class="grid gap-4 md:grid-cols-2">
         <!-- Accounts -->
         <div>
-          <h4 class="text-xs uppercase tracking-wide text-text-muted mb-2">Accounts ({{ t.users.length }})</h4>
+          <h4 class="text-xs uppercase tracking-wide text-text-muted mb-2">{{ t('members.accounts', { n: team.users.length }) }}</h4>
           <ul class="space-y-1 mb-2">
             <li
-              v-for="u in t.users"
+              v-for="u in team.users"
               :key="u.id"
               class="flex items-center gap-2 text-sm rounded border border-border bg-surface px-2 py-1"
             >
@@ -265,34 +267,34 @@ onMounted(load)
               <button
                 type="button"
                 class="text-xs px-1.5 rounded text-danger hover:bg-surface-hover"
-                title="Remove from team"
-                @click="dropUser(t, u.id)"
+                :title="t('admin.teams.remove_account')"
+                @click="dropUser(team, u.id)"
               >×</button>
             </li>
-            <li v-if="t.users.length === 0" class="text-xs text-text-muted">No accounts yet.</li>
+            <li v-if="team.users.length === 0" class="text-xs text-text-muted">{{ t('admin.teams.no_accounts') }}</li>
           </ul>
-          <form class="flex gap-2" @submit.prevent="addUser(t)">
+          <form class="flex gap-2" @submit.prevent="addUser(team)">
             <select
-              v-model="addUserDraft[t.id]"
+              v-model="addUserDraft[team.id]"
               class="flex-1 rounded bg-bg-elevated border border-border px-2 py-1 text-sm"
             >
-              <option value="">Add account…</option>
-              <option v-for="u in candidatesFor(t)" :key="u.id" :value="u.id">{{ u.username }} ({{ roleLabel(u.role) }})</option>
+              <option value="">{{ t('admin.teams.add_account') }}</option>
+              <option v-for="u in candidatesFor(team)" :key="u.id" :value="u.id">{{ u.username }} ({{ roleLabel(u.role) }})</option>
             </select>
             <button
               type="submit"
-              :disabled="!addUserDraft[t.id]"
+              :disabled="!addUserDraft[team.id]"
               class="text-xs px-2 py-1 rounded border border-border hover:bg-surface-hover disabled:opacity-50"
-            >Add</button>
+            >{{ t('admin.teams.add') }}</button>
           </form>
         </div>
 
         <!-- Grants -->
         <div>
-          <h4 class="text-xs uppercase tracking-wide text-text-muted mb-2">Project grants ({{ t.grants.length }})</h4>
+          <h4 class="text-xs uppercase tracking-wide text-text-muted mb-2">{{ t('admin.teams.grants', { n: team.grants.length }) }}</h4>
           <ul class="space-y-1 mb-2">
             <li
-              v-for="g in t.grants"
+              v-for="g in team.grants"
               :key="g.project"
               class="flex items-center gap-2 text-sm rounded border border-border bg-surface px-2 py-1"
             >
@@ -301,38 +303,38 @@ onMounted(load)
               <select
                 class="text-xs rounded bg-bg-elevated border border-border px-1 py-0.5"
                 :value="g.level"
-                @change="changeGrant(t, g.project, ($event.target as HTMLSelectElement).value)"
+                @change="changeGrant(team, g.project, ($event.target as HTMLSelectElement).value)"
               >
-                <option v-for="l in LEVELS" :key="l" :value="l">{{ l }}</option>
+                <option v-for="l in LEVELS" :key="l" :value="l">{{ t(`members.level_name.${l}`) }}</option>
               </select>
               <button
                 type="button"
                 class="text-xs px-1.5 rounded text-danger hover:bg-surface-hover"
-                title="Remove grant"
-                @click="dropGrant(t, g.project)"
+                :title="t('admin.teams.remove_grant')"
+                @click="dropGrant(team, g.project)"
               >×</button>
             </li>
-            <li v-if="t.grants.length === 0" class="text-xs text-text-muted">No grants yet.</li>
+            <li v-if="team.grants.length === 0" class="text-xs text-text-muted">{{ t('admin.teams.no_grants') }}</li>
           </ul>
-          <form class="flex gap-2" @submit.prevent="addGrant(t)">
+          <form class="flex gap-2" @submit.prevent="addGrant(team)">
             <select
-              v-model="grantDraft(t).project"
+              v-model="grantDraft(team).project"
               class="flex-1 rounded bg-bg-elevated border border-border px-2 py-1 text-sm"
             >
-              <option value="">Grant a project…</option>
-              <option v-for="p in projectsFor(t)" :key="p.name" :value="p.name">{{ p.name }}</option>
+              <option value="">{{ t('admin.teams.grant_project') }}</option>
+              <option v-for="p in projectsFor(team)" :key="p.name" :value="p.name">{{ p.name }}</option>
             </select>
             <select
-              v-model="grantDraft(t).level"
+              v-model="grantDraft(team).level"
               class="rounded bg-bg-elevated border border-border px-2 py-1 text-sm"
             >
-              <option v-for="l in LEVELS" :key="l" :value="l">{{ l }}</option>
+              <option v-for="l in LEVELS" :key="l" :value="l">{{ t(`members.level_name.${l}`) }}</option>
             </select>
             <button
               type="submit"
-              :disabled="!grantDraft(t).project"
+              :disabled="!grantDraft(team).project"
               class="text-xs px-2 py-1 rounded border border-border hover:bg-surface-hover disabled:opacity-50"
-            >Add</button>
+            >{{ t('admin.teams.add') }}</button>
           </form>
         </div>
       </div>

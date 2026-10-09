@@ -76,7 +76,11 @@ async function postJson<T>(path: string, body: object, token?: string): Promise<
   })
   if (!res.ok) {
     const data = (await res.json().catch(() => ({}))) as ErrorBody
-    throw new Error(data.error?.message ?? `HTTP ${res.status}`)
+    // The status rides along, for describeError (IMP-155).
+    throw Object.assign(new Error(data.error?.message ?? `HTTP ${res.status}`), {
+      status: res.status,
+      code: data.error?.code,
+    })
   }
   return (await res.json()) as T
 }

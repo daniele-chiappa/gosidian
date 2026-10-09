@@ -1,4 +1,3 @@
-import axios from 'axios'
 import client from './client'
 
 /**
@@ -36,15 +35,4 @@ export function filenameFrom(disposition: string): string | undefined {
     }
   }
   return /filename="?([^";]+)"?/i.exec(disposition)?.[1]
-}
-
-/** A readable message for a failed download. With responseType 'blob' the
- *  JSON error body stays a Blob, so the status carries the meaning. */
-export function downloadErrorMessage(e: unknown, what: string): string {
-  if (axios.isAxiosError(e)) {
-    if (e.response?.status === 429) return `${what}: too many exports, retry in a few minutes`
-    if (e.response?.status === 404) return `${what}: not found`
-    if (e.response?.status === 403) return `${what}: not allowed`
-  }
-  return e instanceof Error ? `${what}: ${e.message}` : `${what} failed`
 }

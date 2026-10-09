@@ -168,7 +168,7 @@ describe('TreeContextMenu', () => {
     vi.mocked(deleteNote).mockRejectedValue(new Error('locked'))
     await openOn(note)
     await click(1)
-    expect(alert).toHaveBeenCalledWith('locked')
+    expect(String((alert.mock.calls[0] as unknown[])[0])).toContain('locked')
   })
 
   it('moves with the arrows and gives the focus back to the row on Esc', async () => {

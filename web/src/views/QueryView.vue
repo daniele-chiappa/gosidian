@@ -3,12 +3,18 @@
  *  on fields, the same query as the MCP memory_query tool. The query lives in
  *  the window's props, so the codec keeps it in the URL (queryArg.ts); notes
  *  open as sibling windows. */
+import { useI18n } from 'vue-i18n'
 import { computed, inject, onMounted, ref } from 'vue'
 import { runQuery, type QueryCondition, type QueryNote, type QueryOp } from '@/api/query'
 import { listProjects } from '@/api/projects'
 import { QUERY_OPS } from '@/composables/queryArg'
 import { useWindowsStore, type OpenSpec } from 'plancia'
 import { planciaKey } from '@/composables/planciaKey'
+import { errorText } from '@/api/errors'
+import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
+import DateTime from '@/components/primitives/DateTime.vue'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   project?: string
@@ -72,10 +78,10 @@ function conditions(): QueryCondition[] {
       return
     }
     const value = r.value.trim()
-    if (!value) throw new Error(`Condition ${i + 1} (${field}) needs a value`)
+    if (!value) throw new Error(t('query.needs_value', { n: i + 1, field }))
     out.push({ field, op: r.op, value: r.op === 'in' ? splitList(value) : value })
   })
-  if (!out.length) throw new Error('Add at least one condition with a field')
+  if (!out.length) throw new Error(t('query.needs_condition'))
   return out
 }
 
@@ -99,7 +105,6 @@ const sortFields = (s: string) =>
 /** Short values (dates, statuses, numbers) stay on one line. */
 const cellClass = (v: string) => (v.length <= 24 ? 'whitespace-nowrap' : '')
 
-const fmtDate = (iso: string) => iso.slice(0, 10)
 
 // URL persistence, as GraphView does: the window is the `query` singleton,
 // so the view finds it and pushes the query back through identify().
@@ -146,8 +151,7 @@ async function run() {
     ran.value = true
     syncWindow(where)
   } catch (e) {
-    const msg = (e as { response?: { data?: { error?: { message?: string } } } }).response?.data?.error?.message
-    error.value = msg || (e instanceof Error ? e.message : 'Query failed')
+    error.value = errorText(e, t, t('query.failed'))
   } finally {
     loading.value = false
   }
@@ -179,12 +183,10 @@ onMounted(async () => {
 <template>
   <div class="p-6 max-w-5xl mx-auto">
     <h1 class="text-xl font-semibold mb-1">
-      Query
+      {{ t('query.title') }}
     </h1>
     <p class="text-sm text-text-muted mb-4">
-      Notes by their frontmatter: every condition must hold. A namespaced tag counts as a field
-      (<code>status:done</code> → <code>status = done</code>), <code>tags</code> is the tag list,
-      dates and numbers compare as such.
+      {{ t('query.intro') }}
     </p>
 
     <form
@@ -217,13 +219,13 @@ onMounted(async () => {
         <label
           class="text-sm text-text-muted"
           for="query-project"
-        >Project</label>
+        >{{ t('query.project') }}</label>
         <input
           id="query-project"
           v-model="project"
           list="query-projects"
-          placeholder="all readable projects"
-          class="w-56 rounded bg-bg-elevated border border-border px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+          :placeholder="t('query.project_placeholder')"
+          class="w-56 rounded bg-bg-elevated border border-border px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
         >
       </div>
 
@@ -236,14 +238,14 @@ onMounted(async () => {
         <input
           v-model="r.field"
           list="query-fields"
-          placeholder="field"
-          aria-label="Field"
-          class="w-44 rounded bg-bg-elevated border border-border px-2 py-1 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-accent"
+          :placeholder="t('query.field')"
+          :aria-label="t('query.field')"
+          class="w-44 rounded bg-bg-elevated border border-border px-2 py-1 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-focus"
         >
         <select
           v-model="r.op"
-          aria-label="Operator"
-          class="rounded bg-bg-elevated border border-border px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+          :aria-label="t('query.operator')"
+          class="rounded bg-bg-elevated border border-border px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
         >
           <option
             v-for="op in QUERY_OPS"
@@ -256,8 +258,8 @@ onMounted(async () => {
         <select
           v-if="r.op === 'exists'"
           v-model="r.value"
-          aria-label="Value"
-          class="rounded bg-bg-elevated border border-border px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+          :aria-label="t('query.value')"
+          class="rounded bg-bg-elevated border border-border px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
         >
           <option value="true">
             true
@@ -269,14 +271,14 @@ onMounted(async () => {
         <input
           v-else
           v-model="r.value"
-          :placeholder="r.op === 'in' ? 'a, b, c' : 'value'"
-          aria-label="Value"
-          class="flex-1 min-w-40 rounded bg-bg-elevated border border-border px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+          :placeholder="r.op === 'in' ? 'a, b, c' : t('query.value')"
+          :aria-label="t('query.value')"
+          class="flex-1 min-w-40 rounded bg-bg-elevated border border-border px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
         >
         <button
           type="button"
           class="px-2 py-1 text-sm rounded hover:bg-surface-hover text-text-muted"
-          :aria-label="`Remove condition ${i + 1}`"
+          :aria-label="t('query.remove_condition', { n: i + 1 })"
           @click="removeRow(i)"
         >
           ×
@@ -289,28 +291,28 @@ onMounted(async () => {
           class="px-2 py-1 text-sm rounded border border-border hover:bg-surface-hover"
           @click="addRow"
         >
-          + condition
+          {{ t('query.add_condition') }}
         </button>
         <span class="inline-flex gap-2 items-center ml-4">
           <label
             class="text-sm text-text-muted"
             for="query-sort-field"
-          >Sort</label>
+          >{{ t('query.sort') }}</label>
           <input
             id="query-sort-field"
             v-model="sort"
             list="query-sort"
-            placeholder="modified"
-            title="One or more keys separated by commas, each with its own asc or desc: status asc, priority desc"
-            class="w-56 rounded bg-bg-elevated border border-border px-2 py-1 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-accent"
+            :placeholder="t('query.sort_placeholder')"
+            :title="t('query.sort_hint')"
+            class="w-56 rounded bg-bg-elevated border border-border px-2 py-1 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-focus"
           >
           <select
             v-model="order"
-            aria-label="Order"
-            class="rounded bg-bg-elevated border border-border px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+            :aria-label="t('query.order')"
+            class="rounded bg-bg-elevated border border-border px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
           >
             <option value="">
-              default
+              {{ t('query.order_default') }}
             </option>
             <option value="desc">
               desc
@@ -324,12 +326,12 @@ onMounted(async () => {
           <label
             class="text-sm text-text-muted"
             for="query-fields-input"
-          >Fields</label>
+          >{{ t('query.fields') }}</label>
           <input
             id="query-fields-input"
             v-model="fieldsText"
-            placeholder="those in the conditions"
-            class="w-56 rounded bg-bg-elevated border border-border px-2 py-1 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-accent"
+            :placeholder="t('query.fields_placeholder')"
+            class="w-56 rounded bg-bg-elevated border border-border px-2 py-1 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-focus"
           >
         </span>
         <button
@@ -337,7 +339,7 @@ onMounted(async () => {
           class="ml-auto px-3 py-1 text-sm rounded bg-accent text-accent-fg hover:bg-accent-hover disabled:opacity-60"
           :disabled="loading"
         >
-          Run
+          {{ t('query.run') }}
         </button>
       </div>
     </form>
@@ -346,21 +348,20 @@ onMounted(async () => {
       v-if="loading"
       class="mt-6 text-text-muted text-sm"
     >
-      Running…
+      {{ t('query.running') }}
     </p>
-    <p
+    <ErrorMessage
       v-else-if="error"
-      class="mt-6 text-danger text-sm"
+      :text="error"
+      class="mt-6 text-sm"
       data-test="query-error"
-    >
-      {{ error }}
-    </p>
+    />
     <template v-else-if="ran">
       <p
         class="mt-6 mb-2 text-sm text-text-muted"
         data-test="query-count"
       >
-        {{ notes.length }} of {{ total }} notes<span v-if="truncated"> — narrow the query to see the rest</span>
+        {{ t('query.count', { n: notes.length, total }) }}<span v-if="truncated"> — {{ t('query.truncated') }}</span>
       </p>
       <div
         v-if="notes.length"
@@ -370,7 +371,7 @@ onMounted(async () => {
           <thead>
             <tr class="text-left text-text-muted border-b border-border">
               <th class="py-1 pr-3 font-medium">
-                Note
+                {{ t('query.col_note') }}
               </th>
               <th
                 v-for="c in columns"
@@ -380,7 +381,7 @@ onMounted(async () => {
                 {{ c }}
               </th>
               <th class="py-1 font-medium">
-                Modified
+                {{ t('query.col_modified') }}
               </th>
             </tr>
           </thead>
@@ -411,7 +412,7 @@ onMounted(async () => {
                 {{ cell(n, c) }}
               </td>
               <td class="py-1 whitespace-nowrap text-text-muted">
-                {{ fmtDate(n.modified) }}
+                <DateTime :value="n.modified" />
               </td>
             </tr>
           </tbody>
@@ -421,7 +422,7 @@ onMounted(async () => {
         v-else
         class="text-text-muted text-sm"
       >
-        No note matches.
+        {{ t('query.no_match') }}
       </p>
     </template>
   </div>

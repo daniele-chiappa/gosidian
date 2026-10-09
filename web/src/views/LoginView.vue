@@ -12,7 +12,8 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { noteSignedIn, withoutWorkspace } from '@/composables/useSessionReset'
 import { getAuthConfig } from '@/api/totp'
-import { apiErrorMessage } from '@/api/client'
+import { errorText } from '@/api/errors'
+import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
 import { isInvalidInvite, signup } from '@/api/signup'
 
 const router = useRouter()
@@ -65,7 +66,7 @@ async function handleSignup() {
     notice.value = t('signup.created')
   } catch (e) {
     if (isInvalidInvite(e)) inviteInvalid.value = true
-    else error.value = apiErrorMessage(e, t('signup.failed'))
+    else error.value = errorText(e, t, t('signup.failed'))
   } finally {
     submitting.value = false
   }
@@ -98,7 +99,9 @@ async function handleSubmit() {
     const same = noteSignedIn(auth.user?.id ?? '')
     await router.push(same ? nextTarget.value : withoutWorkspace(nextTarget.value))
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Login failed'
+    // A 401 here is the credentials, not a session that ended.
+    const status = (e as { status?: number } | null)?.status
+    error.value = status === 401 ? t('login.bad_credentials') : errorText(e, t, t('login.failed'))
   } finally {
     submitting.value = false
   }
@@ -138,7 +141,7 @@ async function handleSubmit() {
             autocomplete="username"
             required
             autofocus
-            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
           />
         </label>
         <label class="block text-sm">
@@ -149,7 +152,7 @@ async function handleSubmit() {
             autocomplete="new-password"
             required
             data-signup-password
-            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
           />
         </label>
         <label class="block text-sm">
@@ -160,11 +163,11 @@ async function handleSubmit() {
             autocomplete="new-password"
             required
             data-signup-confirm
-            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
           />
         </label>
 
-        <p v-if="error" class="text-sm text-danger" role="alert">{{ error }}</p>
+        <ErrorMessage v-if="error" :text="error" class="text-sm" />
 
         <button
           type="submit"
@@ -186,9 +189,9 @@ async function handleSubmit() {
     <div v-else class="w-full max-w-sm">
       <div class="mb-6 text-center">
         <h1 class="text-2xl font-semibold">gosidian</h1>
-        <p class="text-sm text-text-muted">Sign in to continue</p>
+        <p class="text-sm text-text-muted">{{ t('login.subtitle') }}</p>
         <p v-if="ldapEnabled" class="mt-1 text-xs text-text-muted">
-          Directory (LDAP) accounts: use your directory username and password.
+          {{ t('login.ldap_hint') }}
         </p>
       </div>
 
@@ -197,32 +200,32 @@ async function handleSubmit() {
         @submit.prevent="handleSubmit"
       >
         <label class="block text-sm">
-          <span class="text-text-muted">Username</span>
+          <span class="text-text-muted">{{ t('common.username') }}</span>
           <input
             v-model.trim="username"
             type="text"
             autocomplete="username"
             required
             autofocus
-            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
           />
         </label>
 
         <label class="block text-sm">
-          <span class="text-text-muted">Password</span>
+          <span class="text-text-muted">{{ t('common.password') }}</span>
           <input
             v-model="password"
             type="password"
             autocomplete="current-password"
             required
-            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
           />
         </label>
 
         <label v-if="showTotp" class="block text-sm">
           <span class="text-text-muted">
-            Two-factor code
-            <span class="opacity-60">(if enabled for your account — a recovery code works too)</span>
+            {{ t('login.totp') }}
+            <span class="opacity-60">{{ t('login.totp_hint') }}</span>
           </span>
           <!-- inputmode "text", not "numeric": recovery codes carry letters. -->
           <input
@@ -231,20 +234,20 @@ async function handleSubmit() {
             inputmode="text"
             autocomplete="one-time-code"
             autocapitalize="characters"
-            placeholder="123 456 or xxxxx-xxxxx"
-            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+            :placeholder="t('login.totp_placeholder')"
+            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
           />
         </label>
 
         <p v-if="notice && !error" class="text-sm text-success" role="status" data-signup-done>{{ notice }}</p>
-        <p v-if="error" class="text-sm text-danger" role="alert">{{ error }}</p>
+        <ErrorMessage v-if="error" :text="error" class="text-sm" />
 
         <button
           type="submit"
           :disabled="submitting"
           class="w-full rounded bg-accent text-accent-fg py-2 font-medium hover:bg-accent-hover disabled:opacity-60"
         >
-          {{ submitting ? 'Signing in…' : 'Sign in' }}
+          {{ submitting ? t('login.submitting') : t('login.submit') }}
         </button>
       </form>
     </div>

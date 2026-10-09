@@ -3,6 +3,8 @@ import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { enrollTOTP, confirmTOTP } from '@/api/totp'
 import RecoveryCodes from './RecoveryCodes.vue'
+import { errorText } from '@/api/errors'
+import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
 
 const { t } = useI18n()
 // `done` fires only after the user acknowledges the recovery codes; it carries
@@ -26,7 +28,7 @@ async function start() {
     uri.value = d.otpauth_uri
     qrSvg.value = d.qr_svg ?? ''
   } catch (e) {
-    error.value = e instanceof Error ? e.message : t('totp.start_failed')
+    error.value = errorText(e, t, t('totp.start_failed'))
   } finally {
     busy.value = false
   }
@@ -39,7 +41,7 @@ async function confirm() {
   try {
     codes.value = await confirmTOTP(secret.value, code.value.trim())
   } catch (e) {
-    error.value = e instanceof Error ? e.message : t('totp.invalid_code')
+    error.value = errorText(e, t, t('totp.invalid_code'))
   } finally {
     busy.value = false
   }
@@ -87,7 +89,7 @@ async function confirm() {
         inputmode="numeric"
         autocomplete="one-time-code"
         :placeholder="t('totp.code_placeholder')"
-        class="w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+        class="w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
         @keyup.enter="confirm"
       />
       <button
@@ -100,7 +102,7 @@ async function confirm() {
       </button>
     </div>
 
-    <p v-if="error" class="text-sm text-danger">{{ error }}</p>
+    <ErrorMessage v-if="error" :text="error" class="text-sm" />
   </div>
 </template>
 

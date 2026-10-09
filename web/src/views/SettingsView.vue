@@ -2,7 +2,6 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { getSettings, updateSettings, type Settings, type UpdateSettings } from '@/api/settings'
-import { apiErrorMessage } from '@/api/client'
 import PasswordChange from '@/components/domain/PasswordChange.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useUIStore, type LocaleCode, type ThemePreset } from '@/stores/ui'
@@ -10,6 +9,9 @@ import TotpEnroll from '@/components/domain/TotpEnroll.vue'
 import MyTokens from '@/components/domain/MyTokens.vue'
 import RecoveryCodes from '@/components/domain/RecoveryCodes.vue'
 import { disenrollTOTP, regenerateRecoveryCodes } from '@/api/totp'
+import { errorText } from '@/api/errors'
+import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
+import { visibilityHelp, visibilityLabel } from '@/api/access'
 
 const auth = useAuthStore()
 const ui = useUIStore()
@@ -39,7 +41,7 @@ async function disableTotp() {
     auth.setEnrolled(false)
     disableOpen.value = false
   } catch (e) {
-    totpError.value = apiErrorMessage(e, 'Failed to disable two-factor')
+    totpError.value = errorText(e, t, t('settings_view.totp_disable_failed'))
   } finally {
     disablePassword.value = ''
   }
@@ -63,7 +65,7 @@ async function regenerate() {
     regenOpen.value = false
     regenCode.value = ''
   } catch (e) {
-    totpError.value = e instanceof Error ? e.message : 'Failed to regenerate recovery codes'
+    totpError.value = errorText(e, t, t('settings_view.regen_failed'))
   } finally {
     regenBusy.value = false
   }
@@ -79,7 +81,7 @@ const presetOptions: PresetOption[] = [
   { value: 'tokyo-night', label: 'Tokyo Night', tone: 'dark' },
   { value: 'catppuccin-latte', label: 'Catppuccin Latte', tone: 'light' },
   { value: 'solarized-light', label: 'Solarized Light', tone: 'light' },
-  { value: 'custom', label: 'Custom (default = Mocha)', tone: 'dark' },
+  { value: 'custom', label: 'Custom (Mocha)', tone: 'dark' },
 ]
 interface LocaleOption { value: LocaleCode; label: string }
 const localeOptions: LocaleOption[] = [
@@ -171,7 +173,7 @@ async function load() {
   try {
     hydrate(await getSettings())
   } catch (e) {
-    error.value = apiErrorMessage(e, 'Failed to load settings')
+    error.value = errorText(e, t, t('settings_view.load_failed'))
   } finally {
     loading.value = false
   }
@@ -194,11 +196,11 @@ async function save() {
       personal_projects: draft.personal_projects,
     }))
     hydrate(result)
-    message.value = 'Saved.'
+    message.value = t('settings_view.saved')
     // The languages apply at once: the selector above follows them.
     await ui.refreshLocales()
   } catch (e) {
-    error.value = apiErrorMessage(e, 'Save failed')
+    error.value = errorText(e, t, t('note.save_failed'))
   } finally {
     saving.value = false
   }
@@ -218,9 +220,9 @@ async function saveToggle(patch: OwnerToggle) {
   message.value = null
   try {
     data.value = await updateSettings(withoutEnvFields(patch))
-    message.value = 'Saved.'
+    message.value = t('settings_view.saved')
   } catch (e) {
-    error.value = apiErrorMessage(e, 'Save failed')
+    error.value = errorText(e, t, t('note.save_failed'))
   } finally {
     saving.value = false
   }
@@ -231,12 +233,12 @@ onMounted(load)
 
 <template>
   <div class="p-8 max-w-3xl mx-auto">
-    <h1 class="text-2xl font-semibold mb-1">Settings</h1>
+    <h1 class="text-2xl font-semibold mb-1">{{ t('settings_view.title') }}</h1>
     <p
       v-if="!auth.isOwner"
       class="text-sm text-text-muted mb-6"
     >
-      Server settings are read-only for your role; your own two-factor setup and MCP tokens below are yours to change.
+      {{ t('settings_view.read_only') }}
     </p>
 
     <fieldset
@@ -259,29 +261,29 @@ onMounted(load)
     </fieldset>
 
     <fieldset class="rounded border border-border bg-surface p-4 space-y-3 mb-6">
-      <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">Two-factor (TOTP)</legend>
+      <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">{{ t('settings_view.totp') }}</legend>
       <label v-if="auth.isOwner && data" class="block text-sm">
-        <span class="text-text-muted">Global policy</span>
+        <span class="text-text-muted">{{ t('settings_view.totp_policy') }}</span>
         <select
           v-model="draft.totp_mode"
           :disabled="saving || fromEnv('totp_mode')"
-          class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+          class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
           @change="saveToggle({ totp_mode: draft.totp_mode })"
         >
-          <option value="off">Off — two-factor disabled</option>
-          <option value="optional">Optional — users may enable it</option>
-          <option value="required">Required — all users must enable it</option>
+          <option value="off">{{ t('settings_view.totp_off') }}</option>
+          <option value="optional">{{ t('settings_view.totp_optional') }}</option>
+          <option value="required">{{ t('settings_view.totp_required') }}</option>
         </select>
-        <span class="text-xs text-text-muted">Per-user overrides are set in Admin → Users.</span>
+        <span class="text-xs text-text-muted">{{ t('settings_view.totp_per_user') }}</span>
       </label>
       <hr v-if="auth.isOwner && data" class="border-border" />
       <template v-if="auth.user?.totp_enrolled">
-        <p class="text-sm text-success">Two-factor authentication is enabled for your account.</p>
+        <p class="text-sm text-success">{{ t('settings_view.totp_on') }}</p>
         <p class="text-sm text-text-muted">
-          Recovery codes remaining:
+          {{ t('settings_view.recovery_left') }}
           <span class="font-medium text-text">{{ auth.user?.recovery_codes_remaining ?? 0 }}</span>
           <span v-if="(auth.user?.recovery_codes_remaining ?? 0) <= 2" class="text-warning">
-            — running low, regenerate them soon
+            — {{ t('settings_view.recovery_low') }}
           </span>
         </p>
         <RecoveryCodes v-if="regenCodes.length" :codes="regenCodes" @done="regenCodes = []" />
@@ -291,10 +293,10 @@ onMounted(load)
             type="button"
             class="rounded border border-border px-3 py-2 text-sm hover:bg-surface-hover"
             @click="regenOpen = true"
-          >Regenerate recovery codes…</button>
+          >{{ t('settings_view.regen_open') }}</button>
           <div v-else class="space-y-2">
             <p class="text-xs text-text-muted">
-              Enter a current code from your authenticator. Every existing recovery code stops working.
+              {{ t('settings_view.regen_hint') }}
             </p>
             <div class="flex gap-2">
               <input
@@ -302,7 +304,7 @@ onMounted(load)
                 inputmode="numeric"
                 autocomplete="one-time-code"
                 placeholder="123 456"
-                class="w-40 rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+                class="w-40 rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
                 @keyup.enter="regenerate"
               />
               <button
@@ -310,12 +312,12 @@ onMounted(load)
                 :disabled="regenBusy || !regenCode"
                 class="rounded bg-accent text-accent-fg px-3 py-2 text-sm hover:bg-accent-hover disabled:opacity-60"
                 @click="regenerate"
-              >Regenerate</button>
+              >{{ t('settings_view.regen') }}</button>
               <button
                 type="button"
                 class="rounded border border-border px-3 py-2 text-sm hover:bg-surface-hover"
                 @click="cancelRegen"
-              >Cancel</button>
+              >{{ t('common.cancel') }}</button>
             </div>
           </div>
         </template>
@@ -324,7 +326,7 @@ onMounted(load)
           type="button"
           class="rounded border border-border px-3 py-2 text-sm hover:bg-surface-hover"
           @click="disableOpen = true"
-        >Disable two-factor…</button>
+        >{{ t('settings_view.totp_disable_open') }}</button>
         <div v-else class="flex flex-wrap items-end gap-2" data-totp-disable>
           <label class="block text-sm">
             <span class="text-text-muted">{{ t('password.confirm_action') }}</span>
@@ -332,7 +334,7 @@ onMounted(load)
               v-model="disablePassword"
               type="password"
               autocomplete="current-password"
-              class="mt-1 w-56 rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+              class="mt-1 w-56 rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
               @keyup.enter="disableTotp"
             />
           </label>
@@ -341,35 +343,35 @@ onMounted(load)
             :disabled="!disablePassword"
             class="rounded bg-danger text-white px-3 py-2 text-sm disabled:opacity-60"
             @click="disableTotp"
-          >Disable two-factor</button>
+          >{{ t('settings_view.totp_disable') }}</button>
           <button
             type="button"
             class="rounded border border-border px-3 py-2 text-sm hover:bg-surface-hover"
             @click="disableOpen = false; disablePassword = ''"
-          >Cancel</button>
+          >{{ t('common.cancel') }}</button>
         </div>
-        <p v-if="totpError" class="text-sm text-danger">{{ totpError }}</p>
+        <ErrorMessage v-if="totpError" :text="totpError" class="text-sm" />
       </template>
       <TotpEnroll v-else @done="onTotpEnrolled" />
     </fieldset>
 
     <fieldset v-if="auth.isOwner && data" class="rounded border border-border bg-surface p-4 space-y-3 mb-6">
-      <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">Project access</legend>
+      <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">{{ t('settings_view.project_access') }}</legend>
       <label class="block text-sm">
-        <span class="text-text-muted">Default visibility for new projects</span>
+        <span class="text-text-muted">{{ t('settings_view.default_visibility') }}</span>
         <select
           v-model="draft.default_visibility"
           :disabled="saving"
-          class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+          class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
           @change="saveToggle({ default_visibility: draft.default_visibility })"
         >
-          <option value="private">Private — only accounts with a grant (and the owner)</option>
-          <option value="internal">Internal — every member can read; writing takes a grant</option>
-          <option value="public">Public — every account can read, guests included; writing takes a grant</option>
+          <option value="private">{{ visibilityLabel('private') }}</option>
+          <option value="internal">{{ visibilityLabel('internal') }}</option>
+          <option value="public">{{ visibilityLabel('public') }}</option>
         </select>
+        <span class="mt-1 block text-xs text-text-muted">{{ visibilityHelp(draft.default_visibility) }}</span>
         <span class="text-xs text-text-muted">
-          Applies to projects created from now on and to folders that appear on disk without settings.
-          Each project's own visibility and grants are managed from Projects.
+          {{ t('settings_view.default_visibility_hint') }}
         </span>
       </label>
       <label class="flex items-start gap-2 text-sm">
@@ -381,25 +383,23 @@ onMounted(load)
           @change="saveToggle({ personal_projects: draft.personal_projects })"
         />
         <span>
-          <span class="block">Personal project for new accounts</span>
+          <span class="block">{{ t('settings_view.personal') }}</span>
           <span class="text-xs text-text-muted">
-            Every new User account gets a private project named after it where it is admin, so it
-            has a place to work before anyone grants it anything. New accounts start
-            <em>restricted</em> (they see only their grants) — lift it from Admin → Users.
+            {{ t('settings_view.personal_hint') }}
           </span>
         </span>
       </label>
     </fieldset>
 
     <fieldset v-if="!auth.isOwner && !auth.isAnonymous" class="rounded border border-border bg-surface p-4 space-y-3 mb-6">
-      <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">My MCP tokens</legend>
+      <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">{{ t('settings_view.my_tokens') }}</legend>
       <MyTokens />
     </fieldset>
 
     <fieldset class="rounded border border-border bg-surface p-4 space-y-3 mb-6">
-      <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">Appearance</legend>
+      <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">{{ t('settings_view.appearance') }}</legend>
       <label class="block text-sm">
-        <span class="text-text-muted">Theme preset</span>
+        <span class="text-text-muted">{{ t('settings_view.theme') }}</span>
         <select
           :value="ui.preset"
           class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2"
@@ -411,7 +411,7 @@ onMounted(load)
         </select>
       </label>
       <label class="block text-sm">
-        <span class="text-text-muted">Language</span>
+        <span class="text-text-muted">{{ t('settings_view.language') }}</span>
         <select
           :value="ui.locale"
           class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2"
@@ -423,13 +423,12 @@ onMounted(load)
         </select>
       </label>
       <p class="text-xs text-text-muted">
-        Theme + language are stored in your browser. Server-side `git`/`trash`/`i18n.default_lang`
-        below configures the gosidian instance for everyone.
+        {{ t('settings_view.appearance_hint') }}
       </p>
     </fieldset>
 
-    <p v-if="loading" class="text-text-muted">Loading…</p>
-    <p v-else-if="error" class="text-danger">{{ error }}</p>
+    <p v-if="loading" class="text-text-muted">{{ t('common.loading') }}</p>
+    <ErrorMessage v-else-if="error" :text="error" />
 
     <form
       v-else-if="data"
@@ -437,21 +436,21 @@ onMounted(load)
       @submit.prevent="save"
     >
       <p v-if="envOverrides.length" class="text-sm text-text-muted">
-        Set by environment variables, so read-only here:
+        {{ t('settings_view.env_overrides') }}
         <code class="font-mono text-xs">{{ envOverrides.join(', ') }}</code>.
       </p>
       <fieldset class="rounded border border-border bg-surface p-4 space-y-3">
-        <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">Git sync</legend>
+        <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">{{ t('settings_view.git') }}</legend>
         <label class="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
             :disabled="!auth.isOwner || fromEnv('git.enabled')"
             v-model="draft.git.enabled"
           />
-          <span>Enabled</span>
+          <span>{{ t('settings_view.enabled') }}</span>
         </label>
         <label class="block text-sm">
-          <span class="text-text-muted">Remote</span>
+          <span class="text-text-muted">{{ t('settings_view.remote') }}</span>
           <input
             v-model.trim="draft.git.remote"
             :disabled="!auth.isOwner || fromEnv('git.remote')"
@@ -460,7 +459,7 @@ onMounted(load)
         </label>
         <div class="grid grid-cols-2 gap-3">
           <label class="block text-sm">
-            <span class="text-text-muted">Branch</span>
+            <span class="text-text-muted">{{ t('settings_view.branch') }}</span>
             <input
               v-model.trim="draft.git.branch"
               :disabled="!auth.isOwner || fromEnv('git.branch')"
@@ -468,7 +467,7 @@ onMounted(load)
             />
           </label>
           <label class="block text-sm">
-            <span class="text-text-muted">Debounce (ms)</span>
+            <span class="text-text-muted">{{ t('settings_view.debounce') }}</span>
             <input
               v-model.number="draft.git.debounce_ms"
               :disabled="!auth.isOwner || fromEnv('git.debounce_ms')"
@@ -484,10 +483,10 @@ onMounted(load)
             :disabled="!auth.isOwner || fromEnv('git.push')"
             v-model="draft.git.push"
           />
-          <span>Push to remote on commit</span>
+          <span>{{ t('settings_view.push') }}</span>
         </label>
         <label class="block text-sm">
-          <span class="text-text-muted">Token env var name</span>
+          <span class="text-text-muted">{{ t('settings_view.token_env') }}</span>
           <input
             v-model.trim="draft.git.token_env"
             :disabled="!auth.isOwner || fromEnv('git.token_env')"
@@ -498,17 +497,17 @@ onMounted(load)
       </fieldset>
 
       <fieldset class="rounded border border-border bg-surface p-4 space-y-3">
-        <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">Trash</legend>
+        <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">{{ t('trash.title') }}</legend>
         <label class="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
             :disabled="!auth.isOwner || fromEnv('trash.enabled')"
             v-model="draft.trash.enabled"
           />
-          <span>Enabled (soft-delete instead of hard-delete)</span>
+          <span>{{ t('settings_view.trash_enabled') }}</span>
         </label>
         <label class="block text-sm">
-          <span class="text-text-muted">Retention (ms, 0 = forever)</span>
+          <span class="text-text-muted">{{ t('settings_view.retention') }}</span>
           <input
             v-model.number="draft.trash.retention_ms"
             :disabled="!auth.isOwner || fromEnv('trash.retention_ms')"
@@ -520,9 +519,9 @@ onMounted(load)
       </fieldset>
 
       <fieldset class="rounded border border-border bg-surface p-4 space-y-3">
-        <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">i18n</legend>
+        <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">{{ t('settings_view.languages') }}</legend>
         <div class="text-sm">
-          <span class="text-text-muted">Languages offered in the selector</span>
+          <span class="text-text-muted">{{ t('settings_view.languages_offered') }}</span>
           <div class="mt-1 flex flex-wrap gap-x-4 gap-y-1">
             <label v-for="l in localeOptions" :key="l.value" class="inline-flex items-center gap-2">
               <input
@@ -536,7 +535,7 @@ onMounted(load)
           </div>
         </div>
         <label class="block text-sm">
-          <span class="text-text-muted">Default language</span>
+          <span class="text-text-muted">{{ t('settings_view.default_language') }}</span>
           <select
             v-model="draft.i18n.default_lang"
             :disabled="!auth.isOwner || fromEnv('i18n.default_lang')"
@@ -548,7 +547,7 @@ onMounted(load)
           </select>
         </label>
         <p class="text-xs text-text-muted">
-          The default is the language a browser starts in; it must be one of the languages offered.
+          {{ t('settings_view.default_language_hint') }}
         </p>
       </fieldset>
 
@@ -557,7 +556,7 @@ onMounted(load)
           type="submit"
           :disabled="!auth.isOwner || saving"
           class="px-4 py-2 rounded bg-accent text-accent-fg hover:bg-accent-hover disabled:opacity-50"
-        >{{ saving ? 'Saving…' : 'Save' }}</button>
+        >{{ saving ? t('note.saving') : t('common.save') }}</button>
         <p v-if="message" class="text-sm text-success">{{ message }}</p>
       </div>
     </form>

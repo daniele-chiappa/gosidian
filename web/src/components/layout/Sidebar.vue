@@ -68,8 +68,8 @@ const menuItems = computed<MenuItem[]>(() => {
     spec: { type: key, key: planciaKey(key), title: label },
   })
   const items: MenuItem[] = [
-    item('search', t('nav.search', 'Search'), Search),
-    item('query', t('nav.query', 'Query'), ListFilter),
+    item('search', t('nav.search'), Search),
+    item('query', t('nav.query'), ListFilter),
     item('graph', t('nav.graph'), Network),
     item('projects', t('nav.projects'), Folder),
     item('tags', t('nav.tags'), Tags),
@@ -79,7 +79,7 @@ const menuItems = computed<MenuItem[]>(() => {
     items.push(item('settings', t('nav.settings'), Settings))
   }
   if (auth.isOwner) {
-    items.push(item('admin', t('nav.admin', 'Admin'), Shield))
+    items.push(item('admin', t('nav.admin'), Shield))
   }
   return items
 })
@@ -120,7 +120,7 @@ onMounted(() => {
           class="w-3.5 h-3.5 transition-transform"
           :class="menuOpen ? 'rotate-90' : ''"
         />
-        <span>{{ t('nav.menu', 'Menu') }}</span>
+        <span>{{ t('nav.menu') }}</span>
       </button>
       <ul v-if="menuOpen" class="pb-2">
         <li v-for="item in menuItems" :key="item.key">
@@ -146,8 +146,8 @@ onMounted(() => {
         class="text-text-muted hover:text-text disabled:opacity-50"
         :disabled="loading"
         @click="treeStore.load()"
-        :aria-label="'Refresh tree'"
-        :title="'Refresh tree'"
+        :aria-label="t('sidebar.refresh')"
+        :title="t('sidebar.refresh')"
       >
         <RefreshCw class="w-3.5 h-3.5" :class="loading ? 'animate-spin' : ''" />
       </button>
@@ -163,7 +163,7 @@ onMounted(() => {
           :node="child"
         />
       </ul>
-      <p v-else class="text-xs text-text-muted px-1">No notes yet.</p>
+      <p v-else class="text-xs text-text-muted px-1">{{ t('sidebar.empty') }}</p>
     </div>
     <TreeContextMenu />
 
@@ -172,7 +172,7 @@ onMounted(() => {
       class="border-t border-border px-3 py-2"
     >
       <p class="text-xs font-semibold uppercase tracking-wide text-text-muted mb-1">
-        Recent
+        {{ t('sidebar.recent') }}
       </p>
       <ul class="space-y-0.5 text-sm">
         <li

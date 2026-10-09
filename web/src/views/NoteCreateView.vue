@@ -18,8 +18,11 @@ import { useTreeStore } from '@/stores/tree'
 import { useWindowsStore, type OpenSpec } from 'plancia'
 import { planciaKey } from '@/composables/planciaKey'
 import { noteFrontmatter } from './noteFrontmatter'
+import { errorText } from '@/api/errors'
+import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
 
-const props = defineProps<{ path?: string }>()
+// name: the note's name to start from (a missing note's "create it here").
+const props = defineProps<{ path?: string; name?: string }>()
 const emit = defineEmits<{ close: [] }>()
 
 const { t } = useI18n()
@@ -34,7 +37,7 @@ const kind = ref<Kind>('markdown')
 const folder = computed(() => (props.path ?? '').replace(/\/+$/, ''))
 const project = computed(() => folder.value.split('/')[0] || '')
 
-const name = ref('')
+const name = ref(props.name ?? '')
 const title = ref('')
 const caption = ref('')
 const file = ref<File | null>(null)
@@ -91,7 +94,7 @@ async function submit() {
     })
     emit('close')
   } catch (e) {
-    error.value = e instanceof Error ? e.message : t('note_create.err_failed')
+    error.value = errorText(e, t, t('note_create.err_failed'))
   } finally {
     creating.value = false
   }
@@ -102,7 +105,7 @@ async function submit() {
   <div class="p-6 max-w-xl mx-auto">
     <h1 class="text-lg font-semibold mb-1">{{ t('note_create.title') }}</h1>
     <p class="text-sm text-text-muted mb-5">
-      {{ t('note_create.location_prefix') }} <span class="font-mono">{{ folder || '(root)' }}/</span>
+      {{ t('note_create.location_prefix') }} <span class="font-mono">{{ folder || t('note_create.root') }}/</span>
     </p>
 
     <!-- Kind toggle -->
@@ -131,7 +134,7 @@ async function submit() {
           v-model="name"
           type="text"
           :placeholder="t('note_create.name_placeholder')"
-          class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+          class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
         >
         <span
           v-if="slug"
@@ -145,7 +148,7 @@ async function submit() {
           v-model="title"
           type="text"
           :placeholder="slug || t('note_create.title_placeholder')"
-          class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+          class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
         >
       </label>
 
@@ -165,15 +168,12 @@ async function submit() {
             v-model="caption"
             rows="3"
             :placeholder="t('note_create.caption_placeholder')"
-            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
           />
         </label>
       </template>
 
-      <p
-        v-if="error"
-        class="text-sm text-danger"
-      >{{ error }}</p>
+      <ErrorMessage v-if="error" :text="error" class="text-sm" />
 
       <div class="flex gap-2 pt-1">
         <button

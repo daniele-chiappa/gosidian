@@ -161,7 +161,7 @@ function openSettings(): void {
         class="w-1 cursor-col-resize bg-border hover:bg-accent/40 select-none flex-shrink-0"
         role="separator"
         aria-orientation="vertical"
-        aria-label="Resize sidebar"
+        :aria-label="t('sidebar.resize')"
         @pointerdown="startDrag"
         @dblclick="reset"
       />

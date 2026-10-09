@@ -109,15 +109,6 @@ client.interceptors.response.use(
   },
 )
 
-/** The server's message of a failed API call, else fallback. */
-export function apiErrorMessage(e: unknown, fallback: string): string {
-  if (axios.isAxiosError(e)) {
-    const data = e.response?.data as { error?: { message?: string } } | undefined
-    if (data?.error?.message) return data.error.message
-  }
-  return e instanceof Error && e.message ? e.message : fallback
-}
-
 /**
  * True for the 412 that `note.concurrency-conflict` already announced, so a
  * caller can leave it to the conflict banner instead of an error pane.

@@ -17,6 +17,13 @@
  * splits on the FIRST `:` so an encoded path (no raw `:`) round-trips cleanly.
  */
 import { createArgCodec, type ArgTypeSpec, type PlanciaCodec } from 'plancia'
+import { i18n } from '@/locales'
+
+// Window titles in the user's language (IMP-155, M2), read when a window
+// is rebuilt from the address.
+const tr = (key: string) => i18n.global.t(key)
+// A section the catalogue does not know keeps its own name.
+const trOr = (key: string, fallback: string) => (i18n.global.te(key) ? i18n.global.t(key) : fallback)
 import { queryArgFromProps, queryPropsFromArg } from './queryArg'
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null)
@@ -112,34 +119,34 @@ const baseCodec: PlanciaCodec = createArgCodec({
       arg: graphArgFromProps,
       props: graphPropsFromArg,
       title: (a) => {
-        if (!a) return 'Graph'
+        if (!a) return tr('nav.graph')
         if (!a.includes('=')) return `↳ ${base(a)}`
         const p = new URLSearchParams(a).get('p')
-        return p ? `Graph · ${p}` : 'Graph'
+        return p ? `${tr('nav.graph')} · ${p}` : tr('nav.graph')
       },
     },
     tags: {
       arg: (p) => str(p.tag),
       props: (a) => (a ? { tag: a } : {}),
-      title: (a) => (a ? `#${a}` : 'Tags'),
+      title: (a) => (a ? `#${a}` : tr('nav.tags')),
     },
     // The query window keeps its whole query in the URL (queryArg.ts); it
     // stays one window, keyed `query`, whatever the query.
     query: {
       arg: queryArgFromProps,
       props: queryPropsFromArg,
-      title: () => 'Query',
+      title: () => tr('nav.query'),
     },
     admin: {
       arg: (p) => str(p.section),
       props: (a) => (a ? { section: a } : {}),
-      title: (a) => (a ? `Admin · ${a}` : 'Admin'),
+      title: (a) => (a ? `${tr('nav.admin')} · ${trOr(`admin.tab.${a}`, a)}` : tr('nav.admin')),
     },
     // Singletons with a fixed display title.
-    search: { arg: () => null, title: () => 'Search' },
-    projects: { arg: () => null, title: () => 'Projects' },
-    settings: { arg: () => null, title: () => 'Settings' },
-    trash: { arg: () => null, title: () => 'Trash' },
+    search: { arg: () => null, title: () => tr('nav.search') },
+    projects: { arg: () => null, title: () => tr('nav.projects') },
+    settings: { arg: () => null, title: () => tr('nav.settings') },
+    trash: { arg: () => null, title: () => tr('nav.trash') },
   },
   // Unlisted types are bare singletons titled by their type.
   default: { arg: () => null },

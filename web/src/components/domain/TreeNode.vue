@@ -18,7 +18,7 @@ import { Plus, Lock, Globe } from 'lucide-vue-next'
 import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
 import { useWindowsStore } from 'plancia'
 import { useAccessStore } from '@/stores/access'
-import { VISIBILITY_HELP } from '@/api/access'
+import { visibilityHelp } from '@/api/access'
 import { planciaKey } from '@/composables/planciaKey'
 import { useTreeMenu } from '@/composables/useTreeMenu'
 
@@ -116,14 +116,14 @@ function createHere() {
           <Lock
             v-if="visibility === 'private'"
             class="h-3 w-3 shrink-0 text-text-muted"
-            :title="VISIBILITY_HELP.private"
-            aria-label="Private project"
+            :title="visibilityHelp('private')"
+            :aria-label="t('tree.private_project')"
           />
           <Globe
             v-else-if="visibility === 'public'"
             class="h-3 w-3 shrink-0 text-success"
-            :title="VISIBILITY_HELP.public"
-            aria-label="Public project"
+            :title="visibilityHelp('public')"
+            :aria-label="t('tree.public_project')"
           />
           <button
             v-if="canWriteHere"
@@ -142,7 +142,7 @@ function createHere() {
           <span
             v-if="node.hidden_from_mcp"
             class="text-[10px] uppercase text-warning"
-            title="Hidden from MCP"
+            :title="t('tree.hidden_hint')"
           >hidden</span>
         </summary>
         <ul class="pl-4 border-l border-border ml-1.5">

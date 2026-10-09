@@ -9,10 +9,12 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { listMyTokens, createMyToken, revokeMyToken, type TokenMode } from '@/api/me'
-import { apiErrorMessage } from '@/api/client'
 import type { MCPToken, MCPTokenCreated } from '@/api/admin'
 import { useAuthStore } from '@/stores/auth'
 import { useAccessStore } from '@/stores/access'
+import { errorText } from '@/api/errors'
+import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
+import { formatDateTime } from '@/api/format'
 
 const auth = useAuthStore()
 const access = useAccessStore()
@@ -44,7 +46,7 @@ async function load() {
   try {
     tokens.value = await listMyTokens()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to load'
+    error.value = errorText(e, tr, tr('my_tokens.load_failed'))
   } finally {
     loading.value = false
   }
@@ -53,7 +55,7 @@ async function load() {
 async function create() {
   if (!draft.name.trim() || !password.value) return
   if (draft.mode === 'custom' && draft.projects.length === 0) {
-    error.value = 'Pick at least one project for a custom token.'
+    error.value = tr('my_tokens.pick_one')
     return
   }
   busy.value = true
@@ -72,26 +74,26 @@ async function create() {
     draft.projects = []
     await load()
   } catch (e) {
-    error.value = apiErrorMessage(e, 'Create failed')
+    error.value = errorText(e, tr, tr('my_tokens.create_failed'))
   } finally {
     password.value = ''
     busy.value = false
   }
 }
 
-async function revoke(t: MCPToken) {
-  if (!confirm(`Revoke token "${t.name}"? Agents using it are locked out immediately.`)) return
+async function revoke(tok: MCPToken) {
+  if (!confirm(tr('my_tokens.confirm_revoke', { name: tok.name }))) return
   try {
-    await revokeMyToken(t.id)
+    await revokeMyToken(tok.id)
     await load()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Revoke failed'
+    error.value = errorText(e, tr, tr('my_tokens.revoke_failed'))
   }
 }
 
-function scopeLabel(t: MCPToken): string {
-  const proj = t.projects && t.projects.length ? t.projects.join(', ') : 'inherit (follows your access)'
-  return `${proj} · ${t.scopes.join('+')}${t.tool_profile ? ' · ' + t.tool_profile : ''}`
+function scopeLabel(tok: MCPToken): string {
+  const proj = tok.projects && tok.projects.length ? tok.projects.join(', ') : tr('my_tokens.inherit_label')
+  return `${proj} · ${tok.scopes.join('+')}${tok.tool_profile ? ' · ' + tok.tool_profile : ''}`
 }
 
 onMounted(() => {
@@ -103,67 +105,64 @@ onMounted(() => {
 <template>
   <div class="space-y-3">
     <p class="text-xs text-text-muted">
-      Tokens for MCP clients. A token never exceeds your own access: on every request it is
-      narrowed to the projects you can read and write at that moment. <em>Inherit</em> follows
-      your access as it changes; <em>custom</em> pins a subset of the projects you see now.
-      OAuth logins (claude.ai, Claude Code) appear here too and can be revoked.
+      {{ tr('my_tokens.intro') }}
     </p>
 
     <div v-if="fresh" class="rounded border border-success bg-success/10 p-3 space-y-2">
-      <p class="text-sm font-semibold text-success">Token created — copy now, this is the only time it is shown.</p>
+      <p class="text-sm font-semibold text-success">{{ tr('my_tokens.created') }}</p>
       <code class="block bg-bg-elevated rounded px-3 py-2 font-mono text-sm break-all select-all">{{ fresh.token }}</code>
       <p class="text-xs text-text-muted">{{ fresh.usage_hint }}</p>
-      <button type="button" class="text-xs px-2 py-1 rounded border border-border hover:bg-surface-hover" @click="fresh = null">Dismiss</button>
+      <button type="button" class="text-xs px-2 py-1 rounded border border-border hover:bg-surface-hover" @click="fresh = null">{{ tr('common.dismiss') }}</button>
     </div>
 
-    <form class="grid gap-2 sm:grid-cols-2" @submit.prevent="create">
-      <label class="text-sm sm:col-span-2">
-        <span class="text-text-muted text-xs">Name</span>
+    <form class="grid grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-2" @submit.prevent="create">
+      <label class="text-sm col-span-full">
+        <span class="text-text-muted text-xs">{{ tr('my_tokens.name') }}</span>
         <input
           v-model.trim="draft.name"
           type="text"
-          placeholder="e.g. laptop-claude"
+          :placeholder="tr('my_tokens.name_placeholder')"
           required
-          class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+          class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
         />
       </label>
       <label class="text-sm">
-        <span class="text-text-muted text-xs">Projects</span>
+        <span class="text-text-muted text-xs">{{ tr('my_tokens.projects') }}</span>
         <select v-model="draft.mode" class="mt-1 w-full rounded bg-bg-elevated border border-border px-2 py-2">
-          <option value="inherit">Inherit — everything I can see, now and later</option>
-          <option value="custom">Custom — only the projects I pick</option>
+          <option value="inherit">{{ tr('my_tokens.inherit') }}</option>
+          <option value="custom">{{ tr('my_tokens.custom') }}</option>
         </select>
       </label>
       <label class="text-sm">
-        <span class="text-text-muted text-xs">Scope</span>
+        <span class="text-text-muted text-xs">{{ tr('my_tokens.scope') }}</span>
         <select
           :value="draft.write && canWrite ? 'rw' : 'r'"
           :disabled="!canWrite"
           class="mt-1 w-full rounded bg-bg-elevated border border-border px-2 py-2 disabled:opacity-60"
           @change="draft.write = ($event.target as HTMLSelectElement).value === 'rw'"
         >
-          <option value="r">read only</option>
-          <option value="rw">read + write (where I may write)</option>
+          <option value="r">{{ tr('my_tokens.read_only') }}</option>
+          <option value="rw">{{ tr('my_tokens.read_write') }}</option>
         </select>
       </label>
-      <label v-if="draft.mode === 'custom'" class="text-sm sm:col-span-2">
-        <span class="text-text-muted text-xs">Pick projects (Ctrl/Cmd-click for several)</span>
+      <label v-if="draft.mode === 'custom'" class="text-sm col-span-full">
+        <span class="text-text-muted text-xs">{{ tr('my_tokens.pick') }}</span>
         <select v-model="draft.projects" multiple size="4" class="mt-1 w-full rounded bg-bg-elevated border border-border px-2 py-1">
           <option v-for="p in visibleProjects" :key="p" :value="p">{{ p }}</option>
         </select>
       </label>
       <label class="text-sm">
-        <span class="text-text-muted text-xs">Tool profile</span>
+        <span class="text-text-muted text-xs">{{ tr('my_tokens.profile') }}</span>
         <select v-model="draft.profile" class="mt-1 w-full rounded bg-bg-elevated border border-border px-2 py-2">
-          <option value="">full</option>
-          <option value="core">core (worker subset)</option>
+          <option value="">{{ tr('my_tokens.profile_full') }}</option>
+          <option value="core">{{ tr('my_tokens.profile_core') }}</option>
         </select>
       </label>
       <label class="text-sm">
-        <span class="text-text-muted text-xs">Expires in days (0 = never)</span>
+        <span class="text-text-muted text-xs">{{ tr('my_tokens.ttl') }}</span>
         <input v-model.number="draft.ttlDays" type="number" min="0" class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2" />
       </label>
-      <label class="text-sm sm:col-span-2">
+      <label class="text-sm col-span-full">
         <span class="text-text-muted text-xs">{{ tr('password.confirm_action') }}</span>
         <input
           v-model="password"
@@ -171,39 +170,41 @@ onMounted(() => {
           autocomplete="current-password"
           required
           data-token-password
-          class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+          class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
         />
       </label>
-      <div class="sm:col-span-2">
+      <div class="col-span-full">
         <button
           type="submit"
           :disabled="busy || !draft.name || !password"
           class="rounded bg-accent text-accent-fg px-3 py-2 text-sm hover:bg-accent-hover disabled:opacity-60"
-        >+ Create token</button>
+        >{{ tr('my_tokens.create') }}</button>
       </div>
     </form>
 
-    <p v-if="loading" class="text-text-muted text-sm">Loading…</p>
-    <p v-if="error" class="text-danger text-sm">{{ error }}</p>
+    <p v-if="loading" class="text-text-muted text-sm">{{ tr('common.loading') }}</p>
+    <ErrorMessage v-if="error" :text="error" class="text-sm" />
 
     <ul v-if="!loading" class="space-y-1">
       <li
-        v-for="t in tokens"
-        :key="t.id"
-        class="flex items-center gap-2 text-sm rounded border border-border bg-surface px-3 py-2"
+        v-for="tok in tokens"
+        :key="tok.id"
+        class="flex flex-wrap items-center gap-2 text-sm rounded border border-border bg-surface px-3 py-2"
       >
-        <span class="font-medium">{{ t.name }}</span>
-        <span v-if="t.kind === 'oauth'" class="text-[10px] uppercase px-1.5 py-0.5 rounded border border-border text-text-muted">oauth</span>
-        <span class="flex-1 truncate text-xs text-text-muted">{{ scopeLabel(t) }}</span>
+        <span class="font-medium">{{ tok.name }}</span>
+        <span v-if="tok.kind === 'oauth'" class="text-[10px] uppercase px-1.5 py-0.5 rounded border border-border text-text-muted">oauth</span>
+        <span class="min-w-0 flex-1 truncate text-xs text-text-muted">{{ scopeLabel(tok) }}</span>
         <span
-          class="font-mono text-xs text-text-muted"
+          class="text-xs text-text-muted"
           data-last-used
-          :title="t.last_used_at ? 'Last used' : 'Not used since gosidian started recording it'"
-        >{{ t.last_used_at ? `used ${t.last_used_at}` : 'no use recorded' }}</span>
-        <span class="font-mono text-xs" :class="t.expired ? 'text-warning' : 'text-text-muted'">{{ t.expires_at || 'no expiry' }}</span>
-        <button type="button" class="text-xs px-2 py-1 rounded text-danger hover:bg-surface-hover" @click="revoke(t)">Revoke</button>
+          :title="tok.last_used_at ?? tr('my_tokens.never_used_hint')"
+        >{{ tok.last_used_at ? tr('my_tokens.used', { when: formatDateTime(tok.last_used_at) }) : tr('my_tokens.never_used') }}</span>
+        <span class="text-xs" :class="tok.expired ? 'text-warning' : 'text-text-muted'" :title="tok.expires_at || undefined">{{
+          tok.expires_at ? tr('my_tokens.expires', { when: formatDateTime(tok.expires_at) }) : tr('my_tokens.no_expiry')
+        }}</span>
+        <button type="button" class="text-xs px-2 py-1 rounded text-danger hover:bg-surface-hover" @click="revoke(tok)">{{ tr('common.revoke') }}</button>
       </li>
-      <li v-if="tokens.length === 0" class="text-xs text-text-muted">No tokens yet.</li>
+      <li v-if="tokens.length === 0" class="text-xs text-text-muted">{{ tr('my_tokens.none') }}</li>
     </ul>
   </div>
 </template>

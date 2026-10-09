@@ -175,7 +175,7 @@ onUnmounted(() => {
           ref="inputEl"
           v-model="query"
           type="text"
-          placeholder="Jump to a note, project, or tag…"
+          :placeholder="t('palette.placeholder')"
           class="w-full px-4 py-3 bg-bg-elevated border-b border-border focus:outline-none"
         />
         <ul class="max-h-[50vh] overflow-auto">
@@ -202,7 +202,9 @@ onUnmounted(() => {
             v-if="!filtered.length"
             class="px-4 py-3 text-sm text-text-muted"
           >
-            No matches. Press <kbd>Esc</kbd> to close.
+            <i18n-t keypath="palette.no_matches" scope="global">
+              <template #key><kbd>Esc</kbd></template>
+            </i18n-t>
           </li>
         </ul>
       </div>

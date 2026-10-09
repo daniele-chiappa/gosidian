@@ -9,6 +9,7 @@
  * (`?w=&f=`), so this view must not call router.replace. Node clicks open the
  * target note as a sibling window.
  */
+import { useI18n } from 'vue-i18n'
 import { computed, defineAsyncComponent, inject, onMounted, ref, watch } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
 import { fetchGraph, type GraphResponse } from '@/api/graph'
@@ -20,6 +21,10 @@ import { useWindowsStore, type OpenSpec } from 'plancia'
 import { planciaKey } from '@/composables/planciaKey'
 import { useUIStore, type GraphRenderMode } from '@/stores/ui'
 import type { ZMode } from '@/components/graph/adapter'
+import { errorText } from '@/api/errors'
+import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
+
+const { t } = useI18n()
 
 const GraphCanvas = defineAsyncComponent(() => import('@/components/graph/GraphCanvas.vue'))
 const Graph3DCanvas = defineAsyncComponent(() => import('@/components/graph/Graph3DCanvas.vue'))
@@ -102,7 +107,7 @@ function syncWindow() {
     ...(limit.value > 0 ? { limit: limit.value } : {}),
     global: true,
   })
-  store.setTitle(w.id, project.value ? `Graph · ${project.value}` : 'Graph')
+  store.setTitle(w.id, project.value ? `${t('nav.graph')} · ${project.value}` : t('nav.graph'))
 }
 const hadInitialFilter = Boolean(project.value || tag.value || focus.value)
 const base = (p: string) => (p.split('/').pop() ?? p).replace(/\.md$/, '')
@@ -130,7 +135,7 @@ async function load() {
     if (mine === gen) data.value = graph
   } catch (e) {
     if (mine !== gen) return
-    error.value = e instanceof Error ? e.message : 'Failed to load graph'
+    error.value = errorText(e, t, t('graph.load_failed'))
     data.value = null
   } finally {
     if (mine === gen) loading.value = false
@@ -205,7 +210,7 @@ onMounted(async () => {
       class="w-72 shrink-0 border-r border-border bg-bg-elevated p-4 space-y-4 overflow-auto"
     >
       <div class="block text-sm">
-        <span class="text-text-muted text-xs">Project</span>
+        <span class="text-text-muted text-xs">{{ t('graph.project') }}</span>
         <SearchSelect
           v-model="project"
           class="mt-1"
@@ -213,12 +218,12 @@ onMounted(async () => {
           :value-key="(p: Project) => p.name"
           :label="(p: Project) => p.name"
           :secondary="(p: Project) => String(p.note_count)"
-          placeholder="(all) — type to search"
+          :placeholder="t('graph.project_placeholder')"
         />
       </div>
 
       <div class="block text-sm">
-        <span class="text-text-muted text-xs">Tag</span>
+        <span class="text-text-muted text-xs">{{ t('graph.tag') }}</span>
         <SearchSelect
           v-model="tag"
           class="mt-1"
@@ -226,12 +231,12 @@ onMounted(async () => {
           :value-key="(t: TagCount) => t.tag"
           :label="(t: TagCount) => '#' + t.tag"
           :secondary="(t: TagCount) => String(t.count)"
-          placeholder="(no tag) — type to search"
+          :placeholder="t('graph.tag_placeholder')"
         />
       </div>
 
       <div class="block text-sm">
-        <span class="text-text-muted text-xs">Focus (path)</span>
+        <span class="text-text-muted text-xs">{{ t('graph.focus') }}</span>
         <SearchSelect
           v-model="focus"
           class="mt-1"
@@ -239,12 +244,12 @@ onMounted(async () => {
           :value-key="(n: NoteTitleHit) => n.path"
           :label="(n: NoteTitleHit) => n.title || n.path"
           :secondary="(n: NoteTitleHit) => n.path"
-          placeholder="(no focus) — type to search"
+          :placeholder="t('graph.focus_placeholder')"
         />
       </div>
 
       <label class="block text-sm">
-        <span class="text-text-muted text-xs">Depth (hops, when focus is set)</span>
+        <span class="text-text-muted text-xs">{{ t('graph.depth') }}</span>
         <input
           v-model.number="depth"
           type="number"
@@ -254,7 +259,7 @@ onMounted(async () => {
         >
       </label>
       <label class="block text-sm">
-        <span class="text-text-muted text-xs">Min degree (drop leaves below)</span>
+        <span class="text-text-muted text-xs">{{ t('graph.min_degree') }}</span>
         <input
           v-model.number="minDegree"
           type="number"
@@ -264,7 +269,7 @@ onMounted(async () => {
         >
       </label>
       <label class="block text-sm">
-        <span class="text-text-muted text-xs">Limit (cap nodes; top-degree wins)</span>
+        <span class="text-text-muted text-xs">{{ t('graph.limit') }}</span>
         <input
           v-model.number="limit"
           type="number"
@@ -279,20 +284,20 @@ onMounted(async () => {
         class="w-full text-xs px-2 py-1 rounded border border-border hover:bg-surface-hover"
         @click="reset"
       >
-        Reset
+        {{ t('graph.reset') }}
       </button>
 
       <div
         v-if="data"
         class="text-xs text-text-muted space-y-1 pt-3 border-t border-border"
       >
-        <p>Nodes: <strong class="text-text">{{ data.stats.node_count }}</strong></p>
-        <p>Edges: <strong class="text-text">{{ data.stats.edge_count }}</strong></p>
+        <p>{{ t('graph.nodes') }} <strong class="text-text">{{ data.stats.node_count }}</strong></p>
+        <p>{{ t('graph.edges') }} <strong class="text-text">{{ data.stats.edge_count }}</strong></p>
         <p
           v-if="data.stats.truncated"
           class="text-warning"
         >
-          Truncated by limit
+          {{ t('graph.truncated') }}
         </p>
         <p
           v-if="data.stats.filter"
@@ -308,34 +313,33 @@ onMounted(async () => {
         v-if="loading"
         class="absolute top-3 left-3 z-10 text-xs text-text-muted bg-bg-elevated px-2 py-1 rounded border border-border"
       >
-        Loading…
+        {{ t('common.loading') }}
       </p>
-      <p
+      <ErrorMessage
         v-else-if="error"
-        class="absolute top-3 left-3 z-10 text-xs text-danger bg-bg-elevated px-2 py-1 rounded border border-danger"
-      >
-        {{ error }}
-      </p>
+        :text="error"
+        class="absolute top-3 left-3 z-10 max-w-[80%] text-xs bg-bg-elevated px-2 py-1 rounded border border-danger"
+      />
       <select
         v-if="mode === '3d'"
         v-model="zMode"
         class="absolute top-3 right-24 z-10 rounded border border-border bg-bg-elevated text-xs text-text-muted px-1.5 py-1"
-        aria-label="Z axis mode"
+        :aria-label="t('graph.z_mode')"
       >
         <option value="free">
-          Z: free
+          {{ t('graph.z_free') }}
         </option>
         <option value="groups">
-          Z: groups
+          {{ t('graph.z_groups') }}
         </option>
         <option value="recency">
-          Z: recency
+          {{ t('graph.z_recency') }}
         </option>
       </select>
       <div
         class="absolute top-3 right-3 z-10 flex rounded border border-border overflow-hidden text-xs bg-bg-elevated"
         role="group"
-        aria-label="Graph renderer"
+        :aria-label="t('graph.renderer')"
       >
         <button
           type="button"
@@ -371,7 +375,7 @@ onMounted(async () => {
         v-else-if="!loading"
         class="p-8 text-text-muted text-sm"
       >
-        No data yet.
+        {{ t('graph.no_data') }}
       </p>
     </section>
   </div>

@@ -24,13 +24,29 @@ import {
   watch,
 } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useDebounceFn } from '@vueuse/core'
-import { Printer, Download, Copy, Check, GitBranch, Camera } from 'lucide-vue-next'
+import { useDebounceFn, useElementSize } from '@vueuse/core'
+import {
+  Printer,
+  Download,
+  Copy,
+  Check,
+  GitBranch,
+  Camera,
+  SquarePen,
+  Columns2,
+  Rows2,
+  Eye,
+} from 'lucide-vue-next'
+import OverflowMenu, { type OverflowItem } from '@/components/primitives/OverflowMenu.vue'
+import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
 import { getNote, updateNote, deleteNote, createSnapshot, type Note } from '@/api/notes'
 import { downloadNote } from '@/api/noteDownload'
 import { draftAfterSave } from '@/views/noteDraft'
 import { renderPreviewData, type ViewData } from '@/api/preview'
-import { apiErrorMessage, isConcurrencyConflict, onApiEvent, type ConcurrencyConflictDetail } from '@/api/client'
+import axios from 'axios'
+import { isConcurrencyConflict, onApiEvent, type ConcurrencyConflictDetail } from '@/api/client'
+import { errorText } from '@/api/errors'
+import { formatSize } from '@/api/format'
 import { useSSE } from '@/composables/useSSE'
 import MarkdownPreview from '@/components/domain/MarkdownPreview.vue'
 import { findHeading } from '@/components/domain/headings'
@@ -82,6 +98,9 @@ async function renderInto(md: string, notePath: string) {
 const loading = ref(false)
 const saving = ref(false)
 const error = ref<string | null>(null)
+// The note is not there (IMP-155, M4): its own state, with the actions that
+// help, instead of an error under a working toolbar.
+const notFound = ref(false)
 const dirty = ref(false)
 const lastSavedAt = ref<string | null>(null)
 const conflict = ref<ConcurrencyConflictDetail | null>(null)
@@ -150,6 +169,7 @@ async function load() {
   if (!path.value) return
   loading.value = true
   error.value = null
+  notFound.value = false
   try {
     const fetched = await getNote(path.value)
     remoteChanged.value = false
@@ -168,7 +188,8 @@ async function load() {
     }
     dirty.value = false
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to load note'
+    notFound.value = axios.isAxiosError(e) && e.response?.status === 404
+    error.value = errorText(e, t, t('note.load_failed'))
     note.value = null
   } finally {
     loading.value = false
@@ -298,7 +319,7 @@ async function save() {
     remoteChanged.value = false
   } catch (e) {
     // The conflict banner owns a 412: an error pane would hide the draft.
-    if (!isConcurrencyConflict(e)) error.value = apiErrorMessage(e, 'Save failed')
+    if (!isConcurrencyConflict(e)) error.value = errorText(e, t, t('note.save_failed'))
   } finally {
     saving.value = false
   }
@@ -322,7 +343,7 @@ async function forceOverwrite() {
     lastSavedAt.value = new Date().toLocaleTimeString()
     conflict.value = null
   } catch (e) {
-    error.value = apiErrorMessage(e, 'Overwrite failed')
+    error.value = errorText(e, t, t('note.overwrite_failed'))
   } finally {
     saving.value = false
   }
@@ -338,7 +359,7 @@ async function destroy() {
     treeStore.refresh()
     emit('close')
   } catch (e) {
-    error.value = apiErrorMessage(e, 'Delete failed')
+    error.value = errorText(e, t, t('note.delete_failed'))
   }
 }
 
@@ -396,7 +417,7 @@ async function downloadOriginal() {
   try {
     await downloadNote(note.value.path, note.value)
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Download failed'
+    error.value = errorText(e, t, t('note.download_failed'))
   }
 }
 
@@ -416,10 +437,32 @@ async function snapshot() {
       props: { path: snap.path },
     })
   } catch (e) {
-    error.value = e instanceof Error ? e.message : t('note.snapshot_failed')
+    error.value = errorText(e, t, t('note.snapshot_failed'))
   } finally {
     snapshotting.value = false
   }
+}
+
+// Not found: "create it here" opens the creation window on the note's
+// folder, with its name, for whoever may write there.
+// A markdown note only: a missing image or base is not one to write here.
+const canCreateHere = computed(() => {
+  const name = path.value.split('/').pop() ?? ''
+  return access.canWrite(path.value) && (/\.md$/i.test(name) || !/\.[^.]+$/.test(name))
+})
+function createHere() {
+  const i = path.value.lastIndexOf('/')
+  const folder = i >= 0 ? path.value.slice(0, i) : ''
+  const name = (i >= 0 ? path.value.slice(i + 1) : path.value).replace(/\.md$/i, '')
+  // Keyed by the note, not the folder: an open creation window of the
+  // folder would take the focus with a name of its own.
+  openWindow({
+    type: 'create',
+    key: planciaKey('create', `${folder}/${name}`),
+    title: t('note_create.window_title', { name: folder.split('/').pop() || '/' }),
+    props: { path: folder, name },
+  })
+  emit('close')
 }
 
 function openHistory() {
@@ -431,6 +474,39 @@ function openHistory() {
     props: { path: note.value.path },
   })
 }
+
+// The window's toolbar (IMP-156, M5): below these widths the secondary
+// actions go into the ⋯ menu. Editing adds the layouts, Save and Delete;
+// with the layouts as icons it all fits a default window of ~575 px.
+const COMPACT_BELOW = { edit: 560, view: 360 }
+const headerEl = ref<HTMLElement | null>(null)
+const { width: headerWidth } = useElementSize(headerEl)
+const compact = computed(() => headerWidth.value > 0 && headerWidth.value < COMPACT_BELOW[mode.value])
+
+const LAYOUTS: { key: EditorLayout; icon: typeof Eye }[] = [
+  { key: 'editor', icon: SquarePen },
+  { key: 'split', icon: Columns2 },
+  { key: 'stacked', icon: Rows2 },
+  { key: 'preview', icon: Eye },
+]
+
+const actions = computed<OverflowItem[]>(() => {
+  const out: OverflowItem[] = []
+  if (note.value && mode.value === 'view' && !isHtml.value && !isMedia.value && !isCanvas.value)
+    out.push({ key: 'print', label: t('note.print'), icon: Printer, run: printNote })
+  out.push({ key: 'download', label: t('note.download'), icon: Download, disabled: !note.value, run: downloadOriginal })
+  out.push({
+    key: 'copy',
+    label: copied.value ? t('note.copied') : t('note.copy'),
+    icon: copied.value ? Check : Copy,
+    disabled: !note.value,
+    run: copySource,
+  })
+  if (note.value && !isHtml.value && !isMedia.value && !isReadOnlyFile.value && access.canWrite(props.path))
+    out.push({ key: 'snapshot', label: t('note.snapshot'), icon: Camera, disabled: snapshotting.value, run: snapshot })
+  out.push({ key: 'history', label: t('note.history'), icon: GitBranch, run: openHistory })
+  return out
+})
 
 function onKeydown(e: KeyboardEvent) {
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
@@ -459,139 +535,121 @@ watch(path, load)
 
 <template>
   <div ref="rootEl" class="flex flex-col h-full">
-    <header class="flex items-center gap-2 px-4 py-2 border-b border-border bg-bg-elevated">
-      <span class="font-semibold truncate">{{ note?.title || note?.path || path }}</span>
-      <span v-if="dirty" class="text-xs text-warning" :title="t('note.unsaved')">●</span>
-      <span v-else-if="lastSavedAt" class="text-xs text-success">saved {{ lastSavedAt }}</span>
-
-      <div class="flex-1" />
+    <header
+      ref="headerEl"
+      class="flex items-center gap-2 border-b border-border bg-bg-elevated px-4 py-2"
+    >
+      <!-- The title gives way first (IMP-156, M5): it shrinks and ellipsises,
+           the controls keep their size. -->
+      <span class="min-w-0 flex-1 truncate font-semibold" :title="note?.title || note?.path || path">
+        {{ note?.title || note?.path || path }}
+      </span>
+      <span v-if="dirty" class="shrink-0 text-xs text-warning" :title="t('note.unsaved')">●</span>
+      <span v-else-if="lastSavedAt && !compact" class="shrink-0 text-xs text-success">
+        {{ t('note.saved_at', { time: lastSavedAt }) }}
+      </span>
 
       <!-- View / Edit toggle (Edit hidden for read-only users) -->
-      <div class="inline-flex rounded border border-border overflow-hidden text-xs">
+      <div
+        v-if="note"
+        class="inline-flex h-control-sm shrink-0 overflow-hidden rounded border border-border text-xs"
+      >
         <button
           type="button"
-          class="px-2 py-1"
+          class="px-2"
           :class="mode === 'view' ? 'bg-accent text-accent-fg' : 'hover:bg-surface-hover'"
+          :aria-pressed="mode === 'view'"
           @click="enterView"
         >
-          View
+          {{ t('note.view') }}
         </button>
         <button
           v-if="access.canWrite(props.path) && !isReadOnlyFile"
           type="button"
-          class="px-2 py-1"
+          class="px-2"
           :class="mode === 'edit' ? 'bg-accent text-accent-fg' : 'hover:bg-surface-hover'"
+          :aria-pressed="mode === 'edit'"
           @click="enterEdit"
         >
-          Edit
+          {{ t('note.edit') }}
         </button>
       </div>
 
-      <!-- Edit-only controls -->
-      <template v-if="mode === 'edit'">
-        <div class="inline-flex rounded border border-border overflow-hidden text-xs">
+      <!-- Edit-only controls: the layouts as icons (IMP-156, M5) -->
+      <template v-if="mode === 'edit' && note">
+        <div
+          class="inline-flex h-control-sm shrink-0 overflow-hidden rounded border border-border"
+          role="group"
+          :aria-label="t('note.layout.label')"
+        >
           <button
-            v-for="m in ['editor', 'split', 'stacked', 'preview'] as EditorLayout[]"
-            :key="m"
+            v-for="l in LAYOUTS"
+            :key="l.key"
             type="button"
-            class="px-2 py-1"
-            :class="layout === m ? 'bg-accent text-accent-fg' : 'hover:bg-surface-hover'"
-            @click="layout = m"
+            class="px-1.5"
+            :class="layout === l.key ? 'bg-accent text-accent-fg' : 'text-text-muted hover:bg-surface-hover hover:text-text'"
+            :title="t(`note.layout.${l.key}`)"
+            :aria-label="t(`note.layout.${l.key}`)"
+            :aria-pressed="layout === l.key"
+            :data-layout="l.key"
+            @click="layout = l.key"
           >
-            {{ m }}
+            <component :is="l.icon" class="h-3.5 w-3.5" />
           </button>
         </div>
         <button
           type="button"
-          class="text-xs px-2 py-1 rounded bg-accent text-accent-fg hover:bg-accent-hover disabled:opacity-50"
+          class="h-control-sm shrink-0 rounded bg-accent px-2 text-xs text-accent-fg hover:bg-accent-hover disabled:opacity-50"
           :disabled="!dirty || saving"
           @click="save"
         >
-          {{ saving ? 'Saving…' : 'Save' }}
+          {{ saving ? t('note.saving') : t('common.save') }}
         </button>
         <button
           type="button"
-          class="text-xs px-2 py-1 rounded text-danger hover:bg-surface-hover"
+          class="h-control-sm shrink-0 rounded px-2 text-xs text-danger hover:bg-surface-hover"
           @click="destroy"
         >
-          Delete
+          {{ t('common.delete') }}
         </button>
       </template>
 
-      <button
-        v-if="note && mode === 'view' && !isHtml && !isMedia && !isCanvas"
-        type="button"
-        class="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text"
-        :title="t('note.print')"
-        :aria-label="t('note.print')"
-        @click="printNote"
-      >
-        <Printer class="h-3.5 w-3.5" />
-      </button>
-
-      <button
-        type="button"
-        class="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text disabled:opacity-50"
-        :disabled="!note"
-        :title="t('note.download')"
-        :aria-label="t('note.download')"
-        @click="downloadOriginal"
-      >
-        <Download class="h-3.5 w-3.5" />
-      </button>
-
-      <button
-        type="button"
-        class="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text disabled:opacity-50"
-        :class="{ 'text-success': copied }"
-        :disabled="!note"
-        :title="copied ? t('note.copied') : t('note.copy')"
-        :aria-label="copied ? t('note.copied') : t('note.copy')"
-        @click="copySource"
-      >
-        <Check v-if="copied" class="h-3.5 w-3.5" />
-        <Copy v-else class="h-3.5 w-3.5" />
-      </button>
-
-      <button
-        v-if="note && !isHtml && !isMedia && !isReadOnlyFile && access.canWrite(props.path)"
-        type="button"
-        class="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text disabled:opacity-50"
-        :disabled="snapshotting"
-        :title="t('note.snapshot')"
-        :aria-label="t('note.snapshot')"
-        data-snapshot
-        @click="snapshot"
-      >
-        <Camera class="h-3.5 w-3.5" />
-      </button>
-
-      <button
-        type="button"
-        class="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text"
-        :title="t('note.history')"
-        :aria-label="t('note.history')"
-        @click="openHistory"
-      >
-        <GitBranch class="h-3.5 w-3.5" />
-      </button>
+      <!-- The secondary actions: in a row, or in the ⋯ menu when the window
+           is narrow (IMP-156, M5). -->
+      <template v-if="note && !compact">
+        <button
+          v-for="a in actions"
+          :key="a.key"
+          type="button"
+          class="shrink-0 rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text disabled:opacity-50"
+          :class="{ 'text-success': a.key === 'copy' && copied }"
+          :disabled="a.disabled"
+          :title="a.label"
+          :aria-label="a.label"
+          :data-snapshot="a.key === 'snapshot' ? '' : undefined"
+          @click="a.run"
+        >
+          <component :is="a.icon" class="h-3.5 w-3.5" />
+        </button>
+      </template>
+      <OverflowMenu v-else-if="note" class="shrink-0" :items="actions" :label="t('note.more_actions')" />
     </header>
 
     <div
       v-if="conflict"
       class="flex flex-wrap items-center gap-2 border-b border-warning/40 bg-warning/10 px-4 py-2 text-xs"
     >
-      <span class="text-warning">Modified externally since you opened it.</span>
+      <span class="text-warning">{{ t('note.conflict_banner') }}</span>
       <div class="flex-1" />
       <button type="button" class="rounded px-2 py-1 hover:bg-surface-hover" @click="reloadRemote">
-        Reload remote
+        {{ t('note.reload_remote') }}
       </button>
       <button
         type="button"
         class="rounded bg-accent px-2 py-1 text-accent-fg hover:bg-accent-hover"
         @click="forceOverwrite"
       >
-        Overwrite
+        {{ t('note.overwrite') }}
       </button>
     </div>
 
@@ -599,10 +657,10 @@ watch(path, load)
       v-if="remoteChanged && !conflict"
       class="flex flex-wrap items-center gap-2 border-b border-warning/40 bg-warning/10 px-4 py-2 text-xs"
     >
-      <span class="text-warning">Changed elsewhere while you were editing.</span>
+      <span class="text-warning">{{ t('note.changed_elsewhere') }}</span>
       <div class="flex-1" />
       <button type="button" class="rounded px-2 py-1 hover:bg-surface-hover" @click="reloadRemote">
-        Reload remote
+        {{ t('note.reload_remote') }}
       </button>
     </div>
 
@@ -612,25 +670,46 @@ watch(path, load)
     <div
       v-if="error && note"
       class="flex items-center gap-2 border-b border-danger/40 bg-danger/10 px-4 py-2 text-xs"
-      role="alert"
       data-note-error
     >
-      <span class="text-danger">{{ error }}</span>
+      <ErrorMessage :text="error" class="min-w-0" />
       <div class="flex-1" />
       <button type="button" class="rounded px-2 py-1 hover:bg-surface-hover" @click="error = null">
         {{ t('common.dismiss') }}
       </button>
     </div>
 
-    <p v-if="loading" class="p-6 text-text-muted">Loading…</p>
-    <p v-else-if="error && !note" class="p-3 text-danger text-sm">{{ error }}</p>
+    <p v-if="loading" class="p-6 text-text-muted">{{ t('common.loading') }}</p>
+    <div v-else-if="notFound" class="mx-auto max-w-md p-8 text-sm" data-note-missing>
+      <p class="font-medium">{{ t('note.not_found') }}</p>
+      <p class="mt-1 font-mono text-xs text-text-muted break-all">{{ path }}</p>
+      <p class="mt-3 text-text-muted">{{ t('note.not_found_hint') }}</p>
+      <div class="mt-4 flex gap-2">
+        <button
+          v-if="canCreateHere"
+          type="button"
+          class="h-control rounded bg-accent px-3 text-accent-fg hover:bg-accent-hover"
+          @click="createHere"
+        >
+          {{ t('note.create_here') }}
+        </button>
+        <button
+          type="button"
+          class="h-control rounded border border-border px-3 hover:bg-surface-hover"
+          @click="emit('close')"
+        >
+          {{ t('note.close') }}
+        </button>
+      </div>
+    </div>
+    <ErrorMessage v-else-if="error && !note" :text="error" class="p-3 text-sm" />
 
     <!-- View mode: rendered preview -->
     <div v-else-if="mode === 'view'" class="flex-1 overflow-auto">
       <!-- HTML note: full-bleed sandboxed iframe -->
       <template v-if="isHtml && note">
         <p class="px-4 pt-2 text-xs text-text-muted font-mono">
-          {{ note.path }} · html · etag {{ note.etag.slice(0, 12) }} · {{ note.size }} bytes
+          <span :title="`etag ${note.etag}`">{{ note.path }} · html · {{ formatSize(note.size) }}</span>
         </p>
         <HTMLPreview :html="note.content" :path="note.path" />
       </template>
@@ -644,7 +723,7 @@ watch(path, load)
       <!-- An Obsidian canvas (IMP-144): its cards on a plane, full-bleed -->
       <div v-else-if="isCanvas && note" class="flex h-full flex-col">
         <p class="px-4 py-1 text-xs text-text-muted font-mono">
-          {{ note.path }} · etag {{ note.etag.slice(0, 12) }} · {{ note.size }} bytes ·
+          <span :title="`etag ${note.etag}`">{{ note.path }} · {{ formatSize(note.size) }}</span> ·
           {{ t('note.canvas_readonly') }}
         </p>
         <CanvasPreview v-if="note.canvas" class="flex-1" :canvas="note.canvas" :path="note.path" />
@@ -659,7 +738,7 @@ watch(path, load)
       <!-- Markdown note: prose-rendered preview -->
       <article v-else ref="articleEl" class="p-6 max-w-3xl mx-auto">
         <p v-if="note" class="text-xs text-text-muted font-mono mb-6">
-          {{ note.path }} · etag {{ note.etag.slice(0, 12) }} · {{ note.size }} bytes
+          <span :title="`etag ${note.etag}`">{{ note.path }} · {{ formatSize(note.size) }}</span>
           <template v-if="isBase"> · {{ t('note.base_readonly') }}</template>
         </p>
         <!-- A row of a database: its fields, editable (IMP-127 phase 5) -->
@@ -699,7 +778,13 @@ watch(path, load)
       </div>
       <div v-if="layout !== 'editor'" class="overflow-auto p-4 max-w-none">
         <HTMLPreview v-if="isHtml" :html="draft" :path="note.path" />
-        <MarkdownPreview v-else :html="previewHTML" :views="previewViews" :note-path="note.path" />
+        <MarkdownPreview
+          v-else
+          :html="previewHTML"
+          :views="previewViews"
+          :note-path="note.path"
+          :compact="layout !== 'preview'"
+        />
       </div>
     </div>
   </div>

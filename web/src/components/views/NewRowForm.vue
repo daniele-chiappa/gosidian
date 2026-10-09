@@ -195,7 +195,7 @@ async function submit() {
         <label v-for="o in c.options ?? []" :key="o" class="flex items-center gap-1">
           <input
             type="checkbox"
-            class="rounded-sm border-border bg-bg text-accent focus:ring-accent"
+            class="rounded-sm border-border bg-bg text-accent focus:ring-focus"
             :checked="(extra[c.name] as string[]).includes(o)"
             @change="toggle(c.name, o, ($event.target as HTMLInputElement).checked)"
           />
@@ -206,7 +206,7 @@ async function submit() {
         <input
           v-model="extra[c.name]"
           type="checkbox"
-          class="rounded-sm border-border bg-bg text-accent focus:ring-accent"
+          class="rounded-sm border-border bg-bg text-accent focus:ring-focus"
         />
         <span class="text-xs text-text-muted">{{ c.name }}</span>
       </label>

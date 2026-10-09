@@ -164,7 +164,7 @@ const noteHref = (path: string) => '/notes/' + path.split('/').map(encodeURIComp
           <input
             v-if="c.type === 'checkbox'"
             type="checkbox"
-            class="rounded-sm border-border bg-bg-elevated text-accent focus:ring-accent"
+            class="rounded-sm border-border bg-bg-elevated text-accent focus:ring-focus"
             :checked="row.fields[c.name] === 'true'"
             :disabled="!editable(c) || saving"
             :aria-label="t('views.edit', { field: c.name })"

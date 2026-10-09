@@ -20,7 +20,7 @@ const ui = useUIStore()
 const windows = useWindowsStore()
 
 function openSearch() {
-  windows.open({ type: 'search', key: planciaKey('search'), title: t('nav.search', 'Search') })
+  windows.open({ type: 'search', key: planciaKey('search'), title: t('nav.search') })
 }
 
 async function handleLogout() {
@@ -45,7 +45,7 @@ async function handleLogout() {
         @click="openSearch"
       >
         <Search class="w-3 h-3" />
-        <span>{{ t('nav.search', 'Search') }}</span>
+        <span>{{ t('nav.search') }}</span>
         <kbd class="opacity-60">⌘K</kbd>
       </button>
 
@@ -93,12 +93,12 @@ async function handleLogout() {
       <span
         v-else-if="auth.user?.role === 'member'"
         class="px-2 py-0.5 rounded text-xs border border-border text-text-muted"
-        :title="`${roleLabel('member')} — ${access.readableCount} project(s) readable, ${access.writableCount} writable${access.restricted ? ' (restricted: grants only)' : ''}`"
+        :title="t(access.restricted ? 'topbar.member_restricted' : 'topbar.member', { role: roleLabel('member'), r: access.readableCount, w: access.writableCount })"
       >{{ roleLabel('member') }}</span>
       <span
         v-else-if="auth.isGuest"
         class="px-2 py-0.5 rounded text-xs border border-border text-text-muted"
-        title="Read-only account"
+        :title="t('topbar.guest')"
       >{{ roleLabel('guest') }}</span>
       <button
         v-if="auth.isAnonymous"

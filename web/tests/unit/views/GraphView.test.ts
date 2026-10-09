@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { createI18n } from 'vue-i18n'
+import enUI from '@catalogs/ui.en.json'
 import type { GraphResponse } from '@/api/graph'
 
 vi.mock('@/api/graph', () => ({ fetchGraph: vi.fn() }))
@@ -19,6 +21,8 @@ vi.mock('@vueuse/core', async (orig) => ({
 import { fetchGraph } from '@/api/graph'
 import GraphView from '@/views/GraphView.vue'
 
+const i18n = () => createI18n({ legacy: false, locale: 'en', messages: { en: enUI } })
+
 const graph = (count: number): GraphResponse =>
   ({ nodes: [], edges: [], stats: { node_count: count, edge_count: 0 } }) as unknown as GraphResponse
 
@@ -30,7 +34,7 @@ describe('GraphView (BUG-116, S6-10)', () => {
       .mockResolvedValueOnce(graph(42))
     const w = mount(GraphView, {
       props: { project: 'A', global: true },
-      global: { stubs: { GraphCanvas: true, Graph3DCanvas: true, SearchSelect: true } },
+      global: { plugins: [i18n()], stubs: { GraphCanvas: true, Graph3DCanvas: true, SearchSelect: true } },
     })
     await flushPromises()
     const minDegree = w.findAll('input[type="number"]')[1]!

@@ -35,6 +35,16 @@ export default {
         border: tokenColor('border'),
         'border-strong': tokenColor('border-strong'),
         overlay: tokenColor('overlay'),
+        focus: tokenColor('focus'),
+      },
+      // A control and a toolbar control (IMP-154): `h-control`, `h-control-sm`.
+      height: {
+        control: 'var(--control-h)',
+        'control-sm': 'var(--control-h-sm)',
+      },
+      minHeight: {
+        control: 'var(--control-h)',
+        'control-sm': 'var(--control-h-sm)',
       },
       boxShadow: {
         sm: 'var(--shadow-sm)',

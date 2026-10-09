@@ -132,7 +132,7 @@ async function commit(row: ViewRow, col: ViewColumn, input: string | boolean | s
           <input
             v-else-if="c.type === 'checkbox'"
             type="checkbox"
-            class="rounded-sm border-border bg-bg-elevated text-accent focus:ring-accent"
+            class="rounded-sm border-border bg-bg-elevated text-accent focus:ring-focus"
             :checked="row.fields[c.name] === 'true'"
             :disabled="!isEditable(c, row) || saving !== null"
             :aria-label="t('views.edit', { field: c.name })"

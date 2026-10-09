@@ -1,9 +1,14 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import { onMounted, ref } from 'vue'
 import { listTrash, restoreTrash, purgeTrash, type TrashItem } from '@/api/trash'
-import { apiErrorMessage } from '@/api/client'
 import { useTreeStore } from '@/stores/tree'
 import { Folder, FileText, RotateCcw, Trash2 } from 'lucide-vue-next'
+import { errorText } from '@/api/errors'
+import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
+import DateTime from '@/components/primitives/DateTime.vue'
+
+const { t } = useI18n()
 
 const items = ref<TrashItem[]>([])
 const loading = ref(false)
@@ -17,7 +22,7 @@ async function load() {
   try {
     items.value = await listTrash()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to load'
+    error.value = errorText(e, t, t('trash.load_failed'))
   } finally {
     loading.value = false
   }
@@ -26,24 +31,24 @@ async function load() {
 async function restore(item: TrashItem) {
   try {
     const res = await restoreTrash(item.id)
-    message.value = `Restored to ${res.restored}`
+    message.value = t('trash.restored', { path: res.restored })
     treeStore.refresh()
     await load()
   } catch (e) {
     // The server says why: a folder or a note recreated meanwhile, a
     // project to restore first.
-    error.value = apiErrorMessage(e, 'Restore failed')
+    error.value = errorText(e, t, t('trash.restore_failed'))
   }
 }
 
 async function purge(item: TrashItem) {
-  if (!confirm(`Permanently delete "${item.origin_path}"? This cannot be undone.`)) return
+  if (!confirm(t('trash.confirm_purge', { path: item.origin_path }))) return
   try {
     await purgeTrash(item.id)
-    message.value = 'Purged.'
+    message.value = t('trash.purged')
     await load()
   } catch (e) {
-    error.value = apiErrorMessage(e, 'Purge failed')
+    error.value = errorText(e, t, t('trash.purge_failed'))
   }
 }
 
@@ -52,16 +57,16 @@ onMounted(load)
 
 <template>
   <div class="p-8 max-w-4xl mx-auto">
-    <h1 class="text-2xl font-semibold mb-1">Trash</h1>
+    <h1 class="text-2xl font-semibold mb-1">{{ t('trash.title') }}</h1>
     <p class="text-sm text-text-muted mb-6">
-      Soft-deleted notes and folders. Restore puts them back at their original path; purge wipes them for good.
+      {{ t('trash.intro') }}
     </p>
 
-    <p v-if="loading" class="text-text-muted">Loading…</p>
-    <p v-else-if="error" class="text-danger">{{ error }}</p>
+    <p v-if="loading" class="text-text-muted">{{ t('common.loading') }}</p>
+    <ErrorMessage v-else-if="error" :text="error" />
     <p v-else-if="message" class="text-success text-sm mb-3">{{ message }}</p>
 
-    <p v-if="!loading && !items.length" class="text-text-muted text-sm">Trash is empty.</p>
+    <p v-if="!loading && !items.length" class="text-text-muted text-sm">{{ t('trash.empty') }}</p>
 
     <ul v-else class="space-y-2">
       <li
@@ -74,17 +79,17 @@ onMounted(load)
           class="w-4 h-4 text-text-muted shrink-0"
         />
         <span class="flex-1 font-mono text-sm truncate">{{ item.origin_path }}</span>
-        <span class="text-xs text-text-muted whitespace-nowrap">{{ item.discarded_at }}</span>
+        <DateTime class="text-xs text-text-muted whitespace-nowrap" :value="item.discarded_at" />
         <button
           type="button"
           class="text-xs px-2 py-1 rounded border border-border hover:bg-surface-hover inline-flex items-center gap-1"
           @click="restore(item)"
-        ><RotateCcw class="w-3 h-3" /> Restore</button>
+        ><RotateCcw class="w-3 h-3" /> {{ t('trash.restore') }}</button>
         <button
           type="button"
           class="text-xs px-2 py-1 rounded text-danger hover:bg-surface-hover inline-flex items-center gap-1"
           @click="purge(item)"
-        ><Trash2 class="w-3 h-3" /> Purge</button>
+        ><Trash2 class="w-3 h-3" /> {{ t('trash.purge') }}</button>
       </li>
     </ul>
   </div>

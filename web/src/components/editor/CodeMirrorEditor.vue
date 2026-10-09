@@ -18,6 +18,7 @@
  * ConflictDialog root-level — qui ci limitiamo a accettare il nuovo
  * content quando il parent re-passa modelValue.
  */
+import { useI18n } from 'vue-i18n'
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { EditorState, Compartment } from '@codemirror/state'
 import {
@@ -47,6 +48,10 @@ import { markdown } from '@codemirror/lang-markdown'
 import { suggestNoteTitles } from '@/api/noteTitles'
 import { attachFile } from '@/api/attach'
 import { wikilinkClosing } from './wikilink'
+import { editorThemeSpec } from './theme'
+import { errorText } from '@/api/errors'
+
+const { t } = useI18n()
 
 interface Props {
   modelValue: string
@@ -65,55 +70,7 @@ const host = ref<HTMLDivElement | null>(null)
 let view: EditorView | null = null
 const themeCompartment = new Compartment()
 
-// CodeMirror theme expressed via CSS vars so it stays in sync with
-// the app's preset switcher (Catppuccin Mocha/Latte). Reference:
-// /web/src/styles/tokens.css.
-const cmTheme = EditorView.theme(
-  {
-    '&': {
-      height: '100%',
-      backgroundColor: 'var(--color-bg-elevated, #1e1e2e)',
-      color: 'var(--color-text, #cdd6f4)',
-    },
-    '.cm-content': {
-      caretColor: 'var(--color-text, #cdd6f4)',
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-      fontSize: '13px',
-      padding: '1rem',
-    },
-    '.cm-gutters': {
-      backgroundColor: 'var(--color-bg-elevated, #1e1e2e)',
-      color: 'var(--color-text-muted, #6c7086)',
-      border: 'none',
-    },
-    '.cm-activeLine': {
-      backgroundColor:
-        'rgb(from var(--color-surface-hover, #313244) r g b / 0.3)',
-    },
-    '.cm-activeLineGutter': {
-      backgroundColor: 'transparent',
-      color: 'var(--color-accent, #89b4fa)',
-    },
-    '.cm-selectionBackground, &.cm-focused .cm-selectionBackground, ::selection':
-      {
-        backgroundColor:
-          'rgb(from var(--color-accent, #89b4fa) r g b / 0.25) !important',
-      },
-    '.cm-cursor': { borderLeftColor: 'var(--color-accent, #89b4fa)' },
-    '.cm-tooltip': {
-      backgroundColor: 'var(--color-bg-elevated, #1e1e2e)',
-      color: 'var(--color-text, #cdd6f4)',
-      border: '1px solid var(--color-border, #313244)',
-      borderRadius: '4px',
-    },
-    '.cm-tooltip-autocomplete > ul > li[aria-selected]': {
-      backgroundColor:
-        'rgb(from var(--color-accent, #89b4fa) r g b / 0.2)',
-      color: 'var(--color-text, #cdd6f4)',
-    },
-  },
-  { dark: false },
-)
+const cmTheme = EditorView.theme(editorThemeSpec, { dark: false })
 
 // Wikilink completion source. CodeMirror gives us a CompletionContext
 // from which we slice the `[[<prefix>` opener and ship the prefix to
@@ -271,8 +228,8 @@ async function uploadAndInsert(file: File) {
     const doc = view.state.doc.toString()
     const idx = doc.lastIndexOf(placeholder)
     if (idx === -1) return
-    const errMsg = e instanceof Error ? e.message : 'upload failed'
-    const replacement = `[upload failed: ${errMsg}]`
+    // In the note itself, on one line.
+    const replacement = `[${errorText(e, t, t('editor.upload_failed')).replace(/\n/g, ' — ')}]`
     view.dispatch({
       changes: { from: idx, to: idx + placeholder.length, insert: replacement },
     })

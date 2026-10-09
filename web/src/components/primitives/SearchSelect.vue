@@ -28,8 +28,11 @@
  *   - Esc / Enter / blur outside → close.
  *   - × button clears the value and reopens the dropdown.
  */
+import { useI18n } from 'vue-i18n'
 import { computed, ref, useTemplateRef, watch } from 'vue'
 import { onClickOutside } from '@vueuse/core'
+
+const { t } = useI18n()
 
 interface Props<U> {
   modelValue: string
@@ -119,7 +122,7 @@ function commitAndClose() {
         v-if="query"
         type="button"
         class="absolute right-1 top-1/2 -translate-y-1/2 text-text-muted hover:text-text px-1 text-xs"
-        :title="'Clear'"
+        :title="t('select.clear')"
         @click="clear"
       >×</button>
     </div>
@@ -141,10 +144,10 @@ function commitAndClose() {
     <p
       v-else-if="open && !items.length"
       class="absolute z-20 left-0 right-0 mt-1 px-2 py-1.5 rounded border border-border bg-bg-elevated text-xs text-text-muted"
-    >No options.</p>
+    >{{ t('select.no_options') }}</p>
     <p
       v-else-if="open && query && !filtered.length"
       class="absolute z-20 left-0 right-0 mt-1 px-2 py-1.5 rounded border border-border bg-bg-elevated text-xs text-text-muted"
-    >No match — your input is applied as a free filter.</p>
+    >{{ t('select.free_filter') }}</p>
   </div>
 </template>
