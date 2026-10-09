@@ -27,7 +27,7 @@ async function restore(item: TrashItem) {
   try {
     const res = await restoreTrash(item.id)
     message.value = `Restored to ${res.restored}`
-    treeStore.invalidateAll()
+    treeStore.refresh()
     await load()
   } catch (e) {
     // The server says why: a folder or a note recreated meanwhile, a

@@ -1,13 +1,24 @@
 <script setup lang="ts">
+/**
+ * LoginView — the sign-in form, and the sign-up form of an invite link
+ * (`/login?invite=<token>`, minted in Admin → Invites): the invitee picks
+ * a username and a password, the account is created as a member, and the
+ * sign-in form comes back with the username filled in (BUG-099). An invite
+ * expired or used says so, and asks for a new link.
+ */
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
-import { noteSignedIn } from '@/composables/useSessionReset'
+import { noteSignedIn, withoutWorkspace } from '@/composables/useSessionReset'
 import { getAuthConfig } from '@/api/totp'
+import { apiErrorMessage } from '@/api/client'
+import { isInvalidInvite, signup } from '@/api/signup'
 
 const router = useRouter()
 const route = useRoute()
 const auth = useAuthStore()
+const { t } = useI18n()
 
 const username = ref('')
 const password = ref('')
@@ -16,6 +27,49 @@ const showTotp = ref(false)
 const ldapEnabled = ref(false)
 const error = ref<string | null>(null)
 const submitting = ref(false)
+
+// --- Sign-up from an invite (BUG-099) ---
+const invite = ref(typeof route.query.invite === 'string' ? route.query.invite : '')
+const signupPassword = ref('')
+const signupConfirm = ref('')
+const inviteInvalid = ref(false)
+const notice = ref<string | null>(null)
+
+function backToLogin() {
+  invite.value = ''
+  inviteInvalid.value = false
+  error.value = null
+  const query = { ...route.query }
+  delete query.invite
+  void router.replace({ path: '/login', query })
+}
+
+async function handleSignup() {
+  if (submitting.value) return
+  error.value = null
+  if (signupPassword.value.length < 8) {
+    error.value = t('signup.password_short')
+    return
+  }
+  if (signupPassword.value !== signupConfirm.value) {
+    error.value = t('signup.password_mismatch')
+    return
+  }
+  submitting.value = true
+  try {
+    await signup(username.value, signupPassword.value, invite.value)
+    signupPassword.value = ''
+    signupConfirm.value = ''
+    password.value = ''
+    backToLogin()
+    notice.value = t('signup.created')
+  } catch (e) {
+    if (isInvalidInvite(e)) inviteInvalid.value = true
+    else error.value = apiErrorMessage(e, t('signup.failed'))
+  } finally {
+    submitting.value = false
+  }
+}
 
 onMounted(async () => {
   try {
@@ -39,9 +93,10 @@ async function handleSubmit() {
   error.value = null
   try {
     await auth.login(username.value, password.value, totp.value || undefined)
-    // A different account than the last one in this browser: start clean.
-    noteSignedIn(auth.user?.id ?? '')
-    await router.push(nextTarget.value)
+    // Not the account last seen in this browser, or none known: start clean,
+    // without the windows of whoever the address came from.
+    const same = noteSignedIn(auth.user?.id ?? '')
+    await router.push(same ? nextTarget.value : withoutWorkspace(nextTarget.value))
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Login failed'
   } finally {
@@ -52,7 +107,83 @@ async function handleSubmit() {
 
 <template>
   <div class="min-h-screen flex items-center justify-center bg-bg text-text px-4">
-    <div class="w-full max-w-sm">
+    <div v-if="invite" class="w-full max-w-sm" data-signup>
+      <div class="mb-6 text-center">
+        <h1 class="text-2xl font-semibold">gosidian</h1>
+        <p class="text-sm text-text-muted">{{ t('signup.title') }}</p>
+      </div>
+
+      <div v-if="inviteInvalid" class="space-y-3 rounded-lg bg-surface p-5 shadow ring-1 ring-border">
+        <p class="text-sm text-danger" role="alert">{{ t('signup.invalid_invite') }}</p>
+        <button
+          type="button"
+          class="w-full rounded border border-border py-2 font-medium hover:bg-bg-elevated"
+          @click="backToLogin"
+        >
+          {{ t('signup.back_to_login') }}
+        </button>
+      </div>
+
+      <form
+        v-else
+        class="space-y-3 rounded-lg bg-surface p-5 shadow ring-1 ring-border"
+        @submit.prevent="handleSignup"
+      >
+        <p class="text-sm text-text-muted">{{ t('signup.subtitle') }}</p>
+        <label class="block text-sm">
+          <span class="text-text-muted">{{ t('signup.username') }}</span>
+          <input
+            v-model.trim="username"
+            type="text"
+            autocomplete="username"
+            required
+            autofocus
+            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+          />
+        </label>
+        <label class="block text-sm">
+          <span class="text-text-muted">{{ t('signup.password') }}</span>
+          <input
+            v-model="signupPassword"
+            type="password"
+            autocomplete="new-password"
+            required
+            data-signup-password
+            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+          />
+        </label>
+        <label class="block text-sm">
+          <span class="text-text-muted">{{ t('signup.password_confirm') }}</span>
+          <input
+            v-model="signupConfirm"
+            type="password"
+            autocomplete="new-password"
+            required
+            data-signup-confirm
+            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+          />
+        </label>
+
+        <p v-if="error" class="text-sm text-danger" role="alert">{{ error }}</p>
+
+        <button
+          type="submit"
+          :disabled="submitting"
+          class="w-full rounded bg-accent text-accent-fg py-2 font-medium hover:bg-accent-hover disabled:opacity-60"
+        >
+          {{ submitting ? t('signup.creating') : t('signup.create_account_button') }}
+        </button>
+        <button
+          type="button"
+          class="w-full text-xs text-text-muted hover:text-text"
+          @click="backToLogin"
+        >
+          {{ t('signup.back_to_login') }}
+        </button>
+      </form>
+    </div>
+
+    <div v-else class="w-full max-w-sm">
       <div class="mb-6 text-center">
         <h1 class="text-2xl font-semibold">gosidian</h1>
         <p class="text-sm text-text-muted">Sign in to continue</p>
@@ -105,7 +236,8 @@ async function handleSubmit() {
           />
         </label>
 
-        <p v-if="error" class="text-sm text-danger">{{ error }}</p>
+        <p v-if="notice && !error" class="text-sm text-success" role="status" data-signup-done>{{ notice }}</p>
+        <p v-if="error" class="text-sm text-danger" role="alert">{{ error }}</p>
 
         <button
           type="submit"

@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -41,31 +42,21 @@ func (r *Router) handleSignup(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	store := r.deps.Auth.WebAuth
-	inv := store.FindInvite(body.Invite)
-	if inv == nil {
-		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "invite token unknown, consumed, or expired")
+	// The invite is checked, the account created and the invite consumed
+	// in one save (RedeemInvite): a failure keeps neither.
+	user, err := r.deps.Auth.WebAuth.RedeemInvite(body.Invite, body.Username, body.Password)
+	switch {
+	case errors.Is(err, webauth.ErrInviteInvalid):
+		WriteError(w, http.StatusBadRequest, CodeAuthInviteInvalid, err.Error())
 		return
-	}
-
-	user, err := store.AddUser(body.Username, body.Password, webauth.RoleMember)
-	if err != nil {
-		// Two-step is intentional: AddUser carries the precise reason
-		// (duplicate username, weak password) which we surface verbatim.
-		if isDuplicateUsername(err.Error()) {
-			WriteError(w, http.StatusConflict, CodeConflict, err.Error())
-			return
-		}
-		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
+	case errors.Is(err, webauth.ErrAccountsSave):
+		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
 		return
-	}
-
-	// Mark the invite consumed only after the user landed on disk —
-	// otherwise a duplicate-username race would burn the invite for nothing.
-	if err := store.ClaimInvite(body.Invite, user.ID); err != nil {
-		// Clean up the orphan account: AddUser already persisted, so we
-		// must roll it back to keep the invite/account invariants.
-		_ = store.DisableUser(user.ID)
+	case err != nil && isDuplicateUsername(err.Error()):
+		WriteError(w, http.StatusConflict, CodeConflict, err.Error())
+		return
+	case err != nil:
+		// The account's own validation (a weak password), surfaced verbatim.
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
 		return
 	}

@@ -116,17 +116,24 @@ const params = computed(() => ({
   limit: limit.value > 0 ? limit.value : undefined,
 }))
 
+// Only the last request draws the graph: a slow answer to older filters
+// replaced the one asked after (BUG-116, S6-10).
+let gen = 0
+
 async function load() {
   syncWindow()
+  const mine = ++gen
   loading.value = true
   error.value = null
   try {
-    data.value = await fetchGraph(params.value)
+    const graph = await fetchGraph(params.value)
+    if (mine === gen) data.value = graph
   } catch (e) {
+    if (mine !== gen) return
     error.value = e instanceof Error ? e.message : 'Failed to load graph'
     data.value = null
   } finally {
-    loading.value = false
+    if (mine === gen) loading.value = false
   }
 }
 

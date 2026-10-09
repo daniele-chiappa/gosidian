@@ -438,3 +438,12 @@ func TestSettings_TOTPUntouchedAndRemoteRedacted(t *testing.T) {
 		t.Errorf("owner should see the remote whole: %s", o.body)
 	}
 }
+
+// With the trash on, /me/access says a delete goes there (BUG-116, S6-3).
+func TestMeAccess_Trash(t *testing.T) {
+	f := newAdminFixture(t)
+	rec := f.doAuthRecorder(http.MethodGet, "/api/v1/me/access", "", nil)
+	if rec.code != http.StatusOK || !strings.Contains(rec.body, `"trash":true`) {
+		t.Errorf("me/access with a trash = %d (%s)", rec.code, rec.body)
+	}
+}

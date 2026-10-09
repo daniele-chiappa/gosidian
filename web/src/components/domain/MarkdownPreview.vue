@@ -12,7 +12,11 @@
  *   - resolved wikilink (`data-preview-path`) → note window
  *   - tag link (`/tags/<tag>`)               → tags window
  *   - in-note anchor (`#heading`)            → scroll within this preview
- *   - external link                          → open in a new tab
+ *   - a relative or /notes/ link to a note   → note window (noteLinks.ts)
+ *   - an attachment, a web page, the rest    → open in a new tab
+ *   - mailto:, tel:, an app's own scheme     → the browser's, in place
+ * Nothing navigates the SPA away, which lost every window's draft
+ * (BUG-117, S7-3).
  * Modified clicks (ctrl/cmd/middle) fall through to the browser (new tab on
  * the canonical deep-link URL).
  *
@@ -37,14 +41,16 @@ import ViewBoard from '@/components/views/ViewBoard.vue'
 import ViewCount from '@/components/views/ViewCount.vue'
 import { splitViews } from '@/components/views/segments'
 import { findHeading } from './headings'
+import { linkTarget } from './noteLinks'
 
-const props = defineProps<{ html: string; views?: ViewData[] }>()
+// notePath: the note the HTML belongs to, which relative links start from.
+const props = defineProps<{ html: string; views?: ViewData[]; notePath?: string }>()
 
 const store = useWindowsStore()
 const openWindow = inject<(spec: OpenSpec) => string>('openWindow', (s) => store.open(s))
 const root = ref<HTMLElement | null>(null)
 const proseClass =
-  'prose max-w-none prose-pre:bg-bg-elevated prose-pre:border prose-pre:border-border prose-code:before:hidden prose-code:after:hidden'
+  'gosidian-preview prose max-w-none prose-pre:bg-bg-elevated prose-pre:border prose-pre:border-border prose-code:before:hidden prose-code:after:hidden'
 
 const sanitized = computed(() => sanitizePreviewHtml(props.html))
 
@@ -79,20 +85,8 @@ function onClick(e: MouseEvent) {
   if (previewPath) {
     e.preventDefault()
     // A link to a heading opens the note there (IMP-140): the heading as
-    // written, else the fragment of the href. A window already open on the
-    // note gets the anchor too, and scrolls.
-    const anchor = a.getAttribute('data-heading') ?? fragment(href)
-    const key = planciaKey('note', previewPath)
-    const props = anchor
-      ? { path: previewPath, anchor, anchorAt: Date.now() }
-      : { path: previewPath }
-    const id = openWindow({
-      type: 'note',
-      key,
-      title: (previewPath.split('/').pop() ?? previewPath).replace(/\.md$/, ''),
-      props,
-    })
-    if (anchor && id) store.identify(id, key, props)
+    // written, else the fragment of the href.
+    openNote(previewPath, a.getAttribute('data-heading') ?? fragment(href))
     return
   }
   if (href.startsWith('/tags/')) {
@@ -113,10 +107,25 @@ function onClick(e: MouseEvent) {
     e.preventDefault()
     return
   }
-  if (/^https?:\/\//i.test(href)) {
-    e.preventDefault()
-    window.open(href, '_blank', 'noopener,noreferrer')
-  }
+  if (a.hasAttribute('download')) return
+  const target = linkTarget(href, props.notePath)
+  if (target.kind === 'browser') return // mailto:, tel:, an app's scheme: the browser's
+  e.preventDefault()
+  if (target.kind === 'note') openNote(target.path, target.anchor ?? null)
+  else if (target.kind === 'tab') window.open(target.url, '_blank', 'noopener,noreferrer')
+}
+
+/** Opens a note window; a window already open on the note gets the anchor too, and scrolls. */
+function openNote(path: string, anchor: string | null) {
+  const key = planciaKey('note', path)
+  const props = anchor ? { path, anchor, anchorAt: Date.now() } : { path }
+  const id = openWindow({
+    type: 'note',
+    key,
+    title: (path.split('/').pop() ?? path).replace(/\.(md|html)$/, ''),
+    props,
+  })
+  if (anchor && id) store.identify(id, key, props)
 }
 </script>
 
@@ -140,6 +149,13 @@ function onClick(e: MouseEvent) {
 </template>
 
 <style scoped>
+/* A second fence behind the sanitizer, which keeps no positioning style and
+   none of the app's classes (BUG-117, S7-4): the preview is the containing
+   block of what is positioned in it, `fixed` included, and a stacking
+   context of its own. */
+.gosidian-preview {
+  contain: layout;
+}
 /* A `=count(…)` value in the text: the number, its expression on hover. */
 :deep(.gosidian-count) {
   font-weight: 600;

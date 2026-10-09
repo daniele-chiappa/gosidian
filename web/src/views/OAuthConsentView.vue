@@ -31,6 +31,11 @@ const redirecting = ref(false)
 /** Project names the user keeps ticked; starts with everything visible. */
 const selected = ref<Set<string>>(new Set())
 const grantWrite = ref(false)
+/** The owner's "every project, future ones too": an unscoped grant, chosen
+ *  on its own line. Ticking each project, one or many, grants just those:
+ *  with a single project the line did not show, and that project alone
+ *  became an unscoped grant (BUG-116, S6-4). */
+const allProjects = ref(false)
 
 const writeRequested = computed(() => consent.value?.scopes.includes('write') ?? false)
 const allSelected = computed(
@@ -55,6 +60,7 @@ onMounted(async () => {
     const c = await getOAuthRequest(requestId.value)
     consent.value = c
     selected.value = new Set(c.projects.map((p) => p.name))
+    allProjects.value = c.is_owner
     grantWrite.value = c.can_write && c.scopes.includes('write')
   } catch (e: unknown) {
     const status = (e as { response?: { status?: number } })?.response?.status
@@ -85,16 +91,17 @@ function leaveTo(url: string) {
 
 async function approve() {
   if (!consent.value || busy.value) return
-  if (selected.value.size === 0) {
+  const unscoped = consent.value.is_owner && allProjects.value
+  if (!unscoped && selected.value.size === 0) {
     error.value = t('oauth.none_selected')
     return
   }
   busy.value = true
   error.value = null
   try {
-    // An owner keeping every project ticked gets an unscoped grant, which
-    // also covers projects created later — that is what "all" means.
-    const projects = consent.value.is_owner && allSelected.value ? [] : Array.from(selected.value)
+    // An unscoped grant also covers projects created later — that is what
+    // the owner's "all" line means.
+    const projects = unscoped ? [] : Array.from(selected.value)
     const scopes = ['read']
     if (grantWrite.value && consent.value.can_write) scopes.push('write')
     leaveTo(await approveOAuthRequest(consent.value.request_id, { projects, scopes }))
@@ -161,9 +168,16 @@ async function deny() {
             <legend class="text-sm font-medium">
               {{ t('oauth.projects') }}
             </legend>
-            <label v-if="consent.projects.length > 1" class="flex items-center gap-2 text-sm">
+            <label v-if="consent.is_owner" class="flex items-center gap-2 text-sm" data-all-projects>
+              <input v-model="allProjects" type="checkbox" />
+              <span>{{ t('oauth.all_projects') }}</span>
+            </label>
+            <label
+              v-else-if="consent.projects.length > 1"
+              class="flex items-center gap-2 text-sm"
+            >
               <input type="checkbox" :checked="allSelected" @change="toggleAll" />
-              <span>{{ consent.is_owner ? t('oauth.all_projects') : t('oauth.select_all') }}</span>
+              <span>{{ t('oauth.select_all') }}</span>
             </label>
             <p v-if="consent.projects.length === 0" class="text-sm text-danger">
               {{ t('oauth.no_projects') }}
@@ -171,7 +185,12 @@ async function deny() {
             <ul class="max-h-56 overflow-y-auto space-y-1 pl-1">
               <li v-for="p in consent.projects" :key="p.name">
                 <label class="flex items-center gap-2 text-sm">
-                  <input type="checkbox" :checked="selected.has(p.name)" @change="toggle(p.name)" />
+                  <input
+                    type="checkbox"
+                    :checked="(consent.is_owner && allProjects) || selected.has(p.name)"
+                    :disabled="consent.is_owner && allProjects"
+                    @change="toggle(p.name)"
+                  />
                   <span class="font-mono">{{ p.name }}</span>
                   <span class="text-xs text-text-muted">
                     {{ t('oauth.note_count', { n: p.note_count }) }}

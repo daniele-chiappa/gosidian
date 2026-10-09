@@ -78,7 +78,7 @@ async function handleCreate() {
     await createProject(newName.value.trim())
     newName.value = ''
     await refresh()
-    treeStore.invalidateAll()
+    treeStore.refresh()
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Create failed'
   }
@@ -138,7 +138,7 @@ async function rename(p: Project) {
   try {
     await updateProject(p.name, { new_name: newSlug })
     await refresh()
-    treeStore.invalidateAll()
+    treeStore.refresh()
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Rename failed'
   }
@@ -164,7 +164,7 @@ async function destroy(p: Project) {
   try {
     await deleteProject(p.name)
     await refresh()
-    treeStore.invalidateAll()
+    treeStore.refresh()
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Delete failed'
   }

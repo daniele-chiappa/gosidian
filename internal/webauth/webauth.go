@@ -1135,6 +1135,61 @@ func (s *Store) FindInvite(token string) *Invite {
 	return nil
 }
 
+// ErrInviteInvalid refuses an invite that is unknown, consumed or expired.
+var ErrInviteInvalid = errors.New("invite token unknown, consumed, or expired")
+
+// ErrAccountsSave wraps a failure to write the accounts file: nothing of
+// the change it carried was kept.
+var ErrAccountsSave = errors.New("saving the accounts failed")
+
+// RedeemInvite creates a member account from a pending invite and marks the
+// invite consumed by it, in one save (BUG-099): the account was created
+// first and the invite claimed after, so a failed claim left a disabled
+// account holding the username, and a save error read as an expired invite.
+// Errors: ErrInviteInvalid, a taken username ("already exists"), the
+// account's own validation, or ErrAccountsSave with nothing changed.
+func (s *Store) RedeemInvite(token, username, password string) (*User, error) {
+	u, err := newLocalUser(username, password, RoleMember)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	s.reloadLocked()
+	inv := -1
+	for i := range s.file.Invites {
+		if s.file.Invites[i].Token == token {
+			inv = i
+			break
+		}
+	}
+	if inv < 0 || !s.file.Invites[inv].Pending() {
+		s.mu.Unlock()
+		return nil, ErrInviteInvalid
+	}
+	if s.usernameTakenLocked(u.Username) {
+		s.mu.Unlock()
+		return nil, fmt.Errorf("username %q already exists", u.Username)
+	}
+	now := time.Now().UTC()
+	s.file.Users = append(s.file.Users, u)
+	s.file.Invites[inv].ConsumedBy = u.ID
+	s.file.Invites[inv].ConsumedAt = &now
+	if err := s.saveLocked(); err != nil {
+		s.file.Users = s.file.Users[:len(s.file.Users)-1]
+		s.file.Invites[inv].ConsumedBy = ""
+		s.file.Invites[inv].ConsumedAt = nil
+		s.mu.Unlock()
+		return nil, fmt.Errorf("%w: %v", ErrAccountsSave, err)
+	}
+	fn := s.onUserCreated
+	s.mu.Unlock()
+	if fn != nil {
+		fn(u, nil)
+	}
+	cp := u
+	return &cp, nil
+}
+
 // ClaimInvite atomically marks the invite as consumed by consumerID. Returns
 // an error if the invite is unknown or no longer pending.
 func (s *Store) ClaimInvite(token, consumerID string) error {

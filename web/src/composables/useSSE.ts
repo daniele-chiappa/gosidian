@@ -9,14 +9,14 @@
  *
  *   import { useSSE } from '@/composables/useSSE'
  *   const sse = useSSE()
- *   sse.on('tree', (payload) => treeStore.invalidate())
+ *   sse.on('tree', () => treeStore.refresh())
  *   sse.on('note', (payload) => editor.handleExternalUpdate(payload))
  *
  * The composable is idempotent: calling useSSE() many times returns
  * the same shared connection, so a tree-store consumer and an
  * editor consumer don't open two parallel sockets.
  */
-import { ref, onScopeDispose } from 'vue'
+import { effectScope, ref, onScopeDispose, watch, type EffectScope } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 
 export type SSETopic = 'tree' | 'note' | 'sidebar' | 'audit' | 'insight'
@@ -47,6 +47,11 @@ let retryDelay = 0
 let retryTimer: ReturnType<typeof setTimeout> | null = null
 const listeners = new Map<SSETopic, Set<Listener>>()
 const status = ref<'idle' | 'connecting' | 'open' | 'closed' | 'error'>('idle')
+// A connection has been open in this session: the next open is a
+// reconnect, after which every topic gets a `resync` (see onopen).
+let opened = false
+// Watches the session token: no token, no stream (see watchToken).
+let tokenScope: EffectScope | null = null
 
 function dispatch(topic: SSETopic, raw: string) {
   let payload: SSEPayload = {}
@@ -91,6 +96,13 @@ function connect(token: string, topics: SSETopic[]) {
   es.onopen = () => {
     status.value = 'open'
     retryDelay = 0
+    // The hub replays nothing (events.go): what happened while the stream
+    // was down never arrives. Each topic's listeners get a `resync` and
+    // reload what they show, as the server's contract expects; nothing
+    // did, and the tree, the access and the open notes stayed as they
+    // were before the gap (BUG-117, S7-8).
+    if (opened) resync()
+    opened = true
   }
   es.onerror = () => {
     status.value = 'error'
@@ -119,6 +131,28 @@ function connect(token: string, topics: SSETopic[]) {
   }
 }
 
+/** Tells every topic's listeners that events may have been missed. */
+function resync() {
+  for (const topic of ALL_TOPICS) dispatch(topic, JSON.stringify({ action: 'resync' }))
+}
+
+// The stream closes when the session goes (a sign-out, a 401 that cleared
+// the token): it stayed open, on a session the server had revoked, until
+// the page was left (BUG-117, S7-8). A new token reopens it.
+function watchToken(auth: ReturnType<typeof useAuthStore>) {
+  if (tokenScope) return
+  tokenScope = effectScope(true)
+  tokenScope.run(() =>
+    watch(
+      () => auth.token,
+      (token) => {
+        if (!token) disconnect()
+        else if (sharedToken && token !== sharedToken) connect(token, [])
+      },
+    ),
+  )
+}
+
 function disconnect() {
   if (retryTimer) {
     clearTimeout(retryTimer)
@@ -130,11 +164,13 @@ function disconnect() {
     sharedSource = null
   }
   sharedToken = ''
+  opened = false
   status.value = 'closed'
 }
 
 export function useSSE(topics: SSETopic[] = []) {
   const auth = useAuthStore()
+  watchToken(auth)
 
   // Open the connection lazily on first use, but only when auth is
   // ready. Components that need SSE call useSSE() and we tie the
@@ -164,6 +200,8 @@ export function useSSE(topics: SSETopic[] = []) {
 /** Test/dev helper: closes the singleton + clears listeners. */
 export function _resetSSEForTests() {
   disconnect()
+  tokenScope?.stop()
+  tokenScope = null
   listeners.clear()
   status.value = 'idle'
 }

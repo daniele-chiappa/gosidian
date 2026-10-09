@@ -95,8 +95,8 @@ onMounted(() => {
   void treeStore.load()
   void access.load()
   sse.on('tree', () => {
-    treeStore.invalidate()
-    void treeStore.load()
+    // In place: the tree keeps its scroll and focus (BUG-117, S7-11).
+    treeStore.refresh()
     // A project may have appeared or gone: refresh the per-project levels
     // that gate the + buttons and draw the visibility cues.
     void access.load()

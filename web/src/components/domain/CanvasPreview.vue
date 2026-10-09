@@ -19,8 +19,10 @@ import type { CanvasCard, CanvasData } from '@/api/notes'
 import { planciaKey } from '@/composables/planciaKey'
 import MarkdownPreview from './MarkdownPreview.vue'
 import { bounds, colorOf, edgeShape, fit, zoomAt } from './canvasGeometry'
+import { isWebURL } from './noteLinks'
 
-const props = defineProps<{ canvas: CanvasData }>()
+// path: the canvas, which the relative links of its text cards start from.
+const props = defineProps<{ canvas: CanvasData; path?: string }>()
 
 const { t } = useI18n()
 const store = useWindowsStore()
@@ -232,7 +234,7 @@ watch(plane, fitView)
       >
         <template v-if="c.type === 'text'">
           <div class="min-h-0 flex-1 overflow-auto px-4 py-2 text-sm" data-canvas-scroll>
-            <MarkdownPreview :html="c.html ?? ''" />
+            <MarkdownPreview :html="c.html ?? ''" :note-path="path" />
           </div>
         </template>
         <template v-else-if="c.type === 'file' && c.image">
@@ -254,7 +256,7 @@ watch(plane, fitView)
             }}<span v-if="c.subpath" class="font-normal text-text-muted"> {{ c.subpath }}</span>
           </button>
           <div class="min-h-0 flex-1 overflow-auto px-4 py-2 text-sm" data-canvas-scroll>
-            <MarkdownPreview v-if="c.html" :html="c.html" />
+            <MarkdownPreview v-if="c.html" :html="c.html" :note-path="c.path ?? path" />
           </div>
         </template>
         <template v-else-if="c.type === 'file'">
@@ -266,7 +268,13 @@ watch(plane, fitView)
           </p>
         </template>
         <template v-else-if="c.type === 'link'">
+          <!-- A web address only: a javascript: one reached the DOM, and only
+               the shell's CSP stopped it (BUG-117, S7-14). -->
+          <span v-if="!isWebURL(c.url)" class="m-auto break-all px-3 text-sm text-text-muted" data-canvas-bad-url>{{
+            c.url
+          }}</span>
           <a
+            v-else
             :href="c.url"
             target="_blank"
             rel="noopener noreferrer"

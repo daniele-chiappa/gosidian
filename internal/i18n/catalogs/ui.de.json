@@ -48,7 +48,8 @@
     "disable_button": "Deaktivieren",
     "loading": "Lädt…",
     "vault": "Vault",
-    "back": "Back"
+    "back": "Back",
+    "dismiss": "Schließen"
   },
   "tree": {
     "filter_placeholder": "Notizen filtern…",
@@ -63,9 +64,11 @@
       "download_zip": "Als ZIP herunterladen",
       "delete": "Löschen",
       "confirm_delete_note": "{path} löschen? Die Notiz kommt in den Papierkorb.",
+      "confirm_delete_note_forever": "{path} endgültig löschen? Der Papierkorb ist aus: die Notiz lässt sich nicht wiederherstellen.",
       "confirm_delete_folder": "Den Ordner {path} löschen? Er kommt mit allem Inhalt in den Papierkorb. | Den Ordner {path} und seine Notiz löschen? Er kommt in den Papierkorb und lässt sich dort in einem Schritt wiederherstellen. | Den Ordner {path} und seine {count} Notizen löschen? Er kommt in den Papierkorb und lässt sich dort in einem Schritt wiederherstellen.",
       "download_failed": "Download fehlgeschlagen",
-      "delete_failed": "Löschen fehlgeschlagen"
+      "delete_failed": "Löschen fehlgeschlagen",
+      "confirm_delete_note_plain": "{path} löschen?"
     }
   },
   "nav": {
@@ -284,7 +287,8 @@
     "col_created_by": "Erstellt von",
     "col_expires": "Ablauf",
     "confirm_disable": "%s deaktivieren? Alle MCP-Tokens werden widerrufen.",
-    "disable_button": "Deaktivieren"
+    "disable_button": "Deaktivieren",
+    "confirm_guest": "„{user}“ auf nur Lesen setzen? Die MCP-Tokens werden widerrufen, und die Agenten, die sie nutzen, funktionieren nicht mehr."
   },
   "project_settings": {
     "title": "Project settings",

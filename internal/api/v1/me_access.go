@@ -27,10 +27,13 @@ type accessView struct {
 	// Restricted accounts ignore project visibility and see only their
 	// grants; CanCreateProjects is the capability of creating projects;
 	// PersonalProject is the account's own project when it exists.
-	Restricted        bool                `json:"restricted"`
-	CanCreateProjects bool                `json:"can_create_projects"`
-	PersonalProject   string              `json:"personal_project,omitempty"`
-	Projects          []accessProjectView `json:"projects"`
+	Restricted        bool   `json:"restricted"`
+	CanCreateProjects bool   `json:"can_create_projects"`
+	PersonalProject   string `json:"personal_project,omitempty"`
+	// Trash is true when a delete goes to the trash, false when it removes
+	// for good: the web UI says which before it asks (BUG-116, S6-3).
+	Trash    bool                `json:"trash"`
+	Projects []accessProjectView `json:"projects"`
 }
 
 // handleMeAccess returns the caller's effective access to every project they
@@ -85,6 +88,7 @@ func (r *Router) writeAccessView(w http.ResponseWriter, u webauth.User) {
 		Restricted:        u.Restricted,
 		CanCreateProjects: u.CanCreateProjects(),
 		PersonalProject:   r.personalProjectOf(u),
+		Trash:             r.deps.Trash != nil,
 		Projects:          out,
 	})
 }

@@ -48,7 +48,8 @@
     "disable_button": "Désactiver",
     "loading": "Chargement…",
     "vault": "Vault",
-    "back": "Back"
+    "back": "Back",
+    "dismiss": "Fermer"
   },
   "tree": {
     "filter_placeholder": "Filtrer les notes…",
@@ -63,9 +64,11 @@
       "download_zip": "Télécharger en zip",
       "delete": "Supprimer",
       "confirm_delete_note": "Supprimer {path} ? La note va dans la corbeille.",
+      "confirm_delete_note_forever": "Supprimer {path} définitivement ? La corbeille est désactivée : la note ne pourra pas être restaurée.",
       "confirm_delete_folder": "Supprimer le dossier {path} ? Il va dans la corbeille avec tout son contenu. | Supprimer le dossier {path} et sa note ? Il va dans la corbeille, d'où il se restaure d'un seul coup. | Supprimer le dossier {path} et ses {count} notes ? Il va dans la corbeille, d'où il se restaure d'un seul coup.",
       "download_failed": "Échec du téléchargement",
-      "delete_failed": "Échec de la suppression"
+      "delete_failed": "Échec de la suppression",
+      "confirm_delete_note_plain": "Supprimer {path} ?"
     }
   },
   "nav": {
@@ -284,7 +287,8 @@
     "col_created_by": "Créé par",
     "col_expires": "Expiration",
     "confirm_disable": "Désactiver %s ? Tous leurs tokens MCP seront révoqués.",
-    "disable_button": "Désactiver"
+    "disable_button": "Désactiver",
+    "confirm_guest": "Passer « {user} » en lecture seule ? Ses jetons MCP sont révoqués, et les agents qui les utilisent cessent de fonctionner."
   },
   "project_settings": {
     "title": "Project settings",

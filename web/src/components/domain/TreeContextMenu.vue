@@ -5,7 +5,8 @@
  * as a zip and goes to the trash as one entry; a project root only
  * downloads (its delete stays in the Projects window, which also handles
  * its access). Delete shows only where the account may write, and never on
- * a base or a canvas, which are read-only.
+ * a base or a canvas, which are read-only. Without the trash a note's
+ * delete says it is for good, and a folder has none: the server refuses it.
  *
  * Mounted once by the sidebar, opened by TreeNode through useTreeMenu. It
  * closes on Esc (focus back to the row), Tab, a click outside, a scroll, a
@@ -53,7 +54,7 @@ const items = computed<Item[]>(() => {
   }
   if (n.is_dir) {
     const out = [download(t('tree.menu.download_zip'), (x) => exportFolder(x.path))]
-    if (access.canWrite(n.path)) out.push(remove(removeFolder))
+    if (access.canWrite(n.path) && access.trash !== false) out.push(remove(removeFolder))
     return out
   }
   const out = [download(t('tree.menu.download'), (x) => downloadNote(x.path))]
@@ -78,7 +79,7 @@ async function activate(item: Item) {
 }
 
 async function removeNote(n: TreeNode) {
-  if (!window.confirm(t('tree.menu.confirm_delete_note', { path: n.path }))) return
+  if (!window.confirm(t(access.deleteNoteKey, { path: n.path }))) return
   await deleteNote(n.path)
   afterDelete([n.path])
 }
@@ -97,8 +98,7 @@ function afterDelete(paths: string[]) {
   for (const w of [...windows.windows]) {
     if (w.type === 'note' && !w.dirty && gone.has(String(w.props.path))) windows.close(w.id)
   }
-  treeStore.invalidateAll()
-  void treeStore.load()
+  treeStore.refresh()
 }
 
 function menuItems(): HTMLButtonElement[] {

@@ -31,7 +31,10 @@ export function resetSessionState(): void {
   }
 }
 
-export function noteSignedIn(userId: string): void {
+/** Records the account that signed in, dropping the state of another one
+ *  seen last in this browser. True only when it is that same account: an
+ *  unknown last one (storage blocked or cleared) is not taken for it. */
+export function noteSignedIn(userId: string): boolean {
   let last = ''
   try {
     last = localStorage.getItem(LAST_USER_KEY) ?? ''
@@ -44,4 +47,23 @@ export function noteSignedIn(userId: string): void {
   } catch {
     /* ignore */
   }
+  return last === userId
+}
+
+/**
+ * withoutWorkspace drops the plancia's windows (`w`, `f`) from a `next=`
+ * target. The 401 handler copies the whole address, which carries the
+ * windows of the account whose session ran out: after another account
+ * signs in they reopened under it, paths and titles included (BUG-116,
+ * S6-5). The rest of the target (a consent request, a route) stays.
+ */
+export function withoutWorkspace(next: string): string {
+  const q = next.indexOf('?')
+  if (q < 0) return next
+  const h = next.indexOf('#', q)
+  const params = new URLSearchParams(h >= 0 ? next.slice(q + 1, h) : next.slice(q + 1))
+  params.delete('w')
+  params.delete('f')
+  const rest = params.toString()
+  return next.slice(0, q) + (rest ? `?${rest}` : '') + (h >= 0 ? next.slice(h) : '')
 }

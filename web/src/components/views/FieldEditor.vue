@@ -8,7 +8,13 @@
  *
  * It emits `commit` with what it holds (the text, or the options picked)
  * on change, Enter or blur, and `cancel` on Escape. Checkboxes are not
- * edited here: they toggle in place.
+ * edited here: they toggle in place. A date commits on change only when
+ * picked, not typed: Chromium fires `change` at every key that makes a
+ * valid date, and a year typed halfway was saved; typed, it commits on
+ * Enter or blur (BUG-117, S7-7). The labels and the suggestions
+ * keep the focus where it is on mousedown: Safari and Firefox give a click
+ * no focus, so the editor saw a blur, committed and closed before the
+ * click (BUG-117, S7-10).
  */
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -41,6 +47,28 @@ function relationRef(el: unknown) {
 }
 
 const inputValue = (e: Event) => (e.target as HTMLInputElement | HTMLSelectElement).value
+
+// A number input holds "" for what it cannot read ("1,5", "abc"), which
+// read as an empty field and removed the key. "NaN" makes toChange refuse
+// it with its "not a number" message, and the value stays (BUG-117, S7-7).
+function fieldInput(e: Event): string {
+  const el = e.target as HTMLInputElement
+  return el.type === 'number' && el.validity?.badInput ? 'NaN' : el.value
+}
+
+// A date typed with the keyboard, since the last pointer press on it: a
+// digit, a deletion or an arrow on a part of it. Space or Alt+ArrowDown
+// open the calendar instead, and a pick there commits.
+let typedDate = false
+function markTyped(e: KeyboardEvent) {
+  if (e.altKey || e.ctrlKey || e.metaKey) return
+  if ((e.key.length === 1 && e.key !== ' ') || ['Backspace', 'Delete', 'ArrowUp', 'ArrowDown'].includes(e.key))
+    typedDate = true
+}
+const markPicked = () => (typedDate = false)
+function onDateChange(e: Event) {
+  if (props.column.type === 'date' && !typedDate) emit('commit', inputValue(e))
+}
 
 function toggleOption(opt: string, on: boolean) {
   const cur = Array.isArray(draft.value) ? draft.value : []
@@ -112,7 +140,12 @@ const inputType = (type?: string) =>
     @keydown.esc.prevent="emit('cancel')"
     @keydown.enter.prevent="emit('commit', draft)"
   >
-    <label v-for="(o, i) in column.options ?? []" :key="o" class="flex items-center gap-1">
+    <label
+      v-for="(o, i) in column.options ?? []"
+      :key="o"
+      class="flex items-center gap-1"
+      @mousedown.prevent
+    >
       <input
         :ref="i === 0 ? focusOnMount : undefined"
         type="checkbox"
@@ -149,6 +182,7 @@ const inputType = (type?: string) =>
         <button
           type="button"
           class="w-full px-2 py-1 text-left hover:bg-surface-hover focus-visible:bg-surface-hover"
+          @mousedown.prevent
           @click="pick(h)"
         >
           {{ h.title }} <span class="text-xs text-text-muted">{{ h.path }}</span>
@@ -165,9 +199,11 @@ const inputType = (type?: string) =>
     :value="draft"
     :placeholder="column.type === 'list' ? t('views.list_hint') : undefined"
     :aria-label="label"
-    @change="column.type === 'date' ? emit('commit', inputValue($event)) : undefined"
-    @keydown.enter.prevent="emit('commit', inputValue($event))"
+    @change="onDateChange"
+    @keydown="markTyped"
+    @pointerdown="markPicked"
+    @keydown.enter.prevent="emit('commit', fieldInput($event))"
     @keydown.esc.prevent="emit('cancel')"
-    @blur="emit('commit', inputValue($event))"
+    @blur="emit('commit', fieldInput($event))"
   />
 </template>

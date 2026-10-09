@@ -64,7 +64,7 @@ const metaLabel = computed(() => {
       v-if="captionHtml"
       class="mt-6"
     >
-      <MarkdownPreview :html="captionHtml" />
+      <MarkdownPreview :html="captionHtml" :note-path="notePath" />
     </div>
   </div>
 </template>

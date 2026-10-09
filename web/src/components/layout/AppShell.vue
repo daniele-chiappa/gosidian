@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Network } from 'lucide-vue-next'
 import {
@@ -7,6 +7,7 @@ import {
   PlanciaSidebar,
   usePlanciaSync,
   useOpenWindow,
+  useWindowsStore,
   type PlanciaLabels,
   type WindowInstance,
 } from 'plancia'
@@ -80,6 +81,18 @@ function openLinks(win: WindowInstance): void {
 }
 
 onMounted(() => plancia.hydrate())
+
+// Leaving the page (a reload, a typed address, a link that got past the
+// previews) asks first while a window holds unsaved edits: nothing did,
+// and the drafts were lost without a word (BUG-117, S7-3).
+const windowsStore = useWindowsStore()
+function onBeforeUnload(e: BeforeUnloadEvent) {
+  if (!windowsStore.windows.some((w) => w.dirty)) return
+  e.preventDefault()
+  e.returnValue = ''
+}
+onMounted(() => window.addEventListener('beforeunload', onBeforeUnload))
+onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload))
 
 // While a gate is up (a password to change, a TOTP to enrol) the server
 // refuses every data route: the sidebar and the windows are not mounted, so

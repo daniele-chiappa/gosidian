@@ -68,7 +68,8 @@
     "disable_button": "Disabilita",
     "loading": "Caricamento…",
     "vault": "Vault",
-    "back": "Indietro"
+    "back": "Indietro",
+    "dismiss": "Chiudi"
   },
   "tree": {
     "filter_placeholder": "Filtra note…",
@@ -84,9 +85,11 @@
       "download_zip": "Scarica come zip",
       "delete": "Elimina",
       "confirm_delete_note": "Eliminare {path}? Va nel cestino.",
+      "confirm_delete_note_forever": "Eliminare {path} per sempre? Il cestino è spento: la nota non si potrà ripristinare.",
       "confirm_delete_folder": "Eliminare la cartella {path}? Va nel cestino con tutto ciò che contiene. | Eliminare la cartella {path} e la sua nota? Va nel cestino, da cui si ripristina in blocco. | Eliminare la cartella {path} e le sue {count} note? Va nel cestino, da cui si ripristina in blocco.",
       "download_failed": "Download non riuscito",
-      "delete_failed": "Eliminazione non riuscita"
+      "delete_failed": "Eliminazione non riuscita",
+      "confirm_delete_note_plain": "Eliminare {path}?"
     }
   },
   "note": {
@@ -352,14 +355,24 @@
     "col_created_by": "Creato da",
     "col_expires": "Scade",
     "confirm_disable": "Disabilitare %s? Verranno revocati tutti i suoi token MCP.",
-    "disable_button": "Disabilita"
+    "disable_button": "Disabilita",
+    "confirm_guest": "Rendere “{user}” in sola lettura? I suoi token MCP vengono revocati, e gli agent che li usano smettono di funzionare."
   },
   "signup": {
     "title": "Registrazione",
     "create_account_button": "Crea account",
     "password_hint": "Password (min 8 caratteri)",
     "password_confirm": "Conferma password",
-    "invalid_invite": "Link di invito non valido o scaduto."
+    "invalid_invite": "Questo link d'invito è scaduto o è già stato usato. Chiedine uno nuovo a chi ti ha invitato.",
+    "subtitle": "Sei stato invitato: scegli il tuo nome utente e la password.",
+    "username": "Nome utente",
+    "password": "Password (almeno 8 caratteri)",
+    "creating": "Creazione…",
+    "password_short": "La password deve avere almeno 8 caratteri.",
+    "password_mismatch": "Le due password non coincidono.",
+    "failed": "Registrazione non riuscita",
+    "created": "Account creato: accedi con la tua password.",
+    "back_to_login": "Torna all'accesso"
   },
   "project_settings": {
     "title": "Impostazioni progetto",

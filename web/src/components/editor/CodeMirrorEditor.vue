@@ -37,6 +37,8 @@ import {
   closeBrackets,
   closeBracketsKeymap,
   completionKeymap,
+  pickedCompletion,
+  type Completion,
   type CompletionContext,
   type CompletionResult,
 } from '@codemirror/autocomplete'
@@ -44,6 +46,7 @@ import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
 import { markdown } from '@codemirror/lang-markdown'
 import { suggestNoteTitles } from '@/api/noteTitles'
 import { attachFile } from '@/api/attach'
+import { wikilinkClosing } from './wikilink'
 
 interface Props {
   modelValue: string
@@ -149,7 +152,16 @@ async function wikilinkSource(
     options: hits.map((h) => ({
       label: h.title || h.path,
       detail: h.path,
-      apply: stripMdSuffix(h.path) + ']]',
+      apply: (view: EditorView, completion: Completion, from: number, to: number) => {
+        const { insert, skip } = wikilinkClosing(view.state.sliceDoc(to, to + 2))
+        const text = stripMdSuffix(h.path) + insert
+        view.dispatch({
+          changes: { from, to, insert: text },
+          selection: { anchor: from + text.length + skip },
+          annotations: pickedCompletion.of(completion),
+          userEvent: 'input.complete',
+        })
+      },
       type: 'class',
     })),
   }

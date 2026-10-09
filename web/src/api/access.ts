@@ -24,6 +24,8 @@ export interface AccessView {
   can_create_projects: boolean
   /** The account's own project, when it exists. */
   personal_project?: string
+  /** True when a delete goes to the trash, false when it is for good. */
+  trash?: boolean
   projects: AccessProject[]
 }
 

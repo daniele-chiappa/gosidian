@@ -77,7 +77,7 @@ export const router = createRouter({
   routes,
 })
 
-router.beforeEach((to, _from) => {
+router.beforeEach((to, from) => {
   const auth = useAuthStore()
   const requires = to.matched.some((r) => r.meta.requiresAuth !== false)
 
@@ -87,7 +87,10 @@ router.beforeEach((to, _from) => {
       query: to.fullPath !== '/' ? { next: to.fullPath } : {},
     }
   }
-  if (to.name === 'login' && auth.isAuthenticated) {
+  // An invite link opens its sign-up form in a browser signed in already,
+  // and the sign-in that follows it stays (BUG-099); the plain login page
+  // sends a session home.
+  if (to.name === 'login' && auth.isAuthenticated && !to.query.invite && from.name !== 'login') {
     return { name: 'home' }
   }
   return true

@@ -18,23 +18,31 @@ const hits = ref<SearchHit[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
 const lastSubmitted = ref('')
+// Only the last search fills the list: a slow answer to an older query
+// replaced the one typed after (BUG-116, S6-10).
+let gen = 0
 
 async function run(q: string, p: string) {
+  const mine = ++gen
   if (!q.trim()) {
     hits.value = []
     error.value = null
+    loading.value = false
     return
   }
   loading.value = true
   error.value = null
   try {
-    hits.value = await search({ q, project: p || undefined, limit: 50 })
+    const found = await search({ q, project: p || undefined, limit: 50 })
+    if (mine !== gen) return
+    hits.value = found
     lastSubmitted.value = q
   } catch (e) {
+    if (mine !== gen) return
     error.value = e instanceof Error ? e.message : 'Search failed'
     hits.value = []
   } finally {
-    loading.value = false
+    if (mine === gen) loading.value = false
   }
 }
 

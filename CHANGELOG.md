@@ -8,6 +8,108 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.71.4] — 2026-10-09 — "web UI fixes"
+
+The medium findings of the same code review in the web UI, and the
+sign-up form that invite links were missing. Pull the image and restart,
+nothing to migrate. A few behaviours change, each described below: the
+HTML of a markdown note keeps fewer styles and classes, links in a
+preview never leave the page, leaving a page with unsaved edits asks
+first, a date typed in a database field saves on Enter or when the field
+is left, and an unknown, used or expired invite answers with the new
+error code `auth.invite_invalid`.
+
+### Added
+- **An invite link leads to a sign-up form** — the link that Admin →
+  Invites makes (`/login?invite=…`) opened the plain sign-in page, and the
+  invitee had no way to create the account, though `POST /api/v1/signup`
+  was there. It now shows a username and a password typed twice, creates
+  the member account, and brings the sign-in back with the username
+  filled in; it opens in a browser that is signed in already too. A link
+  expired or used says so and asks for a new one: the server answers it
+  with `auth.invite_invalid` (400), where it used
+  `validation.invalid_format`. The account is created and the invite
+  consumed in one save: a failure keeps neither, and a failed save
+  answers 500 instead of an expired invite, where it left a disabled
+  account holding the username.
+- **`trash` in `GET /api/v1/me/access`** — whether a delete goes to the
+  trash, which the web UI now says before it asks (see Fixed).
+
+### Security
+- **A note's HTML can no longer restyle or cover the web UI** — the HTML
+  of a markdown note sits in the page itself. `<style>` and forms are now
+  dropped (a task list keeps its checkboxes), the `style` attribute keeps
+  only the text's color, background color, weight, slant, alignment and
+  decoration (no position, size, layer or `url()`), `class` keeps only the
+  classes the renderer writes (views, links, tags, callouts, highlighted
+  code), not the web UI's own (`fixed inset-0 z-50`), and the preview is
+  a containing block of its own. A `<style>` hid the page, and a link
+  styled `position: fixed; inset: 0` caught every click, enough to draw a
+  fake sign-in over the page.
+- **The CSP of an HTML note's sandbox always comes first in its
+  document** — a `<header>` was taken for the `<head>` it is put in, and
+  the browser ignored the policy in the body.
+- **A link card of an Obsidian canvas links a web address only** — a
+  `javascript:` one reached the page, stopped only by the page's own CSP.
+- **An owner with a single project who authorizes a connector grants
+  that project** — the line "all projects, including ones created later"
+  showed only with more projects, and the single project ticked became an
+  unscoped grant, valid for every project created after. The owner now
+  picks the unscoped grant on that line, always shown, and the projects
+  below it otherwise.
+- **Signing in with another account no longer reopens the previous
+  account's windows** — their paths and titles came back in the `next=`
+  address of the login page after a session ran out. The windows reopen
+  only for the account known to be the last one in this browser.
+
+### Fixed
+- **Links in a preview never take the web UI away** — a relative
+  markdown link (`[x](design.md)`, `../y.md`) or a `/notes/…` one opens
+  the note in a window, an attachment or any other address in a new tab,
+  and `mailto:`, `tel:` or an application's own scheme go to the browser
+  as before. They navigated the whole page, and the unsaved drafts of
+  every window were lost: leaving the page while a window holds unsaved
+  edits now asks first. The links of a canvas card start from the canvas,
+  and an HTML note's links open notes, attachments and other sites, never
+  another address of the web UI.
+- **Deleting, saving and creating notes**:
+  - the question before a delete says whether the note goes to the trash
+    or is gone for good: it always promised the trash, also with the
+    trash off. Until the server has answered it promises neither, and the
+    tree has no Delete on a folder without the trash, which the server
+    refuses;
+  - a save that fails (a 500, a lost connection, a note too large) shows
+    the server's reason above the editor, which keeps the draft and its
+    undo: the error took the editor's place;
+  - a note created from the tree writes its title (and an image note its
+    media path and tags) as YAML that reads back the same: `Plan: Q3` was
+    not valid YAML, `#1 priority` became a comment, and an image note at
+    the vault root got `tags: [, type:image]`.
+- **The editor and database fields**:
+  - a wikilink picked from the editor's suggestions is closed once:
+    `[[note]]`, where the brackets typed were closed a second time;
+  - a number field that cannot be read (`1,5`) is refused with its
+    message instead of removing the field;
+  - a date typed in its field saves on Enter or when it is left, not at
+    every key (Chromium saved a year typed halfway); picked from the
+    calendar, with the mouse or the keyboard, it saves at once;
+  - an option or a suggestion clicked in Safari or Firefox is taken,
+    where the editor closed before the click.
+- **The tree, live updates and slow answers**:
+  - the sidebar tree reloads in place on a change, keeping its scroll and
+    focus; the answers to a burst of changes count in order, and one that
+    lands after a sign-out is dropped;
+  - after the event stream was down (a restart, a network change), the
+    tree, the access and the open notes reload what they may have missed:
+    a clean note takes the new version, an edited one shows the "changed
+    elsewhere" banner. The stream also closes at sign-out;
+  - search, the graph, the "View as" preview of Admin → Users, HTML notes
+    with slow images and the account's access show the answer to what
+    was asked last, where a slow older answer could replace it; "View as"
+    also follows a change of role or flags.
+- **Admin → Users asks before making an account read-only**, which
+  revokes all its MCP tokens: an arrow key on the select was enough.
+
 ## [2.71.3] — 2026-10-09 — "medium findings"
 
 The medium findings of the same code review: accounts and OAuth, the

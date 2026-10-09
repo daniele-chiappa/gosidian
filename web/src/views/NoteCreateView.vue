@@ -17,6 +17,7 @@ import { attachFile } from '@/api/attach'
 import { useTreeStore } from '@/stores/tree'
 import { useWindowsStore, type OpenSpec } from 'plancia'
 import { planciaKey } from '@/composables/planciaKey'
+import { noteFrontmatter } from './noteFrontmatter'
 
 const props = defineProps<{ path?: string }>()
 const emit = defineEmits<{ close: [] }>()
@@ -53,8 +54,8 @@ function onFile(e: Event) {
   file.value = input.files?.[0] ?? null
 }
 
-function frontmatter(extra = ''): string {
-  return `---\ntitle: ${title.value.trim() || slug.value}\n${extra}---\n\n`
+function frontmatter(extra: [string, string | string[]][] = []): string {
+  return noteFrontmatter([['title', title.value.trim() || slug.value], ...extra])
 }
 
 async function submit() {
@@ -71,14 +72,17 @@ async function submit() {
     if (kind.value === 'image') {
       const res = await attachFile(file.value as File, project.value || undefined)
       content =
-        frontmatter(`type: image\nmedia: ${res.path}\ntags: [${project.value}, type:image]\n`) +
-        `${caption.value.trim()}\n`
+        frontmatter([
+          ['type', 'image'],
+          ['media', res.path],
+          ['tags', [project.value, 'type:image']],
+        ]) + `${caption.value.trim()}\n`
     } else {
       content = frontmatter()
       mode = 'edit'
     }
     const created = await createNote(notePath.value, content)
-    treeStore.invalidateAll()
+    treeStore.refresh()
     openWindow({
       type: 'note',
       key: planciaKey('note', created.path),

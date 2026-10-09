@@ -48,7 +48,8 @@
     "disable_button": "Deshabilitar",
     "loading": "Cargando…",
     "vault": "Vault",
-    "back": "Back"
+    "back": "Back",
+    "dismiss": "Cerrar"
   },
   "tree": {
     "filter_placeholder": "Filtrar notas…",
@@ -63,9 +64,11 @@
       "download_zip": "Descargar como zip",
       "delete": "Eliminar",
       "confirm_delete_note": "¿Eliminar {path}? Va a la papelera.",
+      "confirm_delete_note_forever": "¿Eliminar {path} para siempre? La papelera está desactivada: la nota no se podrá restaurar.",
       "confirm_delete_folder": "¿Eliminar la carpeta {path}? Va a la papelera con todo lo que contiene. | ¿Eliminar la carpeta {path} y su nota? Va a la papelera, desde donde se restaura de una vez. | ¿Eliminar la carpeta {path} y sus {count} notas? Va a la papelera, desde donde se restaura de una vez.",
       "download_failed": "La descarga ha fallado",
-      "delete_failed": "No se ha podido eliminar"
+      "delete_failed": "No se ha podido eliminar",
+      "confirm_delete_note_plain": "¿Eliminar {path}?"
     }
   },
   "nav": {
@@ -284,7 +287,8 @@
     "col_created_by": "Creado por",
     "col_expires": "Expira",
     "confirm_disable": "¿Deshabilitar %s? Se revocarán todos sus tokens MCP.",
-    "disable_button": "Deshabilitar"
+    "disable_button": "Deshabilitar",
+    "confirm_guest": "¿Dejar a «{user}» en solo lectura? Sus tokens MCP se revocan, y los agentes que los usan dejan de funcionar."
   },
   "project_settings": {
     "title": "Project settings",

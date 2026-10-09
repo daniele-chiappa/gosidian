@@ -247,8 +247,8 @@ func TestSignup_RequiresInvite(t *testing.T) {
 	f := newAuthFixture(t)
 	body := `{"username":"alice","password":"alice-pass-123","invite":"bogus"}`
 	w := f.request(http.MethodPost, "/api/v1/signup", body, nil)
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status=%d, want 400 for unknown invite", w.Code)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), `"code":"auth.invite_invalid"`) {
+		t.Errorf("unknown invite = %d %s, want 400 auth.invite_invalid (BUG-099)", w.Code, w.Body.String())
 	}
 }
 
@@ -269,8 +269,8 @@ func TestSignup_ConsumesInviteAndCreatesUser(t *testing.T) {
 	}
 	// Invite must be consumed: second signup with the same token fails.
 	w2 := f.request(http.MethodPost, "/api/v1/signup", body, nil)
-	if w2.Code != http.StatusBadRequest {
-		t.Errorf("invite reused: status=%d", w2.Code)
+	if w2.Code != http.StatusBadRequest || !strings.Contains(w2.Body.String(), `"code":"auth.invite_invalid"`) {
+		t.Errorf("invite reused = %d %s", w2.Code, w2.Body.String())
 	}
 }
 

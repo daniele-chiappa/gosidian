@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { effectScope, nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { useSSE, _resetSSEForTests } from '@/composables/useSSE'
 import { useAuthStore } from '@/stores/auth'
@@ -86,5 +87,39 @@ describe('useSSE reconnect', () => {
     sse.disconnect()
     vi.advanceTimersByTime(60_000)
     expect(FakeEventSource.instances).toHaveLength(1)
+  })
+
+  it('tells the listeners to reload after a reconnect, not after the first open (BUG-117, S7-8)', () => {
+    const seen: string[] = []
+    const scope = effectScope()
+    scope.run(() => {
+      const sse = useSSE()
+      sse.on('tree', (p) => seen.push(`tree:${p.action}`))
+      sse.on('note', (p) => seen.push(`note:${p.action}`))
+    })
+    last().onopen?.()
+    expect(seen).toEqual([])
+    // The browser's own reconnect after a network error.
+    last().onerror?.()
+    last().onopen?.()
+    expect(seen).toEqual(['tree:resync', 'note:resync'])
+    // A connection reopened by us after a refusal.
+    refuse(last())
+    vi.advanceTimersByTime(2000)
+    last().onopen?.()
+    expect(seen).toHaveLength(4)
+    scope.stop()
+  })
+
+  it('closes the stream when the session goes (BUG-117, S7-8)', async () => {
+    useSSE()
+    const es = last()
+    useAuthStore().token = ''
+    await nextTick()
+    expect(es.readyState).toBe(FakeEventSource.CLOSED)
+    // A new session opens a new stream, which is no reconnect.
+    useAuthStore().token = 'tok-2'
+    useSSE()
+    expect(FakeEventSource.instances).toHaveLength(2)
   })
 })

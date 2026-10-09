@@ -64,6 +64,10 @@ const (
 	CodeConcurrencyEtag            = "concurrency.etag_mismatch"
 	CodeServerInternal             = "server.internal_error"
 	CodeServerUnavailable          = "server.unavailable"
+	// CodeAuthInviteInvalid refuses a signup whose invite is unknown,
+	// used or expired: the web UI says so and asks for a new link,
+	// instead of a format error the invitee cannot fix (BUG-099).
+	CodeAuthInviteInvalid = "auth.invite_invalid"
 )
 
 // WriteError writes a JSON ErrorResponse with the given HTTP status.

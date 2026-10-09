@@ -30,7 +30,7 @@ import { getNote, updateNote, deleteNote, createSnapshot, type Note } from '@/ap
 import { downloadNote } from '@/api/noteDownload'
 import { draftAfterSave } from '@/views/noteDraft'
 import { renderPreviewData, type ViewData } from '@/api/preview'
-import { isConcurrencyConflict, onApiEvent, type ConcurrencyConflictDetail } from '@/api/client'
+import { apiErrorMessage, isConcurrencyConflict, onApiEvent, type ConcurrencyConflictDetail } from '@/api/client'
 import { useSSE } from '@/composables/useSSE'
 import MarkdownPreview from '@/components/domain/MarkdownPreview.vue'
 import { findHeading } from '@/components/domain/headings'
@@ -206,8 +206,12 @@ const refreshViews = useDebounceFn(async () => {
 
 const bareEtag = (e?: string) => (e ?? '').replace(/"/g, '')
 
-function onNoteEvent(p: { path?: string; etag?: string }) {
+function onNoteEvent(p: { path?: string; etag?: string; action?: string }) {
   if (!note.value) return
+  if (p.action === 'resync') {
+    void checkRemote()
+    return
+  }
   if (p.path === path.value) {
     if (p.etag && bareEtag(p.etag) === bareEtag(note.value.etag)) return // our own save
     if (dirty.value) {
@@ -219,6 +223,27 @@ function onNoteEvent(p: { path?: string; etag?: string }) {
   }
   if (previewHTML.value.includes('gosidian-view') || previewHTML.value.includes('gosidian-count'))
     void refreshViews()
+}
+
+// The event stream was down a while (BUG-117, S7-8): the note may have
+// changed meanwhile. A clean note reloads, a draft keeps its edits and
+// gets the banner; the same etag only refreshes the views.
+async function checkRemote() {
+  if (!note.value) return
+  const at = path.value
+  try {
+    const fresh = await getNote(at)
+    if (!note.value || path.value !== at) return
+    if (bareEtag(fresh.etag) === bareEtag(note.value.etag)) {
+      if (previewHTML.value.includes('gosidian-view') || previewHTML.value.includes('gosidian-count'))
+        void refreshViews()
+      return
+    }
+    if (dirty.value) remoteChanged.value = true
+    else void load()
+  } catch {
+    /* the next event, or a reload, tells */
+  }
 }
 
 /** Scrolls to the heading the window was opened at, once it is rendered. */
@@ -273,7 +298,7 @@ async function save() {
     remoteChanged.value = false
   } catch (e) {
     // The conflict banner owns a 412: an error pane would hide the draft.
-    if (!isConcurrencyConflict(e)) error.value = e instanceof Error ? e.message : 'Save failed'
+    if (!isConcurrencyConflict(e)) error.value = apiErrorMessage(e, 'Save failed')
   } finally {
     saving.value = false
   }
@@ -297,7 +322,7 @@ async function forceOverwrite() {
     lastSavedAt.value = new Date().toLocaleTimeString()
     conflict.value = null
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Overwrite failed'
+    error.value = apiErrorMessage(e, 'Overwrite failed')
   } finally {
     saving.value = false
   }
@@ -305,13 +330,15 @@ async function forceOverwrite() {
 
 async function destroy() {
   if (!note.value) return
-  if (!confirm(`Delete ${note.value.path}? This moves it to the trash.`)) return
+  // Without the trash the delete is for good, and the question says so
+  // (BUG-116, S6-3).
+  if (!confirm(t(access.deleteNoteKey, { path: note.value.path }))) return
   try {
     await deleteNote(note.value.path)
-    treeStore.invalidateAll()
+    treeStore.refresh()
     emit('close')
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Delete failed'
+    error.value = apiErrorMessage(e, 'Delete failed')
   }
 }
 
@@ -579,8 +606,24 @@ watch(path, load)
       </button>
     </div>
 
+    <!-- A save, delete or download that failed: a banner above the editor,
+         which keeps the draft and its undo history (BUG-116, S6-7). Only a
+         note that did not load takes the pane. -->
+    <div
+      v-if="error && note"
+      class="flex items-center gap-2 border-b border-danger/40 bg-danger/10 px-4 py-2 text-xs"
+      role="alert"
+      data-note-error
+    >
+      <span class="text-danger">{{ error }}</span>
+      <div class="flex-1" />
+      <button type="button" class="rounded px-2 py-1 hover:bg-surface-hover" @click="error = null">
+        {{ t('common.dismiss') }}
+      </button>
+    </div>
+
     <p v-if="loading" class="p-6 text-text-muted">Loading…</p>
-    <p v-else-if="error" class="p-3 text-danger text-sm">{{ error }}</p>
+    <p v-else-if="error && !note" class="p-3 text-danger text-sm">{{ error }}</p>
 
     <!-- View mode: rendered preview -->
     <div v-else-if="mode === 'view'" class="flex-1 overflow-auto">
@@ -604,7 +647,7 @@ watch(path, load)
           {{ note.path }} · etag {{ note.etag.slice(0, 12) }} · {{ note.size }} bytes ·
           {{ t('note.canvas_readonly') }}
         </p>
-        <CanvasPreview v-if="note.canvas" class="flex-1" :canvas="note.canvas" />
+        <CanvasPreview v-if="note.canvas" class="flex-1" :canvas="note.canvas" :path="note.path" />
       </div>
       <!-- CSV table note (ADR-016): paginated table + rendered caption -->
       <TablePreview
@@ -621,7 +664,7 @@ watch(path, load)
         </p>
         <!-- A row of a database: its fields, editable (IMP-127 phase 5) -->
         <PropertiesPanel v-if="note && !isBase" :path="note.path" :etag="note.etag" />
-        <MarkdownPreview :html="previewHTML" :views="previewViews" />
+        <MarkdownPreview :html="previewHTML" :views="previewViews" :note-path="note?.path" />
         <!-- A row of a database: the views its schema declares (IMP-139) -->
         <RowViews v-if="note && !isBase" :path="note.path" :etag="note.etag" />
         <!-- An Obsidian base: the YAML its views were translated from -->
@@ -656,7 +699,7 @@ watch(path, load)
       </div>
       <div v-if="layout !== 'editor'" class="overflow-auto p-4 max-w-none">
         <HTMLPreview v-if="isHtml" :html="draft" :path="note.path" />
-        <MarkdownPreview v-else :html="previewHTML" :views="previewViews" />
+        <MarkdownPreview v-else :html="previewHTML" :views="previewViews" :note-path="note.path" />
       </div>
     </div>
   </div>

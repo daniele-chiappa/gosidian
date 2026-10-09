@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -388,4 +389,60 @@ func TestSetup_ResetsOwnerInPlace(t *testing.T) {
 	if users := s.ListUsers(); len(users) != 1 || users[0].Username != "root" || users[0].ID == ownerID {
 		t.Errorf("replace must leave only a new owner: %+v", users)
 	}
+}
+
+// An invite creates its account and is consumed in one save (BUG-099): a
+// taken username or a failed save keeps the invite pending and adds no
+// account, and a used invite is ErrInviteInvalid.
+func TestStore_RedeemInvite(t *testing.T) {
+	s := newStore(t)
+	ownerID := setupOwner(t, s, "owner", "ownerpass1")
+	inv, err := s.CreateInvite(ownerID, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.RedeemInvite(inv.Token, "owner", "memberpass1"); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("taken username: %v", err)
+	}
+	if s.FindInvite(inv.Token) == nil {
+		t.Fatal("a refused signup consumed the invite")
+	}
+
+	// A save that fails, with a folder it cannot write in (root writes
+	// through the mode: the race run in the container is root).
+	if os.Geteuid() != 0 {
+		dir := filepath.Dir(s.path)
+		if err := os.Chmod(dir, 0o500); err != nil {
+			t.Fatal(err)
+		}
+		_, err = s.RedeemInvite(inv.Token, "carol", "memberpass1")
+		_ = os.Chmod(dir, 0o700)
+		if !errors.Is(err, ErrAccountsSave) {
+			t.Fatalf("failed save: %v", err)
+		}
+		if s.FindInvite(inv.Token) == nil || s.usernameTaken("carol") {
+			t.Fatal("a failed save kept part of the signup")
+		}
+	}
+
+	u, err := s.RedeemInvite(inv.Token, "dave", "memberpass1")
+	if err != nil || u.Role != RoleMember {
+		t.Fatalf("redeem = %+v, %v", u, err)
+	}
+	if s.FindInvite(inv.Token) != nil {
+		t.Error("the invite is still pending")
+	}
+	if _, err := s.RedeemInvite(inv.Token, "erin", "memberpass1"); !errors.Is(err, ErrInviteInvalid) {
+		t.Errorf("used invite: %v", err)
+	}
+	if _, err := s.RedeemInvite("inv_bogus", "erin", "memberpass1"); !errors.Is(err, ErrInviteInvalid) {
+		t.Errorf("unknown invite: %v", err)
+	}
+}
+
+func (s *Store) usernameTaken(name string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.usernameTakenLocked(name)
 }

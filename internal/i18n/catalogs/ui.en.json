@@ -68,7 +68,8 @@
     "disable_button": "Disable",
     "loading": "Loading…",
     "vault": "Vault",
-    "back": "Back"
+    "back": "Back",
+    "dismiss": "Dismiss"
   },
   "tree": {
     "filter_placeholder": "Filter notes…",
@@ -84,9 +85,11 @@
       "download_zip": "Download as zip",
       "delete": "Delete",
       "confirm_delete_note": "Delete {path}? It goes to the trash.",
+      "confirm_delete_note_forever": "Delete {path} for good? The trash is off: the note cannot be restored.",
       "confirm_delete_folder": "Delete the folder {path}? It goes to the trash with all it holds. | Delete the folder {path} and its note? It goes to the trash, where it is restored in one go. | Delete the folder {path} and its {count} notes? It goes to the trash, where it is restored in one go.",
       "download_failed": "Download failed",
-      "delete_failed": "Delete failed"
+      "delete_failed": "Delete failed",
+      "confirm_delete_note_plain": "Delete {path}?"
     }
   },
   "note": {
@@ -352,14 +355,24 @@
     "col_created_by": "Created by",
     "col_expires": "Expires",
     "confirm_disable": "Disable %s? All their MCP tokens will be revoked.",
-    "disable_button": "Disable"
+    "disable_button": "Disable",
+    "confirm_guest": "Make “{user}” read-only? Their MCP tokens are revoked, and the agents using them stop working."
   },
   "signup": {
     "title": "Sign up",
     "create_account_button": "Create account",
     "password_hint": "Password (min 8 characters)",
     "password_confirm": "Confirm password",
-    "invalid_invite": "Invalid or expired invite link."
+    "invalid_invite": "This invite link has expired or was already used. Ask whoever invited you for a new one.",
+    "subtitle": "You were invited: choose your username and password.",
+    "username": "Username",
+    "password": "Password (at least 8 characters)",
+    "creating": "Creating…",
+    "password_short": "The password must be at least 8 characters.",
+    "password_mismatch": "The two passwords do not match.",
+    "failed": "Sign-up failed",
+    "created": "Account created: sign in with your password.",
+    "back_to_login": "Back to sign in"
   },
   "project_settings": {
     "title": "Project settings",

@@ -5,11 +5,12 @@ import enUI from '@catalogs/ui.en.json'
 import type { TreeNode } from '@/api/tree'
 
 const writable = new Set<string>()
+const accessState = { trash: true as boolean | null }
 const windows = {
   windows: [] as { id: string; type: string; dirty: boolean; props: Record<string, unknown> }[],
   close: vi.fn(),
 }
-const tree = { invalidateAll: vi.fn(), load: vi.fn() }
+const tree = { refresh: vi.fn() }
 
 vi.mock('@/api/notes', () => ({ deleteNote: vi.fn() }))
 vi.mock('@/api/folders', () => ({ deleteFolder: vi.fn(), exportFolder: vi.fn() }))
@@ -19,7 +20,19 @@ vi.mock('@/api/noteDownload', async (orig) => ({
   downloadNote: vi.fn(),
 }))
 vi.mock('@/stores/access', () => ({
-  useAccessStore: () => ({ canWrite: (p: string) => writable.has(p.split('/')[0]!) }),
+  useAccessStore: () => ({
+    canWrite: (p: string) => writable.has(p.split('/')[0]!),
+    get trash() {
+      return accessState.trash
+    },
+    get deleteNoteKey() {
+      return accessState.trash === true
+        ? 'tree.menu.confirm_delete_note'
+        : accessState.trash === false
+          ? 'tree.menu.confirm_delete_note_forever'
+          : 'tree.menu.confirm_delete_note_plain'
+    },
+  }),
 }))
 vi.mock('@/stores/tree', () => ({ useTreeStore: () => tree }))
 vi.mock('plancia', () => ({ useWindowsStore: () => windows }))
@@ -70,6 +83,7 @@ async function key(k: string) {
 describe('TreeContextMenu', () => {
   beforeEach(() => {
     writable.clear()
+    accessState.trash = true
     windows.windows = []
     vi.clearAllMocks()
   })
@@ -122,7 +136,20 @@ describe('TreeContextMenu', () => {
     expect(deleteFolder).toHaveBeenCalledWith('Alpha/sub')
     // The dirty window keeps its draft.
     expect(windows.close.mock.calls).toEqual([['w1']])
-    expect(tree.load).toHaveBeenCalled()
+    expect(tree.refresh).toHaveBeenCalled()
+  })
+
+  it('says a delete is for good without the trash, and offers none on a folder (BUG-116, S6-3)', async () => {
+    writable.add('Alpha')
+    accessState.trash = false
+    const confirm = vi.fn(() => false)
+    window.confirm = confirm
+    await openOn(note)
+    await click(1)
+    expect(String((confirm.mock.calls[0] as unknown[])[0])).toContain('for good')
+    useTreeMenu().open(folder, 10, 20, null)
+    await flushPromises()
+    expect(labels()).toEqual(['Download as zip'])
   })
 
   it('does nothing when the confirmation is declined', async () => {

@@ -140,11 +140,12 @@ first start after the upgrade the store is converted once:
   Writing a project created *after* the upgrade takes a grant.
 
 The API keeps `public` as an alias (`true` → public, `false` →
-internal) and adds `visibility`, `access` (the caller's level) and
+internal, a private project staying private) and adds `visibility`, `access` (the caller's level) and
 `members_count` / `teams_count` to the project payloads;
 `GET /api/v1/me/access` lists the caller's effective access (with the
 reasons: `owner`, `public`, `internal`, `grant:<level>`,
-`team:<name>:<level>`) and `GET /api/v1/admin/users/{id}/access` the
+`team:<name>:<level>`), and says with `trash` whether a delete goes to
+the trash, and `GET /api/v1/admin/users/{id}/access` the
 same for any account. `GET /api/v1/projects/{name}/access` shows who
 holds a grant on a project; `PUT`/`DELETE` on `/members` and `/teams`
 under it change the grants (owner or project admin); `/api/v1/admin/teams`
@@ -153,10 +154,14 @@ manages the teams themselves (owner).
 ## Invites
 
 Owners create single-use, time-limited invite links from **Admin →
-Users** (default TTL **24h**). The invitee opens the link, picks a
-username and password, and is created as a **member** (the owner can
-change the role afterwards). Invites are consumed on signup and stored
-alongside accounts in `auth.json`.
+Users** (default TTL **24h**). The invitee opens the link
+(`/login?invite=<token>`), which shows a sign-up form: a username and a
+password typed twice. The account is created as a **member** (the owner
+can change the role afterwards), and the sign-in form comes back with
+the username filled in. Invites are consumed on signup and stored
+alongside accounts in `auth.json`. A link expired or used already
+answers `POST /api/v1/signup` with 400 `auth.invite_invalid`, and the
+page asks for a new one.
 
 ## Passwords
 

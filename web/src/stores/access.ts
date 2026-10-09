@@ -16,6 +16,9 @@ interface AccessState {
   restricted: boolean
   canCreateProjects: boolean
   personalProject: string
+  /** A delete goes to the trash; null until loaded, when a confirmation
+   *  promises neither the trash nor a delete for good (BUG-116, S6-3). */
+  trash: boolean | null
   loaded: boolean
   loading: boolean
 }
@@ -26,12 +29,20 @@ function projectOf(path: string): string {
   return i >= 0 ? path.slice(0, i) : path
 }
 
+// A reset bumps the generation, so a response that lands after a sign-out
+// does not fill the store again; a load asked while one is on its way runs
+// once that one ends, so the event that asked for it is not lost
+// (BUG-117, S7-13).
+let generation = 0
+let again = false
+
 export const useAccessStore = defineStore('access', {
   state: (): AccessState => ({
     projects: {},
     restricted: false,
     canCreateProjects: false,
     personalProject: '',
+    trash: null,
     loaded: false,
     loading: false,
   }),
@@ -42,33 +53,54 @@ export const useAccessStore = defineStore('access', {
     readableCount: (s): number => Object.keys(s.projects).length,
     writableCount: (s): number =>
       Object.values(s.projects).filter((p) => LEVEL_RANK[p.level] >= LEVEL_RANK.write).length,
+    /** The i18n key of the question before a note's delete. */
+    deleteNoteKey: (s): string =>
+      s.trash === true
+        ? 'tree.menu.confirm_delete_note'
+        : s.trash === false
+          ? 'tree.menu.confirm_delete_note_forever'
+          : 'tree.menu.confirm_delete_note_plain',
   },
 
   actions: {
     async load() {
-      if (this.loading) return
+      if (this.loading) {
+        again = true
+        return
+      }
       this.loading = true
+      const gen = generation
       try {
         const view = await getMyAccess()
+        if (gen !== generation) return
         const next: Record<string, AccessProject> = {}
         for (const p of view.projects) next[p.name] = p
         this.projects = next
         this.restricted = view.restricted
         this.canCreateProjects = view.can_create_projects
         this.personalProject = view.personal_project ?? ''
+        this.trash = view.trash === true
         this.loaded = true
       } catch {
         /* keep the previous snapshot; the server still enforces everything */
       } finally {
-        this.loading = false
+        if (gen === generation) this.loading = false
+      }
+      if (again && gen === generation) {
+        again = false
+        await this.load()
       }
     },
 
     reset() {
+      generation++
+      again = false
+      this.loading = false
       this.projects = {}
       this.restricted = false
       this.canCreateProjects = false
       this.personalProject = ''
+      this.trash = null
       this.loaded = false
     },
 

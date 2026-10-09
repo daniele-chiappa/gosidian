@@ -59,22 +59,32 @@ const expanded = ref<string | null>(null)
 const accessRows = ref<AccessProject[]>([])
 const accessLoading = ref(false)
 const accessError = ref<string | null>(null)
+// Only the last request fills the preview: the answer for an account opened
+// before landed under the one opened after (BUG-116, S6-8).
+let accessGen = 0
 
 async function toggleAccess(u: AdminUser) {
   if (expanded.value === u.id) {
     expanded.value = null
+    accessGen++
     return
   }
   expanded.value = u.id
   accessRows.value = []
+  await loadAccess(u.id)
+}
+
+async function loadAccess(id: string) {
+  const gen = ++accessGen
   accessError.value = null
   accessLoading.value = true
   try {
-    accessRows.value = (await getUserAccess(u.id)).projects
+    const rows = (await getUserAccess(id)).projects
+    if (gen === accessGen) accessRows.value = rows
   } catch (e) {
-    accessError.value = e instanceof Error ? e.message : 'Failed to load access'
+    if (gen === accessGen) accessError.value = e instanceof Error ? e.message : 'Failed to load access'
   } finally {
-    accessLoading.value = false
+    if (gen === accessGen) accessLoading.value = false
   }
 }
 
@@ -209,6 +219,8 @@ async function load() {
   } finally {
     loading.value = false
   }
+  // A role or a flag changed: the open preview follows (BUG-116, S6-8).
+  if (expanded.value) await loadAccess(expanded.value)
 }
 
 async function disable(u: AdminUser) {
@@ -221,8 +233,14 @@ async function disable(u: AdminUser) {
   }
 }
 
-async function changeRole(u: AdminUser, role: string) {
+async function changeRole(u: AdminUser, role: string, select?: HTMLSelectElement) {
   if ((role !== 'member' && role !== 'guest') || role === u.role) return
+  // Read-only revokes every MCP token of the account: asked first, as an
+  // arrow key on the select was enough (BUG-116, S6-9).
+  if (role === 'guest' && !confirm(t('users.confirm_guest', { user: u.username }))) {
+    if (select) select.value = u.role
+    return
+  }
   try {
     await updateUserRole(u.id, role)
     await load()
@@ -441,7 +459,7 @@ onMounted(load)
               v-else
               class="text-xs rounded bg-bg-elevated border border-border px-2 py-1 focus:outline-none focus:ring-1 focus:ring-accent"
               :value="u.role"
-              @change="changeRole(u, ($event.target as HTMLSelectElement).value)"
+              @change="changeRole(u, ($event.target as HTMLSelectElement).value, $event.target as HTMLSelectElement)"
             >
               <option value="member">{{ roleLabel('member') }}</option>
               <option value="guest">{{ roleLabel('guest') }}</option>

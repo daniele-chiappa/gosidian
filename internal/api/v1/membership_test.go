@@ -264,6 +264,11 @@ func TestAccessViews(t *testing.T) {
 	if strings.Contains(body, "Gamma") {
 		t.Errorf("me/access must not list an unreadable project: %s", body)
 	}
+	// Without a trash a delete is for good, and the web UI must say so
+	// (BUG-116, S6-3).
+	if !strings.Contains(body, `"trash":false`) {
+		t.Errorf("me/access without a trash: %s", body)
+	}
 
 	// Owner: everything, via owner.
 	orec := f.doAuthRecorder(http.MethodGet, "/api/v1/me/access", "", nil)

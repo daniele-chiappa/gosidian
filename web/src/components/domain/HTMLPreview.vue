@@ -41,6 +41,8 @@
 import { inject, ref, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useWindowsStore, type OpenSpec } from 'plancia'
 import { planciaKey } from '@/composables/planciaKey'
+import { hasScheme, linkTarget, resolveRelative } from './noteLinks'
+import { buildSrcdoc as buildDoc } from './htmlNoteDoc'
 
 const props = defineProps<{ html: string; path?: string }>()
 
@@ -48,47 +50,9 @@ const store = useWindowsStore()
 const openWindow = inject<(spec: OpenSpec) => string>('openWindow', (s) => store.open(s))
 const frame = ref<HTMLIFrameElement | null>(null)
 
-// Restrictive policy injected INTO the iframe document. Allows inline script and
-// style (the note's own), data: images/fonts/media, and nothing over the
-// network. Mirrors the "single self-contained file" contract.
-const INJECTED_CSP = [
-  "default-src 'none'",
-  "script-src 'unsafe-inline'",
-  "style-src 'unsafe-inline'",
-  'img-src data:',
-  'font-src data:',
-  'media-src data:',
-].join('; ')
-
-const META = `<meta http-equiv="Content-Security-Policy" content="${INJECTED_CSP}">`
-
 // Match <img> src attributes: /vault-files/ paths, and relative ones that
 // resolve to a vault attachment.
 const imgSrcRe = /(<img\b[^>]*?\bsrc\s*=\s*)(["'])([^"']+)\2/gi
-
-/** The folder of the note, "" without a path. */
-function noteDir(): string {
-  const p = props.path ?? ''
-  const i = p.lastIndexOf('/')
-  return i >= 0 ? p.slice(0, i) : ''
-}
-
-/** Resolves a relative path against the note's folder; null when it climbs out of the vault. */
-function resolveRelative(rel: string): string | null {
-  const parts = noteDir() ? noteDir().split('/') : []
-  for (const seg of rel.split('/')) {
-    if (seg === '' || seg === '.') continue
-    if (seg === '..') {
-      if (parts.length === 0) return null
-      parts.pop()
-    } else {
-      parts.push(seg)
-    }
-  }
-  return parts.join('/')
-}
-
-const hasScheme = (u: string) => /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(u)
 
 /** The /vault-files URL of an image src, or null when it names no attachment. */
 function vaultImageURL(src: string): string | null {
@@ -100,7 +64,7 @@ function vaultImageURL(src: string): string | null {
   } catch {
     /* keep it as written */
   }
-  const p = resolveRelative(rel)
+  const p = resolveRelative(props.path, rel)
   return p && `/${p}`.includes('/attachments/') ? `/vault-files/${p}` : null
 }
 
@@ -146,94 +110,26 @@ async function inlineVaultImages(html: string): Promise<string> {
   })
 }
 
-// Strip a leading frontmatter block so it never renders as visible text. The
-// HTML-comment form (<!-- --- ... --- -->, ADR-011) is already invisible, but
-// the bare markdown form (--- ... ---) shows — drop either.
-function stripFrontmatter(html: string): string {
-  return html
-    .replace(/^\s*<!--\s*\r?\n---[\s\S]*?---\s*\r?\n?\s*-->\s*/, '')
-    .replace(/^\s*---\r?\n[\s\S]*?\r?\n---\r?\n?/, '')
-}
-
-// The shell is served with a per-request CSP nonce (script-src 'self'
-// 'nonce-X'). An about:srcdoc iframe INHERITS that policy, which intersects
-// away the injected 'unsafe-inline' above — so a note's inline <script> only
-// runs if it carries the nonce. Read it from the shell <meta> and stamp it
-// onto every <script> tag (BUG-019). Absent (e.g. `npm run dev`), leave the
-// markup untouched and the dev shell's looser CSP applies.
-function cspNonce(): string {
-  return document.querySelector('meta[name="csp-nonce"]')?.getAttribute('content') ?? ''
-}
-
-function stampScriptNonce(html: string, nonce: string): string {
-  if (!nonce) return html
-  return html.replace(/<script(?=[\s>])/gi, `<script nonce="${nonce}"`)
-}
-
-// LINK_SCRIPT runs inside the iframe and takes the clicks on links (see
-// LINKS above). It runs after the note's own handlers (bubbling), so a link
-// a note's script already handles is left alone.
-const LINK_SCRIPT = `(function(){document.addEventListener('click',function(e){
-if(e.defaultPrevented||e.button!==0)return;
-var a=e.target&&e.target.closest?e.target.closest('a[href]'):null;if(!a)return;
-var h=a.getAttribute('href')||'';if(/^javascript:/i.test(h))return;
-e.preventDefault();
-if(h.charAt(0)==='#'){var id=h.slice(1);try{id=decodeURIComponent(id)}catch(_){}
-var el=document.getElementById(id)||document.getElementsByName(id)[0];if(el)el.scrollIntoView();return;}
-parent.postMessage({gosidian:'html-note-link',href:h},'*');});})();`
-
-function buildSrcdoc(rawHtml: string): string {
-  const nonce = cspNonce()
-  const html = stampScriptNonce(stripFrontmatter(rawHtml), nonce)
-  // The closing tag is split so it does not close this component's own
-  // <script> block.
-  const head = `${META}<script${nonce ? ` nonce="${nonce}"` : ''}>${LINK_SCRIPT}<` + '/script>'
-  // Inject the CSP meta as early as possible so it governs everything that
-  // follows. Place it inside an existing <head>, else after <html>, else wrap
-  // the fragment in a minimal document.
-  if (/<head[^>]*>/i.test(html)) {
-    return html.replace(/<head[^>]*>/i, (m) => `${m}${head}`)
-  }
-  if (/<html[^>]*>/i.test(html)) {
-    return html.replace(/<html[^>]*>/i, (m) => `${m}<head>${head}</head>`)
-  }
-  return `<!DOCTYPE html><html><head>${head}</head><body>${html}</body></html>`
-}
-
 /** Opens a link of the note: a note in a window, anything else in a new tab. */
 function followLink(href: string) {
-  if (/^https?:\/\//i.test(href) || /^mailto:/i.test(href)) {
-    window.open(href, '_blank', 'noopener,noreferrer')
+  const target = linkTarget(href, props.path)
+  if (target.kind === 'browser') {
+    if (/^mailto:/i.test(target.url)) window.open(target.url, '_blank', 'noopener,noreferrer')
     return
   }
-  if (hasScheme(href)) return
-  const [rawPath] = href.split(/[?#]/)
-  let target = rawPath ?? ''
-  try {
-    target = decodeURIComponent(target)
-  } catch {
-    /* keep it as written */
-  }
-  let notePath: string | null
-  if (target.startsWith('/notes/')) notePath = target.slice('/notes/'.length)
-  else if (target.startsWith('/vault-files/')) {
-    window.open(target, '_blank', 'noopener,noreferrer')
+  if (target.kind === 'tab') {
+    // The app's own addresses stay out of reach of a sandboxed note: only
+    // its attachments, and other sites, open.
+    const own = target.url.startsWith('/') && !target.url.startsWith('//')
+    if (!own || target.url.startsWith('/vault-files/')) window.open(target.url, '_blank', 'noopener,noreferrer')
     return
-  } else if (target.startsWith('/')) return
-  else notePath = resolveRelative(target)
-  if (!notePath) return
-  if (!/\.(md|html)$/i.test(notePath)) {
-    if (`/${notePath}`.includes('/attachments/')) {
-      window.open(`/vault-files/${notePath}`, '_blank', 'noopener,noreferrer')
-      return
-    }
-    notePath += '.md'
   }
+  if (target.kind !== 'note') return
   openWindow({
     type: 'note',
-    key: planciaKey('note', notePath),
-    title: (notePath.split('/').pop() ?? notePath).replace(/\.(md|html)$/i, ''),
-    props: { path: notePath },
+    key: planciaKey('note', target.path),
+    title: (target.path.split('/').pop() ?? target.path).replace(/\.(md|html)$/i, ''),
+    props: { path: target.path },
   })
 }
 
@@ -249,13 +145,24 @@ function onMessage(e: MessageEvent) {
   followLink(d.href)
 }
 
+// The shell is served with a per-request CSP nonce (script-src 'self'
+// 'nonce-X'), which an about:srcdoc iframe inherits: see htmlNoteDoc.ts.
+function cspNonce(): string {
+  return document.querySelector('meta[name="csp-nonce"]')?.getAttribute('content') ?? ''
+}
+const buildSrcdoc = (html: string) => buildDoc(html, cspNonce())
+
 // Render immediately (text/layout show at once), then swap in the inlined
-// version once the vault images have been fetched + converted.
+// version once the vault images have been fetched + converted. Only the
+// last rebuild lands: an older one, slower to fetch its images, put a
+// previous version of the note back (BUG-117, S7-12).
 const srcdoc = ref(buildSrcdoc(props.html ?? ''))
+let generation = 0
 
 async function rebuild() {
+  const mine = ++generation
   const inlined = await inlineVaultImages(props.html ?? '')
-  srcdoc.value = buildSrcdoc(inlined)
+  if (mine === generation) srcdoc.value = buildSrcdoc(inlined)
 }
 
 onMounted(() => {
