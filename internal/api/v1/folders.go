@@ -113,8 +113,19 @@ func (r *Router) deleteFolder(w http.ResponseWriter, req *http.Request, dir stri
 }
 
 // folderExists reports whether rel (already through Vault.Rel) is a real
-// directory of the vault, not a symlink to one.
+// directory of the vault, reached through no symlink. Lstat saw only the
+// last element: with proj/shared -> /srv/other, the zip of
+// proj/shared/sub read files outside the vault, and its delete moved them
+// into the trash, from where a restore put them inside (BUG-112, S2-3).
 func (r *Router) folderExists(rel string) bool {
-	st, err := os.Lstat(filepath.Join(r.deps.Vault.Root, filepath.FromSlash(rel)))
+	root, err := filepath.EvalSymlinks(r.deps.Vault.Root)
+	if err != nil {
+		return false
+	}
+	real, err := filepath.EvalSymlinks(filepath.Join(r.deps.Vault.Root, filepath.FromSlash(rel)))
+	if err != nil || real != filepath.Join(root, filepath.FromSlash(rel)) {
+		return false
+	}
+	st, err := os.Stat(real)
 	return err == nil && st.IsDir()
 }

@@ -48,7 +48,7 @@ var projectMu sync.Mutex
 func Rename(v *vault.Vault, idx *index.Index, ps *projects.Store, tokens *auth.Store, from, to string) (int, error) {
 	projectMu.Lock()
 	defer projectMu.Unlock()
-	from, err := v.CheckProject(from)
+	from, err := v.CheckExistingProject(from)
 	if err != nil {
 		return 0, fmt.Errorf("%w: source name: %v", ErrInvalid, err)
 	}

@@ -74,3 +74,52 @@ func TestPasswordLifecycle(t *testing.T) {
 		t.Error("setup left the mark on the owner")
 	}
 }
+
+// A change made to auth.json by another process (a `gosidian user` command
+// while the server runs) survives the next change the server saves: every
+// mutator starts from the file on disk, not from the copy of the last
+// sign-in (BUG-111, S1-4).
+func TestMutatorsKeepChangesFromAnotherProcess(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "auth.json")
+	server, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := server.Setup("owner", "owner-pass-1234", false, "test"); err != nil {
+		t.Fatal(err)
+	}
+	ada, err := server.AddUser("ada", "ada-pass-1234", RoleMember)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob, err := server.AddUser("bob", "bob-pass-1234", RoleMember)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cli, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cli.SetPassword(ada.ID, "ada-reset-5678", true); err != nil {
+		t.Fatal(err)
+	}
+	// The server saves an unrelated change, with no sign-in in between.
+	if err := server.SetMustChangePassword(bob.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.SetRestricted(bob.ID, false); err != nil {
+		t.Fatal(err)
+	}
+
+	again, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := again.CheckPassword(ada.ID, "ada-reset-5678"); err != nil {
+		t.Errorf("the reset from the other process was undone: %v", err)
+	}
+	if u, _ := again.UserByID(bob.ID); !u.MustChangePassword || u.Restricted {
+		t.Errorf("the server's own changes are lost: %+v", u)
+	}
+}

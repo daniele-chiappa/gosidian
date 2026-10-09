@@ -25,29 +25,49 @@ type MediaRef struct {
 }
 
 // ResolveAttachmentByName resolves an Obsidian image-embed target (`![[X]]`)
-// to a vault-relative attachment path. A target carrying a slash is treated as
-// a vault-relative path; a bare filename is searched for in the vault-root
-// attachments/ dir and in each project's attachments/. Returns the path and
-// true on the first hit. Used by the renderer's image-embed support.
+// to a vault-relative attachment path, as ResolveAttachment with no
+// preference and every project visible.
 func (v *Vault) ResolveAttachmentByName(name string) (string, bool) {
+	return v.ResolveAttachment(name, "", nil)
+}
+
+// ResolveAttachment resolves an image-embed target to a vault-relative
+// attachment path. A target carrying a slash is a vault-relative path; a
+// bare filename is looked for in the attachments/ of the project prefer
+// first (the embedding note's), then in the vault-root attachments/ and in
+// each project's. visible, when set, leaves out the projects the reader may
+// not see: the first file of that name in the whole vault exposed the path
+// of a private project, and could be someone else's image (BUG-112, S2-7).
+// Returns the path and true on the first hit.
+func (v *Vault) ResolveAttachment(name, prefer string, visible func(project string) bool) (string, bool) {
 	name = strings.TrimSpace(filepath.ToSlash(name))
 	if name == "" {
 		return "", false
 	}
+	ok := func(rel string) bool {
+		project, _, _ := strings.Cut(rel, "/")
+		return (visible == nil || visible(project)) && v.Exists(rel)
+	}
 	if strings.Contains(name, "/") {
-		if rel, err := v.Rel(name); err == nil && v.Exists(rel) {
+		if rel, err := v.Rel(name); err == nil && ok(rel) {
 			return rel, true
 		}
 		return "", false
 	}
-	candidates := []string{"attachments/" + name}
-	if projs, err := v.Projects(); err == nil {
-		for _, p := range projs {
-			candidates = append(candidates, p.Name+"/attachments/"+name)
+	var candidates []string
+	if prefer != "" {
+		candidates = append(candidates, prefer+"/attachments/"+name)
+	}
+	candidates = append(candidates, "attachments/"+name)
+	if entries, err := os.ReadDir(v.Root); err == nil {
+		for _, e := range entries {
+			if e.IsDir() && e.Name() != prefer && !v.skipDir(v.Root, filepath.Join(v.Root, e.Name())) {
+				candidates = append(candidates, e.Name()+"/attachments/"+name)
+			}
 		}
 	}
 	for _, c := range candidates {
-		if v.Exists(c) {
+		if ok(c) {
 			return c, true
 		}
 	}

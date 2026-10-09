@@ -12,6 +12,7 @@ import (
 
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/config"
+	"github.com/gosidian/gosidian/internal/gitsync"
 	"github.com/gosidian/gosidian/internal/projects"
 )
 
@@ -423,7 +424,15 @@ func applySettingsPatch(cfg *config.Config, body *updateSettingsRequest) string 
 			cfg.Git.Remote = strings.TrimSpace(*g.Remote)
 		}
 		if g.Branch != nil {
-			cfg.Git.Branch = strings.TrimSpace(*g.Branch)
+			b := strings.TrimSpace(*g.Branch)
+			// A name starting with "-" reached git as an option (BUG-115,
+			// S5-8). Empty is the default branch, as before.
+			if b != "" {
+				if err := gitsync.CheckBranch(b); err != nil {
+					return err.Error()
+				}
+			}
+			cfg.Git.Branch = b
 		}
 		if g.AuthorName != nil {
 			cfg.Git.AuthorName = strings.TrimSpace(*g.AuthorName)

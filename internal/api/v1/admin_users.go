@@ -366,6 +366,12 @@ func (r *Router) updateUserRole(w http.ResponseWriter, req *http.Request, id str
 		WriteError(w, http.StatusBadRequest, CodeValidationRequired, "role, totp_policy, restricted or can_create_projects required")
 		return
 	}
+	// Exempting oneself from two-factor here would take it off with the
+	// session alone (BUG-111, S1-10); checked before anything is applied.
+	if body.TOTPPolicy != nil && strings.TrimSpace(*body.TOTPPolicy) == webauth.TOTPDisabled && actor != nil && actor.ID == id {
+		WriteError(w, http.StatusForbidden, CodeAuthForbidden, ownTOTPFromSettings)
+		return
+	}
 	if body.Restricted != nil {
 		if err := r.deps.Auth.WebAuth.SetRestricted(id, *body.Restricted); err != nil {
 			r.writeUserUpdateError(w, err)
@@ -425,13 +431,23 @@ func (r *Router) updateUserRole(w http.ResponseWriter, req *http.Request, id str
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// ownTOTPFromSettings is why the owner's own second factor is not removed
+// from Admin → Users.
+const ownTOTPFromSettings = "your own two-factor is turned off from Settings, with your password"
+
 // resetUserTOTP clears a user's TOTP secret and recovery codes (owner-only,
 // DELETE /admin/users/{id}/totp): the escape hatch for a lost authenticator.
 // The per-user policy stays, so an account that must have two-factor meets
 // the enrolment interstitial at its next login; sessions stay too — a lost
 // device is not a compromised account (disable + token revoke covers that).
-// Allowed on the owner's own account: the caller already proved ownership.
+// Not on the owner's own account: DELETE /totp takes the password for that
+// (IMP-088), and a session alone must not (BUG-111, S1-10). An owner who
+// lost the authenticator signs in with a recovery code, or uses the CLI.
 func (r *Router) resetUserTOTP(w http.ResponseWriter, req *http.Request, id string) {
+	if actor := UserFromContext(req.Context()); actor != nil && actor.ID == id {
+		WriteError(w, http.StatusForbidden, CodeAuthForbidden, ownTOTPFromSettings)
+		return
+	}
 	if err := r.deps.Auth.WebAuth.ResetTOTP(id); err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			WriteError(w, http.StatusNotFound, CodeNotFound, err.Error())

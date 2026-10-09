@@ -116,11 +116,13 @@ func parseWikiLinkInner(content string) (target, alias string) {
 var tagRe = regexp.MustCompile(`(^|[\s>(])#([\p{L}_][\p{L}\p{N}_\-/]*)`)
 
 // IsColorTag reports whether an inline #tag is a hex color code, such as
-// #AC1F24 or #fff: a word of 3, 4, 6 or 8 hex digits is never a tag
-// (IMP-145), nor is one followed by a slash, as in a list of colors
-// (#FAFAFA/#EFEFEF). Obsidian makes a tag of those starting with a letter;
-// here they are colors, in the text of a note and in the tags it is listed
-// by.
+// #AC1F24 or #fff: a word of 3, 4, 6 or 8 hex digits is no tag (IMP-145),
+// nor is one followed by a slash, as in a list of colors (#FAFAFA/#EFEFEF),
+// in the text of a note and in the tags it is listed by. Obsidian makes a
+// tag of those starting with a letter. A short word of lowercase letters
+// is a tag, though, unless all its letters are one: #cafe, #feed, #add and
+// #bad were lost as colors, while #fff, #ABC and #FAFAFA stay colors
+// (BUG-114, S4-5). Words of 6 or 8 letters a-f (#decade) stay colors.
 func IsColorTag(tag string) bool {
 	tag = strings.TrimSuffix(tag, "/")
 	switch len(tag) {
@@ -128,13 +130,23 @@ func IsColorTag(tag string) bool {
 	default:
 		return false
 	}
+	digit, lower, same := false, false, true
 	for i := 0; i < len(tag); i++ {
 		c := tag[i]
-		if !('0' <= c && c <= '9' || 'a' <= c && c <= 'f' || 'A' <= c && c <= 'F') {
+		switch {
+		case '0' <= c && c <= '9':
+			digit = true
+		case 'a' <= c && c <= 'f':
+			lower = true
+		case 'A' <= c && c <= 'F':
+		default:
 			return false
 		}
+		if c != tag[0] {
+			same = false
+		}
 	}
-	return true
+	return digit || len(tag) >= 6 || same || !lower
 }
 
 // frontmatter: lines between --- / --- at top
@@ -492,15 +504,9 @@ func hasSepPrefix(s string) bool {
 // The lines themselves are kept, so section offsets stay intact.
 func fencedLines(lines []string) []bool {
 	out := make([]bool, len(lines))
-	in := false
+	var f Fences
 	for i, line := range lines {
-		trim := strings.TrimSpace(line)
-		if strings.HasPrefix(trim, "```") || strings.HasPrefix(trim, "~~~") {
-			in = !in
-			out[i] = true
-			continue
-		}
-		out[i] = in
+		out[i] = f.Code(line)
 	}
 	return out
 }
@@ -600,16 +606,10 @@ func StripCode(s string) string { return stripCode(s) }
 func stripCode(s string) string {
 	var out strings.Builder
 	out.Grow(len(s))
-	inFence := false
+	var fences Fences
 	lines := strings.Split(s, "\n")
 	for _, line := range lines {
-		trim := strings.TrimSpace(line)
-		if strings.HasPrefix(trim, "```") || strings.HasPrefix(trim, "~~~") {
-			inFence = !inFence
-			out.WriteByte('\n')
-			continue
-		}
-		if inFence {
+		if fences.Code(line) {
 			out.WriteByte('\n')
 			continue
 		}

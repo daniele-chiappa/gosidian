@@ -3,6 +3,7 @@ package gitsync
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -492,5 +493,125 @@ func TestSync_RemoteCorruptionMessage(t *testing.T) {
 	}
 	if strings.Contains(st.LastError, "in the vault; see BUG-015") {
 		t.Errorf("the remote's corruption got the vault's hint: %q", st.LastError)
+	}
+}
+
+// A project committed before its git sync went off leaves git's index at
+// the next commit: ignoring a folder does not untrack it, and it kept going
+// to the remote (BUG-115, S5-5).
+func TestSync_SkippedProjectLeavesTheIndex(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	pstore, err := projects.Open(filepath.Join(t.TempDir(), "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"keep/a.md", "private/b.md"} {
+		full := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(rel), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := New(dir, testCfg())
+	s.SetProjects(pstore)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	s.TriggerCommit()
+	s.Flush()
+	if err := pstore.Set("private", projects.Flags{SkipGitSync: true}); err != nil {
+		t.Fatal(err)
+	}
+	s.TriggerCommit()
+	s.Flush()
+	out, _ := exec.Command("git", "-C", dir, "ls-files").Output()
+	if strings.Contains(string(out), "private/") || !strings.Contains(string(out), "keep/a.md") {
+		t.Errorf("tracked after the skip:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "private", "b.md")); err != nil {
+		t.Errorf("untracking removed the file: %v", err)
+	}
+}
+
+// Flushes at once run one commit at a time: a timer's and the one at
+// shutdown met each other's index.lock (BUG-115, S5-6).
+func TestSync_ConcurrentFlushes(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	s := New(dir, testCfg())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	for w := 0; w < 4; w++ {
+		go func() {
+			defer func() { done <- struct{}{} }()
+			for i := 0; i < 5; i++ {
+				_ = os.WriteFile(filepath.Join(dir, fmt.Sprintf("n-%d.md", w)), []byte(fmt.Sprint(i)), 0o644)
+				s.TriggerCommit()
+				s.Flush()
+			}
+		}()
+	}
+	for w := 0; w < 4; w++ {
+		<-done
+	}
+	if st := s.Status(); !st.Healthy {
+		t.Errorf("concurrent flushes left the sync unhealthy: %+v", st)
+	}
+	if out, _ := exec.Command("git", "-C", dir, "status", "--porcelain").Output(); len(out) != 0 {
+		t.Errorf("changes left out of the commits:\n%s", out)
+	}
+}
+
+// The push token goes to git in its environment, never on its command
+// line, which every process of the host reads (BUG-115, S5-7).
+func TestSync_PushTokenNotInArgs(t *testing.T) {
+	bin := t.TempDir()
+	rec := filepath.Join(t.TempDir(), "rec")
+	script := "#!/bin/sh\necho \"args: $*\" > " + rec + "\nenv >> " + rec + "\n"
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("TEST_PUSH_TOKEN", "secret-push-token")
+	cfg := testCfg()
+	cfg.Push, cfg.TokenEnv = true, "TEST_PUSH_TOKEN"
+	s := New(t.TempDir(), cfg)
+	if err := s.push(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args, envs, _ := strings.Cut(string(got), "\n")
+	if strings.Contains(args, "secret-push-token") || !strings.Contains(args, "push -q origin main") {
+		t.Errorf("git args = %q", args)
+	}
+	if !strings.Contains(envs, "GIT_CONFIG_VALUE_0=Authorization: token secret-push-token") {
+		t.Error("the token is not in git's environment")
+	}
+}
+
+// A branch name git would read as an option, or not as a branch, is
+// refused (BUG-115, S5-8).
+func TestCheckBranch(t *testing.T) {
+	for _, ok := range []string{"main", "release/2.71", "feat-x", "v2.71.3"} {
+		if err := CheckBranch(ok); err != nil {
+			t.Errorf("CheckBranch(%q): %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"", "--receive-pack=touch /tmp/x", "-x", "a b", "a..b", "a~1", "x.lock", "a/", "/a", "a@{1}", "a:b", "a\\b"} {
+		if err := CheckBranch(bad); err == nil {
+			t.Errorf("CheckBranch(%q) accepted", bad)
+		}
 	}
 }

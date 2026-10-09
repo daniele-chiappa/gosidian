@@ -88,6 +88,21 @@ func TestExpandValues(t *testing.T) {
 	}
 }
 
+// The agent's form copied back is read as the value alone only where it is
+// one: a number that ends a word ("v2") is text, and a code block keeps its
+// sample (BUG-114, S4-4).
+func TestExpandValues_CopiesAtAWordStart(t *testing.T) {
+	idx := testIndex(t)
+	body := "Release v2 (`=count(p/plans)`) and 5 (`=count(p/plans)`).\n\n```\n3 (`=count(p/plans)`)\n```\n"
+	out, _ := ExpandValues([]byte(body), true, Context{}, idx.Query)
+	got := string(out)
+	for _, want := range []string{"Release v2 (2 (`=count(p/plans)`))", "and 2 (`=count(p/plans)`).", "```\n3 (`=count(p/plans)`)\n```"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("lacks %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestParseCount(t *testing.T) {
 	c := Context{This: ThisFields("p/a.md", map[string]any{"id": "A"})}
 	s, err := ParseCount("p/x, p/y/ where title = \"salt and pepper\" and status in [a, b] and owner = this.id", c)

@@ -295,6 +295,33 @@ func TestVault_RenameNote_FolderQualified(t *testing.T) {
 	}
 }
 
+// A folder-qualified link to another note with the same name stays: renaming
+// proj/a/Old turned [[proj/b/Old]] into a link to nothing (BUG-115, S5-12).
+// A move to another folder gives the link the new path.
+func TestVault_RenameNote_SameNameElsewhere(t *testing.T) {
+	v := newTestVault(t)
+	idx := openIndex(t)
+	write(t, v.Root, "proj/a/Old.md", "# A")
+	write(t, v.Root, "proj/b/Old.md", "# B")
+	write(t, v.Root, "proj/ref.md", "[[proj/a/Old]], [[proj/b/Old]], [[a/Old]] and [[b/Old]].")
+	_ = v.ScanInto(idx)
+	_ = idx.ResolveAll()
+	if _, err := v.RenameNote(idx, "proj/a/Old.md", "proj/a/New.md"); err != nil {
+		t.Fatal(err)
+	}
+	ref, _ := v.Load("proj/ref.md")
+	if want := "[[proj/a/New]], [[proj/b/Old]], [[a/New]] and [[b/Old]]."; string(ref.Content) != want {
+		t.Errorf("body = %q, want %q", ref.Content, want)
+	}
+	if _, err := v.RenameNote(idx, "proj/a/New.md", "proj/c/New.md"); err != nil {
+		t.Fatal(err)
+	}
+	ref, _ = v.Load("proj/ref.md")
+	if want := "[[proj/c/New]], [[proj/b/Old]], [[proj/c/New]] and [[b/Old]]."; string(ref.Content) != want {
+		t.Errorf("after the move: body = %q, want %q", ref.Content, want)
+	}
+}
+
 // BUG-085: links that cite a section of the renamed note must follow it.
 func TestVault_RenameNote_AnchoredLinks(t *testing.T) {
 	v := newTestVault(t)

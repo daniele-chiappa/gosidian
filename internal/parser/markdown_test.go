@@ -174,6 +174,21 @@ func TestRenderer_CodeBlockPreserved(t *testing.T) {
 
 // A link to a heading carries the heading as written, so the web UI finds it
 // as memory_get_section does: by an ID at its start too (IMP-140).
+// A link to a heading of the same note shows "#Intro": no tag link nests in
+// it, and tags around it still render (BUG-114, S4-2).
+func TestRenderer_HeadingLinkIsNoTag(t *testing.T) {
+	out, err := NewRenderer().Render([]byte("Go to [[#Intro]] or #todo."), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, `/tags/Intro`) {
+		t.Errorf("the heading link became a tag: %s", out)
+	}
+	if !strings.Contains(out, `href="#intro" data-heading="Intro">#Intro</a>`) || !strings.Contains(out, `href="/tags/todo"`) {
+		t.Errorf("render: %s", out)
+	}
+}
+
 func TestRenderer_WikiLinkHeading(t *testing.T) {
 	r := NewRenderer()
 	resolver := ResolverFunc(func(target string) string {

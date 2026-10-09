@@ -83,11 +83,13 @@ func (s *Server) handleWaitChanges(ctx context.Context, req mcp.CallToolRequest)
 		cursor = uint64(c)
 	}
 
-	// One in-flight wait per session (correlation id; token id when the
-	// request didn't come through the SSE pipeline).
-	waiterKey := correlationIDFromContext(ctx)
-	if waiterKey == "" {
-		waiterKey = "tok:" + tok.ID
+	// One in-flight wait per MCP session; a message without a session
+	// counts against its token. Keyed by the correlation id, a sessionless
+	// client got a fresh random one per message, and 200 waits held 200
+	// subscriptions (BUG-113, S3-6).
+	waiterKey := "tok:" + tok.ID
+	if h := sessionHash(ctx); h != "" {
+		waiterKey += ":" + h
 	}
 	if _, busy := s.waiters.LoadOrStore(waiterKey, struct{}{}); busy {
 		return mcp.NewToolResultError("another memory_wait_changes is already in flight for this session; call it sequentially"), nil

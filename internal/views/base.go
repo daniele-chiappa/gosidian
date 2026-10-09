@@ -118,14 +118,21 @@ func translateBaseView(project string, global any, v rawBaseView) BaseView {
 	fs.add(v.Filters)
 	bv.Warnings = append(bv.Warnings, fs.warnings...)
 
+	// A base's folder holds its subfolders (file.inFolder is recursive), and
+	// a base without one reads every note: "/**" takes the folders under
+	// it, where the view listed the top folder alone (BUG-114, S4-7).
 	spec := baseSpec{}
 	switch len(fs.folders) {
 	case 0:
-		spec.From = project
+		spec.From = project + "/**"
 	case 1:
-		spec.From = fs.folders[0]
+		spec.From = fs.folders[0] + "/**"
 	default:
-		spec.From = fs.folders
+		var from []string
+		for _, f := range fs.folders {
+			from = append(from, f+"/**")
+		}
+		spec.From = from
 	}
 	for _, c := range fs.conds {
 		spec.Where = append(spec.Where, c.yaml())

@@ -156,14 +156,19 @@ func (r *Router) resetUserPassword(w http.ResponseWriter, req *http.Request, id 
 		writePasswordError(w, err)
 		return
 	}
-	closed := 0
+	closed, grants := 0, 0
 	if r.deps.Auth.SpaAuth != nil {
 		closed = r.deps.Auth.SpaAuth.RevokeByUser(id)
+	}
+	// The OAuth grants go too, as with the CLI reset: a connector authorized
+	// with the old password would keep its access (BUG-111, S1-9).
+	if tokens := r.mcpTokens(); tokens != nil {
+		grants = tokens.RevokeOAuthByOwner(id)
 	}
 	if r.deps.Audit != nil {
 		_ = r.deps.Audit.Write(audit.Entry{Source: audit.SourceHTTP, Actor: actor.Username, UserID: actor.ID, Action: audit.ActionPasswordReset, Path: id})
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"sessions_closed": closed, "must_change_password": true})
+	WriteJSON(w, http.StatusOK, map[string]any{"sessions_closed": closed, "grants_closed": grants, "must_change_password": true})
 }
 
 func writePasswordError(w http.ResponseWriter, err error) {

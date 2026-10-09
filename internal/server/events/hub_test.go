@@ -173,3 +173,33 @@ func TestHub_PublishesMonotonicID(t *testing.T) {
 		t.Errorf("ids must differ: %s == %s", e1.ID, e2.ID)
 	}
 }
+
+// Concurrent publishers: every subscriber gets the events in sequence
+// order, none skipped (BUG-112, S2-2). A long-poll waiter drops what is not
+// newer than the last seen, so 6 before 5 lost 5.
+func TestHub_DeliversInSequenceOrder(t *testing.T) {
+	const writers, each = 8, 300
+	h := New(HubOptions{BufLen: writers * each})
+	sub := h.Subscribe()
+	defer sub.Unsubscribe()
+	done := make(chan struct{})
+	for w := 0; w < writers; w++ {
+		go func() {
+			for i := 0; i < each; i++ {
+				h.Publish(TopicNote, map[string]any{"i": i})
+			}
+			done <- struct{}{}
+		}()
+	}
+	for w := 0; w < writers; w++ {
+		<-done
+	}
+	var last uint64
+	for n := 0; n < writers*each; n++ {
+		ev := <-sub.Ch
+		if ev.Seq != last+1 {
+			t.Fatalf("event %d after %d", ev.Seq, last)
+		}
+		last = ev.Seq
+	}
+}

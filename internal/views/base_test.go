@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gosidian/gosidian/internal/dbschema"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/parser"
 )
@@ -58,11 +59,11 @@ func TestTranslateBase(t *testing.T) {
 		name, spec string
 		warns      []string
 	}{
-		{"Reading", "from: p/Books\nwhere:\n    - status != done\nsort: year desc, title asc\ncolumns:\n    - title\n    - author\n    - status\nlimit: 20\n",
+		{"Reading", "from: p/Books/**\nwhere:\n    - status != done\nsort: year desc, title asc\ncolumns:\n    - title\n    - author\n    - status\nlimit: 20\n",
 			[]string{"the column formula.ppu has no equivalent"}},
-		{"Shelf", "from: p/Books\nwhere:\n    - status != done\n    - tags in [novel, essay]\n",
+		{"Shelf", "from: p/Books/**\nwhere:\n    - status != done\n    - tags in [novel, essay]\n",
 			[]string{"a cards view has no equivalent: shown as a table"}},
-		{"Linked", "from: p/Books\nwhere:\n    - status != done\n    - links contains this\n    - status exists\nas: list\n",
+		{"Linked", "from: p/Books/**\nwhere:\n    - status != done\n    - links contains this\n    - status exists\nas: list\n",
 			[]string{"file.hasLink(this) names the base itself"}},
 	}
 	for i, w := range want {
@@ -114,21 +115,21 @@ func TestTranslateBase_Filters(t *testing.T) {
 		warn    string // a warning that must be there, "" for none
 		from    string
 	}{
-		{`'file.ext == "md"'`, "", "", "p"},
-		{`'file.mtime > now() - "1 week"'`, "", `the filter "file.mtime > now() - \"1 week\"" has no equivalent`, "p"},
-		{"{or: ['status == \"a\"', 'priority == \"b\"']}", "", "or: status ==", "p"},
-		{"{or: ['status == \"a\"', \"status == 'b'\"]}", "    - status in [a, b]\n", "", "p"},
-		{"{not: ['status == \"a\"', 'file.hasTag(\"x\")', 'title.contains(\"y\")']}", "    - status != a\n    - tags != x\n", `not: "title.contains(\"y\")"`, "p"},
-		{"{or: ['file.inFolder(\"A\")', 'file.inFolder(\"p/B\")']}", "", "", "\n    - p/A\n    - p/B"},
-		{"{and: ['file.inFolder(\"A\")', 'file.inFolder(\"A/sub\")']}", "", "", "p/A/sub"},
-		{"{and: ['file.inFolder(\"A\")', 'file.inFolder(\"B\")']}", "", `file.inFolder("p/B") with another folder`, "p/A"},
-		{`'price >= 2.5 && (done == true)'`, "    - price >= 2.5\n    - done = true\n", "", "p"},
-		{`'note.tags.contains("#todo")'`, "    - tags = todo\n", "", "p"},
-		{`'file.hasLink("Some note")'`, "    - links contains [[Some note]]\n", "", "p"},
-		{`'file.hasProperty("due")'`, "    - due exists\n", "", "p"},
-		{`'author == "Le Guin, Ursula"'`, "    - field: author\n      op: eq\n      value: Le Guin, Ursula\n", "", "p"},
-		{`'file.name == "x"'`, "", "has no equivalent", "p"},
-		{`'status == "a" || priority == "b" && done == true'`, "", "has no equivalent", "p"},
+		{`'file.ext == "md"'`, "", "", "p/**"},
+		{`'file.mtime > now() - "1 week"'`, "", `the filter "file.mtime > now() - \"1 week\"" has no equivalent`, "p/**"},
+		{"{or: ['status == \"a\"', 'priority == \"b\"']}", "", "or: status ==", "p/**"},
+		{"{or: ['status == \"a\"', \"status == 'b'\"]}", "    - status in [a, b]\n", "", "p/**"},
+		{"{not: ['status == \"a\"', 'file.hasTag(\"x\")', 'title.contains(\"y\")']}", "    - status != a\n    - tags != x\n", `not: "title.contains(\"y\")"`, "p/**"},
+		{"{or: ['file.inFolder(\"A\")', 'file.inFolder(\"p/B\")']}", "", "", "\n    - p/A/**\n    - p/B/**"},
+		{"{and: ['file.inFolder(\"A\")', 'file.inFolder(\"A/sub\")']}", "", "", "p/A/sub/**"},
+		{"{and: ['file.inFolder(\"A\")', 'file.inFolder(\"B\")']}", "", `file.inFolder("p/B") with another folder`, "p/A/**"},
+		{`'price >= 2.5 && (done == true)'`, "    - price >= 2.5\n    - done = true\n", "", "p/**"},
+		{`'note.tags.contains("#todo")'`, "    - tags = todo\n", "", "p/**"},
+		{`'file.hasLink("Some note")'`, "    - links contains [[Some note]]\n", "", "p/**"},
+		{`'file.hasProperty("due")'`, "    - due exists\n", "", "p/**"},
+		{`'author == "Le Guin, Ursula"'`, "    - field: author\n      op: eq\n      value: Le Guin, Ursula\n", "", "p/**"},
+		{`'file.name == "x"'`, "", "has no equivalent", "p/**"},
+		{`'status == "a" || priority == "b" && done == true'`, "", "has no equivalent", "p/**"},
 	}
 	for _, c := range cases {
 		b := baseViews(t, "p/x.base", "filters: "+c.filters+"\n")
@@ -205,5 +206,78 @@ func TestBaseMarkdown(t *testing.T) {
 	bad := string(BaseMarkdown("p/bad.base", []byte("views: [\n")))
 	if !strings.Contains(bad, "⚠️ base: not valid YAML") || !strings.Contains(bad, "````yaml\nviews: [\n````") {
 		t.Errorf("a base that does not parse:\n%s", bad)
+	}
+}
+
+// A base's folder takes its subfolders, as file.inFolder does in Obsidian:
+// the view listed the top folder alone, with no warning (BUG-114, S4-7).
+func TestTranslateBase_SubfoldersCount(t *testing.T) {
+	idx, err := index.Open(filepath.Join(t.TempDir(), "idx.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { idx.Close() })
+	for p, body := range map[string]string{
+		"p/Books/dune.md":              "---\ntitle: Dune\n---\n",
+		"p/Books/sci-fi/foundation.md": "---\ntitle: Foundation\n---\n",
+		"p/Other/x.md":                 "---\ntitle: X\n---\n",
+	} {
+		if err := idx.Upsert(index.NoteDoc{Path: p, Title: strings.TrimSuffix(filepath.Base(p), ".md"), Body: body, ModTime: 1, Size: int64(len(body))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for filters, want := range map[string]int{
+		`'file.inFolder("Books")'`: 2,
+		`'file.ext == "md"'`:       3,
+	} {
+		v := baseViews(t, "p/x.base", "filters: "+filters+"\n").Views[0]
+		s, err := Parse(v.Spec, Context{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		r, err := Run(s, idx.Query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Total != want {
+			t.Errorf("%s: %d notes, want %d\n%s", filters, r.Total, want, v.Spec)
+		}
+	}
+}
+
+// A base on a database folder keeps the database's schema: its from is
+// "folder/**", and the lookup by the from as written found none (BUG-114,
+// S4-7).
+func TestTranslateBase_KeepsTheSchema(t *testing.T) {
+	idx, err := index.Open(filepath.Join(t.TempDir(), "idx.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { idx.Close() })
+	schema, err := dbschema.Parse("p/books.md", "type: database\nsource: p/Books\nrows: {type: book}\nfields:\n  status: {type: select, options: [reading, done]}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for p, body := range map[string]string{
+		"p/Books/dune.md":   "---\ntitle: Dune\ntype: book\nstatus: reading\n---\n",
+		"p/Books/README.md": "---\ntitle: Books\n---\n",
+	} {
+		if err := idx.Upsert(index.NoteDoc{Path: p, Title: strings.TrimSuffix(filepath.Base(p), ".md"), Body: body, ModTime: 1, Size: int64(len(body))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c := Context{Schema: func(f string) *dbschema.Schema {
+		if f == "p/Books" {
+			return schema
+		}
+		return nil
+	}}
+	v := baseViews(t, "p/x.base", "filters: 'file.inFolder(\"Books\")'\n").Views[0]
+	r, err := compute(v.Spec, c, idx.Query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Schema == nil || r.Total != 1 {
+		t.Errorf("schema %v, %d rows; want the database's, its one row", r.Schema, r.Total)
 	}
 }

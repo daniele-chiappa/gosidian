@@ -359,6 +359,37 @@ func TestPreview_RendersMarkdown(t *testing.T) {
 	}
 }
 
+// `![[logo.png]]` takes the embedding note's own attachment first, and
+// never one from a project the reader cannot see: the first file of that
+// name in the whole vault exposed a private project's path (BUG-112, S2-7).
+func TestPreview_ImageEmbedResolution(t *testing.T) {
+	f := newNotesFixture(t)
+	f.writeRaw(t, "Beta/attachments/logo.png", "PNG")
+	f.writeRaw(t, "Zeta/attachments/logo.png", "PNG")
+	f.writeRaw(t, "Open/attachments/other.png", "PNG")
+	f.setVisibility(t, "Open", projects.VisibilityInternal)
+	render := func(note, bearer string) string {
+		t.Helper()
+		body, _ := json.Marshal(map[string]string{"markdown": "![[logo.png]]", "path": note})
+		rec := f.req(t, http.MethodPost, "/api/v1/preview", string(body), bearer)
+		var out previewResponse
+		if err := json.NewDecoder(strings.NewReader(rec.body)).Decode(&out); err != nil {
+			t.Fatalf("decode: %v (%s)", err, rec.body)
+		}
+		return out.HTML
+	}
+	if html := render("Zeta/n.md", f.bearer); !strings.Contains(html, "/vault-files/Zeta/attachments/logo.png") {
+		t.Errorf("the note's own attachment is not first: %s", html)
+	}
+	m, bearer := f.memberUser(t, "mel")
+	if err := f.webauth.SetRestricted(m.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if html := render("Open/n.md", bearer); strings.Contains(html, "Beta/") || strings.Contains(html, "Zeta/") {
+		t.Errorf("a private project's attachment reached a member: %s", html)
+	}
+}
+
 func TestPreview_EmptyBody(t *testing.T) {
 	f := newNotesFixture(t)
 	w := f.doAuthRecorder(http.MethodPost, "/api/v1/preview", `{"markdown":""}`, nil)

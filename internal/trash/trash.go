@@ -355,10 +355,14 @@ func (b *Bin) PruneExpired() (int, error) {
 }
 
 // newID produces "<unix-nano>__<sanitized-original>" so we can reconstruct
-// both the discard timestamp and the source path on restore.
+// both the discard timestamp and the source path on restore. "%" itself is
+// escaped first: without it proj/My%20Note.md came back as proj/My Note.md,
+// and the root note B%2Fx.md was taken for a note of project B, open to its
+// members (BUG-112, S2-4).
 func newID(originalPath string) string {
 	ts := time.Now().UTC().UnixNano()
 	clean := strings.NewReplacer(
+		"%", "%25",
 		"/", "%2F",
 		"\\", "%5C",
 		":", "%3A",
@@ -403,6 +407,7 @@ func parseID(id string) (time.Time, string) {
 		return time.Time{}, ""
 	}
 	origin := strings.NewReplacer(
+		"%25", "%",
 		"%2F", "/",
 		"%5C", "\\",
 		"%3A", ":",

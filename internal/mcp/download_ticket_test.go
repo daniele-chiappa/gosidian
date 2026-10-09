@@ -135,3 +135,32 @@ func TestDownloadTicket_CapPerToken(t *testing.T) {
 		t.Errorf("cap: %s", msg)
 	}
 }
+
+// A ticket is redeemed with its token narrowed to the owner's access now:
+// an account that lost the project, or was disabled, after the mint reads
+// nothing with it (BUG-113, S3-4).
+func TestDownloadTicket_FollowsTheOwner(t *testing.T) {
+	f := newAccessFixture(t)
+	f.visibility(t, "proj", "private")
+	f.grant(t, "proj", "m1", "read")
+	if err := f.s.vault.Save("proj/n.md", []byte("# n")); err != nil {
+		t.Fatal(err)
+	}
+	_, tok := f.token(t, "m1", nil, []string{auth.ScopeRead})
+	ctx := context.WithValue(context.Background(), tokenCtxKey, f.s.effectiveToken(tok))
+	h := f.s.Handler("")
+
+	first := mintDownload(t, f.s, ctx, "proj/n.md")
+	second := mintDownload(t, f.s, ctx, "proj/n.md")
+	if err := f.projects.RemoveMember("proj", "m1"); err != nil {
+		t.Fatal(err)
+	}
+	if rec := getTicket(h, first["endpoint"].(string)); rec.Code == http.StatusOK {
+		t.Errorf("redeemed after the grant went: %d %q", rec.Code, rec.Body.String())
+	}
+	f.grant(t, "proj", "m1", "read")
+	delete(f.roles, "m1") // disabled or gone
+	if rec := getTicket(h, second["endpoint"].(string)); rec.Code == http.StatusOK {
+		t.Errorf("redeemed after the owner went: %d %q", rec.Code, rec.Body.String())
+	}
+}

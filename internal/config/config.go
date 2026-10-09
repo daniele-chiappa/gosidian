@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -34,6 +35,31 @@ type Config struct {
 	AgentAnchors AgentAnchorsConfig `toml:"agent_anchors"`
 	OAuth        OAuthConfig        `toml:"oauth"`
 	Uploads      UploadsConfig      `toml:"uploads"`
+
+	// totpWarning says why the configured TOTP mode was read otherwise
+	// (TOTPModeOf); "" when it was read as written.
+	totpWarning string
+}
+
+// TOTPModeWarning says why the configured TOTP mode was read otherwise than
+// written, for the startup log; "" when it was not.
+func (c *Config) TOTPModeWarning() string { return c.totpWarning }
+
+// TOTPModeOf reads a configured two-factor policy: case and spaces aside,
+// "require" for "required", and empty for "off". A value still unknown
+// reads "required", with the reason: "Required" or a typo turned two-factor
+// off without a word (BUG-115, S5-11); closed, every account without a
+// secret enrols at its next sign-in, and the log says why.
+func TOTPModeOf(raw string) (mode, warning string) {
+	switch m := strings.ToLower(strings.TrimSpace(raw)); m {
+	case "", "off":
+		return "off", ""
+	case "optional", "required":
+		return m, ""
+	case "require":
+		return "required", ""
+	}
+	return "required", fmt.Sprintf("totp_mode %q is not off, optional or required: read as required", raw)
 }
 
 // UploadsConfig caps what an account uploads (IMP-034).
@@ -374,7 +400,15 @@ func Default() *Config {
 
 // Save serializes the config to path as TOML. Parent directories are created
 // if missing. Writes atomically via a temp file + rename.
+//
+// The file keeps its permissions, and a new one is 0600: it may hold the
+// LDAP bind password, and a file set to 0600 came back as 0644 at every
+// save. Saves run one at a time, through a temporary file of their own,
+// synced (BUG-115, S5-14). Comments and keys this version does not know are
+// not kept.
 func Save(path string, cfg *Config) error {
+	saveMu.Lock()
+	defer saveMu.Unlock()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -382,12 +416,36 @@ func Save(path string, cfg *Config) error {
 	if err := toml.NewEncoder(&buf).Encode(cfg); err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, buf.Bytes(), 0o644); err != nil {
+	perm := os.FileMode(0o600)
+	if st, err := os.Stat(path); err == nil {
+		perm = st.Mode().Perm()
+	}
+	f, err := os.CreateTemp(filepath.Dir(path), ".config-*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	tmp := f.Name()
+	_, err = f.Write(buf.Bytes())
+	if err == nil {
+		err = f.Sync()
+	}
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Chmod(tmp, perm)
+	}
+	if err == nil {
+		err = os.Rename(tmp, path)
+	}
+	if err != nil {
+		_ = os.Remove(tmp)
+	}
+	return err
 }
+
+// saveMu serializes Save within the process.
+var saveMu sync.Mutex
 
 // ApplyEnv overrides fields whose matching GOSIDIAN_* environment variable is
 // set. It's meant to be called after Load so that env vars override the file
@@ -581,7 +639,7 @@ func (c *Config) ApplyEnv() error {
 		c.Webauth.LoginMaxFailures = n
 	}
 	if v := os.Getenv("GOSIDIAN_TOTP_MODE"); v != "" {
-		c.Webauth.TOTPMode = v
+		c.Webauth.TOTPMode, c.totpWarning = TOTPModeOf(v)
 	}
 	if v := os.Getenv("GOSIDIAN_TRUSTED_PROXIES"); v != "" {
 		var proxies []string
@@ -779,9 +837,7 @@ func (c *Config) applyDefaults() {
 	if c.Webauth.LoginMaxFailures == 0 {
 		c.Webauth.LoginMaxFailures = 5
 	}
-	if c.Webauth.TOTPMode != "optional" && c.Webauth.TOTPMode != "required" {
-		c.Webauth.TOTPMode = "off"
-	}
+	c.Webauth.TOTPMode, c.totpWarning = TOTPModeOf(c.Webauth.TOTPMode)
 	if c.Vault.CacheSize == 0 {
 		c.Vault.CacheSize = 128
 	}

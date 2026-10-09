@@ -187,6 +187,18 @@ func TestSettings_PutMemberForbidden(t *testing.T) {
 	}
 }
 
+// A branch git would read as an option is refused; an empty one is the
+// default, as before (BUG-115, S5-8).
+func TestSettings_PutGitBranch(t *testing.T) {
+	f := newAdminFixture(t)
+	if w := f.doAuthRecorder(http.MethodPut, "/api/v1/settings", `{"git":{"branch":"--receive-pack=touch /tmp/x"}}`, nil); w.code != http.StatusBadRequest {
+		t.Errorf("an option as the branch = %d, want 400", w.code)
+	}
+	if w := f.doAuthRecorder(http.MethodPut, "/api/v1/settings", `{"git":{"branch":""}}`, nil); w.code != http.StatusOK {
+		t.Errorf("an empty branch = %d (%s), want 200", w.code, w.body)
+	}
+}
+
 func TestSettings_PutInvalidDebounce(t *testing.T) {
 	f := newAdminFixture(t)
 	body := `{"git":{"debounce_ms":50}}`

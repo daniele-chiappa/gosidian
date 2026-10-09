@@ -242,28 +242,35 @@ func Open(path string) (*Store, error) {
 // hence indirectly from every webauth-protected route) so that an external
 // `gosidian user setup` is visible to the server without a restart.
 func (s *Store) reloadIfStale() {
-	st, err := os.Stat(s.path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			s.mu.Lock()
-			if !s.mtime.IsZero() || len(s.file.Users) > 0 {
-				s.file = AccountsFile{}
-				s.mtime = time.Time{}
-			}
-			s.mu.Unlock()
+	if st, err := os.Stat(s.path); err == nil {
+		s.mu.RLock()
+		current := s.mtime
+		s.mu.RUnlock()
+		if st.ModTime().Equal(current) {
+			return
 		}
-		return
-	}
-	s.mu.RLock()
-	current := s.mtime
-	s.mu.RUnlock()
-	if st.ModTime().Equal(current) {
-		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.reloadLocked()
+}
+
+// reloadLocked is reloadIfStale for a caller holding s.mu for writing. Every
+// mutator calls it first, so it changes the file as it is on disk, not the
+// copy of the last sign-in: a `gosidian user` command run while the server
+// was up (a password or a two-factor reset) was undone by the next change
+// the server saved (BUG-111, S1-4).
+func (s *Store) reloadLocked() {
+	st, err := os.Stat(s.path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) && (!s.mtime.IsZero() || len(s.file.Users) > 0) {
+			s.file = AccountsFile{}
+			s.mtime = time.Time{}
+		}
+		return
+	}
 	if st.ModTime().Equal(s.mtime) {
-		return // another caller won the race
+		return
 	}
 	data, err := os.ReadFile(s.path)
 	if err != nil {
@@ -414,9 +421,9 @@ func (s *Store) Setup(username, password string, withTOTP bool, issuer string) (
 	if err != nil {
 		return "", err
 	}
-	s.reloadIfStale()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.reloadLocked()
 	for i := range s.file.Users {
 		cur := &s.file.Users[i]
 		if cur.Username != username {
@@ -462,6 +469,7 @@ func (s *Store) Replace(username, password string, withTOTP bool, issuer string)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.reloadLocked()
 	s.file = AccountsFile{Version: accountsVersion, Users: []User{u}}
 	return otpURI, s.saveOwnerLocked()
 }
@@ -506,6 +514,7 @@ func newOwner(username, password string, withTOTP bool, issuer string) (User, st
 func (s *Store) Disable() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.reloadLocked()
 	s.file = AccountsFile{}
 	if err := os.Remove(s.path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -787,6 +796,7 @@ func newLocalUser(username, password string, role Role) (User, error) {
 // renamed out of the way in the same save.
 func (s *Store) addUser(u User, reclaim bool) (*User, *User, error) {
 	s.mu.Lock()
+	s.reloadLocked()
 	held := -1
 	for i, existing := range s.file.Users {
 		if existing.Username != u.Username {
@@ -850,6 +860,7 @@ func (s *Store) usernameTakenLocked(name string) bool {
 func (s *Store) SetRestricted(id string, restricted bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.reloadLocked()
 	for i := range s.file.Users {
 		if s.file.Users[i].ID != id {
 			continue
@@ -871,6 +882,7 @@ func (s *Store) SetRestricted(id string, restricted bool) error {
 func (s *Store) SetCanCreateProjects(id string, can bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.reloadLocked()
 	for i := range s.file.Users {
 		if s.file.Users[i].ID != id {
 			continue
@@ -891,6 +903,7 @@ func (s *Store) SetCanCreateProjects(id string, can bool) error {
 // owner cannot be disabled (guards against lock-out).
 func (s *Store) DisableUser(id string) error {
 	s.mu.Lock()
+	s.reloadLocked()
 	var fn func(string)
 	var found bool
 	for i := range s.file.Users {
@@ -936,6 +949,7 @@ func (s *Store) SetRole(id string, role Role) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.reloadLocked()
 	for i := range s.file.Users {
 		if s.file.Users[i].ID != id {
 			continue
@@ -1037,6 +1051,7 @@ func (s *Store) SetTOTPPolicy(userID, policy string) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.reloadLocked()
 	for i := range s.file.Users {
 		if s.file.Users[i].ID == userID {
 			s.file.Users[i].TOTPPolicy = policy
@@ -1097,6 +1112,7 @@ func (s *Store) CreateInvite(creatorID string, ttl time.Duration) (Invite, error
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.reloadLocked()
 	s.file.Invites = append(s.file.Invites, inv)
 	if err := s.saveLocked(); err != nil {
 		s.file.Invites = s.file.Invites[:len(s.file.Invites)-1]
@@ -1124,6 +1140,7 @@ func (s *Store) FindInvite(token string) *Invite {
 func (s *Store) ClaimInvite(token, consumerID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.reloadLocked()
 	for i := range s.file.Invites {
 		if s.file.Invites[i].Token != token {
 			continue
@@ -1144,6 +1161,7 @@ func (s *Store) ClaimInvite(token, consumerID string) error {
 func (s *Store) RevokeInvite(token string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.reloadLocked()
 	for i := range s.file.Invites {
 		if s.file.Invites[i].Token == token {
 			s.file.Invites = append(s.file.Invites[:i], s.file.Invites[i+1:]...)

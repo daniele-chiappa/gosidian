@@ -151,6 +151,76 @@ func TestRollups_OutgoingRelation(t *testing.T) {
 	}
 }
 
+// A relation naming a note that is gone counts nothing for that link, and
+// the view still computes, every row with it (BUG-114, S4-1).
+func TestRollups_DanglingRelation(t *testing.T) {
+	idx := rollupIndex(t)
+	body := "---\ntitle: D\ntype: plan\nstatus: draft\nimplements_imp: [\"[[p/docs/improvements/IMP-1]]\", \"[[p/docs/improvements/IMP-999]]\"]\n---\n"
+	if err := idx.Upsert(index.NoteDoc{Path: "p/plans/d.md", Title: "d", Body: body, ModTime: 1, Size: int64(len(body))}); err != nil {
+		t.Fatal(err)
+	}
+	c := rollupContext(t, idx)
+	r, err := compute("from: p/plans\nsort: path\ncolumns: [title, imps]", c, idx.Query)
+	if err != nil {
+		t.Fatalf("one dangling link failed the view: %v", err)
+	}
+	if got := cellsOf(r, "imps"); got != "a=2 b=1 c=1 d=1" {
+		t.Errorf("imps: %s", got)
+	}
+}
+
+// The schema of a rollup's folder is looked up once for the whole table,
+// not for every row and rollup (BUG-114, S4-8).
+func TestRollups_OneSchemaLookupPerFolder(t *testing.T) {
+	idx := rollupIndex(t)
+	c := rollupContext(t, idx)
+	lookups := map[string]int{}
+	inner := c.Schema
+	c.Schema = func(f string) *dbschema.Schema {
+		lookups[f]++
+		return inner(f)
+	}
+	if _, err := compute("from: p/docs/improvements\nsort: id asc\ncolumns: [title, plans, open_plans, effort, first_due]", c, idx.Query); err != nil {
+		t.Fatal(err)
+	}
+	if n := lookups["p/plans"]; n > 1 {
+		t.Errorf("the rollups looked up p/plans %d times for 3 rows and 4 rollups", n)
+	}
+}
+
+// An inline =count(…) counts the rows of a database only, as a view does:
+// p/plans/README.md is in the folder but no plan (BUG-114, S4-10).
+func TestCountValue_DatabaseRows(t *testing.T) {
+	idx := rollupIndex(t)
+	c := rollupContext(t, idx)
+	out, _ := ExpandValues([]byte("Plans: `=count(p/plans)`."), true, c, idx.Query)
+	if !strings.Contains(string(out), "Plans: 3 (") {
+		t.Errorf("count = %s, want the 3 plans without the README", out)
+	}
+}
+
+// A whole number in a map condition is a value like any other: YAML reads
+// value: 5 as an int, and it was refused (BUG-114, S4-6).
+func TestView_IntegerInAMapCondition(t *testing.T) {
+	idx := rollupIndex(t)
+	for spec, want := range map[string]string{
+		"from: p/plans\nwhere:\n  - {field: estimate, op: eq, value: 5}":   "b",
+		"from: p/plans\nwhere:\n  - {field: estimate, op: eq, value: 1.5}": "c",
+	} {
+		s, err := Parse(spec, Context{})
+		if err != nil {
+			t.Fatalf("%q: %v", spec, err)
+		}
+		r, err := Run(s, idx.Query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := cellsOf(r, "title"); got != want+"=" {
+			t.Errorf("%q = %s, want %s", spec, got, want)
+		}
+	}
+}
+
 // Sorted by a rollup, every row is computed and sorted, then cut at the
 // limit; a condition or a group_by on a rollup is refused.
 func TestRollups_SortAndRefusals(t *testing.T) {

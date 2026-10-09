@@ -63,3 +63,25 @@ func TestSearch_StemsAddInflections(t *testing.T) {
 		}
 	}
 }
+
+// A word of punctuation alone in the query is no term: the " — " of a
+// title, "&" or a stray "-" emptied the whole search (BUG-114, S4-3).
+func TestSearch_PunctuationWords(t *testing.T) {
+	idx := openTest(t)
+	upsert(t, idx, "p/imp.md", "IMP-152 — Code review", "The review of the code.")
+	upsert(t, idx, "p/ab.md", "A & B", "Two letters.")
+	for q, want := range map[string]string{
+		"IMP-152 — Code review": "p/imp.md",
+		"retry -":               "",
+		"A & B":                 "p/ab.md",
+		"— &":                   "",
+	} {
+		hits, err := idx.Search(q, 10)
+		if err != nil {
+			t.Fatalf("search %q: %v", q, err)
+		}
+		if got := strings.Join(paths(hits), ","); got != want {
+			t.Errorf("search %q = %q, want %q", q, got, want)
+		}
+	}
+}

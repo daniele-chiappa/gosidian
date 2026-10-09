@@ -67,6 +67,14 @@ func ownerOnlyProjects(cfg *config.Config) []string {
 	return out
 }
 
+// reservedProjectNames are the project names the configuration keeps for
+// its own projects, whether their feature is on or not: it can be switched
+// on later, and an account named like one would own it as its personal
+// project.
+func reservedProjectNames(cfg *config.Config) []string {
+	return []string{cfg.SelfImprove.TargetProject, cfg.Global.PublicProject, cfg.Global.PrivateProject}
+}
+
 // globalReadme returns the starter index note for a freshly seeded global
 // project.
 func globalReadme(name string, public bool) string {

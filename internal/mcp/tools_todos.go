@@ -177,7 +177,7 @@ func extractTodos(body []byte) []todoEntry {
 	var (
 		todos         []todoEntry
 		parentHeading string
-		inFence       bool
+		fences        parser.Fences
 		inFrontmatter bool
 	)
 
@@ -201,15 +201,10 @@ func extractTodos(body []byte) []todoEntry {
 			continue
 		}
 
-		// Code fence toggle.
+		if fences.Code(line) {
+			continue
+		}
 		trim := strings.TrimSpace(line)
-		if strings.HasPrefix(trim, "```") || strings.HasPrefix(trim, "~~~") {
-			inFence = !inFence
-			continue
-		}
-		if inFence {
-			continue
-		}
 
 		// Heading tracking (only level 1-6 ATX; setext not supported here
 		// to keep the scan single-pass and parent context simple).

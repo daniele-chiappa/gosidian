@@ -25,18 +25,20 @@ import (
 
 // packageIntent is what a package import was asked to do.
 type packageIntent struct {
-	Project   string
-	Dest      string
-	DryRun    bool
-	Overwrite bool
+	Project     string
+	Dest        string
+	DryRun      bool
+	Overwrite   bool
+	AllowShrink bool
 }
 
 func packageIntentOf(project string, req mcp.CallToolRequest) packageIntent {
 	return packageIntent{
-		Project:   project,
-		Dest:      strings.TrimSpace(req.GetString("dest", "")),
-		DryRun:    req.GetBool("dry_run", false),
-		Overwrite: req.GetBool("overwrite", false),
+		Project:     project,
+		Dest:        strings.TrimSpace(req.GetString("dest", "")),
+		DryRun:      req.GetBool("dry_run", false),
+		Overwrite:   req.GetBool("overwrite", false),
+		AllowShrink: req.GetBool("allow_shrink", false),
 	}
 }
 
@@ -201,10 +203,15 @@ func (s *Server) importPackage(ctx context.Context, in packageIntent, entries []
 		case s.maxNoteBytes > 0 && int64(len(n.Data)) > s.maxNoteBytes:
 			problems = append(problems, fmt.Sprintf("%s: %d bytes, past the limit of %d for a note", n.Src, len(n.Data), s.maxNoteBytes))
 		}
-		if _, err := s.vault.Load(rel); err == nil {
+		if prev, err := s.vault.Load(rel); err == nil {
 			notes[i].Exists = true
-			if !in.Overwrite {
+			switch {
+			case !in.Overwrite:
 				conflicts = append(conflicts, rel)
+			// The shrink guard of memory_update: an almost empty entry of
+			// the package emptied a big note (BUG-113, S3-5).
+			case !in.AllowShrink && s.shrinkRefusal(rel, prev.Size, len(n.Data)) != "":
+				problems = append(problems, fmt.Sprintf("%s would shrink %s from %d to %d bytes (pass allow_shrink:true if meant)", n.Src, rel, prev.Size, len(n.Data)))
 			}
 		}
 	}
@@ -317,12 +324,20 @@ func (s *Server) importPackage(ctx context.Context, in packageIntent, entries []
 		notes[i].Created, notes[i].Exists = d.created, false
 	}
 	for i, d := range written {
-		action := audit.ActionCreate
+		action, change := audit.ActionCreate, "create"
 		if !d.created {
-			action = audit.ActionUpdate
+			action, change = audit.ActionUpdate, "update"
 		}
 		s.auditWrite(ctx, action, d.rel, "", int64(len(plan.Notes[i].Data)))
 		s.noteSchemaProblems(ctx, d.rel, plan.Notes[i].Data)
+		// One note event each, with the new ETag, as writeNote sends: an
+		// editor open on a replaced note learns it changed (S3-5). The tree
+		// event goes once, below.
+		etag := ""
+		if fresh, err := s.vault.Load(d.rel); err == nil {
+			etag = fresh.ETag()
+		}
+		s.publishNoteChange(change, d.rel, etag, false)
 	}
 	s.auditWrite(ctx, audit.ActionIngestPackage, dest, "", int64(len(written)))
 	s.publishTreeChange("create", dest, map[string]any{"package": len(written)})

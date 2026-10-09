@@ -23,7 +23,7 @@ view stays a readable code block.
 
 | Key | Meaning |
 |---|---|
-| `from` | the folder whose notes the view lists (or a list of folders); only notes **directly** inside it, the rows of a [database note](databases.md) |
+| `from` | the folder whose notes the view lists (or a list of folders); only notes **directly** inside it, the rows of a [database note](databases.md). Written `folder/**`, the notes of the folders under it too |
 | `where` | conditions, all required: a `"field op value"` string or a `{field, op, value}` map as in `memory_query` |
 | `sort` | a field, or `path`, `title`, `modified`, optionally followed by `asc` or `desc` (default `desc`, `asc` for `path` and `title`). Up to four keys, as a list (`sort: [status asc, priority desc]`) or separated by commas (`sort: plans desc, id asc`): each key orders the notes the one before leaves tied, and the path breaks the last ties. A select field of the database the view lists sorts by its options (`low`, `medium`, `high`), not alphabetically |
 | `columns` | what to show; `title` links to the note, `path` and `modified` come from the note itself, anything else from its frontmatter. Default: `title` plus the fields used in `where` and `sort` |
@@ -169,7 +169,7 @@ edited in Obsidian.
 
 | Base | View |
 |---|---|
-| `file.inFolder("Books")` | `from: <project>/Books` (a base reads the folders of its own project; several in an `or` are several folders) |
+| `file.inFolder("Books")` | `from: <project>/Books/**`, subfolders included (a base reads the folders of its own project; several in an `or` are several folders; without one, `from: <project>/**`) |
 | `file.hasTag("a", "b")`, `tags.contains("a")` | `tags = a`, `tags in [a, b]` (a nested tag `a/x` is not matched) |
 | `file.hasLink("Note")` | `links contains [[Note]]` |
 | `file.hasProperty("due")`, `due.isEmpty()` | `due exists`, `due !exists` |

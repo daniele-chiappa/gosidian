@@ -8,6 +8,150 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.71.3] — 2026-10-09 — "medium findings"
+
+The medium findings of the same code review: accounts and OAuth, the
+web UI's event stream, MCP tickets and package imports, views and
+search, git sync and the configuration. Pull the image and restart; the
+first start re-indexes the vault (a few seconds per thousand notes),
+because tags and code blocks are read differently. A few behaviours
+change, each described below: an unknown `totp_mode` now reads
+`required` (check the log for a warning after the upgrade), the views of
+an Obsidian base include the subfolders of its folder, short lowercase
+words such as `#cafe` are tags again, the git branch set from Settings
+must be a valid branch name, and an account named like a reserved
+project gets no personal project.
+
+### Added
+- **`from: folder/**` in a view** — a view reads the notes of a folder
+  and of all its subfolders. The translation of an Obsidian base uses it,
+  as Obsidian includes the subfolders of a base's folder; a base without
+  a folder filter reads the whole project.
+
+### Security
+- **Accounts, OAuth and two-factor**:
+  - an account named like a project the configuration keeps for itself
+    (`insights`, `global`, `global-private`) gets no personal project: it
+    would have been admin of everyone's insights, or of a global project
+    switched on later. `gosidian user add` applies the same rule;
+  - a change made to `auth.json` by a `gosidian user` command while the
+    server runs (a password or a two-factor reset) is no longer undone by
+    the next change the server saves: every change starts from the file
+    on disk;
+  - `allowed_redirect_hosts` now holds at every authorization, for
+    clients that publish a metadata document (CIMD) and for clients
+    registered before the list was set;
+  - a refresh token is rotated only once the checks that can fail have
+    passed, so a failure on the server's side leaves it good for a retry
+    instead of revoking the grant as a reuse; the rotation is atomic, so
+    one refresh token presented twice at once is detected as a reuse;
+  - open client registration can no longer lock new connectors out: at
+    the cap of 1000 clients the one used least recently among those no
+    one authorized makes room (a client holding a grant is never evicted;
+    with all of them holding one, registration answers 503), a full list
+    of pending authorizations drops the oldest of the address that made
+    the most, and the rate limits count an IPv6 /64 as one address;
+  - resetting an account's password from Admin → Users closes its OAuth
+    grants too, as the CLI reset does (`grants_closed` in the response);
+  - the owner's own two-factor no longer comes off from Admin → Users
+    with the session alone (the reset and the `disabled` policy answer
+    403): Settings asks for the password;
+  - attachments (`/vault-files/`) are no longer readable with a temporary
+    password the account has not changed yet.
+- **Event stream, folders, trash and previews**:
+  - the web UI's event stream checks the session again every few seconds
+    and at each heartbeat: after a logout, a revoked or expired session,
+    a password to change or a TOTP to enrol, an open stream no longer
+    keeps receiving note paths and project names;
+  - an event about a project that is gone (deleted, or renamed away)
+    reaches members without its names, and a rename or a move into a
+    project the reader cannot see is not delivered: the name of a private
+    project went to every member;
+  - the zip and the trash of a folder refuse a path that goes through a
+    symbolic link (`proj/shared -> /srv/other`): the zip read files
+    outside the vault and the delete moved them into the trash;
+  - `![[image.png]]` in a preview takes the note's own project first, and
+    never an attachment of a project the reader cannot see: it took the
+    first file of that name in the whole vault, exposing its path;
+  - the legacy `public: false` of `PUT /api/v1/projects/{name}` takes a
+    public project down to internal and leaves a private one private: it
+    made a private project readable by every member.
+- **MCP tickets, package imports and waits**:
+  - a single-use download or upload URL is redeemed with its token
+    narrowed to the owner's current access: within its five minutes an
+    account disabled, or taken off the project, still read or wrote the
+    note;
+  - a package import that overwrites notes goes through the shrink guard
+    of `memory_update` (`allow_shrink` to confirm, nothing written
+    otherwise), and each note it writes sends its note event with the new
+    ETag: an editor open on a replaced note did not learn it changed;
+  - `memory_wait_changes` holds one wait at a time per token for a client
+    without an MCP session: each of its messages counted as a new
+    session, and parallel waits held as many subscriptions.
+- **Git sync and the configuration**:
+  - a project switched to git sync off, or a state directory set inside
+    the vault, leaves git's index at the next commit: the `.gitignore`
+    line alone did not untrack what a commit already held, and it kept
+    going to the remote (the files stay on disk; the history keeps what
+    was pushed);
+  - the push token reaches git in its environment, not on its command
+    line, where any process of the host could read it;
+  - the git branch set from Settings must be a valid branch name: one
+    starting with `-` reached `git push` as an option;
+  - a TOTP mode in another case (`Required`) or written `require` is
+    understood, and an unknown one reads `required`, with a line in the
+    log: both turned two-factor off without a word;
+  - `config.toml` keeps its permissions when Settings save it (a new one
+    is `0600`, as it may hold the LDAP password), through a temporary
+    file of its own, one save at a time. Comments and keys gosidian does
+    not know are still not kept by a save;
+  - `import-vault` refuses a destination that is the source, inside it or
+    around it, and does not copy what a symbolic link points to.
+
+### Fixed
+- **Views, search, tags and code blocks**:
+  - a rollup over a relation that names a note gone, or one the reader
+    cannot see, counts nothing for that link, where it failed the whole
+    view;
+  - a link to a heading of the same note (`[[#Intro]]`) no longer turns
+    into a link to the tag `#Intro`;
+  - a search with a word of punctuation alone (the ` — ` of many titles,
+    `&`, `-`) no longer comes back empty;
+  - a copy of an inline value written back as "3 (`=count(…)`)" is read
+    back only where the number starts a word, and never in a code block:
+    "v2 (`=count(…)`)" lost its 2;
+  - short lowercase words of letters a to f are tags again (`#cafe`,
+    `#feed`, `#add`, `#bad`); a digit, a repeated letter, capitals or six
+    letters and more still make a color (`#fff`, `#ABC`, `#FAFAFA`,
+    `#decade`);
+  - `value: 4` in a `{field, op, value}` condition is accepted like
+    `value: 4.5`;
+  - a rollup looks the schema of its folder up once per table, not once
+    per row and rollup;
+  - a code fence closes only on a fence of the same character, at least
+    as long: a ```` block showing a ``` sample was cut in two, and a
+    heading line after the sample split sections and embeds; the same in
+    the index, the search text, `memory_todos` and the package import;
+  - an inline `=count(…)` of a database counts its rows only (`rows:`),
+    as a view and a rollup do.
+- **Git commits, the watcher, renames and project names** — two commits
+  no longer run at once (a timed one and the one at shutdown met each
+  other's lock, and the last changes were left out); a `node_modules` or
+  a hidden folder created while the server runs is no longer watched and
+  indexed; a folder moved or removed from outside takes its notes out of
+  the index at once, not at the next start; renaming `proj/a/Old` no
+  longer rewrites `[[proj/b/Old]]`, another note of the same name, and a
+  move gives a folder-qualified link the new path; a project made before
+  the stricter names (`con`, `Misc.`) can be deleted, renamed and
+  restored again, while a new project still cannot take such a name.
+- **Events in order, and trash names with `%`** — two writes at once
+  could deliver their events out of order, and `memory_wait_changes`,
+  which skips what it has seen, then missed one: publishing is now one
+  step, sequence number, replay ring and delivery. A note with `%` in its
+  name (`My%20Note.md`) came back from the trash under another name, and
+  the root note `B%2Fx.md` was taken for a note of project B; `%` is now
+  escaped in trash ids (entries trashed before keep the old reading).
+
 ## [2.71.2] — 2026-10-08 — "review fixes"
 
 The serious findings of a code review of the server and the web UI:

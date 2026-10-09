@@ -80,6 +80,33 @@ func TestFolders_ExportRefuses(t *testing.T) {
 	}
 }
 
+// A folder reached through a symlink in its path is not a vault folder:
+// neither zipped nor trashed (BUG-112, S2-3).
+func TestFolders_SymlinkInThePath(t *testing.T) {
+	f := newNotesFixture(t)
+	f.router.deps.Trash = trash.New(f.vaultRoot, -1)
+	f.seedNote(t, "Alpha/keep.md", "# keep")
+	outside := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(outside, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "sub", "x.md"), []byte("# outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(f.vaultRoot, "Alpha", "shared")); err != nil {
+		t.Fatal(err)
+	}
+	if rec := f.doAuthRecorder(http.MethodGet, "/api/v1/folders/Alpha/shared/sub/export.zip", "", nil); rec.code != http.StatusNotFound {
+		t.Errorf("zip through a symlink = %d, want 404", rec.code)
+	}
+	if rec := f.doAuthRecorder(http.MethodDelete, "/api/v1/folders/Alpha/shared/sub", "", nil); rec.code != http.StatusNotFound {
+		t.Errorf("delete through a symlink = %d, want 404", rec.code)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "sub", "x.md")); err != nil {
+		t.Errorf("the folder outside the vault moved: %v", err)
+	}
+}
+
 // A note or a folder trashed from where the state dir is now set does not
 // come back into it (BUG-098).
 func TestTrash_RestoreIntoTheStateDir(t *testing.T) {

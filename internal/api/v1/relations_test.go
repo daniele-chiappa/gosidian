@@ -182,7 +182,7 @@ func TestBase_REST(t *testing.T) {
 		t.Fatalf("GET = %d %s", r.code, r.body)
 	}
 	if note.Kind != "base" || note.Format != "markdown" || note.Source != base || note.Title != "books" ||
-		!strings.Contains(note.Content, "## Reading\n\n```view\nfrom: p/Books\nwhere:\n    - status != done\n") {
+		!strings.Contains(note.Content, "## Reading\n\n```view\nfrom: p/Books/**\nwhere:\n    - status != done\n") {
 		t.Errorf("base = %+v", note)
 	}
 	if r := f.doAuthRecorder(http.MethodPut, "/api/v1/notes/p/books.base", `{"content":"x"}`, nil); r.code < 400 {

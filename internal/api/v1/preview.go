@@ -90,7 +90,7 @@ func (r *Router) handlePreview(w http.ResponseWriter, req *http.Request) {
 		}
 		md, data = views.RenderNoteData(md, c, r.viewQuery(p))
 	}
-	html, err := r.deps.Renderer.Render(md, previewResolver{r: r, p: p})
+	html, err := r.deps.Renderer.Render(md, previewResolver{r: r, p: p, note: body.Path})
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, "render: "+err.Error())
 		return
@@ -104,6 +104,9 @@ func (r *Router) handlePreview(w http.ResponseWriter, req *http.Request) {
 type previewResolver struct {
 	r *Router
 	p authz.Principal
+	// note is the path of the note being rendered, when known: its own
+	// project's attachments come first for an `![[image]]`.
+	note string
 }
 
 // Resolve translates `[[Note Title]]` into a vault path the principal may see,
@@ -158,7 +161,12 @@ func (pr previewResolver) ResolveImage(target string) string {
 	if r.deps.Vault == nil {
 		return ""
 	}
-	if rel, ok := r.deps.Vault.ResolveAttachmentByName(target); ok {
+	prefer := ""
+	if strings.Contains(pr.note, "/") {
+		prefer = projectOf(pr.note)
+	}
+	visible := func(project string) bool { return r.canAccessProject(pr.p, project) }
+	if rel, ok := r.deps.Vault.ResolveAttachment(target, prefer, visible); ok {
 		return "/vault-files/" + rel
 	}
 	if path := pr.Resolve(target); path != "" {

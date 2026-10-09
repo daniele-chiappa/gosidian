@@ -269,3 +269,50 @@ func TestEvents_CookieLifecycle(t *testing.T) {
 		t.Errorf("logout: status=%d set-cookie=%v", lo.Code, lo.Header().Values("Set-Cookie"))
 	}
 }
+
+// A stream whose session is revoked after it opened gets no more frames and
+// ends (BUG-112, S2-1): the token was checked only at the connection.
+func TestEvents_StreamEndsWithTheSession(t *testing.T) {
+	prev := sseRecheckInterval
+	sseRecheckInterval = 0 // checked at every frame here
+	t.Cleanup(func() { sseRecheckInterval = prev })
+	srv, f := startEventsServer(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/api/v1/events?token="+f.bearer+"&topics=tree", nil)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", res.StatusCode)
+	}
+	waitSubscribers(t, f.router.deps.Events, 1)
+	if err := f.spaTokens.Revoke(f.bearer); err != nil {
+		t.Fatal(err)
+	}
+	f.router.deps.Events.Publish(events.TopicTree, map[string]string{"action": "create", "path": "secret/x.md"})
+
+	done := make(chan string, 1)
+	go func() {
+		var b strings.Builder
+		reader := bufio.NewReader(res.Body)
+		for {
+			line, err := reader.ReadString('\n')
+			b.WriteString(line)
+			if err != nil {
+				done <- b.String()
+				return
+			}
+		}
+	}()
+	select {
+	case body := <-done:
+		if strings.Contains(body, "secret/x.md") {
+			t.Errorf("a revoked session still received a frame: %q", body)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("the stream stayed open after the session was revoked")
+	}
+}

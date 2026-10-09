@@ -57,6 +57,8 @@ func TestEvents_FiltersFramesByPrincipal(t *testing.T) {
 	srv, f := startEventsServer(t)
 
 	// One public project; everything else is private. A guest reads public only.
+	f.seedNote(t, "Open/y.md", "# y")
+	f.seedNote(t, "Secret/x.md", "# x")
 	if err := f.projects.Set("Open", projects.Flags{Visibility: projects.VisibilityPublic}); err != nil {
 		t.Fatal(err)
 	}
@@ -146,5 +148,57 @@ func TestEvents_OwnerReceivesEverything(t *testing.T) {
 	}
 	if frame := readSSEFrame(t, reader, 2*time.Second); !strings.Contains(frame, "Secret/x.md") {
 		t.Fatalf("owner must receive private frames, got %q", frame)
+	}
+}
+
+// A frame about a project that is gone, deleted or renamed away, has no
+// access entry left to judge it by: a member gets it without its names, and
+// a rename into a project it cannot see is not delivered (BUG-112, S2-5).
+func TestEvents_GoneProjectsAreNameless(t *testing.T) {
+	srv, f := startEventsServer(t)
+	f.seedNote(t, "Team/a.md", "# a")
+	f.seedNote(t, "Hidden/b.md", "# b")
+	if err := f.projects.Set("Team", projects.Flags{Visibility: projects.VisibilityInternal}); err != nil {
+		t.Fatal(err)
+	}
+	m, bearer := f.memberUser(t, "mo")
+	if err := f.webauth.SetRestricted(m.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+"/api/v1/events?token="+bearer+"&topics=tree,sidebar", nil)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	reader := bufio.NewReader(res.Body)
+	for i := 0; i < 2; i++ {
+		if _, _, err := reader.ReadLine(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hub := f.router.deps.Events
+	waitSubscribers(t, hub, 1)
+	go func() {
+		hub.Publish(events.TopicSidebar, map[string]string{"action": "delete", "project": "Gone-Private"})
+		hub.Publish(events.TopicTree, map[string]string{"action": "rename", "path": "Team/a.md", "to": "Hidden/a.md"})
+		hub.Publish(events.TopicTree, map[string]string{"action": "create", "path": "Hidden/b.md"})
+		hub.Publish(events.TopicTree, map[string]string{"action": "create", "path": "Team/c.md"})
+	}()
+	first := readSSEFrame(t, reader, 2*time.Second)
+	if strings.Contains(first, "Gone-Private") || !strings.Contains(first, `"action":"delete"`) {
+		t.Errorf("the delete of a gone project = %q, want it without its name", first)
+	}
+	// A move into a project the member cannot see: the frame says the note
+	// left Team, not where it went; the frame about Hidden is withheld.
+	second := readSSEFrame(t, reader, 2*time.Second)
+	if strings.Contains(second, "Hidden") || !strings.Contains(second, "Team/a.md") {
+		t.Errorf("the move = %q, want it without its target", second)
+	}
+	third := readSSEFrame(t, reader, 2*time.Second)
+	if strings.Contains(third, "Hidden") || !strings.Contains(third, "Team/c.md") {
+		t.Errorf("after the move = %q, want the Team frame", third)
 	}
 }

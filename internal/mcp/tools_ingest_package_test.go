@@ -10,9 +10,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/gosidian/gosidian/internal/index"
+	"github.com/gosidian/gosidian/internal/server/events"
 )
 
 // stagePackage writes a package folder in a fresh bridge dir of s.
@@ -169,5 +171,51 @@ func TestIngestPackage_ZipViaTicket(t *testing.T) {
 	}
 	if !strings.Contains(string(idx.Content), "[[proj/docs/zipped/a|a]]") {
 		t.Errorf("INDEX:\n%s", idx.Content)
+	}
+}
+
+// A package that overwrites notes goes through the shrink guard of
+// memory_update, and every note it writes sends its note event with the
+// new ETag, so an open editor learns it changed (BUG-113, S3-5).
+func TestIngestPackage_OverwriteGuardAndEvents(t *testing.T) {
+	s, ctx := newScopedServer(t, "", []string{auth.ScopeRead, auth.ScopeWrite})
+	big := "# Big\n\n" + strings.Repeat("a line of a note that matters\n", 200)
+	if err := s.vault.Save("proj/imp/big.md", []byte(big)); err != nil {
+		t.Fatal(err)
+	}
+	hub := events.New(events.HubOptions{BufLen: 64})
+	s.SetEvents(hub)
+	sub := hub.Subscribe(events.TopicNote)
+	defer sub.Unsubscribe()
+
+	stagePackage(t, s, "pkg", map[string]string{"big.md": "x", "new.md": "# New"})
+	res, _ := s.handleIngest(ctx, call(map[string]any{"project": "proj", "as": "package", "bridge_filename": "pkg", "dest": "proj/imp", "overwrite": true}))
+	if !res.IsError || !strings.Contains(toolErrorText(res), "shrink") {
+		t.Fatalf("an emptying overwrite: want a refusal, got %+v", res)
+	}
+	if n, _ := s.vault.Load("proj/imp/big.md"); string(n.Content) != big {
+		t.Fatal("the note was emptied")
+	}
+	if s.vault.Exists("proj/imp/new.md") {
+		t.Fatal("a refused package wrote a note")
+	}
+
+	out := packageOut(t, s, ctx, map[string]any{"project": "proj", "as": "package", "bridge_filename": "pkg", "dest": "proj/imp", "overwrite": true, "allow_shrink": true})
+	if out["kind"] != "package" {
+		t.Fatalf("with allow_shrink: %v", out)
+	}
+	seen := map[string]string{}
+	for len(seen) < 2 {
+		select {
+		case ev := <-sub.Ch:
+			var p struct{ Action, Path, Etag string }
+			_ = json.Unmarshal(ev.Data, &p)
+			seen[p.Path] = p.Action + ":" + p.Etag
+		case <-time.After(time.Second):
+			t.Fatalf("note events = %v, want one per note", seen)
+		}
+	}
+	if !strings.HasPrefix(seen["proj/imp/big.md"], "update:") || !strings.HasPrefix(seen["proj/imp/new.md"], "create:") || strings.HasSuffix(seen["proj/imp/big.md"], ":") {
+		t.Errorf("note events = %v", seen)
 	}
 }

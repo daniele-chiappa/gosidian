@@ -39,6 +39,12 @@ func ProvisionPersonalProject(v *vault.Vault, ps *projects.Store, tokens *auth.S
 	if !force && !ps.PersonalProjectsEnabled() {
 		return "", nil
 	}
+	// An account named like a project the configuration keeps for itself
+	// would be admin of it: of everyone's insights, or of the global
+	// projects, created later (BUG-111, S1-3).
+	if ps.Reserved(u.Username) {
+		return "", fmt.Errorf("create project %q: the name is reserved by the server configuration", u.Username)
+	}
 	name, err := projectops.Create(v, ps, tokens, u.Username, projects.VisibilityPrivate, u.ID)
 	if err != nil {
 		return "", fmt.Errorf("create project %q: %w", u.Username, err)
@@ -83,6 +89,9 @@ func (r *Router) reclaimPersonalProject(req *http.Request, actor *RequestUser, a
 		return "", "", ""
 	}
 	name := u.Username
+	if ps.Reserved(name) {
+		return "", "", fmt.Sprintf("no personal project: the name %q is reserved by the server configuration", name)
+	}
 	if r.projectExists(name) {
 		why := r.personalProjectKept(archived, name)
 		var err error

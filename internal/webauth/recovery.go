@@ -137,6 +137,7 @@ func (s *Store) EnrollTOTP(userID, secret string) ([]string, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.reloadLocked()
 	for i := range s.file.Users {
 		if s.file.Users[i].ID == userID {
 			if s.file.Users[i].TOTPSec != "" {
@@ -163,6 +164,7 @@ func (s *Store) GenerateRecoveryCodes(userID string) ([]string, error) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.reloadLocked()
 	for i := range s.file.Users {
 		if s.file.Users[i].ID != userID {
 			continue
@@ -187,6 +189,7 @@ func (s *Store) GenerateRecoveryCodes(userID string) ([]string, error) {
 func (s *Store) ResetTOTP(userID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.reloadLocked()
 	for i := range s.file.Users {
 		if s.file.Users[i].ID == userID {
 			s.file.Users[i].TOTPSec = ""
@@ -233,6 +236,7 @@ func (s *Store) consumeRecoveryCode(userID, norm string) (bool, error) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.reloadLocked()
 	for i := range s.file.Users {
 		u := &s.file.Users[i]
 		if u.ID != userID {

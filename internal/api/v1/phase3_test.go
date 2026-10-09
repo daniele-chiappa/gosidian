@@ -74,6 +74,31 @@ func TestRestrictedAccount_SeesGrantsOnly(t *testing.T) {
 	}
 }
 
+// An account named like a project the configuration keeps for itself gets
+// no personal project: it would be admin of everyone's insights, or of a
+// global project switched on later (BUG-111, S1-3).
+func TestPersonalProject_ReservedName(t *testing.T) {
+	f := newAdminFixture(t)
+	f.wirePersonalProjects()
+	f.projects.SetReservedNames("insights", "global", "global-private")
+	for _, name := range []string{"insights", "Global"} {
+		rec := f.doAuthRecorder(http.MethodPost, "/api/v1/admin/users", `{"username":"`+name+`","password":"reserved-pass-1234"}`, nil)
+		if rec.code != http.StatusCreated {
+			t.Fatalf("create %s = %d (%s)", name, rec.code, rec.body)
+		}
+		u, _ := f.webauth.UserByID(jsonField(t, rec.body, "id"))
+		if f.router.projectExists(name) {
+			t.Errorf("%s: a personal project was created on a reserved name", name)
+		}
+		if _, ok := f.projects.MemberLevel(name, u.ID); ok {
+			t.Errorf("%s: the account got a grant on a reserved name", name)
+		}
+		if rec := f.doAuthRecorder(http.MethodPost, "/api/v1/admin/users/"+u.ID+"/personal-project", "", nil); rec.code != http.StatusConflict {
+			t.Errorf("%s: manual provisioning on a reserved name = %d want 409", name, rec.code)
+		}
+	}
+}
+
 // Creating an account provisions its personal project: private, admin
 // grant, reported everywhere; collisions and the setting are respected.
 func TestPersonalProject_Provisioning(t *testing.T) {

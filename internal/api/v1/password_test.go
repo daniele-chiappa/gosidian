@@ -4,10 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/gosidian/gosidian/internal/audit"
+	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/gosidian/gosidian/internal/webauth"
 )
 
@@ -100,6 +102,15 @@ func TestConfirmPassword_Limiter(t *testing.T) {
 func TestAdminResetPassword_AndGate(t *testing.T) {
 	f := newNotesFixture(t)
 	u, bearer := f.memberUser(t, "nico")
+	mcp, err := auth.Open(filepath.Join(t.TempDir(), "tokens.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.router.deps.Auth.MCPTokens = mcp
+	grant, err := mcp.CreateGrant("connector", nil, []string{auth.ScopeRead}, 0, u.ID, "gsc_client")
+	if err != nil {
+		t.Fatal(err)
+	}
 	url := "/api/v1/admin/users/" + u.ID + "/password"
 	if rec := f.doAuthRecorder(http.MethodPost, url, `{"password":"temp-pass-1234","owner_password":"wrong"}`, nil); rec.code != http.StatusForbidden {
 		t.Errorf("wrong owner password = %d", rec.code)
@@ -114,6 +125,10 @@ func TestAdminResetPassword_AndGate(t *testing.T) {
 	if _, err := f.spaTokens.Validate(bearer); err == nil {
 		t.Error("the account's session is still open after the reset")
 	}
+	// Its OAuth grants close too (BUG-111, S1-9).
+	if _, ok := mcp.ByID(grant.ID); ok || !strings.Contains(rec.body, `"grants_closed":1`) {
+		t.Errorf("the OAuth grant survived the reset: %s", rec.body)
+	}
 
 	// The next login says so, and every route but the change is refused.
 	w := f.request(http.MethodPost, "/api/v1/login", `{"username":"nico","password":"temp-pass-1234"}`, nil)
@@ -124,6 +139,15 @@ func TestAdminResetPassword_AndGate(t *testing.T) {
 	hdr := bearerHdr(tok)
 	if rec := f.request(http.MethodGet, "/api/v1/tree", "", hdr); rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), CodeAuthPasswordChangeRequired) {
 		t.Errorf("gated route = %d %s", rec.Code, rec.Body.String())
+	}
+	// Attachments too, with the cookie or the header (BUG-111, S1-11).
+	gate := f.router.VaultFileAuthorizer()
+	const att = "nico/attachments/a.png"
+	if got := gate(vfReq(att, tok, ""), att); got != http.StatusUnauthorized {
+		t.Errorf("vault-files with the temporary password (bearer) = %d, want 401", got)
+	}
+	if got := gate(vfReq(att, "", tok), att); got != http.StatusUnauthorized {
+		t.Errorf("vault-files with the temporary password (cookie) = %d, want 401", got)
 	}
 	if rec := f.request(http.MethodGet, "/api/v1/me", "", hdr); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"password_change_required":true`) {
 		t.Errorf("me = %d %s", rec.Code, rec.Body.String())

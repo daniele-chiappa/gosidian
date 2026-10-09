@@ -111,7 +111,10 @@ func (i *Index) matchExpr(q string) string {
 	var parts []string
 	for _, t := range strings.Fields(q) {
 		t = strings.ReplaceAll(t, `"`, ``)
-		if t == "" {
+		// A word of punctuation alone (the " — " of most titles, "&", "-")
+		// is no term to the tokenizer, and ANDed in it matched nothing:
+		// the whole search came back empty (BUG-114, S4-3).
+		if !strings.ContainsFunc(t, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsNumber(r) }) {
 			continue
 		}
 		part := `"` + t + `"*`

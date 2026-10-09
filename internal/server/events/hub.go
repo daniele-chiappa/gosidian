@@ -97,6 +97,12 @@ type Hub struct {
 	ringMu  sync.Mutex
 	ring    []Event
 	ringCap int
+	// pubMu makes a publish one step: the sequence number, the ring and the
+	// delivery to the subscribers, so every subscriber gets the events in
+	// sequence order. Taken apart, two concurrent writes could deliver 6
+	// before 5, and a long-poll waiter, which skips what it has seen
+	// (Seq <= last), lost 5 (BUG-112, S2-2). Delivery never blocks.
+	pubMu sync.Mutex
 }
 
 // HubOptions configure a hub. BufLen is the per-subscriber channel
@@ -173,6 +179,8 @@ func (h *Hub) Publish(topic Topic, data any) {
 		h.logger.Warn("events: marshal failed", "topic", topic, "err", err)
 		return
 	}
+	h.pubMu.Lock()
+	defer h.pubMu.Unlock()
 	n := h.seq.Add(1)
 	ev := Event{
 		ID:    fmt.Sprintf("%d", n),

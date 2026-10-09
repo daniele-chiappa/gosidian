@@ -45,7 +45,7 @@ func (s *Server) registerIngestTool() {
 		mcp.WithString("caption", mcp.Description("Table/media notes: markdown body describing the content — the searchable text. Strongly recommended.")),
 		mcp.WithBoolean("overwrite", mcp.Description("Note kind and package: replace the notes that already exist. Default false (fail on existing).")),
 		mcp.WithString("if_match", mcp.Description("Note kind only, with overwrite: etag from a previous memory_get — the replace fails if the note changed since you read it.")),
-		mcp.WithBoolean("allow_shrink", mcp.Description("Note kind only, with overwrite: confirm a content much shorter than the note it replaces. Default false: as for memory_update, the shrink guard refuses a content that would empty the note.")),
+		mcp.WithBoolean("allow_shrink", mcp.Description("With overwrite, for a note or the notes of a package: confirm a content much shorter than the note it replaces. Default false: as for memory_update, the shrink guard refuses a content that would empty the note (a package is then not imported at all).")),
 	), s.handleIngest)
 }
 
@@ -405,7 +405,7 @@ func (s *Server) ingestRaw(ctx context.Context, in ingestIntent, data []byte) (*
 		if err != nil {
 			return mcp.NewToolResultError("package: " + err.Error()), nil
 		}
-		return s.importPackage(ctx, packageIntent{Project: in.Project, Dest: in.Dest, DryRun: in.DryRun, Overwrite: in.Overwrite}, entries, skipped, true)
+		return s.importPackage(ctx, packageIntent{Project: in.Project, Dest: in.Dest, DryRun: in.DryRun, Overwrite: in.Overwrite, AllowShrink: in.AllowShrink}, entries, skipped, true)
 	}
 	if strings.TrimSpace(in.Filename) == "" {
 		return mcp.NewToolResultError("cannot route: missing filename (pass filename with an extension)"), nil

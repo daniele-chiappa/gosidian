@@ -117,18 +117,57 @@ func (cs *clientStore) save() error {
 
 var errTooManyClients = errors.New("too many registered clients")
 
-// add stores c, evicting idle clients when the cap is reached.
-func (cs *clientStore) add(c *Client, now time.Time) error {
+// add stores c. At the cap it evicts the idle clients, then, when none is
+// idle, the one used least recently among those without a live grant:
+// registration is open to anyone, and refusing at the cap let one address
+// fill the registry in hours and lock every new connector out until the
+// clients aged (BUG-111, S1-7). A connector someone authorized holds a
+// grant and is never evicted for a flood of registrations, which hold
+// none; with every client holding one, the registration is refused.
+// granted lists the clients with a live grant; it runs only at the cap.
+func (cs *clientStore) add(c *Client, now time.Time, granted func() map[string]bool) error {
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 	if len(cs.clients) >= cs.max {
 		cs.evictIdle(now)
 	}
 	if len(cs.clients) >= cs.max {
-		return errTooManyClients
+		var keep map[string]bool
+		if granted != nil {
+			keep = granted()
+		}
+		for len(cs.clients) >= cs.max {
+			if !cs.evictLeastRecent(keep) {
+				return errTooManyClients
+			}
+		}
 	}
 	cs.clients[c.ID] = c
 	return cs.save()
+}
+
+// evictLeastRecent drops the client whose last use (or creation) is the
+// oldest, keep aside; false when every client is kept.
+func (cs *clientStore) evictLeastRecent(keep map[string]bool) bool {
+	var oldest string
+	var at time.Time
+	for id, c := range cs.clients {
+		if keep[id] {
+			continue
+		}
+		last := c.LastUsed
+		if last.IsZero() {
+			last = c.CreatedAt
+		}
+		if oldest == "" || last.Before(at) {
+			oldest, at = id, last
+		}
+	}
+	if oldest == "" {
+		return false
+	}
+	delete(cs.clients, oldest)
+	return true
 }
 
 // evictIdle drops clients whose last use (or creation) is older than idleTTL.
@@ -167,6 +206,17 @@ func (cs *clientStore) touch(id string, now time.Time) {
 	}
 }
 
+// grantedClients lists the clients that hold a live grant.
+func (s *Server) grantedClients() map[string]bool {
+	out := map[string]bool{}
+	for _, t := range s.tokens.List() {
+		if t.IsOAuthGrant() && !t.Expired() && t.ClientID != "" {
+			out[t.ClientID] = true
+		}
+	}
+	return out
+}
+
 // ---- Dynamic Client Registration (RFC 7591) ----
 
 type registrationRequest struct {
@@ -197,7 +247,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := s.now()
-	if !s.limiter.Allow("register:"+s.cfg.ClientIP(r), now) {
+	if !s.limiter.Allow("register:"+s.limitKey(r), now) {
 		writeOAuthError(w, http.StatusTooManyRequests, "invalid_request", "too many registrations from this address, retry later")
 		return
 	}
@@ -249,7 +299,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c := &Client{ID: id, Name: name, RedirectURIs: append([]string(nil), req.RedirectURIs...), CreatedAt: now.UTC()}
-	if err := s.clients.add(c, now); err != nil {
+	if err := s.clients.add(c, now, s.grantedClients); err != nil {
 		if errors.Is(err, errTooManyClients) {
 			writeOAuthError(w, http.StatusServiceUnavailable, "server_error", "client registry is full")
 			return

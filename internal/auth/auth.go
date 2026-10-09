@@ -530,6 +530,37 @@ func (s *Store) SetRefresh(id, refreshHash string, expiresAt time.Time) error {
 	return fmt.Errorf("token %q not found", id)
 }
 
+// ErrRefreshRotated is returned by RotateRefresh when the grant's refresh
+// token is no longer the one presented: another request rotated it first.
+var ErrRefreshRotated = errors.New("refresh token already rotated")
+
+// RotateRefresh replaces the grant's refresh token hash oldHash with newHash,
+// only while oldHash is still the current one (BUG-111, S1-8: two refreshes
+// with one token both passed), and puts the previous values back when the
+// save fails, so the token presented stays good for a retry (S1-6).
+func (s *Store) RotateRefresh(id, oldHash, newHash string, expiresAt time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reloadIfStale()
+	for i := range s.tokens {
+		t := &s.tokens[i]
+		if t.ID != id {
+			continue
+		}
+		if subtle.ConstantTimeCompare([]byte(t.RefreshHash), []byte(oldHash)) != 1 {
+			return ErrRefreshRotated
+		}
+		prevHash, prevExp := t.RefreshHash, t.RefreshExpiresAt
+		t.RefreshHash, t.RefreshExpiresAt = newHash, expiresAt
+		if err := s.save(); err != nil {
+			t.RefreshHash, t.RefreshExpiresAt = prevHash, prevExp
+			return err
+		}
+		return nil
+	}
+	return fmt.Errorf("token %q not found", id)
+}
+
 // Revoke deletes a token identified by its ID prefix (first 8 hex of hash).
 func (s *Store) Revoke(id string) error {
 	s.mu.Lock()

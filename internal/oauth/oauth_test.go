@@ -5,12 +5,14 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -155,19 +157,89 @@ func TestRegisterValidation(t *testing.T) {
 }
 
 func TestRegisterCapEvictsIdle(t *testing.T) {
-	s, _ := newTestServer(t)
+	s, tokens := newTestServer(t)
 	s.clients.max = 2
 	s.clients.idleTTL = time.Hour
 	h := s.Handler()
 	base := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
 	s.now = func() time.Time { return base }
-	register(t, h, "https://a.example/cb")
-	register(t, h, "https://b.example/cb")
-	if rec := do(h, http.MethodPost, PathRegister, "application/json", `{"redirect_uris":["https://c.example/cb"]}`); rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("at cap with nothing idle: %d", rec.Code)
+	a := register(t, h, "https://a.example/cb")
+	s.now = func() time.Time { return base.Add(time.Minute) }
+	b := register(t, h, "https://b.example/cb")
+	// At the cap with nothing idle the least recent goes: refusing let
+	// anyone lock new connectors out (BUG-111, S1-7).
+	s.now = func() time.Time { return base.Add(2 * time.Minute) }
+	c := register(t, h, "https://c.example/cb")
+	if _, ok := s.clients.get(a); ok {
+		t.Error("the least recently used client was kept")
 	}
-	s.now = func() time.Time { return base.Add(2 * time.Hour) }
-	register(t, h, "https://c.example/cb") // idle ones evicted
+	if _, ok := s.clients.get(b); !ok {
+		t.Error("a more recent client was evicted")
+	}
+	s.now = func() time.Time { return base.Add(3 * time.Hour) }
+	d := register(t, h, "https://d.example/cb") // idle ones evicted
+	if _, ok := s.clients.get(c); ok {
+		t.Error("an idle client was kept")
+	}
+	// A client someone authorized holds a grant: never evicted, and with
+	// every client holding one the registration is refused.
+	s.now = func() time.Time { return base.Add(3*time.Hour + time.Minute) }
+	e := register(t, h, "https://e.example/cb")
+	for _, id := range []string{d, e} {
+		if _, err := tokens.CreateGrant("g-"+id, []string{"p"}, []string{"read"}, 0, "u1", id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if rec := do(h, http.MethodPost, PathRegister, "application/json", `{"redirect_uris":["https://f.example/cb"]}`); rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("at the cap with every client granted: %d, want 503", rec.Code)
+	}
+	if _, ok := s.clients.get(d); !ok {
+		t.Error("a client with a grant was evicted")
+	}
+}
+
+// Pending authorizations at the cap make room by dropping the oldest of the
+// address with the most, so a flood evicts its own and not a consent in
+// progress; the rate limits count an IPv6 /64 as one address (S1-7).
+func TestPendingCapAndIPv6Limit(t *testing.T) {
+	s, _ := newTestServer(t)
+	h := s.Handler()
+	clientID := register(t, h, "https://claude.ai/api/mcp/auth_callback")
+	_, challenge := pkce(t)
+	base := time.Now()
+	s.mu.Lock()
+	for i := 0; i < maxPendingRequests; i++ {
+		id, from := fmt.Sprintf("old-%d", i), "198.51.100.9"
+		if i == 0 {
+			from = "203.0.113.5" // a user mid-consent, the oldest of all
+		}
+		s.pending[id] = &pendingRequest{ID: id, Created: base.Add(time.Duration(i) * time.Millisecond), Expires: base.Add(time.Hour), From: from}
+	}
+	s.mu.Unlock()
+	authorize(t, h, url.Values{"response_type": {"code"}, "client_id": {clientID}, "redirect_uri": {"https://claude.ai/api/mcp/auth_callback"}, "code_challenge": {challenge}, "code_challenge_method": {"S256"}})
+	s.mu.Lock()
+	_, first := s.pending["old-0"]
+	_, second := s.pending["old-1"]
+	n := len(s.pending)
+	s.mu.Unlock()
+	if !first || second || n != maxPendingRequests {
+		t.Errorf("after an authorize at the cap: the user's old-0 kept=%v, the flood's old-1 kept=%v, %d pending", first, second, n)
+	}
+
+	req := func(addr string) *http.Request {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.RemoteAddr = addr
+		return r
+	}
+	if a, b := s.limitKey(req("[2001:db8:1:2::1]:4000")), s.limitKey(req("[2001:db8:1:2:ffff::9]:4001")); a != b {
+		t.Errorf("one /64 counts as two addresses: %q, %q", a, b)
+	}
+	if a, b := s.limitKey(req("[2001:db8:1:2::1]:4000")), s.limitKey(req("[2001:db8:1:3::1]:4000")); a == b {
+		t.Errorf("two /64 count as one: %q", a)
+	}
+	if got := s.limitKey(req("192.0.2.7:5000")); got != "192.0.2.7" {
+		t.Errorf("IPv4 key = %q", got)
+	}
 }
 
 func TestFullFlowAndRotation(t *testing.T) {
@@ -267,6 +339,93 @@ func TestFullFlowAndRotation(t *testing.T) {
 	}
 	if status, _ := tokenRequest(t, h, url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refresh2}, "client_id": {clientID}}); status != 400 {
 		t.Errorf("refresh after revocation: %d", status)
+	}
+}
+
+// grantWithRefresh runs a consent and the code exchange, and returns the
+// client id and the refresh token.
+func grantWithRefresh(t *testing.T, s *Server, h http.Handler) (string, string) {
+	t.Helper()
+	const cb = "https://claude.ai/api/mcp/auth_callback"
+	clientID := register(t, h, cb)
+	verifier, challenge := pkce(t)
+	reqID := authorize(t, h, url.Values{"response_type": {"code"}, "client_id": {clientID}, "redirect_uri": {cb}, "code_challenge": {challenge}, "code_challenge_method": {"S256"}})
+	redirect, err := s.Approve(reqID, "u1", "alice", []string{"proj"}, []string{"read"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ru, _ := url.Parse(redirect)
+	status, body := tokenRequest(t, h, url.Values{"grant_type": {"authorization_code"}, "code": {ru.Query().Get("code")}, "code_verifier": {verifier}, "client_id": {clientID}, "redirect_uri": {cb}})
+	if status != 200 {
+		t.Fatalf("exchange: %d %v", status, body)
+	}
+	refresh, _ := body["refresh_token"].(string)
+	return clientID, refresh
+}
+
+// A refresh that fails on the server's side (here the cap on live access
+// tokens) rotates nothing: the client retries with the same token, and that
+// is not taken for a reuse (BUG-111, S1-6).
+func TestRefreshFailureKeepsTheToken(t *testing.T) {
+	s, tokens := newTestServer(t)
+	h := s.Handler()
+	clientID, refresh := grantWithRefresh(t, s, h)
+	later := time.Now().Add(time.Hour)
+	s.mu.Lock()
+	for i := len(s.access); i < maxAccessEntries; i++ {
+		s.access[fmt.Sprintf("filler-%d", i)] = accessEntry{tokenID: "x", exp: later}
+	}
+	s.mu.Unlock()
+	form := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refresh}, "client_id": {clientID}}
+	if status, body := tokenRequest(t, h, form); status != http.StatusInternalServerError {
+		t.Fatalf("refresh at the cap: %d %v", status, body)
+	}
+	s.mu.Lock()
+	for k := range s.access {
+		if strings.HasPrefix(k, "filler-") {
+			delete(s.access, k)
+		}
+	}
+	s.mu.Unlock()
+	if status, body := tokenRequest(t, h, form); status != 200 {
+		t.Fatalf("retry with the same token: %d %v", status, body)
+	}
+	if len(tokens.List()) != 1 {
+		t.Error("the retry revoked the grant")
+	}
+}
+
+// One refresh token presented by several requests at once: at most one gets
+// new tokens, and the reuse revokes the grant, whatever the interleaving
+// (BUG-111, S1-8).
+func TestConcurrentRefreshIsAReuse(t *testing.T) {
+	s, tokens := newTestServer(t)
+	h := s.Handler()
+	clientID, refresh := grantWithRefresh(t, s, h)
+	form := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {refresh}, "client_id": {clientID}}
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	ok := 0
+	start := make(chan struct{})
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			if status, _ := tokenRequest(t, h, form); status == 200 {
+				mu.Lock()
+				ok++
+				mu.Unlock()
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if ok > 1 {
+		t.Errorf("%d refreshes with the same token succeeded", ok)
+	}
+	if len(tokens.List()) != 0 {
+		t.Error("the grant survived a refresh token used several times")
 	}
 }
 
@@ -386,6 +545,32 @@ func TestCIMDClientAndLoopbackRedirect(t *testing.T) {
 	if rec := do(h, http.MethodGet, PathAuthorize+"?client_id=https://evil.example/meta.json&redirect_uri=https://a/cb&response_type=code", "", ""); rec.Code != 400 {
 		t.Errorf("mismatched client_id accepted: %d", rec.Code)
 	}
+}
+
+// allowed_redirect_hosts holds for a client metadata document and for a
+// client registered before the list was set: both were checked only by the
+// package's rules (BUG-111, S1-5).
+func TestAllowedRedirectHostsAtAuthorize(t *testing.T) {
+	s, _ := newTestServer(t)
+	h := s.Handler()
+	_, challenge := pkce(t)
+	early := register(t, h, "https://elsewhere.example.org/cb")
+	docURL := "https://client.example.org/meta.json"
+	s.cimd.fetch = func(_ context.Context, u string) ([]byte, http.Header, error) {
+		return []byte(`{"client_id":"` + docURL + `","redirect_uris":["https://evil.example.org/cb","http://localhost/cb"]}`), nil, nil
+	}
+	s.cfg.AllowedRedirectHosts = []string{"good.example.org"}
+	for _, c := range []struct{ client, redirect string }{
+		{early, "https://elsewhere.example.org/cb"},
+		{docURL, "https://evil.example.org/cb"},
+	} {
+		q := url.Values{"response_type": {"code"}, "client_id": {c.client}, "redirect_uri": {c.redirect}, "code_challenge": {challenge}, "code_challenge_method": {"S256"}}
+		if rec := do(h, http.MethodGet, PathAuthorize+"?"+q.Encode(), "", ""); rec.Code != http.StatusBadRequest {
+			t.Errorf("%s → %s = %d, want 400", c.client, c.redirect, rec.Code)
+		}
+	}
+	// Loopback stays allowed, as at registration.
+	authorize(t, h, url.Values{"response_type": {"code"}, "client_id": {docURL}, "redirect_uri": {"http://localhost:5000/cb"}, "code_challenge": {challenge}, "code_challenge_method": {"S256"}})
 }
 
 func TestSSRFGuard(t *testing.T) {

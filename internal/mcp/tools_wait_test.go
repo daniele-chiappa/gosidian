@@ -140,3 +140,28 @@ func TestMCP_WaitChangesOneWaiterPerSession(t *testing.T) {
 	}
 	<-done
 }
+
+// A client without an MCP session gets a fresh correlation id per message:
+// the guard holds per token for it, not per message (BUG-113, S3-6).
+func TestMCP_WaitChangesOneWaiterSessionless(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	s.SetEvents(events.New(events.HubOptions{}))
+	first := context.WithValue(context.Background(), correlationCtxKey, "msg-1")
+	second := context.WithValue(context.Background(), correlationCtxKey, "msg-2")
+
+	started := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		close(started)
+		_, _ = s.handleWaitChanges(first, call(map[string]any{"timeout_s": 2}))
+	}()
+	<-started
+	time.Sleep(100 * time.Millisecond) // readiness, as above
+
+	res, _ := s.handleWaitChanges(second, call(map[string]any{"timeout_s": 1}))
+	if msg := expectError(t, res); !strings.Contains(msg, "already in flight") {
+		t.Fatalf("second sessionless waiter error = %q", msg)
+	}
+	<-done
+}

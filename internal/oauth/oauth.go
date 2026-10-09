@@ -263,6 +263,17 @@ func hashHex(s string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// limitKey is the address the rate limits count against: the client IP,
+// an IPv6 one cut to its /64, which one host gets whole and could otherwise
+// rotate through for a fresh budget at every request (S1-7).
+func (s *Server) limitKey(r *http.Request) string {
+	ip := s.cfg.ClientIP(r)
+	if a := net.ParseIP(ip); a != nil && a.To4() == nil {
+		return a.Mask(net.CIDRMask(64, 128)).String() + "/64"
+	}
+	return ip
+}
+
 func remoteIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {

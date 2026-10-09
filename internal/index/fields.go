@@ -251,7 +251,8 @@ type QueryOptions struct {
 	Projects []string
 	Exclude  []string
 	// Folders, when set, keeps only notes directly inside one of these
-	// vault-relative folders, the rows of a database note (IMP-127).
+	// vault-relative folders, the rows of a database note (IMP-127); a
+	// folder written "f/**" takes the notes of every folder under it too.
 	Folders []string
 	// Paths, when set, keeps only these notes.
 	Paths []string
@@ -385,7 +386,13 @@ func (i *Index) Query(opts QueryOptions) ([]QueryHit, int, error) {
 	if len(opts.Folders) > 0 {
 		ors := make([]string, 0, len(opts.Folders))
 		for _, f := range opts.Folders {
-			in := likeUnder(strings.Trim(f, "/"))
+			f = strings.Trim(f, "/")
+			if base, ok := strings.CutSuffix(f, "/**"); ok {
+				ors = append(ors, `n.path LIKE ? ESCAPE '\'`)
+				args = append(args, likeUnder(base))
+				continue
+			}
+			in := likeUnder(f)
 			ors = append(ors, `(n.path LIKE ? ESCAPE '\' AND n.path NOT LIKE ? ESCAPE '\')`)
 			args = append(args, in, in+"/%")
 		}
@@ -859,6 +866,14 @@ func scalarString(v any) (string, error) {
 		return x, nil
 	case float64:
 		return strconv.FormatFloat(x, 'f', -1, 64), nil
+	// A view's YAML gives int for value: 4, where JSON gives float64: it
+	// was refused, and value: 4.5 was not (BUG-114, S4-6).
+	case int:
+		return strconv.Itoa(x), nil
+	case int64:
+		return strconv.FormatInt(x, 10), nil
+	case uint64:
+		return strconv.FormatUint(x, 10), nil
 	case bool:
 		return strconv.FormatBool(x), nil
 	}

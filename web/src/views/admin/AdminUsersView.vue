@@ -461,8 +461,10 @@ onMounted(load)
               </select>
               <span v-else class="text-xs text-text-muted">{{ u.totp_policy || 'inherit' }}</span>
               <span v-if="u.totp_enrolled" class="text-xs text-success" title="TOTP enrolled">●</span>
+              <!-- The owner's own two-factor comes off from Settings, with
+                   the password: the server refuses it here. -->
               <button
-                v-if="u.totp_enrolled && !u.disabled_at"
+                v-if="u.totp_enrolled && !u.disabled_at && u.role !== 'owner'"
                 type="button"
                 class="text-xs px-2 py-0.5 rounded text-warning hover:bg-surface-hover"
                 title="Clear the secret and recovery codes (lost authenticator)"

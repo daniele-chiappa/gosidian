@@ -10,6 +10,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/gosidian/gosidian/internal/index"
+	"github.com/gosidian/gosidian/internal/parser"
 )
 
 // Values in the text (IMP-127 iteration 2, Q6): an inline code span
@@ -36,15 +39,16 @@ var (
 	valueRe = regexp.MustCompile("`=count\\(([^`]*)\\)`")
 	// valueCopyRe is the form an agent reads, "3 (`=count(…)`)" or
 	// "⚠️ count: <reason> (`=count(…)`)", copied back into a note by
-	// mistake: it stands for the code span alone.
-	valueCopyRe = regexp.MustCompile("(?:-?\\d+|⚠️ count: [^\\n]*?) \\((`=count\\([^`]*\\)`)\\)")
+	// mistake: it stands for the code span alone. The number starts a
+	// word: "v2 (`=count(…)`)" is the text v2 followed by a value, and
+	// lost its 2 to the result (BUG-114, S4-4).
+	valueCopyRe = regexp.MustCompile("(^|[^\\p{L}\\p{N}_.])(?:-?\\d+|⚠️ count: [^\\n]*?) \\((`=count\\([^`]*\\)`)\\)")
 )
 
-// FindValues returns the inline values of body, in order, outside fenced
-// code blocks (a sample of the syntax in a code block stays as written).
-func FindValues(body []byte) []Value {
-	var out []Value
-	var fence string
+// forLines calls fn for each line of body with its offset, and whether it
+// is code: a fence line, or inside a fenced block (parser.Fences).
+func forLines(body []byte, fn func(off int, line []byte, code bool)) {
+	var fences parser.Fences
 	off := 0
 	for off < len(body) {
 		end := len(body)
@@ -52,25 +56,38 @@ func FindValues(body []byte) []Value {
 			end = off + i + 1
 		}
 		line := body[off:end]
-		if m := fenceRe.FindStringSubmatch(strings.TrimRight(string(line), "\r\n")); m != nil {
-			switch {
-			case fence == "":
-				fence = m[1]
-			case m[2] == "" && strings.HasPrefix(m[1], fence[:1]) && len(m[1]) >= len(fence):
-				fence = ""
-			}
-			off = end
-			continue
-		}
-		if fence == "" {
-			for _, sp := range codeSpans(line) {
-				if expr, ok := countExpr(line[sp[0]:sp[1]]); ok {
-					out = append(out, Value{Start: off + sp[0], End: off + sp[1], Expr: expr})
-				}
-			}
-		}
+		fn(off, line, fences.Code(strings.TrimRight(string(line), "\r\n")))
 		off = end
 	}
+}
+
+// FindValues returns the inline values of body, in order, outside fenced
+// code blocks (a sample of the syntax in a code block stays as written).
+func FindValues(body []byte) []Value {
+	var out []Value
+	forLines(body, func(off int, line []byte, code bool) {
+		if code {
+			return
+		}
+		for _, sp := range codeSpans(line) {
+			if expr, ok := countExpr(line[sp[0]:sp[1]]); ok {
+				out = append(out, Value{Start: off + sp[0], End: off + sp[1], Expr: expr})
+			}
+		}
+	})
+	return out
+}
+
+// stripCopies puts back the code span of every value copied in the agent's
+// form, outside fenced code blocks: a sample there stays as written (S4-4).
+func stripCopies(body []byte) []byte {
+	out := make([]byte, 0, len(body))
+	forLines(body, func(_ int, line []byte, code bool) {
+		if !code {
+			line = valueCopyRe.ReplaceAll(line, []byte("${1}${2}"))
+		}
+		out = append(out, line...)
+	})
 	return out
 }
 
@@ -184,7 +201,7 @@ func splitAnd(s string) []string {
 // does not compute shows the reason instead. The second value hashes the
 // results ("" when body has no values).
 func ExpandValues(body []byte, keepSpec bool, c Context, q QueryFunc) ([]byte, string) {
-	body = valueCopyRe.ReplaceAll(body, []byte("$1"))
+	body = stripCopies(body)
 	vals := FindValues(body)
 	if len(vals) == 0 {
 		return body, ""
@@ -220,6 +237,16 @@ func countValue(expr string, c Context, q QueryFunc) (int, error) {
 	s, err := ParseCount(expr, c)
 	if err != nil {
 		return 0, err
+	}
+	// The rows of a database only (rows: {type: plan}), as a view and a
+	// rollup count them: the folder's index note and other notes counted
+	// too (BUG-114, S4-10).
+	if c.Schema != nil && len(s.From) == 1 {
+		if schema := c.Schema(schemaFolder(s.From[0])); schema != nil {
+			for _, kv := range schema.RowConds() {
+				s.Where = append(s.Where, index.FieldCond{Field: kv[0], Op: index.OpEq, Values: []string{kv[1]}})
+			}
+		}
 	}
 	r, err := Run(s, q)
 	if err != nil {

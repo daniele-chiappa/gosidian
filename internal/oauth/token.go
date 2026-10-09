@@ -59,7 +59,7 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := s.now()
-	if !s.limiter.Allow("token:"+s.cfg.ClientIP(r), now) {
+	if !s.limiter.Allow("token:"+s.limitKey(r), now) {
 		writeOAuthError(w, http.StatusTooManyRequests, "invalid_request", "too many token requests from this address, retry later")
 		return
 	}
@@ -115,7 +115,7 @@ func (s *Server) exchangeCode(w http.ResponseWriter, r *http.Request, now time.T
 		writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not create grant: "+err.Error())
 		return
 	}
-	resp, err := s.issueTokens(&grant, now)
+	resp, err := s.issueTokens(&grant, "", now)
 	if err != nil {
 		writeOAuthError(w, http.StatusInternalServerError, "server_error", err.Error())
 		return
@@ -170,11 +170,18 @@ func (s *Server) refreshGrant(w http.ResponseWriter, r *http.Request, now time.T
 			}
 		}
 	}
-	s.mu.Lock()
-	s.consumed[h] = consumedRefresh{tokenID: grant.ID, exp: grant.RefreshExpiresAt}
-	s.mu.Unlock()
-	resp, err := s.issueTokens(grant, now)
+	resp, err := s.issueTokens(grant, h, now)
+	if errors.Is(err, auth.ErrRefreshRotated) {
+		// Another request rotated this token between the lookup and now: the
+		// same token used twice at once, the reuse case above (S1-8).
+		_ = s.tokens.Revoke(grant.ID)
+		s.dropAccessFor(grant.ID)
+		s.auditWrite(audit.ActionOAuthRevoke, "", "refresh-reuse", grant.ID, "concurrent refresh token reuse detected")
+		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "refresh token is invalid")
+		return
+	}
 	if err != nil {
+		// Nothing rotated: the client may retry with the same token (S1-6).
 		writeOAuthError(w, http.StatusInternalServerError, "server_error", err.Error())
 		return
 	}
@@ -183,8 +190,13 @@ func (s *Server) refreshGrant(w http.ResponseWriter, r *http.Request, now time.T
 }
 
 // issueTokens mints a fresh access token (memory) and refresh token
-// (persisted on the grant, replacing the previous one).
-func (s *Server) issueTokens(grant *auth.Token, now time.Time) (*tokenResponse, error) {
+// (persisted on the grant, replacing the previous one). On a refresh,
+// oldRefresh is the hash presented: the rotation happens only while it is
+// still the grant's (auth.ErrRefreshRotated otherwise), marked consumed
+// while it happens. Every check that can fail comes
+// before the rotation, so a failure leaves the presented token good for a
+// retry (BUG-111, S1-6).
+func (s *Server) issueTokens(grant *auth.Token, oldRefresh string, now time.Time) (*tokenResponse, error) {
 	access, err := randomToken(accessPrefix)
 	if err != nil {
 		return nil, err
@@ -201,18 +213,35 @@ func (s *Server) issueTokens(grant *auth.Token, now time.Time) (*tokenResponse, 
 	if !grant.ExpiresAt.IsZero() && grant.ExpiresAt.Before(refreshExp) {
 		refreshExp = grant.ExpiresAt
 	}
-	if err := s.tokens.SetRefresh(grant.ID, hashHex(refresh), refreshExp); err != nil {
-		return nil, err
-	}
 	s.mu.Lock()
 	s.issued++
 	if s.issued%sweepEvery == 0 || len(s.access) >= maxAccessEntries {
 		s.sweepAccessLocked(now)
 	}
-	if len(s.access) >= maxAccessEntries {
-		s.mu.Unlock()
+	full := len(s.access) >= maxAccessEntries
+	s.mu.Unlock()
+	if full {
 		return nil, errors.New("too many live access tokens")
 	}
+	if oldRefresh == "" {
+		err = s.tokens.SetRefresh(grant.ID, hashHex(refresh), refreshExp)
+	} else {
+		// Consumed before the rotation, so a replay in between is a reuse;
+		// a rotation that fails for another reason puts it back.
+		s.mu.Lock()
+		s.consumed[oldRefresh] = consumedRefresh{tokenID: grant.ID, exp: grant.RefreshExpiresAt}
+		s.mu.Unlock()
+		err = s.tokens.RotateRefresh(grant.ID, oldRefresh, hashHex(refresh), refreshExp)
+		if err != nil && !errors.Is(err, auth.ErrRefreshRotated) {
+			s.mu.Lock()
+			delete(s.consumed, oldRefresh)
+			s.mu.Unlock()
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
 	s.access[hashHex(access)] = accessEntry{tokenID: grant.ID, exp: accessExp}
 	s.mu.Unlock()
 	return &tokenResponse{
@@ -259,7 +288,7 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := s.now()
-	if !s.limiter.Allow("token:"+s.cfg.ClientIP(r), now) {
+	if !s.limiter.Allow("token:"+s.limitKey(r), now) {
 		writeOAuthError(w, http.StatusTooManyRequests, "invalid_request", "too many requests from this address, retry later")
 		return
 	}

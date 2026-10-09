@@ -39,6 +39,9 @@ func runImportCmd(args []string) {
 	if err != nil || !st.IsDir() {
 		log.Fatalf("source must be a directory: %v", err)
 	}
+	if err := separateDirs(src, dst); err != nil {
+		log.Fatal(err)
+	}
 	if err := os.MkdirAll(dst, 0o755); err != nil {
 		log.Fatalf("create destination: %v", err)
 	}
@@ -46,6 +49,37 @@ func runImportCmd(args []string) {
 	copied, skipped := importDir(src, dst, *overwrite)
 	fmt.Printf("Imported %d files (skipped %d).\n", copied, skipped)
 	fmt.Println("Now run `gosidian --vault " + dst + "` to start serving the new vault.")
+}
+
+// separateDirs refuses a destination that is the source, or lies inside it,
+// or holds it, once symbolic links are resolved (BUG-115, S5-13): the same
+// folder with --overwrite rewrote the source with itself, and a destination
+// inside the source was copied into itself again and again.
+func separateDirs(src, dst string) error {
+	resolve := func(p string) string {
+		// The destination may not exist yet: resolve what does.
+		rest := ""
+		for {
+			if r, err := filepath.EvalSymlinks(p); err == nil {
+				return filepath.Join(r, rest)
+			}
+			parent := filepath.Dir(p)
+			if parent == p {
+				return filepath.Join(p, rest)
+			}
+			rest = filepath.Join(filepath.Base(p), rest)
+			p = parent
+		}
+	}
+	a, b := resolve(src), resolve(dst)
+	within := func(child, parent string) bool {
+		rel, err := filepath.Rel(parent, child)
+		return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+	}
+	if within(a, b) || within(b, a) {
+		return fmt.Errorf("--from %s and --to %s must be separate folders, neither inside the other", src, dst)
+	}
+	return nil
 }
 
 func importDir(src, dst string, overwrite bool) (copied, skipped int) {
@@ -68,6 +102,13 @@ func importDir(src, dst string, overwrite bool) (copied, skipped int) {
 		target := filepath.Join(dst, rel)
 		if d.IsDir() {
 			return os.MkdirAll(target, 0o755)
+		}
+		// A link is not followed: copying what it points to put files from
+		// outside the source into the vault (S5-13).
+		if d.Type()&iofs.ModeSymlink != 0 {
+			fmt.Fprintf(os.Stderr, "skip %s: a symbolic link\n", rel)
+			skipped++
+			return nil
 		}
 		if _, err := os.Stat(target); err == nil && !overwrite {
 			skipped++

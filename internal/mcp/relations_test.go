@@ -290,7 +290,7 @@ func TestBase_MemoryGet(t *testing.T) {
 	if err := json.Unmarshal([]byte(resultText(t, res)), &out); err != nil {
 		t.Fatal(err)
 	}
-	if out.Rendered || !strings.Contains(out.Hint, "pass render_views:true") || !strings.Contains(out.Content, "```view\nfrom: p/Books\n") {
+	if out.Rendered || !strings.Contains(out.Hint, "pass render_views:true") || !strings.Contains(out.Content, "```view\nfrom: p/Books/**\n") {
 		t.Errorf("without render_views the views are left as blocks: %+v", out)
 	}
 	res, _ = s.handleEdit(ctx, call(map[string]any{"path": "p/books.base", "old_string": "cards", "new_string": "table"}))

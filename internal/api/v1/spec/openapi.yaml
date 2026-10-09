@@ -911,8 +911,9 @@ paths:
       description: >-
         Confirmed with the owner's own password. The account must change it
         at its next request (password_change_required), and its web sessions
-        are closed. Audited as password_reset. The owner changes its own
-        password with /api/v1/me/password.
+        and OAuth grants are closed (sessions_closed, grants_closed). Audited
+        as password_reset. The owner changes its own password with
+        /api/v1/me/password.
       parameters:
         - in: path
           name: id
@@ -945,7 +946,10 @@ paths:
       summary: Clear a user's TOTP secret and recovery codes (owner-only; lost authenticator).
       description: >-
         Policy and sessions are untouched: under a required policy the user
-        re-enrols at the next login. Audited as totp_reset.
+        re-enrols at the next login. Audited as totp_reset. Refused (403) on
+        the owner's own account, whose two-factor comes off from
+        DELETE /api/v1/totp, with the password; so is a PATCH that sets the
+        owner's own totp_policy to disabled.
       parameters:
         - in: path
           name: id

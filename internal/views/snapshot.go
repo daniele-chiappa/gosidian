@@ -52,7 +52,7 @@ func Freeze(body []byte, c Context, q QueryFunc) ([]byte, FreezeStats) {
 		st.Views = len(blocks)
 	}
 
-	body = valueCopyRe.ReplaceAll(body, []byte("$1"))
+	body = stripCopies(body)
 	vals := FindValues(body)
 	if len(vals) > 0 {
 		var out bytes.Buffer

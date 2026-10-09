@@ -13,6 +13,7 @@ import (
 
 	apiv1 "github.com/gosidian/gosidian/internal/api/v1"
 	"github.com/gosidian/gosidian/internal/auth"
+	"github.com/gosidian/gosidian/internal/config"
 	"github.com/gosidian/gosidian/internal/projects"
 	"github.com/gosidian/gosidian/internal/qrsvg"
 	"github.com/gosidian/gosidian/internal/statedir"
@@ -321,6 +322,16 @@ func userAdd(args []string) {
 		log.Printf("warning: personal project not provisioned: %v", err)
 		return
 	}
+	// The names the server keeps for its own projects, as `serve` reads them.
+	cfg, err := config.Load(filepath.Join(stateDir, "config.toml"))
+	if err == nil {
+		err = cfg.ApplyEnv()
+	}
+	if err != nil {
+		log.Printf("warning: personal project not provisioned: config: %v", err)
+		return
+	}
+	ps.SetReservedNames(reservedProjectNames(cfg)...)
 	tokens, err := auth.Open(filepath.Join(stateDir, "tokens.json"))
 	if err != nil {
 		log.Printf("warning: personal project not provisioned: %v", err)

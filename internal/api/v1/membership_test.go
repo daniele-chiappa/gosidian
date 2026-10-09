@@ -117,9 +117,16 @@ func TestProjectAccess_VisibilityAndGrants(t *testing.T) {
 	if rec := f.doAuthRecorder(http.MethodPut, "/api/v1/projects/Alpha", `{"visibility":"public"}`, nil); rec.code != http.StatusOK || !strings.Contains(rec.body, `"public":true`) {
 		t.Errorf("public by owner = %d (%s)", rec.code, rec.body)
 	}
-	// The legacy alias still works: public:false means internal.
+	// The legacy alias still works: public:false takes a public project
+	// down to internal, and leaves a private one private (BUG-112, S2-6).
 	if rec := f.doAuthRecorder(http.MethodPut, "/api/v1/projects/Alpha", `{"public":false}`, nil); rec.code != http.StatusOK || !strings.Contains(rec.body, `"visibility":"internal"`) {
-		t.Errorf("legacy public:false = %d (%s)", rec.code, rec.body)
+		t.Errorf("legacy public:false on a public project = %d (%s)", rec.code, rec.body)
+	}
+	if rec := f.doAuthRecorder(http.MethodPut, "/api/v1/projects/Alpha", `{"visibility":"private"}`, nil); rec.code != http.StatusOK {
+		t.Fatalf("private = %d (%s)", rec.code, rec.body)
+	}
+	if rec := f.doAuthRecorder(http.MethodPut, "/api/v1/projects/Alpha", `{"public":false}`, nil); rec.code != http.StatusOK || !strings.Contains(rec.body, `"visibility":"private"`) {
+		t.Errorf("legacy public:false on a private project = %d (%s)", rec.code, rec.body)
 	}
 	if rec := f.doAuthRecorder(http.MethodPut, "/api/v1/projects/Alpha", `{"visibility":"secret"}`, nil); rec.code != http.StatusBadRequest {
 		t.Errorf("invalid visibility = %d want 400", rec.code)

@@ -40,12 +40,23 @@ func (v *Vault) HoldsStateDir(rel string) bool {
 	return v.stateRel != "" && strings.HasPrefix(v.stateRel, rel+"/")
 }
 
-// CheckProject returns name as a top-level project folder name, trimmed, or
-// why it cannot be one: the check every project operation applies. Beyond a
-// portable folder name, it refuses the folder of the state dir and a folder
-// holding it.
+// CheckProject returns name as a new top-level project folder name,
+// trimmed, or why it cannot be one: the check of a create and of the target
+// of a rename. Beyond a portable folder name, it refuses the folder of the
+// state dir and a folder holding it.
 func (v *Vault) CheckProject(name string) (string, error) {
-	clean, err := sanitizeProjectName(name)
+	return v.checkProject(name, false)
+}
+
+// CheckExistingProject is CheckProject for a project that is there, or was
+// (a delete, the source of a rename, a restore): a name that is no longer
+// portable (a trailing dot, a Windows device name) passes.
+func (v *Vault) CheckExistingProject(name string) (string, error) {
+	return v.checkProject(name, true)
+}
+
+func (v *Vault) checkProject(name string, existing bool) (string, error) {
+	clean, err := sanitizeProjectName(name, existing)
 	if err != nil {
 		return "", err
 	}

@@ -70,6 +70,20 @@ func RowThis(h index.QueryHit) map[string][]string {
 // value of the field (removed when there is none: a min of no notes). The
 // rows' fields that the rollups read must be in the hits (ThisFieldsOf).
 func ComputeRollups(hits []index.QueryHit, fs []dbschema.Field, c Context, q QueryFunc) error {
+	// One schema lookup per folder for the whole table, where it ran for
+	// every row and rollup: in MCP each one loads every database note of
+	// the project (BUG-114, S4-8).
+	if c.Schema != nil {
+		lookup, seen := c.Schema, map[string]*dbschema.Schema{}
+		c.Schema = func(folder string) *dbschema.Schema {
+			if sc, ok := seen[folder]; ok {
+				return sc
+			}
+			sc := lookup(folder)
+			seen[folder] = sc
+			return sc
+		}
+	}
 	for i := range hits {
 		h := &hits[i]
 		rc := c
@@ -99,7 +113,19 @@ func ComputeRollups(hits []index.QueryHit, fs []dbschema.Field, c Context, q Que
 // are its rows only (rows: {type: plan}), as in a view.
 func RollupValue(f dbschema.Field, c Context, q QueryFunc) (string, error) {
 	r := f.Rollup
-	s, err := Parse(r.Spec, c)
+	// A row's relation may name a note that is gone, or one the reader may
+	// not see: that link matches no note, where it failed the whole view,
+	// every row with it (BUG-114, S4-1).
+	rc := c
+	rc.Resolve = func(target string) string {
+		if c.Resolve != nil {
+			if p := c.Resolve(target); p != "" {
+				return p
+			}
+		}
+		return noNote
+	}
+	s, err := Parse(r.Spec, rc)
 	if err != nil {
 		var missing noThisField
 		if errors.As(err, &missing) {
@@ -112,7 +138,7 @@ func RollupValue(f dbschema.Field, c Context, q QueryFunc) (string, error) {
 		return "", err
 	}
 	if c.Schema != nil && len(s.From) == 1 {
-		if schema := c.Schema(s.From[0]); schema != nil {
+		if schema := c.Schema(schemaFolder(s.From[0])); schema != nil {
 			for _, kv := range schema.RowConds() {
 				s.Where = append(s.Where, index.FieldCond{Field: kv[0], Op: index.OpEq, Values: []string{kv[1]}})
 			}
@@ -135,6 +161,9 @@ func RollupValue(f dbschema.Field, c Context, q QueryFunc) (string, error) {
 	}
 	return aggregate(r.Calc, values), nil
 }
+
+// noNote is a path no note has, for a link that names none.
+const noNote = "\x00no note"
 
 // aggregate reduces the values of a sum, min or max: numbers when every value
 // is one, otherwise text, which orders ISO dates too. A sum of anything but

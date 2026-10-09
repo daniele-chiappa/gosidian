@@ -44,10 +44,17 @@ type Sync struct {
 
 	// stateRel is the state dir's vault-relative path when it sits inside
 	// the vault ("" otherwise): one more managed line keeps the credentials
-	// off the remote (BUG-098). stateUntracked is set once a sync has taken
-	// it out of the index; the ignore line keeps it out afterwards.
-	stateRel       string
-	stateUntracked bool
+	// off the remote (BUG-098).
+	stateRel string
+	// untracked holds the ignored folders a commit has taken out of git's
+	// index in this process: the state dir, the projects with git sync off.
+	// The ignore lines keep them out afterwards. Used by commitAndPush only.
+	untracked map[string]bool
+
+	// workMu runs one commit at a time: a timer's flush and Flush at
+	// shutdown ran together, the second met the first's index.lock, and the
+	// last changes were left out (BUG-115, S5-6).
+	workMu sync.Mutex
 
 	// tokens (optional) is the on-disk token fallback used by authToken when
 	// the env var is unset. Allows the operator to rotate the PAT from the
@@ -119,7 +126,6 @@ func (s *Sync) SetStateDir(rel string) {
 	}
 	s.mu.Lock()
 	s.stateRel = rel
-	s.stateUntracked = false
 	s.mu.Unlock()
 }
 
@@ -148,7 +154,11 @@ func (s *Sync) Start(ctx context.Context) error {
 		statusGauge.Set(statusCodeDisabled)
 		return nil
 	}
-	if err := s.ensureRepo(); err != nil {
+	err := CheckBranch(s.cfg.Branch)
+	if err == nil {
+		err = s.ensureRepo()
+	}
+	if err != nil {
 		wrapped := fmt.Errorf("git init: %w", err)
 		s.mu.Lock()
 		s.initFailed = true
@@ -320,8 +330,11 @@ func (s *Sync) Flush() {
 	s.flush()
 }
 
-// flush is the timer callback — does the actual git work.
+// flush is the timer callback — does the actual git work. A flush that
+// finds a commit running waits for it, then commits what came after.
 func (s *Sync) flush() {
+	s.workMu.Lock()
+	defer s.workMu.Unlock()
 	s.mu.Lock()
 	if !s.pending {
 		s.mu.Unlock()
@@ -359,7 +372,7 @@ func (s *Sync) ensureRepo() error {
 	gitDir := filepath.Join(s.vaultDir, ".git")
 	fresh := false
 	if st, err := os.Stat(gitDir); err != nil || !st.IsDir() {
-		if err := s.run("git", "init", "-q", "-b", s.cfg.Branch); err != nil {
+		if err := s.run("git", "init", "-q", "--initial-branch="+s.cfg.Branch); err != nil {
 			return err
 		}
 		fresh = true
@@ -402,6 +415,25 @@ func (s *Sync) ensureRemote() error {
 		return nil
 	}
 	return s.run("git", "remote", "set-url", "origin", s.cfg.Remote)
+}
+
+// CheckBranch refuses a branch name git would not take as one, or would
+// take for an option: the owner sets it from Settings, and a name starting
+// with "-" reached `git push` as an option, --receive-pack=<command> among
+// them (BUG-115, S5-8).
+func CheckBranch(name string) error {
+	bad := name == "" || strings.HasPrefix(name, "-") || strings.HasPrefix(name, "/") ||
+		strings.HasSuffix(name, "/") || strings.HasSuffix(name, ".") || strings.HasSuffix(name, ".lock") ||
+		strings.Contains(name, "..") || strings.Contains(name, "//") || strings.Contains(name, "@{") || name == "@"
+	for _, r := range name {
+		if r < 0x20 || r == 0x7f || strings.ContainsRune(" ~^:?*[\\", r) {
+			bad = true
+		}
+	}
+	if bad {
+		return fmt.Errorf("git branch %q is not a valid branch name", name)
+	}
+	return nil
 }
 
 // gitignoreManagedBegin and gitignoreManagedEnd bracket the lines this package
@@ -523,14 +555,8 @@ func (s *Sync) commitAndPush() error {
 	if err := s.refreshGitignore(); err != nil {
 		return fmt.Errorf("refresh gitignore: %w", err)
 	}
-	// .gitignore does not untrack what a commit already holds: a state dir
-	// committed before the vault hid it leaves the index here, once, so the
-	// credentials stop following every change to the remote.
-	if s.stateRel != "" && !s.stateUntracked {
-		if err := s.run("git", "rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", ":(literal)"+s.stateRel); err != nil {
-			return fmt.Errorf("untrack the state dir: %w", err)
-		}
-		s.stateUntracked = true
+	if err := s.untrackIgnored(); err != nil {
+		return err
 	}
 
 	// Detect whether there is anything to commit.
@@ -559,14 +585,51 @@ func (s *Sync) commitAndPush() error {
 	return s.push()
 }
 
-func (s *Sync) push() error {
-	args := []string{}
-	if tok := s.authToken(); tok != "" {
-		// Use a per-invocation header so the token never lands in git config.
-		args = append(args, "-c", "http.extraheader=Authorization: token "+tok)
+// untrackIgnored takes out of git's index, once per folder and process,
+// what the managed .gitignore names but a commit already holds: ignoring
+// does not untrack, so a state dir committed before the vault hid it, or a
+// project committed before its git sync went off, kept going to the remote
+// with every change (BUG-098, BUG-115 S5-5). The files stay on disk; the
+// history keeps what was pushed.
+func (s *Sync) untrackIgnored() error {
+	want := map[string]bool{}
+	if s.stateRel != "" {
+		want[s.stateRel] = true
 	}
-	args = append(args, "push", "-q", "origin", s.cfg.Branch)
-	if err := s.run("git", args...); err != nil {
+	if s.projects != nil {
+		for _, name := range s.projects.SkipNamesForGit() {
+			want[name] = true
+		}
+	}
+	for dir := range s.untracked {
+		if !want[dir] {
+			delete(s.untracked, dir) // tracked again: a later skip untracks again
+		}
+	}
+	for dir := range want {
+		if s.untracked[dir] {
+			continue
+		}
+		if err := s.run("git", "rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", ":(literal)"+dir); err != nil {
+			return fmt.Errorf("untrack %s: %w", dir, err)
+		}
+		if s.untracked == nil {
+			s.untracked = map[string]bool{}
+		}
+		s.untracked[dir] = true
+	}
+	return nil
+}
+
+func (s *Sync) push() error {
+	var env []string
+	if tok := s.authToken(); tok != "" {
+		// A per-invocation header, so the token never lands in git config,
+		// passed in the environment: on the command line any process of the
+		// host read it in ps and /proc/<pid>/cmdline (BUG-115, S5-7).
+		env = []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http.extraheader", "GIT_CONFIG_VALUE_0=Authorization: token " + tok}
+	}
+	if err := s.runEnv(env, "git", "push", "-q", "origin", s.cfg.Branch); err != nil {
 		return fmt.Errorf("git push: %w", err)
 	}
 	return nil
@@ -597,8 +660,16 @@ func (s *Sync) authToken() string {
 // run executes a git command in the vault dir, propagating stdout/stderr
 // to the server log via errors when it fails.
 func (s *Sync) run(cmd string, args ...string) error {
+	return s.runEnv(nil, cmd, args...)
+}
+
+// runEnv is run with env added to the process environment.
+func (s *Sync) runEnv(env []string, cmd string, args ...string) error {
 	c := exec.Command(cmd, args...)
 	c.Dir = s.vaultDir
+	if len(env) > 0 {
+		c.Env = append(os.Environ(), env...)
+	}
 	var stderr bytes.Buffer
 	c.Stderr = &stderr
 	if err := c.Run(); err != nil {

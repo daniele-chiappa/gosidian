@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -616,7 +617,7 @@ func (v *Vault) countNotesIn(dir string) (int, error) {
 // it, recursively. It returns the list of vault-relative paths of the .md
 // notes that were removed so the caller can purge them from the index.
 func (v *Vault) DeleteProject(name string) ([]string, error) {
-	clean, err := v.CheckProject(name)
+	clean, err := v.CheckExistingProject(name)
 	if err != nil {
 		return nil, err
 	}
@@ -669,7 +670,7 @@ func (v *Vault) CreateProject(name string) (string, error) {
 	return clean, nil
 }
 
-func sanitizeProjectName(name string) (string, error) {
+func sanitizeProjectName(name string, existing bool) (string, error) {
 	clean := strings.TrimSpace(name)
 	if clean == "" {
 		return "", errors.New("project name is empty")
@@ -693,7 +694,13 @@ func sanitizeProjectName(name string) (string, error) {
 		}
 	}
 	// Windows drops a trailing dot ("ok." is the folder "ok") and reserves
-	// device names: refused everywhere, so a vault stays portable.
+	// device names: refused for a new name, so a vault stays portable. A
+	// project that has one already is still deleted, renamed, restored and
+	// written to: refused there too, it could only expire in the trash
+	// (BUG-115, S5-10).
+	if existing {
+		return clean, nil
+	}
 	if strings.HasSuffix(clean, ".") {
 		return "", errors.New("project name cannot end with a dot")
 	}
@@ -949,9 +956,16 @@ func rewriteWikiLinks(body []byte, oldBase, newBase, oldRel, newRel string) []by
 			replacement = newBase
 		case strings.EqualFold(base, oldRel), strings.EqualFold(base, oldRelNoExt):
 			replacement = newRelNoExt
-		case strings.HasSuffix(strings.ToLower(base), "/"+strings.ToLower(oldBase)):
-			// Folder-qualified target like [[sub/OldBase]] — swap the tail.
-			replacement = base[:len(base)-len(oldBase)] + newBase
+		case strings.HasSuffix(strings.ToLower(oldRelNoExt), "/"+strings.ToLower(base)):
+			// Folder-qualified target like [[sub/OldBase]] that names the
+			// renamed note: renaming proj/a/Old also turned [[proj/b/Old]],
+			// another note, into a link to nothing (BUG-115, S5-12). Moved
+			// to another folder, it takes the new path.
+			if path.Dir(oldRel) == path.Dir(newRel) {
+				replacement = base[:len(base)-len(oldBase)] + newBase
+			} else {
+				replacement = newRelNoExt
+			}
 		}
 		if replacement == "" {
 			continue
@@ -1034,7 +1048,11 @@ func (v *Vault) MoveNote(idx *index.Index, from, toProject string) ([]string, er
 	base := filepath.Base(fromRel)
 	target := base
 	if toProject = strings.TrimSpace(toProject); toProject != "" {
-		clean, err := v.CheckProject(toProject)
+		check := v.CheckProject
+		if st, err := os.Stat(filepath.Join(v.Root, strings.TrimSpace(toProject))); err == nil && st.IsDir() {
+			check = v.CheckExistingProject
+		}
+		clean, err := check(toProject)
 		if err != nil {
 			return nil, fmt.Errorf("invalid project: %w", err)
 		}
@@ -1048,7 +1066,7 @@ func (v *Vault) MoveNote(idx *index.Index, from, toProject string) ([]string, er
 // the note filenames don't change; full-path wiki-links are rewritten to use
 // the new prefix.
 func (v *Vault) RenameProject(idx *index.Index, from, to string) error {
-	fromClean, err := v.CheckProject(from)
+	fromClean, err := v.CheckExistingProject(from)
 	if err != nil {
 		return fmt.Errorf("source name: %w", err)
 	}

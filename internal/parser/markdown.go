@@ -152,14 +152,18 @@ func (r *Renderer) Render(body []byte, resolver Resolver) (string, error) {
 			}
 			return `<a class="` + class + `" href="` + href + `"` + extraAttr + `>` + stdhtml.EscapeString(text) + `</a>`
 		})
-		segment = tagRe.ReplaceAllStringFunc(segment, func(match string) string {
-			m := tagRe.FindStringSubmatch(match)
-			prefix := m[1]
-			tag := m[2]
-			if IsColorTag(tag) {
-				return match
-			}
-			return prefix + `<a class="tag" href="/tags/` + url.PathEscape(tag) + `">#` + stdhtml.EscapeString(tag) + `</a>`
+		// Not inside a link's text: [[#Intro]] reads "#Intro", and a tag
+		// link nested in it sent the click to the tag page (BUG-114, S4-2).
+		segment = outsideAnchors(segment, func(part string) string {
+			return tagRe.ReplaceAllStringFunc(part, func(match string) string {
+				m := tagRe.FindStringSubmatch(match)
+				prefix := m[1]
+				tag := m[2]
+				if IsColorTag(tag) {
+					return match
+				}
+				return prefix + `<a class="tag" href="/tags/` + url.PathEscape(tag) + `">#` + stdhtml.EscapeString(tag) + `</a>`
+			})
 		})
 		return segment
 	})
@@ -171,23 +175,36 @@ func (r *Renderer) Render(body []byte, resolver Resolver) (string, error) {
 	return buf.String(), nil
 }
 
+// outsideAnchors applies fn to the parts of s outside its <a …>…</a>
+// elements, which it leaves as they are.
+func outsideAnchors(s string, fn func(string) string) string {
+	var b strings.Builder
+	for {
+		i := strings.Index(s, "<a ")
+		if i < 0 {
+			break
+		}
+		j := strings.Index(s[i:], "</a>")
+		if j < 0 {
+			break
+		}
+		end := i + j + len("</a>")
+		b.WriteString(fn(s[:i]))
+		b.WriteString(s[i:end])
+		s = s[end:]
+	}
+	b.WriteString(fn(s))
+	return b.String()
+}
+
 // processOutsideCode walks the source and applies fn to slices outside of
 // fenced and inline code regions.
 func processOutsideCode(src string, fn func(string) string) string {
 	var out strings.Builder
 	lines := strings.Split(src, "\n")
-	inFence := false
+	var fences Fences
 	for i, line := range lines {
-		trim := strings.TrimSpace(line)
-		if strings.HasPrefix(trim, "```") || strings.HasPrefix(trim, "~~~") {
-			inFence = !inFence
-			out.WriteString(line)
-			if i < len(lines)-1 {
-				out.WriteByte('\n')
-			}
-			continue
-		}
-		if inFence {
+		if fences.Code(line) {
 			out.WriteString(line)
 			if i < len(lines)-1 {
 				out.WriteByte('\n')

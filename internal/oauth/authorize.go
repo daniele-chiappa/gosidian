@@ -23,6 +23,9 @@ type pendingRequest struct {
 	Scopes        []string // requested, validated; may include offline_access
 	Created       time.Time
 	Expires       time.Time
+	// From is the address the request came from (limitKey): at the cap the
+	// address with the most requests loses its oldest.
+	From string
 }
 
 // ConsentView is what the consent screen shows and decides on.
@@ -62,7 +65,7 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		q = r.URL.Query()
 	}
 	now := s.now()
-	if !s.limiter.Allow("authorize:"+s.cfg.ClientIP(r), now) {
+	if !s.limiter.Allow("authorize:"+s.limitKey(r), now) {
 		writeAuthorizePage(w, http.StatusTooManyRequests, "invalid_request", "too many authorization requests from this address, retry later")
 		return
 	}
@@ -86,6 +89,13 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, ok := client.matchRedirect(redirectURI); !ok {
 		writeAuthorizePage(w, http.StatusBadRequest, "invalid_request", "redirect_uri is not registered for this client")
+		return
+	}
+	// The host allowlist holds at every authorize, not only at registration:
+	// a client metadata document and a client registered before the list
+	// was set were never checked against it (BUG-111, S1-5).
+	if err := s.validRedirectURI(redirectURI); err != nil {
+		writeAuthorizePage(w, http.StatusBadRequest, "invalid_request", err.Error())
 		return
 	}
 	state := q.Get("state")
@@ -123,15 +133,16 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	s.sweepPendingLocked(now)
-	if len(s.pending) >= maxPendingRequests {
-		s.mu.Unlock()
-		s.redirectError(w, r, redirectURI, state, "temporarily_unavailable", "too many pending authorizations")
-		return
+	// At the cap a request goes, as for the clients (S1-7): a refusal kept
+	// every consent out while the map was full. The oldest of the address
+	// with the most: a flood evicts its own, not a consent in progress.
+	for len(s.pending) >= maxPendingRequests {
+		s.dropOldestPendingLocked()
 	}
 	s.pending[id] = &pendingRequest{
 		ID: id, Client: client, RedirectURI: redirectURI, State: state,
 		CodeChallenge: challenge, Resource: resource, Scopes: scopes,
-		Created: now, Expires: now.Add(s.cfg.RequestTTL),
+		Created: now, Expires: now.Add(s.cfg.RequestTTL), From: s.limitKey(r),
 	}
 	s.mu.Unlock()
 	if !client.CIMD {
@@ -235,6 +246,28 @@ func (s *Server) sweepPendingLocked(now time.Time) {
 		if !now.Before(p.Expires) {
 			delete(s.pending, id)
 		}
+	}
+}
+
+// dropOldestPendingLocked drops the oldest pending request of the address
+// that has the most.
+func (s *Server) dropOldestPendingLocked() {
+	count := map[string]int{}
+	top := ""
+	for _, p := range s.pending {
+		count[p.From]++
+		if top == "" || count[p.From] > count[top] {
+			top = p.From
+		}
+	}
+	var oldest *pendingRequest
+	for _, p := range s.pending {
+		if p.From == top && (oldest == nil || p.Created.Before(oldest.Created)) {
+			oldest = p
+		}
+	}
+	if oldest != nil {
+		delete(s.pending, oldest.ID)
 	}
 }
 

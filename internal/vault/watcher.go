@@ -2,6 +2,8 @@ package vault
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -27,15 +29,28 @@ func (v *Vault) Watch(ctx context.Context, idx *index.Index, onChange func()) er
 	}
 
 	handle := func(abs string) {
-		if !v.IsNoteFile(abs) {
-			return
-		}
 		rel, err := filepath.Rel(v.Root, abs)
 		if err != nil {
 			return
 		}
 		relSlash := filepath.ToSlash(rel)
 		if _, err := v.Rel(relSlash); err != nil {
+			return
+		}
+		if !v.IsNoteFile(abs) {
+			// A folder moved or removed from outside sends one event, for
+			// itself: its notes stayed in the index until a restart
+			// (BUG-115, S5-15).
+			if _, err := os.Lstat(abs); errors.Is(err, fs.ErrNotExist) {
+				if gone, err := idx.NotesByPrefix(relSlash); err == nil && len(gone) > 0 {
+					for _, n := range gone {
+						_ = idx.Delete(n.Path)
+					}
+					if onChange != nil {
+						onChange()
+					}
+				}
+			}
 			return
 		}
 		n, err := loadNote(v.Root, relSlash)
@@ -86,9 +101,11 @@ func (v *Vault) Watch(ctx context.Context, idx *index.Index, onChange func()) er
 		case err := <-w.Errors:
 			log.Printf("watcher error: %v", err)
 		case ev := <-w.Events:
-			// Hidden entries are no vault content (Rel refuses them), and
-			// every save goes through a hidden temporary file (writeWhole).
-			if isHidden(filepath.Base(ev.Name)) {
+			// What the vault skips is no vault content: hidden entries
+			// (every save goes through a hidden temporary file, writeWhole),
+			// node_modules, the state dir. A node_modules made by an npm
+			// install had thousands of READMEs indexed (BUG-115, S5-9).
+			if v.skipDir(v.Root, ev.Name) {
 				continue
 			}
 			if ev.Op&fsnotify.Create != 0 {
@@ -100,7 +117,13 @@ func (v *Vault) Watch(ctx context.Context, idx *index.Index, onChange func()) er
 					// file race.
 					_ = v.addRecursive(w, ev.Name)
 					_ = filepath.Walk(ev.Name, func(p string, info os.FileInfo, err error) error {
-						if err != nil || info.IsDir() {
+						if err != nil {
+							return nil
+						}
+						if info.IsDir() {
+							if v.skipDir(v.Root, p) {
+								return filepath.SkipDir
+							}
 							return nil
 						}
 						if !v.IsNoteFile(info.Name()) {

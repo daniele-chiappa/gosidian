@@ -300,3 +300,44 @@ func TestStore_MutationsReloadExternalWrites(t *testing.T) {
 		t.Errorf("expected both via-cli and via-spa on disk, got %v", names)
 	}
 }
+
+// RotateRefresh replaces the refresh hash only while the presented one is
+// current, and keeps the previous one when the save fails (BUG-111, S1-6
+// and S1-8).
+func TestStore_RotateRefresh(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(filepath.Join(dir, "tokens.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := s.CreateGrant("client", []string{"p"}, []string{ScopeRead}, 0, "u1", "c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exp := time.Now().Add(time.Hour)
+	if err := s.SetRefresh(g.ID, "h1", exp); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RotateRefresh(g.ID, "h1", "h2", exp); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RotateRefresh(g.ID, "h1", "h3", exp); err != ErrRefreshRotated {
+		t.Errorf("rotation from a stale hash = %v, want ErrRefreshRotated", err)
+	}
+	if got, ok := s.ByRefreshHash("h2"); !ok || got.ID != g.ID {
+		t.Fatal("the current hash is not h2")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root writes into a read-only folder")
+	}
+	if err := os.Chmod(dir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	if err := s.RotateRefresh(g.ID, "h2", "h4", exp); err == nil {
+		t.Fatal("a rotation whose save fails succeeded")
+	}
+	if _, ok := s.ByRefreshHash("h2"); !ok {
+		t.Error("a failed save left the presented hash replaced")
+	}
+}

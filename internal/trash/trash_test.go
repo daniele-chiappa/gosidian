@@ -305,3 +305,30 @@ func TestEntry_IsProject(t *testing.T) {
 		}
 	}
 }
+
+// A name with "%" in it comes back as it was: "%20" in a name is not a
+// space, and the root note "B%2Fx.md" is not a note of project B
+// (BUG-112, S2-4).
+func TestBin_PercentInNames(t *testing.T) {
+	b, root := newBin(t)
+	for _, rel := range []string{"proj/My%20Note.md", "B%2Fx.md", "proj/100%.md"} {
+		write(t, root, rel, "# x")
+		id, err := b.DiscardNote(rel)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := Origin(id); got != rel {
+			t.Errorf("origin of %q = %q", rel, got)
+		}
+		restored, _, err := b.Restore(id)
+		if err != nil {
+			t.Fatalf("restore %q: %v", rel, err)
+		}
+		if len(restored) != 1 || restored[0] != rel {
+			t.Errorf("restored %q as %v", rel, restored)
+		}
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); err != nil {
+			t.Errorf("%q is not back in place: %v", rel, err)
+		}
+	}
+}

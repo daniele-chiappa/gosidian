@@ -313,9 +313,14 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 			return
 		}
 	} else if body.Public != nil {
-		newVisibility = projects.VisibilityInternal
-		if *body.Public {
+		// "Not public" takes a public project down to internal and leaves
+		// any other as it is: it made a private project readable by every
+		// member (BUG-112, S2-6).
+		switch {
+		case *body.Public:
 			newVisibility = projects.VisibilityPublic
+		case r.deps.Projects != nil && r.deps.Projects.Visibility(name) == projects.VisibilityPublic:
+			newVisibility = projects.VisibilityInternal
 		}
 	}
 	if newVisibility == projects.VisibilityPublic && !princ.CanAdmin() {

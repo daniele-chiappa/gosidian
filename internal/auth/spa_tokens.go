@@ -259,6 +259,30 @@ func (s *SpaTokenStore) Validate(plaintext string) (*SpaToken, error) {
 	return nil, errors.New("token not found")
 }
 
+// Check is Validate without the use it records: a check that the session
+// is still good, made on the user's behalf by a stream that stays open. It
+// leaves LastSeenAt alone, which an idle tab with its event stream would
+// otherwise keep at now.
+func (s *SpaTokenStore) Check(plaintext string) (*SpaToken, error) {
+	sum := sha256.Sum256([]byte(plaintext))
+	hash := hex.EncodeToString(sum[:])
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reloadIfStale()
+	now := time.Now().UTC()
+	for i := range s.tokens {
+		if s.tokens[i].Hash != hash {
+			continue
+		}
+		if now.After(s.tokens[i].HardExpiry) || now.After(s.tokens[i].ExpiresAt) {
+			return nil, errors.New("token expired")
+		}
+		t := s.tokens[i]
+		return &t, nil
+	}
+	return nil, errors.New("token not found")
+}
+
 // Refresh extends the sliding TTL of an existing token. The hard expiry
 // is not extended — it caps absolute lifetime so a refresh chain cannot
 // keep a leaked token alive forever. Returns the unchanged plaintext

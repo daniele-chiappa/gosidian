@@ -137,6 +137,7 @@ type Store struct {
 	personalOff       bool                       // personal projects for new accounts switched off (IMP-101 phase 3)
 	accessModel       int                        // 0 = pre-v2.30 file, accessModelVersion = migrated
 	mtime             time.Time
+	reserved          []string // names the configuration keeps for its own projects, not persisted
 }
 
 type storeFile struct {
@@ -491,6 +492,33 @@ func (s *Store) SetDefaultVisibility(v string) error {
 		s.defaultVisibility = v
 	}
 	return s.save()
+}
+
+// SetReservedNames records the project names the configuration keeps for
+// its own projects (the self-improve target, the global projects), set at
+// startup and not persisted.
+func (s *Store) SetReservedNames(names ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reserved = nil
+	for _, n := range names {
+		if n != "" {
+			s.reserved = append(s.reserved, n)
+		}
+	}
+}
+
+// Reserved reports whether name is one of SetReservedNames, ignoring case:
+// on a case-insensitive file system it is the same folder.
+func (s *Store) Reserved(name string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, n := range s.reserved {
+		if strings.EqualFold(n, name) {
+			return true
+		}
+	}
+	return false
 }
 
 // PersonalProjectsEnabled reports whether a new account gets a private

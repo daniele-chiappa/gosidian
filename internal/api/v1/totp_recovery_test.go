@@ -136,6 +136,31 @@ func TestTOTPRecoveryRegen(t *testing.T) {
 
 // TestAdminResetTOTP: the owner clears a locked-out member's second factor;
 // the member then re-enrols under the policy instead of being stuck.
+// The owner's own second factor does not come off from Admin → Users with
+// the session alone: neither the reset nor the "disabled" policy (BUG-111,
+// S1-10). Settings asks for the password.
+func TestAdminCannotDropOwnTOTP(t *testing.T) {
+	f := newNotesFixture(t)
+	f.webauth.SetTOTPMode(webauth.TOTPOptional)
+	secret, _, err := f.webauth.GenerateTOTPSecret(f.owner.Username, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.webauth.EnrollTOTP(f.owner.ID, secret); err != nil {
+		t.Fatal(err)
+	}
+	self := "/api/v1/admin/users/" + f.owner.ID
+	if rec := f.doAuthRecorder(http.MethodDelete, self+"/totp", "", nil); rec.code != http.StatusForbidden {
+		t.Errorf("reset of the owner's own TOTP = %d, want 403", rec.code)
+	}
+	if rec := f.doAuthRecorder(http.MethodPatch, self, `{"totp_policy":"disabled"}`, nil); rec.code != http.StatusForbidden {
+		t.Errorf("own policy set to disabled = %d, want 403", rec.code)
+	}
+	if u, _ := f.webauth.UserByID(f.owner.ID); u.TOTPSec == "" || u.TOTPPolicy == webauth.TOTPDisabled {
+		t.Errorf("the owner's second factor changed: %+v", u)
+	}
+}
+
 func TestAdminResetTOTP(t *testing.T) {
 	f := newNotesFixture(t)
 	// Optional globally (the owner stays free of the enrolment gate) with a

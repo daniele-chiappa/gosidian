@@ -121,7 +121,8 @@ func (r *Router) mcpTokenGate(mt *auth.Token, rel string) int {
 
 // spaPrincipal resolves a SPA session token to its principal, mirroring the
 // checks requireAuth performs (valid token, existing enabled user, no pending
-// TOTP enrolment).
+// TOTP enrolment, no password to change first: with a temporary password the
+// attachments were readable without changing it, BUG-111 S1-11).
 func (r *Router) spaPrincipal(token string) (authz.Principal, bool) {
 	d := r.deps.Auth
 	spaTok, err := d.SpaAuth.Validate(token)
@@ -129,7 +130,7 @@ func (r *Router) spaPrincipal(token string) (authz.Principal, bool) {
 		return authz.Principal{}, false
 	}
 	user, ok := d.WebAuth.UserByID(spaTok.UserID)
-	if !ok || !user.Enabled() || d.WebAuth.TOTPEnrollmentRequired(user) {
+	if !ok || !user.Enabled() || d.WebAuth.TOTPEnrollmentRequired(user) || user.MustChangePassword {
 		return authz.Principal{}, false
 	}
 	return authz.Principal{UserID: user.ID, Role: user.Role, Restricted: user.Restricted}, true

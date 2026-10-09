@@ -258,6 +258,9 @@ func main() {
 	// so their two-factor stays enforced after the upgrade rather than going
 	// silently dormant.
 	totpMode := cfg.Webauth.TOTPMode
+	if w := cfg.TOTPModeWarning(); w != "" {
+		log.Printf("web auth: %s", w)
+	}
 	if (totpMode == "" || totpMode == "off") && webauthStore.AnyTOTPEnrolled() {
 		totpMode = "optional"
 		log.Printf("web auth: TOTP mode bumped off→optional (enrolled account present)")
@@ -343,6 +346,7 @@ func main() {
 	}
 	// A new account starts with its personal project (IMP-101 phase 3): a
 	// private project named after it where it is admin. Off via Settings.
+	projectsStore.SetReservedNames(reservedProjectNames(cfg)...)
 	webauthStore.SetOnUserCreated(apiv1.PersonalProjectHook(v, projectsStore, tokenStore, auditLog))
 	if cfg.Vault.CacheSize != 128 {
 		v.SetCacheSize(cfg.Vault.CacheSize)

@@ -404,6 +404,12 @@ func Run(s *Spec, q QueryFunc) (*Result, error) {
 	return &Result{Spec: s, Hits: hits, Total: total}, nil
 }
 
+// schemaFolder is the folder whose database a from names: "f/**", the
+// folder and the ones under it, is a view of the database of f, its rows
+// filter included. Looked up as written, a view of an Obsidian base on a
+// database folder lost its schema (BUG-114, S4-7).
+func schemaFolder(from string) string { return strings.TrimSuffix(from, "/**") }
+
 // compute parses and computes a view in context c: with the schema of the
 // database it lists, and a board checked against it.
 func compute(spec string, c Context, q QueryFunc) (*Result, error) {
@@ -413,7 +419,7 @@ func compute(spec string, c Context, q QueryFunc) (*Result, error) {
 	}
 	var schema *dbschema.Schema
 	if c.Schema != nil && len(s.From) == 1 {
-		schema = c.Schema(s.From[0])
+		schema = c.Schema(schemaFolder(s.From[0]))
 	}
 	if schema != nil {
 		s.SortOrder = schema.OptionOrder(s.Sort)

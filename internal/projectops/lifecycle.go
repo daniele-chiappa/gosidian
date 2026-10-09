@@ -97,7 +97,7 @@ type DeleteResult struct {
 func Delete(v *vault.Vault, idx *index.Index, ps *projects.Store, tokens *auth.Store, bin *trash.Bin, name string) (DeleteResult, error) {
 	projectMu.Lock()
 	defer projectMu.Unlock()
-	clean, err := v.CheckProject(name)
+	clean, err := v.CheckExistingProject(name)
 	if err != nil {
 		return DeleteResult{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
@@ -183,7 +183,7 @@ type RestoreResult struct {
 func RestoreProject(v *vault.Vault, idx *index.Index, ps *projects.Store, tokens *auth.Store, bin *trash.Bin, id, restorerID string) (RestoreResult, error) {
 	projectMu.Lock()
 	defer projectMu.Unlock()
-	clean, err := v.CheckProject(trash.Origin(id))
+	clean, err := v.CheckExistingProject(trash.Origin(id))
 	if err != nil {
 		return RestoreResult{}, fmt.Errorf("%w: %v", ErrInvalid, err)
 	}

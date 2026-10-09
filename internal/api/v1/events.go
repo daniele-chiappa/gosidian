@@ -20,6 +20,11 @@ import (
 // belt-and-suspenders, but operators run varied stacks behind us.
 const sseHeartbeatInterval = 30 * time.Second
 
+// sseRecheckInterval is how often a stream with events to send checks its
+// session and account again (streamPrincipal); a quiet one checks at each
+// heartbeat. A variable for the tests.
+var sseRecheckInterval = 5 * time.Second
+
 // eventsCookieName carries the SPA session token to /api/v1/events
 // (IMP-090). EventSource cannot set an Authorization header, and the token
 // used to ride on the query string, where every reverse proxy's access log
@@ -166,6 +171,8 @@ func (r *Router) handleEvents(w http.ResponseWriter, req *http.Request) {
 	defer heartbeat.Stop()
 
 	ctx := req.Context()
+	princ := authz.Principal{UserID: user.ID, Role: user.Role, Restricted: user.Restricted}
+	checked := time.Now()
 	for {
 		select {
 		case <-ctx.Done():
@@ -174,18 +181,30 @@ func (r *Router) handleEvents(w http.ResponseWriter, req *http.Request) {
 			if !open {
 				return
 			}
-			princ, alive := r.streamPrincipal(spaTok.UserID)
-			if !alive {
-				return // account disabled or gone: end the stream like requireAuth would
+			// Checked again every few seconds, not at every frame: a burst
+			// of events took the session store's lock once per frame and tab.
+			if time.Since(checked) >= sseRecheckInterval {
+				var alive bool
+				if princ, alive = r.streamPrincipal(token); !alive {
+					return // session or account gone: end the stream like requireAuth would
+				}
+				checked = time.Now()
 			}
-			if !r.mayStream(princ, ev) {
+			data, ok := r.streamData(princ, ev)
+			if !ok {
 				continue
 			}
-			if _, err := fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", ev.ID, ev.Topic, ev.Data); err != nil {
+			if _, err := fmt.Fprintf(w, "id: %s\nevent: %s\ndata: %s\n\n", ev.ID, ev.Topic, data); err != nil {
 				return
 			}
 			flusher.Flush()
 		case <-heartbeat.C:
+			// A quiet stream ends here, within a heartbeat of a logout.
+			var alive bool
+			if princ, alive = r.streamPrincipal(token); !alive {
+				return
+			}
+			checked = time.Now()
 			if _, err := fmt.Fprint(w, ": heartbeat\n\n"); err != nil {
 				return
 			}
@@ -194,37 +213,81 @@ func (r *Router) handleEvents(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-// streamPrincipal re-resolves the subscriber's account on every frame, so a
-// demotion takes effect on the next event and a disabled account ends the
-// stream without waiting for a reconnect. alive=false means "close".
-func (r *Router) streamPrincipal(userID string) (authz.Principal, bool) {
-	user, ok := r.deps.Auth.WebAuth.UserByID(userID)
-	if !ok || !user.Enabled() {
+// streamPrincipal re-checks the subscriber's session and account, every few
+// seconds of events and at each heartbeat, so a demotion takes effect soon and a
+// logout, a revoked or expired session, a disabled account, a password to
+// change or a TOTP to enrol end the stream without waiting for a reconnect:
+// the token was checked only at the connection, and an open stream kept
+// receiving paths and project names (BUG-112, S2-1). alive=false means
+// "close".
+func (r *Router) streamPrincipal(token string) (authz.Principal, bool) {
+	spaTok, err := r.deps.Auth.SpaAuth.Check(token)
+	if err != nil {
+		return authz.Principal{}, false
+	}
+	user, ok := r.deps.Auth.WebAuth.UserByID(spaTok.UserID)
+	if !ok || !user.Enabled() || user.MustChangePassword || r.deps.Auth.WebAuth.TOTPEnrollmentRequired(user) {
 		return authz.Principal{}, false
 	}
 	return authz.Principal{UserID: user.ID, Role: user.Role, Restricted: user.Restricted}, true
 }
 
-// mayStream applies the read predicate that gates every REST read to one SSE
-// frame: the hub is a single shared stream, so without this filter a guest or
-// a member outside a project would learn the paths and names of private
-// notes and projects from the events about them (BUG-054). Frames that name
-// a path or a project are gated by canSee on that project; frames that name
-// neither (nothing to scope them to) go to the owner only.
-func (r *Router) mayStream(p authz.Principal, ev events.Event) bool {
+// streamData applies the read predicate that gates every REST read to one
+// SSE frame, and returns what of it p may receive, or false for nothing: the
+// hub is a single shared stream, so without this filter a guest or a member
+// outside a project would learn the paths and names of private notes and
+// projects from the events about them (BUG-054). A frame naming a path, a
+// project or a target ("to", of a rename or a move) goes to who can see each
+// of them; a frame that names none (nothing to scope it to) goes to the
+// owner only. A project that is gone, deleted or renamed away, has no access
+// entry left, and judging it by the default visibility handed its name to
+// every member (BUG-112, S2-5): such a frame reaches the others without its
+// names. The web UI reloads on any tree or sidebar frame, payload unread.
+func (r *Router) streamData(p authz.Principal, ev events.Event) ([]byte, bool) {
 	var ref struct {
+		Action  string `json:"action"`
 		Path    string `json:"path"`
 		Project string `json:"project"`
+		To      string `json:"to"`
 	}
 	_ = json.Unmarshal(ev.Data, &ref)
-	switch {
-	case ref.Path != "":
-		return r.canSee(p, ref.Path)
-	case ref.Project != "":
-		return r.canAccessProject(p, ref.Project)
-	default:
-		return p.Role == webauth.RoleOwner
+	if ref.Path == "" && ref.Project == "" && ref.To == "" {
+		return ev.Data, p.Role == webauth.RoleOwner
 	}
+	if p.Role == webauth.RoleOwner {
+		return ev.Data, true
+	}
+	gone := false
+	for _, ps := range []struct{ project, path string }{
+		{projectOf(ref.Path), ref.Path},
+		{ref.Project, ""},
+	} {
+		switch {
+		case ps.project == "":
+		case !r.deps.Vault.Exists(ps.project): // a stat, at every frame
+			gone = true
+		case ps.path != "" && !r.canSee(p, ps.path):
+			return nil, false
+		case ps.path == "" && !r.canAccessProject(p, ps.project):
+			return nil, false
+		}
+	}
+	if gone {
+		data, _ := json.Marshal(map[string]string{"action": ref.Action})
+		return data, true
+	}
+	// A note moved where the reader cannot follow: the frame still says it
+	// left, without saying where to.
+	if to := projectOf(ref.To); ref.To != "" && (!r.deps.Vault.Exists(to) || !r.canSee(p, ref.To)) {
+		var full map[string]any
+		if json.Unmarshal(ev.Data, &full) != nil {
+			return nil, false
+		}
+		delete(full, "to")
+		data, _ := json.Marshal(full)
+		return data, true
+	}
+	return ev.Data, true
 }
 
 // parseTopicList tokenises the comma-separated `topics=` query param

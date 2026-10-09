@@ -398,3 +398,48 @@ func TestTrashRetention(t *testing.T) {
 		t.Errorf("a saved 0 reloads as %v, %v", cfg.Trash.Retention, err)
 	}
 }
+
+// A TOTP mode is read whatever its case, "require" included; a value still
+// unknown closes, as required, and says so: it opened, as off (BUG-115,
+// S5-11).
+func TestTOTPModeOf(t *testing.T) {
+	for raw, want := range map[string]string{"": "off", "off": "off", "Optional": "optional", " required ": "required", "Require": "required", "requird": "required", "yes": "required"} {
+		got, warn := TOTPModeOf(raw)
+		if got != want {
+			t.Errorf("TOTPModeOf(%q) = %q, want %q", raw, got, want)
+		}
+		if unknown := raw == "requird" || raw == "yes"; unknown != (warn != "") {
+			t.Errorf("TOTPModeOf(%q) warning = %q", raw, warn)
+		}
+	}
+	t.Setenv("GOSIDIAN_TOTP_MODE", "Required")
+	cfg := Default()
+	if err := cfg.ApplyEnv(); err != nil || cfg.Webauth.TOTPMode != "required" || cfg.TOTPModeWarning() != "" {
+		t.Errorf("env Required = %q (%q), %v", cfg.Webauth.TOTPMode, cfg.TOTPModeWarning(), err)
+	}
+}
+
+// A save keeps the file's permissions, a new file is 0600, and no
+// temporary file is left (BUG-115, S5-14).
+func TestSave_Permissions(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := Save(path, Default()); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := os.Stat(path); st.Mode().Perm() != 0o600 {
+		t.Errorf("a new config.toml is %v, want 0600", st.Mode().Perm())
+	}
+	if err := os.Chmod(path, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := Save(path, Default()); err != nil {
+		t.Fatal(err)
+	}
+	if st, _ := os.Stat(path); st.Mode().Perm() != 0o640 {
+		t.Errorf("after a save the file is %v, want the 0640 it had", st.Mode().Perm())
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, ".config-*")); len(left) > 0 {
+		t.Errorf("temporary files left: %v", left)
+	}
+}

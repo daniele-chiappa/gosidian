@@ -20,6 +20,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/gosidian/gosidian/internal/parser"
 )
 
 // Entry is a file of a package: its path inside the package, slash
@@ -351,20 +353,9 @@ var mdLinkRe = regexp.MustCompile(`(!?)\[([^\]\n]*)\]\(\s*<?([^)\s>]+)>?(\s+"[^"
 func rewriteMarkdown(text, src string, notes, attach map[string]string) (string, []string) {
 	var unresolved []string
 	lines := strings.SplitAfter(text, "\n")
-	fence := ""
+	var fences parser.Fences
 	for i, line := range lines {
-		trim := strings.TrimSpace(line)
-		if strings.HasPrefix(trim, "```") || strings.HasPrefix(trim, "~~~") {
-			marker := trim[:3]
-			switch {
-			case fence == "":
-				fence = marker
-			case marker == fence:
-				fence = ""
-			}
-			continue
-		}
-		if fence != "" {
+		if fences.Code(line) {
 			continue
 		}
 		lines[i] = outsideCode(line, func(s string) string {

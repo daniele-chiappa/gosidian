@@ -53,7 +53,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_LOGIN_WINDOW` | `webauth.login_window` | `15m` |
 | `GOSIDIAN_LOGIN_MAX_FAILURES` | `webauth.login_max_failures` | `5` |
 | `GOSIDIAN_TRUSTED_PROXIES` | `webauth.trusted_proxies` | empty (comma-separated IPs/CIDRs of the reverse proxies whose `X-Forwarded-For` the login rate limiter may trust; empty = the header is ignored and the peer address is used) |
-| `GOSIDIAN_TOTP_MODE` | `webauth.totp_mode` | `off` (`optional`, `required`) |
+| `GOSIDIAN_TOTP_MODE` | `webauth.totp_mode` | `off` (`optional`, `required`; any case, `require` too; another value reads `required`, with a line in the log) |
 | `GOSIDIAN_AUTO_OWNER` | `webauth.auto_owner` | `true` (at the first start, with no account at all, create the owner `admin` with a random password, shown once in the log and kept in `<state-dir>/initial-admin-password` until the owner chooses its own at the first sign-in; `false` leaves the owner to `gosidian user setup`) |
 | `GOSIDIAN_LDAP_ENABLED` | `ldap.enabled` | `false` |
 | `GOSIDIAN_LDAP_URL` | `ldap.url` | empty (`ldap://host:389`, `ldaps://host:636`) |

@@ -71,6 +71,7 @@ func (s *Store) SetPassword(userID, password string, mustChange bool) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.reloadLocked()
 	for i := range s.file.Users {
 		u := &s.file.Users[i]
 		if u.ID != userID {
@@ -98,6 +99,7 @@ func (s *Store) SetPassword(userID, password string, mustChange bool) error {
 func (s *Store) SetMustChangePassword(userID string, must bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.reloadLocked()
 	for i := range s.file.Users {
 		if s.file.Users[i].ID == userID {
 			s.file.Users[i].MustChangePassword = must

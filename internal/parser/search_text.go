@@ -23,19 +23,13 @@ func SearchText(s string) string {
 	}
 	var out strings.Builder
 	out.Grow(len(s))
-	inFence := false
+	var fences Fences
 	lines := strings.Split(s, "\n")
 	for i, line := range lines {
 		if i > 0 {
 			out.WriteByte('\n')
 		}
-		trim := strings.TrimSpace(line)
-		if strings.HasPrefix(trim, "```") || strings.HasPrefix(trim, "~~~") {
-			inFence = !inFence
-			out.WriteString(line)
-			continue
-		}
-		if inFence || !strings.Contains(line, "[[") {
+		if fences.Code(line) || !strings.Contains(line, "[[") {
 			out.WriteString(line)
 			continue
 		}

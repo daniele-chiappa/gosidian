@@ -144,13 +144,17 @@ Line start:
 // 6 and 8 (IMP-145); a longer or a non-hex word is.
 func TestExtract_ColorsAreNotTags(t *testing.T) {
 	body := []byte("Brand #AC1F24, text #fff on #F5F6F7, overlay (#c0392b80) and #FFFF; palette #FAFAFA/#EFEFEF/#333.\n" +
-		"Tags #topic, #cafebabe1, #fffa0/x, #decaf and #bad-word stay.\n")
+		"Tags #topic, #cafebabe1, #fffa0/x, #decaf, #bad-word, #cafe and #feed stay.\n")
 	_, tags, _ := Extract(body)
-	want := []string{"topic", "cafebabe1", "fffa0/x", "decaf", "bad-word"}
+	want := []string{"topic", "cafebabe1", "fffa0/x", "decaf", "bad-word", "cafe", "feed"}
 	if !reflect.DeepEqual(tags, want) {
 		t.Errorf("tags mismatch:\ngot  %v\nwant %v", tags, want)
 	}
-	for tag, want := range map[string]bool{"fff": true, "FAFAFA/": true, "abc//": false, "AC1F24": true, "c0392b80": true, "abcd": true, "ab": false, "abcde": false, "abcdefg": false, "fffg": false, "": false} {
+	for tag, want := range map[string]bool{"fff": true, "FAFAFA/": true, "abc//": false, "AC1F24": true, "c0392b80": true, "ab": false, "abcde": false, "abcdefg": false, "fffg": false, "": false,
+		// Short lowercase words are tags; a repeated letter, capitals or a
+		// digit make a color (BUG-114, S4-5).
+		"cafe": false, "feed": false, "add": false, "bad": false, "fede": false, "abcd": false,
+		"ffff": true, "eee": true, "ABC": true, "CAFE": true, "fafafa": true, "3a3": true} {
 		if got := IsColorTag(tag); got != want {
 			t.Errorf("IsColorTag(%q) = %v", tag, got)
 		}
@@ -472,5 +476,16 @@ func TestResolveHeading(t *testing.T) {
 		if got != c.want || !reflect.DeepEqual(cands, c.candidates) {
 			t.Errorf("ResolveHeading(%q) = %q %v, want %q %v", c.in, got, cands, c.want, c.candidates)
 		}
+	}
+}
+
+// A fence of four backticks holds a ``` sample, and a "## …" line after it
+// is still code: the section runs on to the real heading (BUG-114, S4-9).
+func TestFences_MatchCharAndLength(t *testing.T) {
+	lines := strings.Split("````md\n```go\nx\n```\n## not a heading\n````\n## Real\n~~~\n```\n~~~\nend", "\n")
+	got := fencedLines(lines)
+	want := []bool{true, true, true, true, true, true, false, true, true, true, false}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("fenced = %v\nwant     %v", got, want)
 	}
 }

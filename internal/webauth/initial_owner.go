@@ -56,6 +56,7 @@ func (s *Store) ProvisionInitialOwner(username string) (string, error) {
 		return "", fmt.Errorf("write %s: %w", path, err)
 	}
 	s.mu.Lock()
+	s.reloadLocked()
 	if len(s.file.Users) > 0 {
 		s.mu.Unlock()
 		_ = os.Remove(path)

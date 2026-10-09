@@ -143,7 +143,9 @@ func (s *Server) handleDownloadTicketRedeem(w http.ResponseWriter, r *http.Reque
 
 // tokenByID finds the token a ticket was minted with: the admin token in
 // open mode (see openMode), nil when it no longer exists or expired since
-// the mint.
+// the mint. It is narrowed to its owner's access now, as every MCP call
+// is: within the ticket's minutes a disabled account, or one taken off the
+// project, still read or wrote the note (BUG-113, S3-4).
 func (s *Server) tokenByID(id string) *auth.Token {
 	if s.openMode() {
 		return auth.AdminToken()
@@ -154,7 +156,7 @@ func (s *Server) tokenByID(id string) *auth.Token {
 				return nil
 			}
 			tt := t
-			return &tt
+			return s.effectiveToken(&tt)
 		}
 	}
 	return nil
