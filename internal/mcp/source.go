@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/gosidian/gosidian/internal/attach"
 )
 
 // bridgePath resolves a bridge_filename to its path in the bridge dir. Only
@@ -45,7 +47,7 @@ func (s *Server) checkSource(ctx context.Context, p string) (string, error) {
 	real, err := filepath.EvalSymlinks(clean)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("source_path %q does not exist on the server", p)
+			return "", fmt.Errorf("source_path %q does not exist on the server. %s", p, attach.RemoteSetupHint)
 		}
 		return "", fmt.Errorf("source_path: %w", err)
 	}
@@ -62,7 +64,7 @@ func (s *Server) checkSource(ctx context.Context, p string) (string, error) {
 		}
 	}
 	if !inRoot {
-		return "", fmt.Errorf("source_path %q is not inside the vault, the bridge dir or an allowed upload root (GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS)", p)
+		return "", fmt.Errorf("source_path %q is not inside the vault, the bridge dir or an allowed upload root (GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS). %s", p, attach.RemoteSetupHint)
 	}
 	if _, ok := relWithin(real, vaultRoot); ok {
 		return "", fmt.Errorf("source_path %q holds the whole vault", p)
@@ -82,6 +84,20 @@ func (s *Server) checkSource(ctx context.Context, p string) (string, error) {
 	vrel, err := s.vault.Rel(rel)
 	if err != nil || tok == nil || !tok.AllowsPath(vrel) || s.pathInHiddenProject(vrel) {
 		return "", refused
+	}
+	return real, nil
+}
+
+// checkSourceFile is checkSource for a single file. It is the one check
+// of a file's source_path: the ingestion of a note checked it first
+// against the roots without resolving the links too (IMP-161).
+func (s *Server) checkSourceFile(ctx context.Context, p string) (string, error) {
+	real, err := s.checkSource(ctx, p)
+	if err != nil {
+		return "", err
+	}
+	if fi, err := os.Stat(real); err == nil && fi.IsDir() {
+		return "", errors.New("source_path is a directory, not a file")
 	}
 	return real, nil
 }

@@ -20,15 +20,19 @@ type gitSyncHealth struct {
 	LastCommitAt *time.Time `json:"last_commit_at,omitempty"`
 }
 
-// handleHealth answers liveness/readiness probes. It is intentionally
-// unauthenticated (and will be whitelisted by the future auth middleware) so
-// orchestrators can reach it without credentials.
+// handleHealth answers liveness/readiness probes. It is unauthenticated so
+// orchestrators reach it without credentials, and then says only what a
+// probe needs: status, version, the MCP tool count and whether git sync is
+// healthy. With the owner's credentials (healthDetails) it adds the vault
+// path, the note count and git's last error and times: git's stderr may
+// carry the remote's URL, and none of it is for an anonymous caller
+// (IMP-160, S2-10).
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	type payload struct {
-		Status  string `json:"status"`
-		Version string `json:"version,omitempty"`
-		Vault   string `json:"vault"`
-		Notes   int    `json:"notes"`
+		Status  string  `json:"status"`
+		Version string  `json:"version,omitempty"`
+		Vault   *string `json:"vault,omitempty"`
+		Notes   *int    `json:"notes,omitempty"`
 		// MCPTools is how many tools the MCP server registered (IMP-030):
 		// after a rebuild it tells whether a new tool is in, without
 		// reconnecting an MCP client, which keeps the list it first read.
@@ -36,11 +40,12 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		GitSync  gitSyncHealth `json:"git_sync"`
 	}
 
-	out := payload{
-		Version: s.version,
-		Vault:   s.vault.Root,
-		GitSync: buildGitSyncHealth(s.gitSync, s.gitSyncOn),
+	details := s.healthDetails != nil && s.healthDetails(r)
+	git := buildGitSyncHealth(s.gitSync, s.gitSyncOn)
+	if !details {
+		git = gitSyncHealth{Enabled: git.Enabled, Healthy: git.Healthy}
 	}
+	out := payload{Version: s.version, GitSync: git}
 	if s.mcpTools != nil {
 		out.MCPTools = s.mcpTools()
 	}
@@ -52,12 +57,17 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	// any status != "ok". Backup degradation stays observable via
 	// git_sync.healthy below and the Prometheus gauge gosidian_gitsync_status
 	// (=2). See BUG-015 and ADR-002 (push-only, fail-loud, manual reconcile).
-	notes, err := s.index.AllNotes()
+	// A count, not every note loaded at each probe.
+	notes, err := s.index.NoteCount()
 	indexOK := err == nil
 	status, code := topLevelStatus(indexOK)
 	out.Status = status
-	if indexOK {
-		out.Notes = len(notes)
+	if details {
+		root := s.vault.Root
+		out.Vault = &root
+		if indexOK {
+			out.Notes = &notes
+		}
 	}
 	writeJSON(w, code, out)
 }

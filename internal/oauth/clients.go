@@ -376,16 +376,17 @@ func (c *cimdCache) resolve(ctx context.Context, docURL string, now time.Time) (
 	c.mu.Unlock()
 
 	client, ttl, err := c.fetchAndParse(ctx, docURL)
+	// A fetch cut short by the request itself (the client went away, or its
+	// deadline passed) says nothing about the document: cached for a minute,
+	// it kept a legitimate client out (IMP-159, S1-12). The fetch's own
+	// timeout is cached as any failure: a slow host would otherwise hold a
+	// fresh 10 s fetch at every /authorize.
+	if err != nil && ctx.Err() != nil {
+		return nil, err
+	}
 	c.mu.Lock()
 	if len(c.entries) >= cimdMaxEntries {
-		for k, e := range c.entries {
-			if !now.Before(e.exp) {
-				delete(c.entries, k)
-			}
-		}
-		if len(c.entries) >= cimdMaxEntries {
-			c.entries = map[string]cimdEntry{}
-		}
+		c.evictLocked(now)
 	}
 	c.entries[docURL] = cimdEntry{client: client, err: err, exp: now.Add(ttl)}
 	c.mu.Unlock()
@@ -394,6 +395,26 @@ func (c *cimdCache) resolve(ctx context.Context, docURL string, now time.Time) (
 	}
 	out := *client
 	return &out, nil
+}
+
+// evictLocked makes room: the expired entries go, and if none had, the one
+// closest to expiry. The whole cache was dropped at the cap, so a burst of
+// bogus client ids flushed every legitimate client with it.
+func (c *cimdCache) evictLocked(now time.Time) {
+	var oldest string
+	var oldestExp time.Time
+	for k, e := range c.entries {
+		if !now.Before(e.exp) {
+			delete(c.entries, k)
+			continue
+		}
+		if oldest == "" || e.exp.Before(oldestExp) {
+			oldest, oldestExp = k, e.exp
+		}
+	}
+	if len(c.entries) >= cimdMaxEntries && oldest != "" {
+		delete(c.entries, oldest)
+	}
 }
 
 func (c *cimdCache) fetchAndParse(ctx context.Context, docURL string) (*Client, time.Duration, error) {

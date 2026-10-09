@@ -350,7 +350,11 @@ func main() {
 	webauthStore.SetOnUserCreated(apiv1.PersonalProjectHook(v, projectsStore, tokenStore, auditLog))
 	if cfg.Vault.CacheSize != 128 {
 		v.SetCacheSize(cfg.Vault.CacheSize)
-		log.Printf("vault cache size set to %d", cfg.Vault.CacheSize)
+		if cfg.Vault.CacheSize <= 0 {
+			log.Printf("vault cache off (cache_size = %d)", cfg.Vault.CacheSize)
+		} else {
+			log.Printf("vault cache size set to %d", cfg.Vault.CacheSize)
+		}
 	}
 	v.SetHTMLNotes(cfg.Vault.HTMLNotes)
 	if cfg.Vault.HTMLNotes {
@@ -447,12 +451,11 @@ func main() {
 	//   - gitsync.TriggerCommit when git sync is enabled (debounced
 	//     auto-commit of vault changes).
 	//   - eventsHub publish on the `tree` topic so SSE subscribers
-	//     invalidate their sidebar cache. Carries no path data
-	//     because the v1 watcher signature doesn't surface it; the
-	//     SPA refetches /api/v1/tree on receipt. Per-path note
-	//     events come from the MCP/api write hooks instead, which
-	//     do know which path changed.
-	onChange := func() {
+	//     invalidate their sidebar cache. It carries the path that
+	//     changed, so the stream delivers it to whoever may see it: it
+	//     had none, and only the owner got it (IMP-160, S2-9). Per-path
+	//     note events come from the MCP/api write hooks.
+	onChange := func(rel string) {
 		if cfg.Git.Enabled {
 			syncer.TriggerCommit()
 		}
@@ -460,6 +463,7 @@ func main() {
 			eventsHub.Publish(events.TopicTree, map[string]any{
 				"action": "fs_change",
 				"source": "watcher",
+				"path":   rel,
 			})
 		}
 	}
@@ -660,6 +664,7 @@ func main() {
 	})
 	srv.MountAPIv1(apiRouter)
 	srv.SetVaultFileAuthorizer(apiRouter.VaultFileAuthorizer()) // ADR-022: attachments share the API auth
+	srv.SetHealthDetailsAuthorizer(apiRouter.HealthDetailsAuthorizer())
 	srv.MountMCP(mcpServer.Handler("/mcp"))
 	srv.SetMCPToolCount(mcpServer.ToolCount)
 	if oauthSrv != nil {

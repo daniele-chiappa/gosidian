@@ -38,7 +38,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS` | `mcp.allowed_upload_roots` | empty (vault only) |
 | `GOSIDIAN_MCP_BRIDGE_DIR` | `mcp.bridge_dir` | empty (off; staging dir for cheap `bridge_filename` uploads, IMP-059) |
 | `GOSIDIAN_OAUTH_ENABLED` | `oauth.enabled` | `false` (embedded OAuth 2.1 authorization server for claude.ai / ChatGPT / Claude Code logins, see [Authentication](mcp/authentication.md#oauth-21-for-hosted-clients-claudeai-chatgpt-claude-code)) |
-| `GOSIDIAN_OAUTH_ISSUER` | `oauth.issuer` | empty (required when enabled: the public HTTPS origin clients use, e.g. `https://notes.example.com`; the MCP resource is `<issuer>/mcp`) |
+| `GOSIDIAN_OAUTH_ISSUER` | `oauth.issuer` | empty (required when enabled: the public HTTPS origin clients use, e.g. `https://notes.example.com`, without a path, which is refused at start; the MCP resource is `<issuer>/mcp`) |
 | `GOSIDIAN_OAUTH_ACCESS_TTL` | `oauth.access_ttl` | `1h` (in-memory access tokens) |
 | `GOSIDIAN_OAUTH_REFRESH_TTL` | `oauth.refresh_ttl` | `720h` (grant lifetime; refresh tokens rotate on use) |
 | `GOSIDIAN_OAUTH_ALLOWED_REDIRECT_HOSTS` | `oauth.allowed_redirect_hosts` | empty (any HTTPS redirect host; loopback always allowed). `oauth.client_max` (`1000`) and `oauth.client_idle_ttl` (`2160h`) bound the registered clients, config file only |

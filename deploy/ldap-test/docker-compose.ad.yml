@@ -31,9 +31,10 @@ services:
       ADMIN_PASS: "Passw0rd!2026"
       DNS_FORWARDER: "8.8.8.8"
       BIND_NETWORK_INTERFACES: "false"
+    # On the loopback only: the administrator password is in this file.
     ports:
-      - "1390:389" # ldap://
-      - "1637:636" # ldaps://
+      - "127.0.0.1:1390:389" # ldap://
+      - "127.0.0.1:1637:636" # ldaps://
     networks:
       - ldaptest
     volumes:

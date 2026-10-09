@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"testing"
 	"time"
@@ -596,5 +597,62 @@ func TestVault_RenameNote_FrontmatterLinks(t *testing.T) {
 	}
 	if bl, _ := idx.Backlinks("p/bugs/BUG-001.md"); len(bl) != 1 || bl[0].Path != "p/plans/fix.md" {
 		t.Errorf("backlinks after rename: %+v", bl)
+	}
+}
+
+// ProjectNames lists what Projects lists, without counting (IMP-161, S3-10).
+func TestVault_ProjectNames(t *testing.T) {
+	v := newTestVault(t)
+	write(t, v.Root, "loose.md", "# loose")
+	write(t, v.Root, "b/n.md", "# n")
+	write(t, v.Root, "a/n.md", "# n")
+	write(t, v.Root, ".obsidian/x.json", "{}")
+	if err := os.MkdirAll(filepath.Join(v.Root, "empty"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	names, err := v.ProjectNames()
+	projs, _ := v.Projects()
+	var want []string
+	for _, p := range projs {
+		want = append(want, p.Name)
+	}
+	if err != nil || !slices.Equal(names, want) || !slices.Equal(names, []string{"a", "b", "empty"}) {
+		t.Errorf("ProjectNames = %v, %v; Projects = %v", names, err, want)
+	}
+}
+
+// A walk skips what vanished under it and still fails on a missing root
+// (IMP-163).
+func TestSkipVanished(t *testing.T) {
+	gone := &fs.PathError{Op: "open", Path: "/v/p/sub", Err: fs.ErrNotExist}
+	if err := skipVanished("/v", "/v/p/sub", gone); err != nil {
+		t.Errorf("a folder gone mid-walk: %v", err)
+	}
+	if err := skipVanished("/v", "/v", gone); err == nil {
+		t.Error("the root missing is no error")
+	}
+	if err := skipVanished("/v", "/v/p", fs.ErrPermission); !errors.Is(err, fs.ErrPermission) {
+		t.Errorf("another error is lost: %v", err)
+	}
+	v := New(filepath.Join(t.TempDir(), "missing"))
+	if _, err := v.List(); err == nil {
+		t.Error("List of a missing vault does not fail")
+	}
+}
+
+// An attachment named however a link writes it is referenced: in another
+// case, escaped with either hex case or "+", in either Unicode form
+// (IMP-163).
+func TestUnreferenced_MatchesTheWaysALinkWritesIt(t *testing.T) {
+	v := newTestVault(t)
+	write(t, v.Root, "p/a.md", "![](attachments/Shot.PNG) ![](attachments/caf%c3%a9.png) ![](attachments/my+plan.png)\n")
+	write(t, v.Root, "p/b.md", "![](attachments/naïve.png) 100% sure\n")
+	names := []string{"shot.png", "café.png", "my plan.png", "naïve.png", "lost.png"}
+	got, err := v.Unreferenced(names)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || !got["lost.png"] {
+		t.Errorf("unreferenced = %v, want lost.png only", got)
 	}
 }

@@ -92,6 +92,13 @@ func (i *Index) FolderStats(prefix string, over int64) (FolderStats, error) {
 	return st, err
 }
 
+// NoteCount is the number of indexed notes, for the health probe.
+func (i *Index) NoteCount() (int, error) {
+	var n int
+	err := i.db.QueryRow(`SELECT COUNT(*) FROM notes`).Scan(&n)
+	return n, err
+}
+
 func (i *Index) AllNotes() ([]NoteRow, error) {
 	rows, err := i.db.Query(`SELECT id, path, title FROM notes ORDER BY path`)
 	if err != nil {
@@ -187,16 +194,41 @@ func (i *Index) RecentNotes(project string, since int64, limit int) ([]RecentNot
 			since, limit,
 		)
 	} else {
-		like := strings.ReplaceAll(project, "%", `\%`)
-		like = strings.ReplaceAll(like, "_", `\_`) + "/%"
 		rows, err = i.db.Query(
 			`SELECT path, title, mtime FROM notes WHERE path LIKE ? ESCAPE '\' AND mtime >= ? ORDER BY mtime DESC LIMIT ?`,
-			like, since, limit,
+			likeUnder(project), since, limit,
 		)
 	}
 	if err != nil {
 		return nil, err
 	}
+	return scanRecent(rows)
+}
+
+// RecentNotesIn is RecentNotes over a list of projects: nil means every
+// note, an empty list none. The list goes in the query, so a caller who
+// sees a few projects gets their latest notes and not the vault's latest
+// with the others filtered out after the LIMIT (IMP-160, S2-13).
+func (i *Index) RecentNotesIn(projects []string, limit int) ([]RecentNote, error) {
+	if projects != nil && len(projects) == 0 {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	limit = min(limit, 500)
+	scope, args := scopeClause(projects, nil)
+	rows, err := i.db.Query(
+		`SELECT n.path, n.title, n.mtime FROM notes n WHERE 1=1`+scope+` ORDER BY n.mtime DESC LIMIT ?`,
+		append(args, limit)...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return scanRecent(rows)
+}
+
+func scanRecent(rows *sql.Rows) ([]RecentNote, error) {
 	defer rows.Close()
 	var out []RecentNote
 	for rows.Next() {

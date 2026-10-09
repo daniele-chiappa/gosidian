@@ -165,3 +165,17 @@ func TestMCP_WaitChangesOneWaiterSessionless(t *testing.T) {
 	}
 	<-done
 }
+
+// The watcher's frame for a write, which carries the path since IMP-160,
+// does not wake a waiter a second time: only the write's own frame does.
+func TestMCP_WaitChangesIgnoresTheWatcher(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	hub := events.New(events.HubOptions{})
+	s.SetEvents(hub)
+	cursor := int(hub.Seq())
+	hub.Publish(events.TopicTree, map[string]any{"action": "fs_change", "source": "watcher", "path": "p/x.md"})
+	out := waitCall(t, s, context.Background(), map[string]any{"cursor": cursor, "timeout_s": 1})
+	if len(out.Events) != 0 || !out.Timed {
+		t.Fatalf("a watcher frame woke the waiter: %+v", out)
+	}
+}

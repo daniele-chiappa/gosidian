@@ -59,3 +59,30 @@ func TestSettings_I18nEnvDefault(t *testing.T) {
 		t.Errorf("enabled list with the env default refused: %d %s", w.code, w.body)
 	}
 }
+
+// A remote's credentials stay hidden from members even when the remote is
+// not a URL Go parses (IMP-160, S2-11).
+func TestRedactUserinfo(t *testing.T) {
+	cases := map[string]string{
+		"https://bot:s3cr3t@git.example.com/o/r.git":  "https://redacted@git.example.com/o/r.git",
+		"https://bot:s3%zzcr3t@git.example.com/o/r":   "https://redacted@git.example.com/o/r",
+		"https://bot:s3/cr3t@git.example.com/o/r.git": "https://redacted@git.example.com/o/r.git",
+		"https://bot:s3 cr3t@git.example.com/o/r.git": "https://redacted@git.example.com/o/r.git",
+		"https://bot:s3cr3t@/o/r.git":                 "https://redacted@/o/r.git",
+		"https://ghp_s3/def@git.example.com/o/r.git":  "https://redacted@git.example.com/o/r.git",
+		"https://bot:123/s3@git.example.com/o/r.git":  "https://redacted@git.example.com/o/r.git",
+		"https://bot:4242#s3@git.example.com/o/r.git": "https://redacted@git.example.com/o/r.git",
+		"https://bot:4242?s3@git.example.com/o/r.git": "https://redacted@git.example.com/o/r.git",
+		"git@git.example.com:o/r.git":                 "git@git.example.com:o/r.git",
+		"bot:s3cr3t@git.example.com:o/r.git":          "redacted@git.example.com:o/r.git",
+		"https://git.example.com/o/r.git":             "https://git.example.com/o/r.git",
+		"/srv/backup.git":                             "/srv/backup.git",
+		"":                                            "",
+	}
+	for in, want := range cases {
+		got := redactUserinfo(in)
+		if got != want || strings.Contains(got, "s3") {
+			t.Errorf("redactUserinfo(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

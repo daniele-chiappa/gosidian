@@ -251,3 +251,58 @@ func TestVaultFiles_CookieLifecycle(t *testing.T) {
 		t.Errorf("revoked session cookie: got %d, want 401", got)
 	}
 }
+
+// /healthz shows its details (vault path, note count, git's last error) to
+// the owner's session and to an MCP token of the owner or of no account,
+// to no one else (IMP-160, S2-10).
+func TestHealthDetailsAuthorizer(t *testing.T) {
+	f := newNotesFixture(t)
+	fn := f.router.HealthDetailsAuthorizer()
+	req := func(bearer string) *http.Request { return vfReq("", bearer, "") }
+
+	if fn(req("")) {
+		t.Error("anonymous sees the details")
+	}
+	if !fn(req(f.bearer)) {
+		t.Error("the owner's session does not see the details")
+	}
+	bob, err := f.webauth.AddUser("bob", "bob-Pass123!", webauth.RoleMember)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bobTok, _, err := f.spaTokens.Create(bob.ID, "bob-agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fn(req(bobTok)) {
+		t.Error("a member's session sees the details")
+	}
+
+	mcp, err := auth.Open(filepath.Join(t.TempDir(), "tokens.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.router.deps.Auth.MCPTokens = mcp
+	cli, _, err := mcp.Create("cli", nil, []string{auth.ScopeRead}, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mine, _, err := mcp.Create("mine", nil, []string{auth.ScopeRead}, 0, f.webauth.FirstOwner().ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bobs, _, err := mcp.Create("bobs", nil, []string{auth.ScopeRead}, 0, bob.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fn(req(cli)) || !fn(req(mine)) {
+		t.Error("an MCP token of no account or of the owner does not see the details")
+	}
+	scoped, _, err := mcp.Create("scoped", []string{"scratch"}, []string{auth.ScopeRead}, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fn(req(bobs)) || fn(req("gsm_bogus")) || fn(req(scoped)) {
+		t.Error("a member's MCP token, a bogus one or one limited to a project sees the details")
+	}
+}

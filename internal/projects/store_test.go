@@ -207,3 +207,33 @@ func TestStore_OpenMissingFile(t *testing.T) {
 		t.Errorf("missing file should yield zero Flags, got %+v", got)
 	}
 }
+
+// The access lookups check the file at most once per staleCheckEvery: they
+// run once per project and note of a request, and each stat'ed the file
+// (IMP-159). A plain read and every write still check at once.
+func TestStore_AccessLookupsCheckTheFileOncePerInterval(t *testing.T) {
+	prev := staleCheckEvery
+	staleCheckEvery = time.Hour
+	t.Cleanup(func() { staleCheckEvery = prev })
+	path := filepath.Join(t.TempDir(), "projects.json")
+	s, _ := Open(path)
+	_ = s.Set("p", Flags{Visibility: VisibilityPrivate})
+	if s.Visibility("p") != VisibilityPrivate {
+		t.Fatal("setup")
+	}
+	raw, _ := json.MarshalIndent(storeFile{Projects: map[string]Flags{"p": {Visibility: VisibilityPublic}}}, "", "  ")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	future := time.Now().Add(2 * time.Second)
+	_ = os.Chtimes(path, future, future)
+	if s.Visibility("p") != VisibilityPrivate {
+		t.Error("the access lookup stat'ed the file within the interval")
+	}
+	if s.Get("p").Visibility != VisibilityPublic {
+		t.Error("a plain read must still see the change at once")
+	}
+	if s.Visibility("p") != VisibilityPublic {
+		t.Error("after a reload the lookup sees the change")
+	}
+}

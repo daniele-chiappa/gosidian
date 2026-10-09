@@ -739,11 +739,14 @@ func linkTo(p string) string {
 	return "[[" + strings.TrimSuffix(p, ".md") + "]]"
 }
 
+// link is a row's wikilink, its title as the alias. A .html row keeps its
+// extension, as in linkTo: without it the link led to a .md namesake
+// (IMP-162, S4-11).
 func link(h index.QueryHit) string {
-	target := strings.TrimSuffix(h.Path, path.Ext(h.Path))
+	target := strings.TrimSuffix(h.Path, ".md")
 	title := h.Title
 	if title == "" {
-		title = path.Base(target)
+		title = strings.TrimSuffix(path.Base(h.Path), path.Ext(h.Path))
 	}
 	// A backtick in the alias opens an inline code span that swallows the
 	// wikilink, which then shows as raw text: titles keep their words only.

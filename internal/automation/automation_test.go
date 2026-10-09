@@ -2,6 +2,7 @@ package automation
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -287,5 +288,70 @@ func TestEngine_Plan(t *testing.T) {
 	p, _ = e.Plan("demo", time.Time{})
 	if p.Rules[0].Fires || len(p.Rules[0].Fired) != 3 || len(p.Log) != 1 {
 		t.Errorf("after the run: %+v", p)
+	}
+}
+
+// A rule over MaxRows rows checks the first MaxRows, and its run and its
+// plan say so (IMP-161, S3-8).
+func TestEngine_RowCap(t *testing.T) {
+	rome, _ := time.LoadLocation("Europe/Rome")
+	h := demoHost(t)
+	h.rows = make([]Row, MaxRows+1)
+	for k := range h.rows {
+		h.rows[k] = Row{Path: fmt.Sprintf("demo/tasks/r%05d.md", k), Due: "2026-10-04"}
+	}
+	now := time.Date(2026, 10, 5, 8, 0, 0, 0, rome)
+	e, _ := newEngine(t, h, &now)
+	plan, err := e.Plan("", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, pr := range plan.Rules {
+		if pr.Name == "Deadlines near" && (!strings.Contains(pr.Warning, "more than 10000 rows") || len(pr.Rows) != MaxRows) {
+			t.Errorf("plan: warning %q, %d rows", pr.Warning, len(pr.Rows))
+		}
+	}
+	runs := e.Tick("")
+	if len(runs) != 1 || len(runs[0].Rows) != MaxRows || runs[0].Warning == "" {
+		t.Fatalf("tick over the cap: %d runs", len(runs))
+	}
+	// Past the cap, the firing of a row the rule did not read stays: the
+	// row is not gone, only unread.
+	rs := e.state.Rules[h.dbs[0].Rules[0].Key(h.dbs[0].Path)]
+	rs.Fired["demo/tasks/unread.md@2024-01-01"] = now.Add(-2 * forgetAfter)
+	e.Tick("")
+	if _, kept := rs.Fired["demo/tasks/unread.md@2024-01-01"]; !kept {
+		t.Error("the firing of a row past the cap was forgotten")
+	}
+}
+
+// A row handed off and still past its date more than 400 days later is not
+// handed off again; the firing of a row gone goes after that time (IMP-162,
+// S4-14).
+func TestEngine_RowFiringOutlivesForgetAfter(t *testing.T) {
+	rome, _ := time.LoadLocation("Europe/Rome")
+	h := demoHost(t)
+	h.rows = []Row{{Path: "demo/tasks/late.md", Title: "Late", Due: "2026-10-04"}, {Path: "demo/tasks/gone.md", Due: "2026-10-04"}}
+	now := time.Date(2026, 10, 5, 8, 0, 0, 0, rome)
+	e, _ := newEngine(t, h, &now)
+	if runs := e.Tick(""); len(runs) != 1 || len(runs[0].Rows) != 2 {
+		t.Fatalf("first tick: %+v", runs)
+	}
+	h.rows = h.rows[:1]
+	now = now.Add(forgetAfter + 48*time.Hour)
+	// Twice: the state is pruned at the end of a run.
+	for range 2 {
+		for _, run := range e.Tick("") {
+			if run.Rule == "Deadlines near" {
+				t.Errorf("the row was handed off again: %+v", run)
+			}
+		}
+	}
+	rs := e.state.Rules[h.dbs[0].Rules[0].Key(h.dbs[0].Path)]
+	if _, kept := rs.Fired["demo/tasks/late.md@2026-10-04"]; !kept {
+		t.Error("the firing of the row still there went")
+	}
+	if _, kept := rs.Fired["demo/tasks/gone.md@2026-10-04"]; kept {
+		t.Error("the firing of the row gone stays")
 	}
 }

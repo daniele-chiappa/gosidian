@@ -83,7 +83,7 @@ func (s *Server) ingestPackage(ctx context.Context, project string, req mcp.Call
 	if err != nil {
 		return mcp.NewToolResultError("package: " + err.Error()), nil
 	}
-	res, errOut := s.importPackage(ctx, in, entries, skipped, false)
+	res, errOut := s.importPackage(ctx, in, entries, skipped)
 	if errOut == nil && res != nil && !res.IsError && !in.DryRun && consume != "" {
 		_ = os.RemoveAll(consume) // consume the staged package (best-effort)
 	}
@@ -140,12 +140,16 @@ type packageNoteResult struct {
 	Unresolved       []string `json:"unresolved,omitempty"`
 }
 
+// errCreatedMeanwhile is a note of a package that appeared between the
+// check and the write, without overwrite.
+var errCreatedMeanwhile = errors.New("created meanwhile")
+
 // importPackage checks a read package and writes it, all or nothing: every
 // note is checked first (path, access, size, a note already there without
-// overwrite), and a write that fails midway takes back the ones done.
-// limited reports a caller that has already charged the write limit (the
-// redemption of an upload ticket).
-func (s *Server) importPackage(ctx context.Context, in packageIntent, entries []pkgimport.Entry, skipped []pkgimport.Skipped, limited bool) (*mcp.CallToolResult, error) {
+// overwrite), and a write that fails midway takes back the ones done. It
+// takes one place in the write rate, none when the ingestion took it
+// already (writeCharge: the upload of a ticket).
+func (s *Server) importPackage(ctx context.Context, in packageIntent, entries []pkgimport.Entry, skipped []pkgimport.Skipped) (*mcp.CallToolResult, error) {
 	tok, errRes := s.packageDest(ctx, in)
 	if errRes != nil {
 		return errRes, nil
@@ -250,10 +254,8 @@ func (s *Server) importPackage(ctx context.Context, in packageIntent, entries []
 		return mcp.NewToolResultErrorf("package not imported, nothing written: %d note(s) already exist (%s); pass overwrite:true to replace them, or dry_run:true to see the plan",
 			len(conflicts), strings.Join(firstN(conflicts, 10), ", ")), nil
 	}
-	if !limited {
-		if msg, _ := s.writeLimitViolation(ctx, tok, 0); msg != "" {
-			return mcp.NewToolResultError(msg), nil
-		}
+	if msg, _ := s.writeLimitViolation(ctx, tok, 0); msg != "" {
+		return mcp.NewToolResultError(msg), nil
 	}
 
 	// Attachments first: they are content-addressed, so one already there
@@ -292,30 +294,32 @@ func (s *Server) importPackage(ctx context.Context, in packageIntent, entries []
 	rollback := func() {
 		for i := len(written) - 1; i >= 0; i-- {
 			d := written[i]
-			unlock := s.vault.LockPath(d.rel)
-			if d.created {
-				_ = s.vault.Delete(d.rel)
-				_ = s.index.Delete(d.rel)
-			} else {
-				_ = s.writeAndIndex(d.rel, d.prev)
-			}
-			unlock()
+			_ = s.underLock(d.rel, func() error {
+				if d.created {
+					_ = s.vault.Delete(d.rel)
+					_ = s.index.Delete(d.rel)
+					return nil
+				}
+				return s.writeAndIndex(d.rel, d.prev)
+			})
 		}
 	}
 	for i, n := range plan.Notes {
 		rel, _ := s.vault.Rel(n.Path)
-		unlock := s.vault.LockPath(rel)
 		d := done{rel: rel, created: true}
-		if prev, err := s.vault.Load(rel); err == nil {
-			if !in.Overwrite {
-				unlock()
-				rollback()
-				return mcp.NewToolResultErrorf("package not imported: %s was created meanwhile; nothing is left written", rel), nil
+		err := s.underLock(rel, func() error {
+			if prev, err := s.vault.Load(rel); err == nil {
+				if !in.Overwrite {
+					return errCreatedMeanwhile
+				}
+				d.created, d.prev = false, prev.Content
 			}
-			d.created, d.prev = false, prev.Content
+			return s.writeAndIndex(rel, n.Data)
+		})
+		if errors.Is(err, errCreatedMeanwhile) {
+			rollback()
+			return mcp.NewToolResultErrorf("package not imported: %s was created meanwhile; nothing is left written", rel), nil
 		}
-		err := s.writeAndIndex(rel, n.Data)
-		unlock()
 		if err != nil {
 			rollback()
 			return mcp.NewToolResultErrorFromErr("package not imported, the notes written are taken back: "+rel, err), nil

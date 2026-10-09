@@ -19,25 +19,33 @@ import (
 // directly (IMP-127).
 func (s *Server) viewQuery(tok *auth.Token) views.QueryFunc {
 	return func(o index.QueryOptions) ([]index.QueryHit, int, error) {
-		filter := buildProjectsFilter(nil, tok.ProjectList())
-		o.Exclude = append(o.Exclude, s.hiddenProjects()...)
-		if filter.active {
-			o.Projects = append([]string{}, filter.allowed...)
-		}
-		hits, total, err := s.index.Query(o)
-		if err != nil {
-			return nil, 0, err
-		}
-		out := hits[:0]
-		for _, h := range hits {
-			if !tok.AllowsPath(h.Path) || !filter.matches(h.Path) || s.pathInHiddenProject(h.Path) {
-				total--
-				continue
-			}
-			out = append(out, h)
-		}
-		return out, total, nil
+		hits, total, dropped, err := s.scopedQuery(tok, o)
+		return hits, total - dropped, err
 	}
+}
+
+// scopedQuery is index.Query inside tok's reach: total is the index's,
+// dropped the hits of this page the reach took out (the SQL filters match
+// a project's name without case, the token with it). A reader that pages
+// with Offset steps by total, which stays the same from page to page.
+func (s *Server) scopedQuery(tok *auth.Token, o index.QueryOptions) ([]index.QueryHit, int, int, error) {
+	filter := buildProjectsFilter(nil, tok.ProjectList())
+	o.Exclude = append(o.Exclude, s.hiddenProjects()...)
+	if filter.active {
+		o.Projects = append([]string{}, filter.allowed...)
+	}
+	hits, total, err := s.index.Query(o)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	out := hits[:0]
+	for _, h := range hits {
+		if !tok.AllowsPath(h.Path) || !filter.matches(h.Path) || s.pathInHiddenProject(h.Path) {
+			continue
+		}
+		out = append(out, h)
+	}
+	return out, total, len(hits) - len(out), nil
 }
 
 // renderViews expands the view blocks of a note for an agent: each block

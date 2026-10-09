@@ -1,6 +1,9 @@
 package v1
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"path"
 	"strings"
@@ -55,12 +58,6 @@ func (r *Router) readCanvas(w http.ResponseWriter, req *http.Request, rel string
 		writeReadOnlyLoadError(w, err)
 		return
 	}
-	etag := quoteETag(c.ETag())
-	w.Header().Set("ETag", etag)
-	if match := req.Header.Get("If-None-Match"); match != "" && match == etag {
-		w.WriteHeader(http.StatusNotModified)
-		return
-	}
 	resp := noteResponse{
 		Path:    c.Path,
 		Title:   c.Title,
@@ -86,7 +83,39 @@ func (r *Router) readCanvas(w http.ResponseWriter, req *http.Request, rel string
 		return "`" + file + "`"
 	}))
 	resp.Canvas = r.canvasCards(pr, cv)
-	WriteJSON(w, http.StatusOK, resp)
+	writeCanvas(w, req, resp)
+}
+
+// writeCanvas answers with an ETag of the response itself: the cards carry
+// titles and excerpts of other notes, resolved for the reader, so the file's
+// own ETag let a 304 keep stale excerpts and another reader's view
+// (IMP-160, S2-8).
+func writeCanvas(w http.ResponseWriter, req *http.Request, resp noteResponse) {
+	body, err := json.Marshal(resp)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
+		return
+	}
+	sum := sha256.Sum256(body)
+	etag := `W/"` + hex.EncodeToString(sum[:12]) + `"`
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "private, no-cache")
+	if match := req.Header.Get("If-None-Match"); match != "" && match == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(append(body, '\n'))
+}
+
+// canvasOpens reports whether the web UI opens rel in a note window.
+func canvasOpens(rel string) bool {
+	switch strings.ToLower(path.Ext(rel)) {
+	case ".md", ".html", ".base", ".canvas":
+		return true
+	}
+	return false
 }
 
 // canvasNote is the vault path of the note (or base, or canvas) a file
@@ -117,8 +146,16 @@ func (r *Router) canvasCards(pr previewResolver, cv *canvas.Canvas) *canvasData 
 			if rel == "" {
 				break
 			}
+			// /vault-files/ serves attachments only, and /notes/ notes, bases
+			// and canvases only: an image elsewhere was a 404, any other file
+			// a 400 (IMP-160, S2-12). Those cards show their name.
 			if canvasImageExts[strings.ToLower(path.Ext(rel))] {
-				card.Image = "/vault-files/" + rel
+				if strings.Contains("/"+rel, "/attachments/") {
+					card.Image = "/vault-files/" + rel
+				}
+				break
+			}
+			if !canvasOpens(rel) {
 				break
 			}
 			card.Path = rel

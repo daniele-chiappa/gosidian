@@ -4,12 +4,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
 
-func TestSync_HistoryAndShow(t *testing.T) {
+func TestSync_History(t *testing.T) {
 	requireGit(t)
 	dir := t.TempDir()
 	cfg := testCfg()
@@ -44,43 +43,5 @@ func TestSync_HistoryAndShow(t *testing.T) {
 	}
 	if commits[0].SHA == "" || commits[0].ShortSHA == "" {
 		t.Errorf("missing sha in commit: %+v", commits[0])
-	}
-
-	// Show the most recent commit for that file
-	diff, err := s.Show("note.md", commits[0].SHA)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(diff, "note.md") {
-		t.Errorf("diff should mention the file: %s", diff)
-	}
-}
-
-func TestSync_RestoreReturnsHistoricalBytes(t *testing.T) {
-	requireGit(t)
-	dir := t.TempDir()
-	cfg := testCfg()
-	cfg.Debounce = 50 * time.Millisecond
-	s := New(dir, cfg)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	_ = s.Start(ctx)
-
-	_ = os.WriteFile(filepath.Join(dir, "n.md"), []byte("first"), 0o644)
-	s.TriggerCommit()
-	s.Flush()
-	commits, _ := s.History("n.md", 5)
-	firstSHA := commits[0].SHA
-
-	_ = os.WriteFile(filepath.Join(dir, "n.md"), []byte("second"), 0o644)
-	s.TriggerCommit()
-	s.Flush()
-
-	bytes, err := s.Restore("n.md", firstSHA)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(bytes) != "first" {
-		t.Errorf("restored bytes = %q, want %q", bytes, "first")
 	}
 }

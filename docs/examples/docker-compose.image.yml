@@ -36,6 +36,17 @@ services:
     container_name: gosidian
     restart: unless-stopped
 
+    # Hardening: the image runs as uid 65532 and writes only to /vault,
+    # /data and the temporary directory, so the rest of the filesystem can
+    # be read-only, with no capability and no privilege gained by exec.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
     # Single-port mode: web UI + MCP transport on the same port. An SSH
     # tunnel forwarding 8080 reaches both `/api/upload` and `/mcp/sse`.
     # See docs/mcp/client-setup.md for the agent endpoint URL.

@@ -137,8 +137,15 @@ type Store struct {
 	personalOff       bool                       // personal projects for new accounts switched off (IMP-101 phase 3)
 	accessModel       int                        // 0 = pre-v2.30 file, accessModelVersion = migrated
 	mtime             time.Time
-	reserved          []string // names the configuration keeps for its own projects, not persisted
+	reserved          []string  // names the configuration keeps for its own projects, not persisted
+	checkedAt         time.Time // last stat of the hot read path (reloadForRead)
 }
+
+// staleCheckEvery spaces the file checks of the access lookups: visibility
+// and grants run once per project and note of a request, and each stat'ed
+// the file (IMP-159). A change made by another process shows within it;
+// every write still checks first. A variable for the tests.
+var staleCheckEvery = time.Second
 
 type storeFile struct {
 	Projects          map[string]Flags           `json:"projects"`
@@ -217,6 +224,17 @@ func (s *Store) load() error {
 
 // reloadIfStale re-reads the file when its mtime (or existence) diverges from
 // the last-loaded snapshot. Caller must hold s.mu in write mode.
+// reloadForRead is reloadIfStale for the access lookups, at most once per
+// staleCheckEvery. Caller holds s.mu in write mode.
+func (s *Store) reloadForRead() {
+	now := time.Now()
+	if now.Sub(s.checkedAt) < staleCheckEvery {
+		return
+	}
+	s.checkedAt = now
+	s.reloadIfStale()
+}
+
 func (s *Store) reloadIfStale() {
 	st, err := os.Stat(s.path)
 	if err != nil {
@@ -444,7 +462,7 @@ func (s *Store) SkipNamesForGit() []string {
 func (s *Store) Visibility(name string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.reloadIfStale()
+	s.reloadForRead()
 	return s.visibilityLocked(name)
 }
 
@@ -579,7 +597,7 @@ func (s *Store) AllowsLocalMirror(name string) bool {
 func (s *Store) MemberLevel(project, userID string) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.reloadIfStale()
+	s.reloadForRead()
 	for _, m := range s.members[project] {
 		if m.UserID == userID {
 			return m.Level, true
@@ -734,8 +752,11 @@ type MigrationReport struct {
 // yet); seedUsers are the enabled accounts that were neither owner nor guest
 // — under the legacy default (member_scope=all) they could read and write
 // every project, so each of them receives a write grant on every existing
-// project, which preserves their access exactly. Existing memberships keep
-// their level.
+// project, which preserves their access exactly. A membership already there
+// keeps its level when it gives write or more; a read one is raised to
+// write, because under the legacy default it was inert (the member wrote
+// anyway), and kept as it was it took write away (IMP-159, S1-15). Under
+// member_scope=members memberships were binding and stay as they are.
 //
 // Visibility: Public → public; otherwise private under member_scope=members
 // (memberships already gated access) and internal under the legacy default
@@ -814,7 +835,7 @@ func (s *Store) MigrateAccessModel(vaultProjects, seedUsers, ownerOnly []string)
 				if noSeed[n] {
 					continue
 				}
-				if _, ok := s.memberLevelLocked(n, u); ok {
+				if lvl, ok := s.memberLevelLocked(n, u); ok && lvl != LevelRead {
 					continue
 				}
 				s.setMemberLocked(n, u, LevelWrite)

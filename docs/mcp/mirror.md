@@ -48,9 +48,12 @@ The values can also come from `.claude/gosidian.env`, the file the
   first sync downloads every note; later syncs download only the notes
   whose ETag changed and delete the ones that disappeared.
 - **`MIRROR.md`** at the mirror root says what the folder is and how to
-  write; **`<project>/_index.md`** lists the notes from the most recent,
-  with title, path and tags — a copy of files cannot otherwise tell which
-  of two notes is newer.
+  write; **`<project>/.gosidian-index.md`** lists the notes from the most
+  recent, with title, path and tags — a copy of files cannot otherwise
+  tell which of two notes is newer. It is a hidden file, so it never takes
+  the place of a note; mirrors made before v2.72.1 had it at
+  `<project>/_index.md`, which the next sync removes (or downloads again,
+  when the project has a real note by that name).
 - Two syncs of the same project never run at once (a lock file; a sync
   already running makes the second exit quietly).
 - The token is never written to the mirror.
@@ -70,6 +73,6 @@ gosidian mirror purge                  # delete the whole mirror
 - It is a **snapshot**: between syncs, changes made by others are not
   there. Sync at the start of a session and again when freshness matters.
 - It has no ranking: `grep` finds words, not the most relevant note. For
-  "what is the current state" questions, `_index.md` and the frontmatter
+  "what is the current state" questions, `.gosidian-index.md` and the frontmatter
   dates tell which note is newer.
 - A revoked token cannot delete a copy already on disk.

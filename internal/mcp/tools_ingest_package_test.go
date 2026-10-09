@@ -190,7 +190,7 @@ func TestIngestPackage_OverwriteGuardAndEvents(t *testing.T) {
 
 	stagePackage(t, s, "pkg", map[string]string{"big.md": "x", "new.md": "# New"})
 	res, _ := s.handleIngest(ctx, call(map[string]any{"project": "proj", "as": "package", "bridge_filename": "pkg", "dest": "proj/imp", "overwrite": true}))
-	if !res.IsError || !strings.Contains(toolErrorText(res), "shrink") {
+	if !res.IsError || !strings.Contains(callToolResultText(res), "shrink") {
 		t.Fatalf("an emptying overwrite: want a refusal, got %+v", res)
 	}
 	if n, _ := s.vault.Load("proj/imp/big.md"); string(n.Content) != big {

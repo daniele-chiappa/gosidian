@@ -443,3 +443,27 @@ func TestSave_Permissions(t *testing.T) {
 		t.Errorf("temporary files left: %v", left)
 	}
 }
+
+// cache_size = 0 turns the vault cache off, from the file and from the
+// environment; unset, it is 128 (IMP-163).
+func TestCacheSize_ZeroDisables(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[vault]\ncache_size = 0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil || cfg.Vault.CacheSize != 0 {
+		t.Errorf("cache_size = 0 in the file: %d, %v", cfg.Vault.CacheSize, err)
+	}
+	if err := os.WriteFile(path, []byte("[vault]\nhtml_notes = true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, _ := Load(path); cfg.Vault.CacheSize != 128 {
+		t.Errorf("cache_size unset: %d, want 128", cfg.Vault.CacheSize)
+	}
+	t.Setenv("GOSIDIAN_VAULT_CACHE_SIZE", "0")
+	cfg = Default()
+	if err := cfg.ApplyEnv(); err != nil || cfg.Vault.CacheSize != 0 {
+		t.Errorf("GOSIDIAN_VAULT_CACHE_SIZE=0: %d, %v", cfg.Vault.CacheSize, err)
+	}
+}

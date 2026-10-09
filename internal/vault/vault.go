@@ -407,12 +407,23 @@ func checkAttachmentPath(r string, allowedExt map[string]bool) error {
 	return nil
 }
 
+// skipVanished is what a walk of the vault returns for err at path: a file
+// or a folder removed while the walk runs (by an agent, git, the trash) is
+// skipped, where it ended the walk with an error; the root missing still
+// is one (IMP-163).
+func skipVanished(root, path string, err error) error {
+	if errors.Is(err, fs.ErrNotExist) && path != root {
+		return nil
+	}
+	return err
+}
+
 // List returns all note paths, sorted.
 func (v *Vault) List() ([]string, error) {
 	var out []string
 	err := filepath.WalkDir(v.Root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return err
+			return skipVanished(v.Root, path, err)
 		}
 		if d.IsDir() {
 			if v.skipDir(v.Root, path) {
@@ -459,7 +470,7 @@ func (v *Vault) ProjectNotes(project string) ([]NoteStat, error) {
 	var out []NoteStat
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return err
+			return skipVanished(root, path, err)
 		}
 		if d.IsDir() {
 			if v.skipDir(root, path) {
@@ -472,7 +483,7 @@ func (v *Vault) ProjectNotes(project string) ([]NoteStat, error) {
 		}
 		info, err := d.Info()
 		if err != nil {
-			return err
+			return skipVanished(root, path, err)
 		}
 		rel, err := filepath.Rel(v.Root, path)
 		if err != nil {
@@ -565,22 +576,48 @@ type Project struct {
 	ModTime   time.Time
 }
 
+// ProjectNames is the names of Projects, sorted, without counting their
+// notes: one read of the vault root, for a caller that needs no more (the
+// MCP token check at every request walked every project twice, IMP-161,
+// S3-10).
+func (v *Vault) ProjectNames() ([]string, error) {
+	entries, err := v.projectDirs()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, len(entries))
+	for k, e := range entries {
+		out[k] = e.Name()
+	}
+	return out, nil
+}
+
+// projectDirs is the top-level directories that are projects, by name
+// (os.ReadDir sorts).
+func (v *Vault) projectDirs() ([]fs.DirEntry, error) {
+	entries, err := os.ReadDir(v.Root)
+	if err != nil {
+		return nil, err
+	}
+	var out []fs.DirEntry
+	for _, e := range entries {
+		if e.IsDir() && !v.skipDir(v.Root, filepath.Join(v.Root, e.Name())) {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
 // Projects returns all top-level directories under the vault root, sorted by
 // name. Hidden directories and bookkeeping folders are skipped.
 func (v *Vault) Projects() ([]Project, error) {
-	entries, err := os.ReadDir(v.Root)
+	entries, err := v.projectDirs()
 	if err != nil {
 		return nil, err
 	}
 	var out []Project
 	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
 		name := e.Name()
-		if v.skipDir(v.Root, filepath.Join(v.Root, name)) {
-			continue
-		}
 		count, _ := v.countNotesIn(name)
 		var modTime time.Time
 		if info, err := e.Info(); err == nil {
@@ -597,7 +634,7 @@ func (v *Vault) countNotesIn(dir string) (int, error) {
 	root := filepath.Join(v.Root, dir)
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return err
+			return skipVanished(root, path, err)
 		}
 		if d.IsDir() {
 			if v.skipDir(root, path) {

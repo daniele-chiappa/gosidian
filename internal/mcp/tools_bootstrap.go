@@ -122,9 +122,6 @@ type bootstrapTagCount struct {
 	Count int    `json:"count"`
 }
 
-// bootstrapPendingInsights is the owner-facing surface for un-triaged
-// self-improvement insights (status:pending). Count is the full total;
-// Notes is capped to the first few for a quick preview.
 // bootstrapPendingHandoffs is memory_bootstrap's `pending_handoffs`: how
 // many handoffs of the project wait to be claimed, and the newest of them.
 type bootstrapPendingHandoffs struct {
@@ -135,6 +132,9 @@ type bootstrapPendingHandoffs struct {
 // maxBootstrapHandoffs caps the handoffs the bootstrap lists.
 const maxBootstrapHandoffs = 10
 
+// bootstrapPendingInsights is the owner-facing surface for un-triaged
+// self-improvement insights (status:pending). Count is the full total;
+// Notes is capped to the first few for a quick preview.
 type bootstrapPendingInsights struct {
 	Project string    `json:"project"`
 	Count   int       `json:"count"`

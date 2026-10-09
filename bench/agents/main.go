@@ -20,7 +20,7 @@
 //   - mirror: the local read-only mirror of IMP-102 as it ships. The real
 //     `gosidian mirror sync` (-gosidian-bin) copies every project of
 //     -mirror-projects into .gosidian/mirror/ of the working directory,
-//     with _index.md and MIRROR.md; the orientation is the mirror section
+//     with .gosidian-index.md and MIRROR.md; the orientation is the mirror section
 //     the real Claude Code hook (-hook) injects. File tools only.
 //   - mirror-mcp: the deployed setup: only the current project mirrored,
 //     the gosidian MCP server as well (tools loaded on demand through

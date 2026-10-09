@@ -15,6 +15,7 @@ import (
 	"github.com/gosidian/gosidian/internal/projects"
 	"github.com/gosidian/gosidian/internal/vault"
 	"github.com/gosidian/gosidian/internal/webauth"
+	mcplib "github.com/mark3labs/mcp-go/mcp"
 )
 
 // accessFixture wires a token store, a projects store and a principal
@@ -368,5 +369,27 @@ func TestTokenAccess_ReportsLiveLevels(t *testing.T) {
 	}
 	if n := len(f.s.tokenAccess(cli)); n != 3 {
 		t.Errorf("admin token should reach the 3 projects, got %d", n)
+	}
+}
+
+// A path without its extension resolves only inside the token's reach: the
+// answer about a note outside it is the same whether the note exists or
+// not (IMP-161, S3-12).
+func TestNotePathArg_NoExistenceOracle(t *testing.T) {
+	s, ctx := newScopedServer(t, "pub", []string{auth.ScopeRead, auth.ScopeWrite})
+	s.vault.SetHTMLNotes(true)
+	if err := s.writeAndIndex("secret/x.html", []byte("<html><body>x</body></html>")); err != nil {
+		t.Fatal(err)
+	}
+	answer := func(h func(context.Context, mcplib.CallToolRequest) (*mcplib.CallToolResult, error), path string) string {
+		res, _ := h(ctx, call(map[string]any{"path": path}))
+		return strings.ReplaceAll(callToolResultText(res), path, "<p>")
+	}
+	for name, h := range map[string]func(context.Context, mcplib.CallToolRequest) (*mcplib.CallToolResult, error){
+		"backlinks": s.handleBacklinks, "outlinks": s.handleOutlinks, "snapshot": s.handleSnapshot,
+	} {
+		if there, none := answer(h, "secret/x"), answer(h, "secret/none"); there != none {
+			t.Errorf("%s: %q for a note there, %q for none", name, there, none)
+		}
 	}
 }

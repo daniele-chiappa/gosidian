@@ -2,6 +2,7 @@ package v1
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -408,6 +409,33 @@ func TestNoteTitles_FetchesByQuery(t *testing.T) {
 	}
 	if !strings.Contains(w.body, "meeting.md") {
 		t.Errorf("missing match: %s", w.body)
+	}
+}
+
+// With no query, an account that sees a few projects gets their latest
+// notes, even when the vault's latest edits are all elsewhere (IMP-160,
+// S2-13: the overfetch filtered after the LIMIT came back empty).
+func TestNoteTitles_EmptyQueryReachesTheVisibleProjects(t *testing.T) {
+	f := newNotesFixture(t)
+	if err := f.idx.Upsert(index.NoteDoc{Path: "mine/old.md", Title: "Old", ModTime: 1000}); err != nil {
+		t.Fatal(err)
+	}
+	for k := range 30 {
+		if err := f.idx.Upsert(index.NoteDoc{Path: fmt.Sprintf("other/n%d.md", k), Title: "N", ModTime: int64(2000 + k)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m, bearer := f.memberUser(t, "mel")
+	if err := f.projects.SetMember("mine", m.ID, projects.LevelRead); err != nil {
+		t.Fatal(err)
+	}
+	rec := f.req(t, http.MethodGet, "/api/v1/note-titles?limit=5", "", bearer)
+	if rec.code != http.StatusOK || !strings.Contains(rec.body, "mine/old.md") || strings.Contains(rec.body, "other/") {
+		t.Errorf("member note-titles = %d %s, want mine/old.md only", rec.code, rec.body)
+	}
+	rec = f.req(t, http.MethodGet, "/api/v1/note-titles?limit=5", "", f.bearer)
+	if !strings.Contains(rec.body, "other/n29.md") || strings.Contains(rec.body, "mine/old.md") {
+		t.Errorf("owner note-titles = %s, want the vault's 5 latest", rec.body)
 	}
 }
 

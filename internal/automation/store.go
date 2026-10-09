@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -13,7 +14,8 @@ import (
 const MaxLog = 200
 
 // forgetAfter is how long the state keeps a rule no database declares any
-// more, and a row's firing after its date: then they are dropped.
+// more, a slot's firing, and the firing of a row no longer among the rule's
+// rows: then they are dropped.
 const forgetAfter = 400 * 24 * time.Hour
 
 // State is what the engine remembers between runs, in the state dir: when
@@ -32,6 +34,8 @@ type RuleState struct {
 	Fired map[string]time.Time `json:"fired,omitempty"`
 	// Error is the rule's last failure, logged once until it changes.
 	Error string `json:"error,omitempty"`
+	// Warning is a rule over MaxRows rows, logged once until it changes.
+	Warning string `json:"warning,omitempty"`
 }
 
 // Run is one execution of a rule, or its failure.
@@ -41,9 +45,10 @@ type Run struct {
 	Rule     string    `json:"rule"`
 	Action   string    `json:"action"`
 	// Path is the note it wrote: the handoff or the snapshot.
-	Path  string   `json:"path,omitempty"`
-	Rows  []string `json:"rows,omitempty"`
-	Error string   `json:"error,omitempty"`
+	Path    string   `json:"path,omitempty"`
+	Rows    []string `json:"rows,omitempty"`
+	Error   string   `json:"error,omitempty"`
+	Warning string   `json:"warning,omitempty"`
 }
 
 // Store keeps the State in a JSON file, written whole through a temporary
@@ -126,7 +131,10 @@ func (st *State) log(r Run) {
 }
 
 // prune drops the rules no database declared for a long time, and the
-// firings long past.
+// slots fired long ago. A row's firing ("<path>@<date>", rowKey) stays
+// while the row does: dropped by age, a row still past its date was handed
+// off again (IMP-162, S4-14). The engine drops it when the rule no longer
+// reads the row (forgetRows).
 func (st *State) prune(now time.Time) {
 	for k, rs := range st.Rules {
 		if now.Sub(rs.LastSeen) > forgetAfter {
@@ -134,9 +142,25 @@ func (st *State) prune(now time.Time) {
 			continue
 		}
 		for f, at := range rs.Fired {
-			if now.Sub(at) > forgetAfter {
+			if !isRowKey(f) && now.Sub(at) > forgetAfter {
 				delete(rs.Fired, f)
 			}
 		}
 	}
 }
+
+// forgetRows drops the firings, long past, of the rows not in rows.
+func (rs *RuleState) forgetRows(rows []Row, now time.Time) {
+	keep := make(map[string]bool, len(rows))
+	for _, r := range rows {
+		keep[rowKey(r)] = true
+	}
+	for f, at := range rs.Fired {
+		if isRowKey(f) && !keep[f] && now.Sub(at) > forgetAfter {
+			delete(rs.Fired, f)
+		}
+	}
+}
+
+// isRowKey tells a row's firing from a slot's (RFC 3339, without "@").
+func isRowKey(k string) bool { return strings.Contains(k, "@") }

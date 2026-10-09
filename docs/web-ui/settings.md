@@ -71,8 +71,9 @@ when `git.push` is true.
   **never** persisted to disk — it has to be exported in gosidian's
   environment
 
-Push failures surface in `/healthz` (`git_sync.healthy=false` with
-`last_error` + `last_error_at`) and as a red state on the metric
+Push failures surface in `/healthz` (`git_sync.healthy=false`, plus
+`last_error` + `last_error_at` for a request with an owner's token, see
+[Health probe](../deployment.md#health-probe)) and as a red state on the metric
 `gosidian_gitsync_status` (0=disabled, 1=healthy, 2=degraded).
 
 `last_error` says which side to repair when a repository is corrupt:

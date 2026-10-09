@@ -190,8 +190,11 @@ func New(cfg Config, tokens *auth.Store, auditLog *audit.Log) (*Server, error) {
 	return s, nil
 }
 
-// parseIssuer accepts an absolute http(s) origin with an optional path and
-// no query or fragment, returning it without a trailing slash.
+// parseIssuer accepts an absolute http(s) origin, without a path, a query
+// or a fragment, returning it without a trailing slash. An issuer with a
+// path is refused: gosidian is served at the root of its host, its consent
+// redirect and authorization-server metadata included, and with a path the
+// OAuth flow broke halfway (IMP-159, S1-13).
 func parseIssuer(raw string) (*url.URL, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -201,7 +204,10 @@ func parseIssuer(raw string) (*url.URL, error) {
 	if err != nil || !u.IsAbs() || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") || u.RawQuery != "" || u.Fragment != "" {
 		return nil, fmt.Errorf("oauth: issuer %q must be an absolute http(s) URL without query or fragment", raw)
 	}
-	u.Path = strings.TrimRight(u.Path, "/")
+	if strings.Trim(u.Path, "/") != "" {
+		return nil, fmt.Errorf("oauth: issuer %q has a path: gosidian is served at the root of its host, so the issuer is the origin alone (e.g. https://notes.example.com); give it a host of its own behind the proxy", raw)
+	}
+	u.Path = ""
 	u.RawPath = ""
 	return u, nil
 }

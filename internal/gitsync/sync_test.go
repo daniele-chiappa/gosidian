@@ -615,3 +615,39 @@ func TestCheckBranch(t *testing.T) {
 		}
 	}
 }
+
+// A vault that is a git worktree (its .git a file) is a repository: git
+// init does not run over it and no init commit lands on its branch
+// (IMP-163).
+func TestSync_WorktreeVaultIsARepository(t *testing.T) {
+	requireGit(t)
+	main := t.TempDir()
+	git := func(dir string, args ...string) string {
+		t.Helper()
+		out, err := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=T", "-c", "user.email=t@example.com"}, args...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+		return string(out)
+	}
+	git(main, "init", "-q", "--initial-branch=main")
+	if err := os.WriteFile(filepath.Join(main, "a.md"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(main, "add", "a.md")
+	git(main, "commit", "-q", "-m", "first")
+	vault := filepath.Join(t.TempDir(), "wt")
+	git(main, "worktree", "add", "-q", "-b", "vault", vault)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := New(vault, testCfg()).Start(ctx); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if st, err := os.Lstat(filepath.Join(vault, ".git")); err != nil || st.IsDir() {
+		t.Fatalf(".git of the worktree: %v %v", st, err)
+	}
+	if log := git(vault, "log", "--oneline"); strings.Contains(log, "init gosidian vault") {
+		t.Errorf("an init commit on the worktree's branch:\n%s", log)
+	}
+}

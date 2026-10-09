@@ -55,3 +55,36 @@ func TestMintIngestTicket_CapPerToken(t *testing.T) {
 		t.Fatalf("expected the per-token ticket cap, got: %s", msg)
 	}
 }
+
+// An ingestion takes one place in the write rate: a CSV that becomes an
+// attachment and its table note, and a ticket from its mint to the note
+// it writes. With one write a minute both go through whole, and the next
+// write is refused (IMP-161, S3-7: the ticket counted three times and lost
+// the bytes at the third).
+func TestIngest_TakesOnePlaceInTheWriteRate(t *testing.T) {
+	s, ctx := newScopedServer(t, "", []string{auth.ScopeRead, auth.ScopeWrite})
+	s.vault.SetTableNotes(true)
+	s.SetWriteLimits(1, 0)
+	res, _ := s.handleIngest(ctx, call(map[string]any{
+		"project": "audit", "data": b64(sampleCSV), "filename": "log.csv", "title": "Direct",
+	}))
+	if out := resultText(t, res); !strings.Contains(out, `"kind":"table"`) {
+		t.Fatalf("direct ingest under a limit of one: %s", out)
+	}
+	res, _ = s.handleIngest(ctx, call(map[string]any{"project": "audit", "data": b64(sampleCSV), "filename": "log.csv"}))
+	if msg := expectError(t, res); !strings.Contains(msg, "write rate limit") {
+		t.Fatalf("a second ingestion in the minute: %s", msg)
+	}
+
+	s, ctx = newScopedServer(t, "", []string{auth.ScopeRead, auth.ScopeWrite})
+	s.vault.SetTableNotes(true)
+	s.SetWriteLimits(1, 0)
+	out := ingestOut(t, s, ctx, map[string]any{"project": "audit", "transfer": "http", "title": "Remote"})
+	code, body := postTicket(t, s.Handler(""), out["endpoint"].(string), "log.csv", []byte(sampleCSV))
+	if code != http.StatusOK || !strings.Contains(body, `"kind":"table"`) {
+		t.Fatalf("ticket under a limit of one: HTTP %d %s", code, body)
+	}
+	if _, err := s.vault.Load("audit/remote.md"); err != nil {
+		t.Errorf("the ticket's table note: %v", err)
+	}
+}

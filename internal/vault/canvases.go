@@ -36,3 +36,9 @@ func (v *Vault) LoadCanvas(rel string) (*Note, error) {
 func (v *Vault) ListCanvases(project string) ([]string, error) {
 	return v.listFiles(project, IsCanvasFile)
 }
+
+// ListBasesAndCanvases is ListBases and ListCanvases in one walk of the
+// tree, for the file tree, which walked it once for each (IMP-160, S2-15).
+func (v *Vault) ListBasesAndCanvases(project string) ([]string, error) {
+	return v.listFiles(project, func(name string) bool { return IsBaseFile(name) || IsCanvasFile(name) })
+}

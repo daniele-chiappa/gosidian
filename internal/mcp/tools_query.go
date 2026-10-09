@@ -142,7 +142,6 @@ func (s *Server) handleQuery(ctx context.Context, req mcp.CallToolRequest) (*mcp
 	})
 }
 
-// parseWhere reads the where argument: a list of {field, op, value}.
 // queryFolders reads the from of a query: a folder or a list of them,
 // trimmed of slashes; nil when absent. A client still holding a schema from
 // before from existed sends a list as its JSON text, which is read as the
@@ -178,6 +177,7 @@ func isEmptyList(raw any) bool {
 	return raw == nil || ok && len(l) == 0
 }
 
+// parseWhere reads the where argument: a list of {field, op, value}.
 func parseWhere(raw any) ([]index.FieldCond, error) {
 	list, ok := raw.([]any)
 	if !ok || len(list) == 0 {

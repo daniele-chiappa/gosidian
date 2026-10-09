@@ -312,10 +312,10 @@ func Build(entries []Entry, skipped []Skipped, o Options) (*Plan, error) {
 	return p, nil
 }
 
-// external reports a link target that is not a file of the package: a URL
-// with a scheme, a path from the server root, or an anchor in the page.
 var schemeRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9+.-]*:`)
 
+// external reports a link target that is not a file of the package: a URL
+// with a scheme, a path from the server root, or an anchor in the page.
 func external(t string) bool {
 	return t == "" || schemeRe.MatchString(t) || strings.HasPrefix(t, "/") || strings.HasPrefix(t, "#")
 }

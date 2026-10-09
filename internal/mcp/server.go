@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -24,7 +25,6 @@ import (
 	"github.com/gosidian/gosidian/internal/trash"
 	"github.com/gosidian/gosidian/internal/uploadquota"
 	"github.com/gosidian/gosidian/internal/vault"
-	"github.com/gosidian/gosidian/internal/webauth"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -396,9 +396,6 @@ func (s *Server) SetProjects(p *projects.Store) {
 // deleting from disk.
 func (s *Server) SetTrash(b *trash.Bin) { s.trash = b }
 
-// SetWriteLimits configures the write/minute cap of an MCP session (a token's
-// sessions share tokenLimitFactor times that) and the per-note size cap.
-// Pass zero values to keep the defaults already set in New().
 // SetUploadQuota wires the upload quota shared with the web UI (IMP-034).
 func (s *Server) SetUploadQuota(q *uploadquota.Quota) { s.uploadQuota = q }
 
@@ -434,6 +431,9 @@ func (s *Server) openMode() bool {
 	return s.tokens == nil || (s.openWhenEmpty && s.tokens.Empty())
 }
 
+// SetWriteLimits configures the write/minute cap of an MCP session (a token's
+// sessions share tokenLimitFactor times that) and the per-note size cap.
+// Pass zero values to keep the defaults already set in New().
 func (s *Server) SetWriteLimits(perMinute int, maxNoteBytes int64) {
 	if perMinute > 0 {
 		s.limiter = newWriteLimiter(perMinute)
@@ -867,56 +867,15 @@ func (s *Server) effectiveTokenWhy(tok *auth.Token) (*auth.Token, authDenial) {
 		slog.Info("mcp.auth refused: token owner not found or disabled", "token", tok.ID, "owner", tok.OwnerUserID)
 		return nil, denyOwnerGone
 	}
-	if princ.Role == webauth.RoleOwner {
-		return tok, denyInvalid
-	}
-	cfg := s.projects.AccessConfig()
-	candidates := tok.ProjectList()
-	if len(candidates) == 0 {
-		projs, err := s.vault.Projects()
-		if err != nil {
-			return nil, denyInvalid
-		}
-		for _, p := range projs {
-			candidates = append(candidates, p.Name)
-		}
-	}
-	readable := make([]string, 0, len(candidates))
-	writable := map[string]bool{}
-	for _, p := range candidates {
-		if !princ.CanAccessProject(p, cfg) {
-			continue
-		}
-		readable = append(readable, p)
-		if princ.CanWriteProject(p, cfg) {
-			writable[p] = true
-		}
-	}
-	if len(readable) == 0 {
+	eff, err := authz.NarrowToken(tok, princ, s.projects.AccessConfig(), s.vault.ProjectNames)
+	if errors.Is(err, authz.ErrNoAccess) {
 		slog.Info("mcp.auth refused: token owner has no readable project", "token", tok.ID, "owner", tok.OwnerUserID)
 		return nil, denyNoAccess
 	}
-	eff := *tok
-	eff.Project = ""
-	eff.Projects = readable
-	switch {
-	case len(writable) == 0:
-		eff.Scopes = withoutScope(tok.Scopes, auth.ScopeWrite)
-	case len(writable) < len(readable):
-		return eff.WithWriteFilter(func(project string) bool { return writable[project] }), denyInvalid
+	if err != nil {
+		return nil, denyInvalid
 	}
-	return &eff, denyInvalid
-}
-
-// withoutScope returns scopes minus the named one, leaving the input as is.
-func withoutScope(scopes []string, drop string) []string {
-	out := make([]string, 0, len(scopes))
-	for _, sc := range scopes {
-		if sc != drop {
-			out = append(out, sc)
-		}
-	}
-	return out
+	return eff, denyInvalid
 }
 
 // requireToken enforces Bearer auth at the HTTP layer before any transport

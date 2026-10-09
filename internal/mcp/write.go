@@ -124,7 +124,7 @@ func (s *Server) writeNote(ctx context.Context, tok *auth.Token, w noteWrite) (n
 		existing = nil
 		switch {
 		case w.mode == writeReplace:
-			return noteWritten{}, &writeError{kind: writeMissing, status: http.StatusNotFound, msg: toolErrorText(writeNoteError(w.rel, err))}
+			return noteWritten{}, &writeError{kind: writeMissing, status: http.StatusNotFound, msg: callToolResultText(writeNoteError(w.rel, err))}
 		case errors.Is(err, vault.ErrNotNote):
 			// Not a note path: write + index refuses it below, with the
 			// message that points at the file tools.
@@ -141,7 +141,7 @@ func (s *Server) writeNote(ctx context.Context, tok *auth.Token, w noteWrite) (n
 			return noteWritten{}, &writeError{kind: writePrecondition, status: http.StatusPreconditionFailed, msg: fmt.Sprintf("etag mismatch: note %q does not exist", w.rel)}
 		}
 		if errRes := checkIfMatch(existing, w.ifMatch); errRes != nil {
-			return noteWritten{}, &writeError{kind: writePrecondition, status: http.StatusPreconditionFailed, msg: toolErrorText(errRes)}
+			return noteWritten{}, &writeError{kind: writePrecondition, status: http.StatusPreconditionFailed, msg: callToolResultText(errRes)}
 		}
 	}
 	content, err := w.content(existing)

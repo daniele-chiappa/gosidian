@@ -173,7 +173,8 @@ the copy was deleted after the run. Answers checked by hand.
 ### Local mirror (2026-09-26) — the shipped pieces, one run each
 
 The harness syncs the benchmark vault with the real `gosidian mirror sync`
-(read-only files, `_index.md`, `MIRROR.md`) and takes the orientation
+(read-only files, `_index.md` — `.gosidian-index.md` since v2.72.1 —,
+`MIRROR.md`) and takes the orientation
 from the real Claude Code hook's SessionStart context. Two setups:
 `mirror`, file tools only on every project's mirror; `mirror-mcp`, as a
 user would run it — the current project mirrored, the MCP server

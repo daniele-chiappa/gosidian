@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"os/exec"
@@ -369,9 +370,12 @@ func (s *Sync) flush() {
 // global config). It also aligns the `origin` remote with cfg.Remote when
 // one is configured.
 func (s *Sync) ensureRepo() error {
+	// A .git file is a repository too: a worktree or a submodule, whose
+	// gitdir it names. Taken for none, it had git init run over it and an
+	// init commit added to its branch (IMP-163).
 	gitDir := filepath.Join(s.vaultDir, ".git")
 	fresh := false
-	if st, err := os.Stat(gitDir); err != nil || !st.IsDir() {
+	if _, err := os.Lstat(gitDir); errors.Is(err, fs.ErrNotExist) {
 		if err := s.run("git", "init", "-q", "--initial-branch="+s.cfg.Branch); err != nil {
 			return err
 		}

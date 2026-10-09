@@ -48,6 +48,11 @@ services:
       # - "8765:8765"
 ```
 
+The example files also harden the container: `read_only: true` with a
+`tmpfs` on `/tmp`, `cap_drop: [ALL]` and `no-new-privileges`. The image
+runs as uid 65532 and writes only to `/vault`, `/data` and `/tmp`, so
+nothing else needs to be writable.
+
 Pin a specific version (`:vX.Y.Z`) for production rather than
 `:latest` to make rollbacks deterministic. Available tags:
 [ghcr.io/daniele-chiappa/gosidian](https://github.com/daniele-chiappa/gosidian/pkgs/container/gosidian).
@@ -155,12 +160,24 @@ second copy of the notes themselves.
 
 ```bash
 curl -sS http://127.0.0.1:8080/healthz
-# → {"status":"ok","version":"v2.64.0","vault":"/vault","notes":1406,
-#    "mcp_tools":61,"git_sync":{"enabled":true,"healthy":true,…}}
+# → {"status":"ok","version":"v2.72.1","mcp_tools":61,
+#    "git_sync":{"enabled":true,"healthy":true}}
+curl -sS -H "Authorization: Bearer $OWNER_TOKEN" http://127.0.0.1:8080/healthz
+# → {…,"vault":"/vault","notes":1406,
+#    "git_sync":{"enabled":true,"healthy":false,"last_error":"…","last_error_at":"…"}}
 ```
 
+Without credentials the probe says only the status, the version, the
+MCP tool count and whether git sync is healthy. The vault path, the
+note count and git sync's last error and times (git's stderr may carry
+the remote's URL) need a credential of the owner: an owner web session
+or an MCP token of the owner or of no account (`gosidian token create`)
+that no project list limits.
+
 Suitable for Kubernetes liveness/readiness, Docker healthcheck (already
-baked into the image), or external uptime monitors. The probe passes on
+baked into the image: `gosidian healthcheck` asks the port of
+`GOSIDIAN_ADDR`, on the loopback for a wildcard address), or external
+uptime monitors. The probe passes on
 `"status":"ok"` (HTTP 200); a failing git sync shows in
 `git_sync.healthy` and never fails it. `mcp_tools` is how many MCP tools
 the server registered: after an upgrade it tells whether a new tool is

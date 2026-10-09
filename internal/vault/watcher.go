@@ -16,8 +16,9 @@ import (
 
 // Watch starts a recursive fsnotify watcher on the vault and reindexes files
 // as they change. If onChange is non-nil it is invoked after every successful
-// reindex (create/update/delete). Blocks until ctx is cancelled.
-func (v *Vault) Watch(ctx context.Context, idx *index.Index, onChange func()) error {
+// reindex (create/update/delete) with the vault-relative path that changed,
+// a note or a folder gone. Blocks until ctx is cancelled.
+func (v *Vault) Watch(ctx context.Context, idx *index.Index, onChange func(rel string)) error {
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
 		return err
@@ -47,7 +48,7 @@ func (v *Vault) Watch(ctx context.Context, idx *index.Index, onChange func()) er
 						_ = idx.Delete(n.Path)
 					}
 					if onChange != nil {
-						onChange()
+						onChange(relSlash)
 					}
 				}
 			}
@@ -58,7 +59,7 @@ func (v *Vault) Watch(ctx context.Context, idx *index.Index, onChange func()) er
 			// file likely deleted
 			_ = idx.Delete(relSlash)
 			if onChange != nil {
-				onChange()
+				onChange(relSlash)
 			}
 			return
 		}
@@ -67,7 +68,7 @@ func (v *Vault) Watch(ctx context.Context, idx *index.Index, onChange func()) er
 			return
 		}
 		if onChange != nil {
-			onChange()
+			onChange(relSlash)
 		}
 	}
 

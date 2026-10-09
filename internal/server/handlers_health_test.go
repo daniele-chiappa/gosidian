@@ -30,8 +30,10 @@ func TestTopLevelStatus(t *testing.T) {
 }
 
 type healthBody struct {
-	Status   string `json:"status"`
-	MCPTools *int   `json:"mcp_tools"`
+	Status   string  `json:"status"`
+	Vault    *string `json:"vault"`
+	Notes    *int    `json:"notes"`
+	MCPTools *int    `json:"mcp_tools"`
 	GitSync  struct {
 		Enabled bool   `json:"enabled"`
 		Healthy bool   `json:"healthy"`
@@ -104,6 +106,7 @@ func TestHandleHealth_DegradedGitSyncStaysReady(t *testing.T) {
 	s := newTestServer(t)
 	s.SetBuildInfo("test", true)
 	s.SetGitSync(degradedSync(t))
+	s.SetHealthDetailsAuthorizer(func(*http.Request) bool { return true })
 
 	code, body := getHealth(t, s)
 	if code != http.StatusOK || body.Status != "ok" {
@@ -139,5 +142,30 @@ func TestHandleHealth_MCPTools(t *testing.T) {
 	code, body := getHealth(t, s)
 	if code != http.StatusOK || body.MCPTools == nil || *body.MCPTools != 61 {
 		t.Errorf("mcp_tools = %v (HTTP %d)", body.MCPTools, code)
+	}
+}
+
+// An anonymous probe learns the status, the version, the tool count and
+// whether the backup is healthy; the vault path, the note count and git's
+// error are for the owner (IMP-160, S2-10).
+func TestHandleHealth_DetailsNeedTheOwner(t *testing.T) {
+	s := newTestServer(t)
+	s.SetBuildInfo("test", true)
+	s.SetGitSync(degradedSync(t))
+	owner := false
+	s.SetHealthDetailsAuthorizer(func(*http.Request) bool { return owner })
+
+	code, body := getHealth(t, s)
+	if code != http.StatusOK || body.Status != "ok" || !body.GitSync.Enabled || body.GitSync.Healthy {
+		t.Fatalf("anonymous /healthz = %d %+v", code, body)
+	}
+	if body.Vault != nil || body.Notes != nil || body.GitSync.LastErr != "" {
+		t.Errorf("anonymous /healthz shows the details: %+v", body)
+	}
+
+	owner = true
+	_, body = getHealth(t, s)
+	if body.Vault == nil || *body.Vault == "" || body.Notes == nil || body.GitSync.LastErr == "" {
+		t.Errorf("owner /healthz lacks the details: %+v", body)
 	}
 }

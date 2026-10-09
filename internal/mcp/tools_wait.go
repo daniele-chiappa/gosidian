@@ -101,6 +101,14 @@ func (s *Server) handleWaitChanges(ctx context.Context, req mcp.CallToolRequest)
 		if err := json.Unmarshal(ev.Data, &p); err != nil || p.Path == "" {
 			return waitEvent{}, false
 		}
+		// The watcher re-announces every write of the API and MCP (the
+		// rename of its temporary file) about 100 ms later, with no ETag:
+		// a waiter woke twice for each. Its frames carry the path for the
+		// web UI's tree since IMP-160; the tool waits, as before, on the
+		// writes that come with an ETag.
+		if p.Source == "watcher" {
+			return waitEvent{}, false
+		}
 		if !tok.AllowsPath(p.Path) {
 			return waitEvent{}, false
 		}

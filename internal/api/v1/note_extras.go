@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+
+	"github.com/gosidian/gosidian/internal/parser"
 )
 
 // backlinkView is the JSON shape returned by /notes/{path}/backlinks.
@@ -112,34 +114,14 @@ func firstNLines(s string, n int) string {
 	return body
 }
 
-// stripLeadingFrontmatter removes a leading `---\n...---\n` block so
-// the wikilink hover excerpt shows the body, not the YAML metadata.
-// Tolerant of CRLF: a stray \r before \n is accepted.
+// stripLeadingFrontmatter removes the frontmatter block so the wikilink
+// hover excerpt shows the body, not the YAML metadata. It reads the block
+// as the indexer does (parser.BodyAfterFrontmatter): a hand-made scan took
+// a "----" or a "--- text" line for the closing fence (IMP-160, S2-14).
 func stripLeadingFrontmatter(s string) string {
-	if !strings.HasPrefix(s, "---") {
+	body := parser.BodyAfterFrontmatter([]byte(s))
+	if len(body) == len(s) {
 		return s
 	}
-	// Skip the opening fence line.
-	first := strings.IndexByte(s, '\n')
-	if first < 0 {
-		return s
-	}
-	rest := s[first+1:]
-	// Find the closing `---` at line start.
-	idx := strings.Index(rest, "\n---")
-	if idx < 0 {
-		return s
-	}
-	// Skip past the closing fence's own newline.
-	end := idx + len("\n---")
-	if end < len(rest) {
-		// Allow CR before LF.
-		if rest[end] == '\r' && end+1 < len(rest) {
-			end++
-		}
-		if end < len(rest) && rest[end] == '\n' {
-			end++
-		}
-	}
-	return strings.TrimLeft(rest[end:], "\n")
+	return strings.TrimLeft(body, "\r\n")
 }

@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -208,5 +209,47 @@ func TestAutomations_Invalid(t *testing.T) {
 	text = resultText(t, res)
 	if !strings.Contains(text, `is not a date field of the database`) || !strings.Contains(text, `is not a day of the week`) {
 		t.Errorf("dry run:\n%s", text)
+	}
+}
+
+// A rule reads every row of its database, a page at a time, not the first
+// 500 (IMP-161, S3-8).
+func TestAutomations_RowsPastOnePage(t *testing.T) {
+	s, _, _, _ := automationServer(t)
+	for k := range 520 {
+		rel := fmt.Sprintf("p/tasks/bulk-%03d.md", k)
+		if err := s.writeAndIndex(rel, []byte("---\ntitle: Bulk\nstatus: open\ndue: 2026-12-01\ntags: [p]\n---\n")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	host := s.AutomationHost()
+	dbs, err := host.Databases("p")
+	if err != nil || len(dbs) != 1 {
+		t.Fatalf("databases: %v %+v", err, dbs)
+	}
+	var rule automation.Rule
+	for _, r := range dbs[0].Rules {
+		if r.Name == "Deadlines near" {
+			rule = r
+		}
+	}
+	rows, err := host.Rows(dbs[0], rule, time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC))
+	if err != nil || len(rows) != 524 {
+		t.Fatalf("rows = %d, %v; want the 520 bulk rows and the 4 open dated ones", len(rows), err)
+	}
+}
+
+// A date alone is 23:59 of that day on the clock, on the days the clocks
+// change too (IMP-161, S3-15).
+func TestParseAsOf_DayEndAcrossDST(t *testing.T) {
+	rome, err := time.LoadLocation("Europe/Rome")
+	if err != nil {
+		t.Skip("no tzdata")
+	}
+	for _, day := range []string{"2026-03-29", "2026-10-25", "2026-10-05"} {
+		got, err := parseAsOf(day, rome)
+		if err != nil || got.Format("2006-01-02 15:04") != day+" 23:59" {
+			t.Errorf("parseAsOf(%s) = %s, %v", day, got, err)
+		}
 	}
 }

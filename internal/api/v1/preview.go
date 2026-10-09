@@ -179,8 +179,6 @@ func (pr previewResolver) ResolveImage(target string) string {
 	return ""
 }
 
-// viewQuery runs the query of a view with the reader's scope, as
-// POST /query does: a view never shows a note its reader cannot see.
 // viewSchema resolves the schema a view's columns are typed with: the
 // database whose rows are the notes of a folder, when the reader may see
 // the database note.
@@ -217,6 +215,8 @@ func (r *Router) viewLoad(p authz.Principal) func(path string) ([]byte, bool) {
 	}
 }
 
+// viewQuery runs the query of a view with the reader's scope, as
+// POST /query does: a view never shows a note its reader cannot see.
 func (r *Router) viewQuery(p authz.Principal) views.QueryFunc {
 	return func(o index.QueryOptions) ([]index.QueryHit, int, error) {
 		scope, err := r.searchScope(p, "")

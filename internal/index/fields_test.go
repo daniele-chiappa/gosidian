@@ -3,6 +3,7 @@ package index
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -437,5 +438,33 @@ func TestParseSort(t *testing.T) {
 	}
 	if got := DefaultQueryFields(nil, "plans desc, title, id asc"); !slices.Equal(got, []string{"plans", "id"}) {
 		t.Errorf("default fields = %v", got)
+	}
+}
+
+// SortHits orders values the index does not read as numbers, dates written
+// two ways, lists that mix kinds and letters outside ASCII as the query
+// does (IMP-162, S4-15).
+func TestSortHits_AsQueryOnOddValues(t *testing.T) {
+	idx := openTest(t)
+	for k, v := range []string{"NaN", "Inf", "0x10", "2026-10-05T10:00", "2026-10-05 09:00", "10", "9", "Éclair", "eclair", "[b, 2026-01-01]", "[3, x]", "[low, odd]", "[odd]"} {
+		body := fmt.Sprintf("---\ntitle: n%02d\nv: %s\npriority: %s\n---\n", k, v, v)
+		upsert(t, idx, fmt.Sprintf("q/n%02d.md", k), fmt.Sprintf("n%02d", k), body)
+	}
+	for _, keys := range [][]SortKey{
+		{{Field: "v"}}, {{Field: "v", Desc: true}},
+		{{Field: "priority", Order: []string{"low", "high"}}}, {{Field: "priority", Desc: true, Order: []string{"low", "high"}}},
+	} {
+		opts := QueryOptions{Folders: []string{"q"}, Fields: []string{"v", "priority"}, Limit: 50}
+		opts.SetSortKeys(keys)
+		want, _, err := idx.Query(opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := slices.Clone(want)
+		slices.Reverse(got)
+		SortHits(got, keys)
+		if !slices.Equal(hitPaths(got), hitPaths(want)) {
+			t.Errorf("%s:\nSortHits %v\nquery    %v", SortString(keys), hitPaths(got), hitPaths(want))
+		}
 	}
 }

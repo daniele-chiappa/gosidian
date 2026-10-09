@@ -152,3 +152,36 @@ func TestWatcher_SkippedFoldersAndRemovedFolders(t *testing.T) {
 		t.Error("an untouched note left the index")
 	}
 }
+
+// onChange gets the path that changed, so the event it sends reaches the
+// readers of that project: it got nothing, and only the owner saw changes
+// made on disk (IMP-160, S2-9).
+func TestWatcher_OnChangeGetsThePath(t *testing.T) {
+	v := newTestVault(t)
+	idx := openIndex(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	got := make(chan string, 8)
+	done := make(chan error, 1)
+	go func() {
+		done <- v.Watch(ctx, idx, func(rel string) { got <- rel })
+	}()
+	time.Sleep(150 * time.Millisecond) // readiness, as above
+	if err := os.MkdirAll(filepath.Join(v.Root, "proj"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if err := os.WriteFile(filepath.Join(v.Root, "proj", "n.md"), []byte("# n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case rel := <-got:
+		if rel != "proj/n.md" {
+			t.Errorf("onChange(%q), want proj/n.md", rel)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("no onChange")
+	}
+	cancel()
+	<-done
+}

@@ -143,14 +143,32 @@ func (r *Router) getSettings(w http.ResponseWriter, req *http.Request) {
 }
 
 // redactUserinfo hides the user:password@ part of a URL remote, which may
-// carry a token; other remote forms (scp-like git@host:repo) are unchanged.
+// carry a token; an scp-like git@host:repo is unchanged. Whatever stands
+// before the last "@" of a remote Go reads without userinfo goes too: a
+// password with a "/", a "?" or a "#" (https://ghp_x/y@host) parses as a
+// host and a path, and a bad escape or a space does not parse at all;
+// returned whole, the token showed to every member (IMP-160, S2-11). An
+// "@" in the path of a plain remote is cut the same way, which only the
+// members' display shows.
 func redactUserinfo(remote string) string {
-	u, err := url.Parse(remote)
-	if err != nil || u.User == nil || u.Host == "" {
+	if u, err := url.Parse(remote); err == nil && u.Opaque == "" && u.User != nil {
+		u.User = url.User("redacted")
+		return u.String()
+	}
+	scheme, rest, ok := strings.Cut(remote, "://")
+	if !ok {
+		// scp-like: a login name before the "@", unless it has a password.
+		at := strings.Index(remote, "@")
+		if at < 0 || !strings.Contains(remote[:at], ":") {
+			return remote
+		}
+		return "redacted@" + remote[at+1:]
+	}
+	at := strings.LastIndex(rest, "@")
+	if at < 0 {
 		return remote
 	}
-	u.User = url.User("redacted")
-	return u.String()
+	return scheme + "://redacted@" + rest[at+1:]
 }
 
 // effectiveSettings is the settings view the server actually runs with:

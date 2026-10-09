@@ -191,3 +191,32 @@ func TestMCP_AuditTail_ScopedTokenSeesProjectLevelRows(t *testing.T) {
 		t.Errorf("row outside the scope leaked: %v", paths)
 	}
 }
+
+// The action and the source the tool announces are accepted: a package
+// import and the writes of the automations (IMP-161, S3-9).
+func TestMCP_AuditTail_PackageAndAutomation(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	l := seedAuditLog(t, s)
+	now := time.Now().Add(-time.Hour)
+	for _, e := range []audit.Entry{
+		{TS: now, Source: audit.SourceMCP, Actor: "bob", Action: audit.ActionIngestPackage, Path: "projA/guide", Size: 3},
+		{TS: now.Add(time.Minute), Source: audit.SourceAutomation, Actor: "automation", Action: audit.ActionCreate, Path: "projA/handoffs/h.md"},
+	} {
+		if err := l.Write(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for args, want := range map[string]string{"action": "projA/guide", "source": "projA/handoffs/h.md"} {
+		value := map[string]string{"action": "ingest_package", "source": "automation"}[args]
+		res, _ := s.handleAuditTail(context.Background(), call(map[string]any{args: value}))
+		var payload struct {
+			Entries []auditEntryOut `json:"entries"`
+		}
+		if err := json.Unmarshal([]byte(resultText(t, res)), &payload); err != nil {
+			t.Fatalf("%s=%s: %v", args, value, err)
+		}
+		if len(payload.Entries) != 1 || payload.Entries[0].Path != want {
+			t.Errorf("%s=%s: %+v", args, value, payload.Entries)
+		}
+	}
+}

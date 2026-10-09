@@ -296,7 +296,7 @@ func (s *Store) TeamsCount(project string) int {
 func (s *Store) TeamLevelsFor(userID, project string) []TeamGrant {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.reloadIfStale()
+	s.reloadForRead()
 	return s.teamLevelsForLocked(userID, project)
 }
 

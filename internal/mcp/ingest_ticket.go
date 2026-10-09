@@ -194,21 +194,17 @@ func (s *Server) handleIngestTicketRedeem(w http.ResponseWriter, r *http.Request
 		writeJSONError(w, http.StatusRequestEntityTooLarge, "file too large (max 10 MiB)")
 		return
 	}
-	// Only the write rate applies to the upload itself: a note is checked
-	// against the note size limit when it is written, the notes of a
-	// package one by one, and an attachment has its own 10 MiB cap, which
-	// the note limit used to replace (BUG-104).
-	if msg, wait := s.writeLimitViolation(r.Context(), tok, 0); msg != "" {
-		writeRateLimited(w, http.StatusTooManyRequests, msg, wait)
-		return
-	}
-
+	// No size limit on the upload itself: a note is checked against the
+	// note size limit when it is written, the notes of a package one by
+	// one, and an attachment has its own 10 MiB cap, which the note limit
+	// used to replace (BUG-104). Nor a place in the write rate: the
+	// memory_ingest call that minted the ticket took it (IMP-161, S3-7).
 	intent := tk.Intent
 	if intent.Filename == "" {
 		intent.Filename = hdr.Filename
 	}
 
-	ctx := context.WithValue(r.Context(), tokenCtxKey, tok)
+	ctx := withWriteCharge(context.WithValue(r.Context(), tokenCtxKey, tok), true)
 	res, _ := s.ingestRaw(ctx, intent, data)
 	if res == nil {
 		writeJSONError(w, http.StatusInternalServerError, "ingest produced no result")

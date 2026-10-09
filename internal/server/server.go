@@ -37,6 +37,15 @@ type Server struct {
 	// the principal must not learn the file exists). Injected by main from the
 	// api/v1 router — this package cannot import it. nil fails closed.
 	vaultFileAuthz func(r *http.Request, rel string) int
+	// healthDetails says whether a /healthz request may see the vault path,
+	// the note count and git's last error (IMP-160, S2-10). nil: never.
+	healthDetails func(r *http.Request) bool
+}
+
+// SetHealthDetailsAuthorizer installs the check of /healthz's details: true
+// for a request carrying the owner's credentials. nil keeps them private.
+func (s *Server) SetHealthDetailsAuthorizer(fn func(r *http.Request) bool) {
+	s.healthDetails = fn
 }
 
 // SetVaultFileAuthorizer installs the /vault-files/ gate. See vaultFileAuthz.

@@ -168,8 +168,7 @@ func (r *Router) registerAuthed() {
 	r.mux.Handle("/api/v1/insights/pending", owner(r.handleInsightsPending))
 }
 
-// Health is the only handler implemented end-to-end at Phase 0; it
-// confirms the v1 mux is wired and reachable.
+// handleHealth confirms the v1 mux is wired and reachable.
 func (r *Router) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"api":      "v1",

@@ -39,7 +39,9 @@ func (v *Vault) ListBases(project string) ([]string, error) {
 
 // loadReadOnly reads a file of the vault that gosidian shows without
 // writing it (a base, a canvas): is tells its kind by name, max caps its
-// size, and notKind is the error for a path of another kind.
+// size, and notKind is the error for a path of another kind. A symbolic
+// link, or a file under a linked folder, is not there, as listFiles does
+// not list it: followed, it read a file outside the vault (IMP-163).
 func (v *Vault) loadReadOnly(rel string, is func(string) bool, max int64, notKind error) (*Note, error) {
 	r, err := v.Rel(rel)
 	if err != nil {
@@ -49,11 +51,11 @@ func (v *Vault) loadReadOnly(rel string, is func(string) bool, max int64, notKin
 		return nil, fmt.Errorf("%w: %q", notKind, r)
 	}
 	full := filepath.Join(v.Root, filepath.FromSlash(r))
-	st, err := os.Stat(full)
+	st, err := os.Lstat(full)
 	if err != nil {
 		return nil, err
 	}
-	if !st.Mode().IsRegular() {
+	if !st.Mode().IsRegular() || !v.resolvesInside(full) {
 		return nil, fs.ErrNotExist
 	}
 	if st.Size() > max {
@@ -70,6 +72,25 @@ func (v *Vault) loadReadOnly(rel string, is func(string) bool, max int64, notKin
 		ModTime: st.ModTime(),
 		Size:    st.Size(),
 	}, nil
+}
+
+// resolvesInside says whether full is the file its path names, no link
+// along the way from the vault root (itself resolved): a folder linked to
+// another project, or to the trash, led there under this project's name.
+func (v *Vault) resolvesInside(full string) bool {
+	real, err := filepath.EvalSymlinks(full)
+	if err != nil {
+		return false
+	}
+	root, err := filepath.EvalSymlinks(v.Root)
+	if err != nil {
+		root = filepath.Clean(v.Root)
+	}
+	rel, err := filepath.Rel(filepath.Clean(v.Root), full)
+	if err != nil {
+		return false
+	}
+	return real == filepath.Join(root, rel)
 }
 
 // listFiles returns the paths of the files of the vault, or of the project
@@ -89,7 +110,7 @@ func (v *Vault) listFiles(project string, is func(string) bool) ([]string, error
 	var out []string
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return err
+			return skipVanished(root, path, err)
 		}
 		if d.IsDir() {
 			if v.skipDir(root, path) {

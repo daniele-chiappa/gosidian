@@ -25,7 +25,7 @@ func (s *Server) registerAuditTools() {
 		mcp.WithString("actor", mcp.Description("Exact match on actor (token name, possibly suffixed with @<correlation_id> for MCP sessions).")),
 		mcp.WithString("action", mcp.Description("Exact match on action. One of: create, update, append, delete, rename, create_project, delete_project, rename_project, upload_attachment, delete_attachment, ingest_package.")),
 		mcp.WithString("path_prefix", mcp.Description("Prefix match on the vault-relative path. Scoped tokens always prepend their project.")),
-		mcp.WithString("source", mcp.Description("Filter by source: 'http' (web UI) or 'mcp' (agent). Empty = both.")),
+		mcp.WithString("source", mcp.Description("Filter by source: 'http' (web UI), 'mcp' (agent) or 'automation' (the automations of a database note). Empty = all.")),
 		mcp.WithNumber("limit", mcp.Description("Max entries to return (default 50, max 500).")),
 	), s.handleAuditTail)
 }
@@ -67,8 +67,10 @@ func (s *Server) handleAuditTail(ctx context.Context, req mcp.CallToolRequest) (
 		opts.Action = audit.Action(raw)
 	}
 	if raw := strings.TrimSpace(req.GetString("source", "")); raw != "" {
-		if raw != string(audit.SourceHTTP) && raw != string(audit.SourceMCP) {
-			return mcp.NewToolResultErrorf("unknown source %q (expected 'http' or 'mcp')", raw), nil
+		switch audit.Source(raw) {
+		case audit.SourceHTTP, audit.SourceMCP, audit.SourceAutomation:
+		default:
+			return mcp.NewToolResultErrorf("unknown source %q (expected 'http', 'mcp' or 'automation')", raw), nil
 		}
 		opts.Source = audit.Source(raw)
 	}
@@ -137,7 +139,8 @@ func knownAction(a audit.Action) bool {
 	case audit.ActionCreate, audit.ActionUpdate, audit.ActionAppend,
 		audit.ActionDelete, audit.ActionRename,
 		audit.ActionCreateProject, audit.ActionDeleteProject, audit.ActionRenameProject,
-		audit.ActionUploadAttachment, audit.ActionDeleteAttachment:
+		audit.ActionUploadAttachment, audit.ActionDeleteAttachment,
+		audit.ActionIngestPackage:
 		return true
 	}
 	return false

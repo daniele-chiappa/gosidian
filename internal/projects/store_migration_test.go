@@ -21,7 +21,7 @@ func writeLegacyFile(t *testing.T, body string) string {
 func TestMigrate_LegacyAllSeedsWriteGrants(t *testing.T) {
 	path := writeLegacyFile(t, `{
 	  "projects": {"pub": {"public": true}, "priv": {"hidden_from_mcp": true}},
-	  "members": {"priv": [{"user_id": "u1", "level": "read"}]}
+	  "members": {"priv": [{"user_id": "u1", "level": "read"}, {"user_id": "u2", "level": "admin"}]}
 	}`)
 	s, err := Open(path)
 	if err != nil {
@@ -34,9 +34,13 @@ func TestMigrate_LegacyAllSeedsWriteGrants(t *testing.T) {
 	if !rep.Applied || rep.LegacyMembersMode || rep.Projects != 3 || rep.DefaultVisibility != VisibilityInternal {
 		t.Fatalf("report = %+v", rep)
 	}
-	// u1 keeps its read grant on priv (2 seeded), u2 gets 3.
+	// u1: write on pub and disk-only, its read on priv raised to write (3);
+	// u2: write on pub and disk-only, its admin on priv kept (2).
 	if rep.GrantsSeeded != 5 {
 		t.Errorf("GrantsSeeded = %d want 5", rep.GrantsSeeded)
+	}
+	if lvl, _ := s.MemberLevel("priv", "u2"); lvl != LevelAdmin {
+		t.Errorf("an admin grant must stay admin: %q", lvl)
 	}
 	if s.Visibility("pub") != VisibilityPublic || s.Visibility("priv") != VisibilityInternal || s.Visibility("disk-only") != VisibilityInternal {
 		t.Errorf("visibilities: pub=%s priv=%s disk-only=%s", s.Visibility("pub"), s.Visibility("priv"), s.Visibility("disk-only"))
@@ -47,8 +51,10 @@ func TestMigrate_LegacyAllSeedsWriteGrants(t *testing.T) {
 	if !s.Get("priv").HiddenFromMCP {
 		t.Error("other flags must survive")
 	}
-	if lvl, _ := s.MemberLevel("priv", "u1"); lvl != LevelRead {
-		t.Errorf("existing grant overwritten: %q", lvl)
+	// Under the legacy default a read membership was inert: u1 wrote on
+	// priv anyway, and keeping it read took that away (IMP-159, S1-15).
+	if lvl, _ := s.MemberLevel("priv", "u1"); lvl != LevelWrite {
+		t.Errorf("a legacy read grant must become write: %q", lvl)
 	}
 	if lvl, _ := s.MemberLevel("disk-only", "u2"); lvl != LevelWrite {
 		t.Errorf("seeded grant missing: %q", lvl)

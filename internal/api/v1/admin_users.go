@@ -372,6 +372,33 @@ func (r *Router) updateUserRole(w http.ResponseWriter, req *http.Request, id str
 		WriteError(w, http.StatusForbidden, CodeAuthForbidden, ownTOTPFromSettings)
 		return
 	}
+	// Every value is checked before any is applied: a wrong role changed
+	// the flags sent with it and then answered 400 (IMP-159).
+	var role webauth.Role
+	if body.Role != nil {
+		role = webauth.Role(strings.TrimSpace(*body.Role))
+		if role != webauth.RoleMember && role != webauth.RoleGuest {
+			WriteError(w, http.StatusBadRequest, CodeValidationFormat, "role must be 'member' or 'guest'")
+			return
+		}
+	}
+	if body.TOTPPolicy != nil {
+		switch strings.TrimSpace(*body.TOTPPolicy) {
+		case webauth.TOTPInherit, webauth.TOTPEnabled, webauth.TOTPDisabled:
+		default:
+			WriteError(w, http.StatusBadRequest, CodeValidationFormat, fmt.Sprintf("unknown totp policy %q", *body.TOTPPolicy))
+			return
+		}
+	}
+	target, ok := r.deps.Auth.WebAuth.UserByID(id)
+	if !ok {
+		WriteError(w, http.StatusNotFound, CodeNotFound, "user not found")
+		return
+	}
+	if body.Role != nil && target.Role == webauth.RoleOwner {
+		WriteError(w, http.StatusForbidden, CodeAuthForbidden, "the owner's role cannot change")
+		return
+	}
 	if body.Restricted != nil {
 		if err := r.deps.Auth.WebAuth.SetRestricted(id, *body.Restricted); err != nil {
 			r.writeUserUpdateError(w, err)
@@ -385,11 +412,6 @@ func (r *Router) updateUserRole(w http.ResponseWriter, req *http.Request, id str
 		}
 	}
 	if body.Role != nil {
-		role := webauth.Role(strings.TrimSpace(*body.Role))
-		if role != webauth.RoleMember && role != webauth.RoleGuest {
-			WriteError(w, http.StatusBadRequest, CodeValidationFormat, "role must be 'member' or 'guest'")
-			return
-		}
 		if err := r.deps.Auth.WebAuth.SetRole(id, role); err != nil {
 			switch {
 			case strings.Contains(err.Error(), "not found"):

@@ -42,6 +42,7 @@ var Files = []string{
 	"gitsync.json",
 	"config.toml",
 	"projects.json",
+	"automations.json", // what the automations already did (IMP-127); it stayed behind (IMP-159)
 	"audit.jsonl",
 	"index.db",
 	"index.db-wal",

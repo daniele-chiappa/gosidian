@@ -226,3 +226,29 @@ func TestMCP_ClaimRejectsNonHandoffNotes(t *testing.T) {
 		t.Fatalf("claim on plain note error = %q", msg)
 	}
 }
+
+// For one status, the handoffs read off the disk are those the index has
+// with it, inside the project's handoffs folder (IMP-161, S3-11).
+func TestHandoffCandidates_ByStatusFromTheIndex(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	for rel, status := range map[string]string{
+		"p/handoffs/a.md":     "pending",
+		"p/handoffs/b.md":     "done",
+		"p/handoffs/old/c.md": "pending",
+		"p/notes/d.md":        "pending",
+		"q/handoffs/e.md":     "pending",
+	} {
+		content := "---\ntitle: H\ntype: handoff\nstatus: " + status + "\ntags: [type:handoff]\n---\n\n## Summary\n\nx\n"
+		if err := s.writeAndIndex(rel, []byte(content)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, err := s.handoffCandidates("p", "pending")
+	var got []string
+	for _, r := range rows {
+		got = append(got, r.Path)
+	}
+	if err != nil || strings.Join(got, ",") != "p/handoffs/a.md,p/handoffs/old/c.md" {
+		t.Errorf("candidates = %v, %v", got, err)
+	}
+}

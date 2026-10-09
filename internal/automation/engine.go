@@ -34,7 +34,8 @@ type Host interface {
 	// Databases lists the database notes with automations, of one
 	// project or, for "", of all.
 	Databases(project string) ([]Database, error)
-	// Rows returns the rows of db that meet r.Where and have r.Due set.
+	// Rows returns the rows of db that meet r.Where and have r.Due set,
+	// at least MaxRows+1 of them when there are more than MaxRows.
 	Rows(db Database, r Rule, now time.Time) ([]Row, error)
 	// Handoff writes a handoff from the automation to r.Handoff.
 	Handoff(db Database, r Rule, summary string, items []string, now time.Time) (string, error)
@@ -160,6 +161,18 @@ func (e *Engine) fire(db Database, r Rule, now time.Time) (Run, bool) {
 	rows, err := e.host.Rows(db, r, now)
 	if err != nil {
 		return fail(err)
+	}
+	rows, warning := capRows(rows)
+	if warning != rs.Warning {
+		rs.Warning = warning
+		if warning != "" {
+			e.log.Warn("automations: rule over the row cap", "database", db.Path, "rule", r.Name, "max_rows", MaxRows)
+		}
+	}
+	run.Warning = warning
+	if warning == "" {
+		// Past the cap the rows not read are not gone: their firings stay.
+		rs.forgetRows(rows, now)
 	}
 	var due []Row
 	for _, row := range e.comeIn(r, rows, now) {
@@ -316,6 +329,8 @@ type PlannedRule struct {
 	// Fired are the rows already handed off for their date.
 	Fired []PlannedRow `json:"already_fired,omitempty"`
 	Error string       `json:"error,omitempty"`
+	// Warning says the rule reads only its first MaxRows rows.
+	Warning string `json:"warning,omitempty"`
 }
 
 // PlannedRow is a row in a Plan; From is the day it comes in.
@@ -328,6 +343,18 @@ type PlannedRow struct {
 
 // MaxUpcoming caps the rows a plan lists as still to come, per rule.
 const MaxUpcoming = 20
+
+// MaxRows caps the rows a rule reads, in path order; past it the rule and
+// its plan carry a warning, and the log says it once.
+const MaxRows = 10000
+
+// capRows keeps the first MaxRows rows, and says why when there were more.
+func capRows(rows []Row) ([]Row, string) {
+	if len(rows) <= MaxRows {
+		return rows, ""
+	}
+	return rows[:MaxRows], fmt.Sprintf("the database has more than %d rows that meet the rule: only the first %d, in path order, are checked; narrow the rule's where", MaxRows, MaxRows)
+}
 
 // Plan says what the rules of project would do at asOf (zero: now), given
 // what they already did. It writes nothing.
@@ -386,6 +413,7 @@ func (e *Engine) plan(db Database, r Rule, now, asOf time.Time) PlannedRule {
 		pr.Error = err.Error()
 		return pr
 	}
+	rows, pr.Warning = capRows(rows)
 	in := map[string]bool{}
 	for _, row := range e.comeIn(r, rows, asOf) {
 		in[row.Path] = true

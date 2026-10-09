@@ -5,8 +5,8 @@
 // create a handoff note (summary + pending items), query handoffs for a given
 // destination agent, atomically claim one, and complete it. Handoff notes live
 // at <project>/handoffs/YYYYMMDD-HHMMSS-<slug>.md with a stable frontmatter
-// shape so memory_pending_handoffs can filter by `to_agent` and `status` with
-// a single NotesByTag("type:handoff") call followed by a frontmatter scan.
+// shape so memory_pending_handoffs can filter by `to_agent` and `status`: the
+// index picks the handoffs of a status, a frontmatter scan reads them.
 //
 // Lifecycle: pending → claimed → done | rejected. Claim and complete run
 // under the per-note path lock (vault.LockPath), so when several agents race
@@ -26,6 +26,7 @@ import (
 
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/auth"
+	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/gosidian/gosidian/internal/vault"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -189,7 +190,7 @@ func (s *Server) handlePendingHandoffs(ctx context.Context, req mcp.CallToolRequ
 // listHandoffs returns the handoffs of project the token may read, with a
 // status (or "all") and, when forAgent is set, addressed to that agent.
 func (s *Server) listHandoffs(tok *auth.Token, project, forAgent, statusFilter string) ([]handoffEntry, error) {
-	notes, err := s.index.NotesByTag("type:handoff")
+	notes, err := s.handoffCandidates(project, statusFilter)
 	if err != nil {
 		return nil, err
 	}
@@ -231,6 +232,40 @@ func (s *Server) listHandoffs(tok *auth.Token, project, forAgent, statusFilter s
 		})
 	}
 	return out, nil
+}
+
+// handoffCandidates is the handoff notes of project that listHandoffs
+// reads, all of them or, for one status, those the index has with it: the
+// bootstrap read every handoff of the vault off the disk, closed ones
+// included, to show the pending ten (IMP-161, S3-11).
+func (s *Server) handoffCandidates(project, status string) ([]index.NoteRow, error) {
+	if status == "all" {
+		return s.index.NotesByTag("type:handoff")
+	}
+	opts := index.QueryOptions{
+		Projects: []string{project},
+		Folders:  []string{project + "/handoffs/**"},
+		Where: []index.FieldCond{
+			{Field: "tags", Op: index.OpEq, Values: []string{"type:handoff"}},
+			{Field: "status", Op: index.OpEq, Values: []string{status}},
+		},
+		Sort:  "path",
+		Limit: index.QueryMaxLimit,
+	}
+	var out []index.NoteRow
+	for {
+		hits, total, err := s.index.Query(opts)
+		if err != nil {
+			return nil, err
+		}
+		for _, h := range hits {
+			out = append(out, index.NoteRow{Path: h.Path, Title: h.Title})
+		}
+		opts.Offset += opts.Limit
+		if opts.Offset >= total {
+			return out, nil
+		}
+	}
 }
 
 func (s *Server) handleClaimHandoff(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

@@ -102,20 +102,31 @@ func (h automationHost) Rows(db automation.Database, r automation.Rule, now time
 	}
 	where := append(spec.Where, rowConds(sc)...)
 	where = append(where, index.FieldCond{Field: r.Due, Op: index.OpExists, Values: []string{"true"}})
-	hits, _, err := h.s.viewQuery(tok)(index.QueryOptions{Folders: spec.From, Where: where, Fields: []string{r.Due}, Sort: "path", Limit: index.QueryMaxLimit})
-	if err != nil {
-		return nil, err
-	}
-	rows := make([]automation.Row, 0, len(hits))
-	for _, hit := range hits {
-		if !sc.Covers(hit.Path) {
-			continue
+	// Every row, a page at a time, up to one past the engine's cap: one
+	// query of QueryMaxLimit left the 501st row without a handoff, and
+	// nothing said so (IMP-161, S3-8). The pages step by the index's
+	// total, before the token's reach drops a hit (scopedQuery).
+	opts := index.QueryOptions{Folders: spec.From, Where: where, Fields: []string{r.Due}, Sort: "path", Limit: index.QueryMaxLimit}
+	var rows []automation.Row
+	for len(rows) <= automation.MaxRows {
+		hits, total, _, err := h.s.scopedQuery(tok, opts)
+		if err != nil {
+			return nil, err
 		}
-		due := ""
-		if vs := hit.Fields[r.Due]; len(vs) > 0 {
-			due = vs[0]
+		for _, hit := range hits {
+			if !sc.Covers(hit.Path) {
+				continue
+			}
+			due := ""
+			if vs := hit.Fields[r.Due]; len(vs) > 0 {
+				due = vs[0]
+			}
+			rows = append(rows, automation.Row{Path: hit.Path, Title: hit.Title, Due: due})
 		}
-		rows = append(rows, automation.Row{Path: hit.Path, Title: hit.Title, Due: due})
+		opts.Offset += opts.Limit
+		if opts.Offset >= total {
+			break
+		}
 	}
 	return rows, nil
 }

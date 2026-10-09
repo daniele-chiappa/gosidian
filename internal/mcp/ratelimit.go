@@ -1,8 +1,10 @@
 package mcp
 
 import (
+	"context"
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -154,4 +156,28 @@ func (l *writeLimiter) sweep(now, cutoff time.Time) {
 // agent is told to wait and the Retry-After header of an HTTP refusal.
 func retrySeconds(wait time.Duration) int {
 	return max(1, int(math.Ceil(wait.Seconds())))
+}
+
+// writeCharge is one ingestion's place in the write rate: the first write
+// takes it, and the steps that follow (the attachment, the note that shows
+// it, the notes of a package) write under it. A ticket's upload comes with
+// it taken, by the memory_ingest call that minted the ticket. An upload by
+// ticket counted three times, at the mint, at the redeem and at the write,
+// and the third refusal lost bytes already uploaded with a ticket already
+// spent (IMP-161, S3-7).
+type writeCharge struct{ taken atomic.Bool }
+
+type writeChargeKey struct{}
+
+// withWriteCharge starts an ingestion's charge, taken already for the
+// upload of a ticket.
+func withWriteCharge(ctx context.Context, taken bool) context.Context {
+	c := &writeCharge{}
+	c.taken.Store(taken)
+	return context.WithValue(ctx, writeChargeKey{}, c)
+}
+
+func writeChargeOf(ctx context.Context) *writeCharge {
+	c, _ := ctx.Value(writeChargeKey{}).(*writeCharge)
+	return c
 }

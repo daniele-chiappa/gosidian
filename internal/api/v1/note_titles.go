@@ -44,44 +44,37 @@ func (r *Router) handleNoteTitles(w http.ResponseWriter, req *http.Request) {
 	q := strings.TrimSpace(req.URL.Query().Get("q"))
 	limit := limitParam(req, noteTitlesDefaultLimit, noteTitlesMaxLimit)
 
+	p := principalFromContext(req)
+	scope, err := r.searchScope(p, "")
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
+		return
+	}
+
 	// Empty query returns the most recently modified notes — useful as
 	// the editor's "show me anything" fallback when the user opens the
 	// `[[` autocomplete with no prefix yet, and as the default ranking
-	// for the graph view's "focus" picker (last-edited first). Calls
-	// the existing index.RecentNotes (used elsewhere by the MCP recent
-	// tool) with empty project + zero `since` to mean "all notes,
-	// limit-many, mtime desc".
-	p := principalFromContext(req)
-	fetch := limit
-	if !r.seesAllProjects(p) {
-		fetch = limit * 4 // overfetch; the visibility filter drops some
-	}
-
+	// for the graph view's "focus" picker (last-edited first). The
+	// visible projects go in the query: an overfetch filtered afterwards
+	// came back empty for an account whose projects were not among the
+	// vault's latest edits (IMP-160, S2-13).
 	if q == "" {
-		rows, err := r.deps.Index.RecentNotes("", 0, fetch)
+		rows, err := r.deps.Index.RecentNotesIn(scope, limit)
 		if err != nil {
 			WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
 			return
 		}
 		out := make([]noteTitleHit, 0, noteTitlesMaxLimit)
 		for _, n := range rows {
-			if !r.canSee(p, n.Path) {
+			if !r.canSee(p, n.Path) { // defence in depth: the scope already filtered
 				continue
 			}
 			out = append(out, noteTitleHit{Title: n.Title, Path: n.Path})
-			if len(out) >= limit {
-				break
-			}
 		}
 		WriteJSON(w, http.StatusOK, map[string]any{"items": out})
 		return
 	}
 
-	scope, err := r.searchScope(p, "")
-	if err != nil {
-		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
-		return
-	}
 	rows, err := r.deps.Index.SearchWith(q, index.SearchOptions{Limit: limit, Projects: scope})
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())

@@ -150,3 +150,38 @@ func TestMCP_DeleteNote_Trash(t *testing.T) {
 		t.Errorf("trash after the restore and a missing note = %+v", entries)
 	}
 }
+
+// A project hidden from MCP is neither deleted nor renamed through it, as
+// it is not read (IMP-161).
+func TestMCP_HiddenProjectIsNotDeletedOrRenamed(t *testing.T) {
+	dir := t.TempDir()
+	idx, err := index.Open(filepath.Join(t.TempDir(), "idx.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { idx.Close() })
+	tokens, err := auth.Open(filepath.Join(t.TempDir(), "tokens.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(vault.New(dir), idx, tokens)
+	ps, err := projects.Open(filepath.Join(t.TempDir(), "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.SetProjects(ps)
+	ctx := context.WithValue(context.Background(), tokenCtxKey, auth.AdminToken())
+	resultText(t, mustCall(s.handleCreateProject(ctx, call(map[string]any{"name": "Secret"}))))
+	if err := ps.Set("Secret", projects.Flags{HiddenFromMCP: true}); err != nil {
+		t.Fatal(err)
+	}
+	if msg := expectError(t, mustCall(s.handleDeleteProject(ctx, call(map[string]any{"name": "Secret"})))); !strings.Contains(msg, "hidden from MCP") {
+		t.Errorf("delete: %s", msg)
+	}
+	if msg := expectError(t, mustCall(s.handleRenameProject(ctx, call(map[string]any{"from": "Secret", "to": "Open"})))); !strings.Contains(msg, "hidden from MCP") {
+		t.Errorf("rename: %s", msg)
+	}
+	if !s.vault.Exists("Secret") {
+		t.Error("the hidden project is gone")
+	}
+}

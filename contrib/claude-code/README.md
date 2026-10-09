@@ -64,7 +64,7 @@ and so skips the bootstrap and the tool schemas
 - `SessionStart` starts `gosidian mirror sync` in the background (the
   session does not wait) and adds to the context where the mirror is, when
   it was last synced and how to use it: start from `hot.md`, `README.md`
-  and `_index.md`, prefer the more recent of two notes that disagree,
+  and `.gosidian-index.md`, prefer the more recent of two notes that disagree,
   never edit the files, write through MCP.
 - `PostToolUse` on the gosidian write tools syncs again, so the agent's own
   writes show up in the copy (only changed notes are fetched).

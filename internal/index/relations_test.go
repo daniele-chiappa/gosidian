@@ -132,3 +132,19 @@ func TestOpen_MigratesV3Index(t *testing.T) {
 		t.Errorf("links.field = %q (%v)", field, err)
 	}
 }
+
+// A frontmatter key with a comma in it is one field of the backlink, not
+// two (IMP-162, S4-13).
+func TestBacklinks_FieldWithAComma(t *testing.T) {
+	idx := seedRelations(t)
+	upsert(t, idx, "p/plans/r5.md", "r5", "---\ntitle: r5\n\"see, also\": \"[[p/docs/BUG-1]]\"\n---\n")
+	bl, err := idx.Backlinks("p/docs/BUG-1.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range bl {
+		if b.Path == "p/plans/r5.md" && !reflect.DeepEqual(b.Fields, []string{"see, also"}) {
+			t.Errorf("r5 fields = %q", b.Fields)
+		}
+	}
+}

@@ -25,19 +25,19 @@ func (s *Server) handleSnapshot(ctx context.Context, req mcp.CallToolRequest) (*
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	rel, err := s.vault.Rel(s.notePathArg(raw))
-	if err != nil {
-		return mcp.NewToolResultErrorFromErr("invalid path", err), nil
-	}
-	if !strings.HasSuffix(strings.ToLower(rel), ".md") {
-		return mcp.NewToolResultErrorf("%q is not a markdown note: only a .md note has views to freeze", rel), nil
-	}
 	reader, errRes := s.authorizeRead(ctx)
 	if errRes != nil {
 		return errRes, nil
 	}
+	rel, err := s.vault.Rel(s.notePathArg(reader, raw))
+	if err != nil {
+		return mcp.NewToolResultErrorFromErr("invalid path", err), nil
+	}
 	if !reader.AllowsPath(rel) || s.pathInHiddenProject(rel) {
 		return mcp.NewToolResultErrorf("note %q not found", rel), nil
+	}
+	if !strings.HasSuffix(strings.ToLower(rel), ".md") {
+		return mcp.NewToolResultErrorf("%q is not a markdown note: only a .md note has views to freeze", rel), nil
 	}
 	note, err := s.vault.Load(rel)
 	if err != nil {

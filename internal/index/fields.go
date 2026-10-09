@@ -266,6 +266,9 @@ type QueryOptions struct {
 	// ThenBy are the keys after Sort (IMP-143), at most MaxSortKeys-1.
 	ThenBy []SortKey
 	Limit  int
+	// Offset skips that many notes of the order first: a page after the
+	// first, for a reader that needs every match (the automations).
+	Offset int
 	Fields []string
 }
 
@@ -432,8 +435,8 @@ func (i *Index) Query(opts QueryOptions) ([]QueryHit, int, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	q := `SELECT n.id, n.path, n.title, n.mtime FROM notes n WHERE 1=1` + where + ` ORDER BY ` + order + ` LIMIT ?`
-	all := append(append(append([]any{}, args...), sortArgs...), limit)
+	q := `SELECT n.id, n.path, n.title, n.mtime FROM notes n WHERE 1=1` + where + ` ORDER BY ` + order + ` LIMIT ? OFFSET ?`
+	all := append(append(append([]any{}, args...), sortArgs...), limit, max(opts.Offset, 0))
 	rows, err := i.db.Query(q, all...)
 	if err != nil {
 		return nil, 0, err
@@ -710,8 +713,8 @@ func sortTerm(k SortKey) (string, []any) {
 
 // SortHits orders hits by keys as Query would, on the values they carry:
 // the caller fetched every field the keys name (a rollup's computed value
-// among them). Values compare as numbers when both are, otherwise as text
-// without case, so ISO dates in time order; a field's lowest value counts
+// among them). Values compare as the ORDER BY of sortTerm does: by date,
+// then number, then text without case; a field's lowest values count
 // ascending and its highest descending, the notes without it last, and the
 // path breaks the ties.
 func SortHits(hits []QueryHit, keys []SortKey) {
@@ -743,7 +746,7 @@ func compareHits(a, b QueryHit, k SortKey) int {
 	case "path":
 		return sign * strings.Compare(a.Path, b.Path)
 	case "title":
-		return sign * strings.Compare(strings.ToLower(a.Title), strings.ToLower(b.Title))
+		return sign * compareNoCase(a.Title, b.Title)
 	}
 	va, vb := a.Fields[k.Field], b.Fields[k.Field]
 	switch {
@@ -757,7 +760,7 @@ func compareHits(a, b QueryHit, k SortKey) int {
 	if len(k.Order) > 0 {
 		// As in SQL: a note with a listed value first, then by rank.
 		ra, rb := rankOf(va, k.Order, k.Desc), rankOf(vb, k.Order, k.Desc)
-		la, lb := ra < len(k.Order), rb < len(k.Order)
+		la, lb := anyListed(va, k.Order), anyListed(vb, k.Order)
 		if la != lb {
 			if la {
 				return -1
@@ -767,8 +770,14 @@ func compareHits(a, b QueryHit, k SortKey) int {
 		if c := sign * cmpInt(int64(ra), int64(rb)); c != 0 {
 			return c
 		}
+		return sign * compareNoCase(aggText(va, k.Desc), aggText(vb, k.Desc))
 	}
-	return sign * compareValues(pickValue(va, k.Desc), pickValue(vb, k.Desc))
+	return sign * compareSortVals(sortValsOf(va, k.Desc), sortValsOf(vb, k.Desc))
+}
+
+// anyListed says whether one of vs is in order.
+func anyListed(vs, order []string) bool {
+	return slices.ContainsFunc(vs, func(v string) bool { return slices.Contains(order, v) })
 }
 
 // rankOf is the rank of a note's values in order: the lowest ascending, the
@@ -787,33 +796,93 @@ func rankOf(vs, order []string, desc bool) int {
 	return best
 }
 
-// pickValue is the value of a list a sort reads: the lowest ascending, the
-// highest descending.
-func pickValue(vs []string, desc bool) string {
+// sortVals is a note's values for one key as sortTerm's ORDER BY reads
+// them: the lowest of each column (the highest, descending), its date, its
+// number and its text, nil where no value has one. The Go sort used to read
+// one value of the list, and a number by strconv.ParseFloat, which takes
+// NaN, Inf and hexadecimals the index never stores as numbers, and dates
+// with a space or a "T" apart (IMP-162, S4-15).
+type sortVals struct {
+	date *string
+	num  *float64
+	text string
+}
+
+func sortValsOf(vs []string, desc bool) sortVals {
+	var out sortVals
+	better := func(c int) bool { return desc && c > 0 || !desc && c < 0 }
+	for k, v := range vs {
+		f := typedField("", v, "")
+		if d, ok := f.date.(string); ok && (out.date == nil || better(strings.Compare(d, *out.date))) {
+			out.date = &d
+		}
+		if n, ok := f.num.(float64); ok && (out.num == nil || better(cmpFloat(n, *out.num))) {
+			out.num = &n
+		}
+		if k == 0 || better(strings.Compare(v, out.text)) {
+			out.text = v
+		}
+	}
+	return out
+}
+
+// compareSortVals orders as SQLite does: NULL before any value, then the
+// date, the number and the text without (ASCII) case.
+func compareSortVals(a, b sortVals) int {
+	if c := cmpNullable(a.date, b.date, strings.Compare); c != 0 {
+		return c
+	}
+	if c := cmpNullable(a.num, b.num, cmpFloat); c != 0 {
+		return c
+	}
+	return compareNoCase(a.text, b.text)
+}
+
+func cmpNullable[T any](a, b *T, cmp func(T, T) int) int {
+	switch {
+	case a == nil && b == nil:
+		return 0
+	case a == nil:
+		return -1
+	case b == nil:
+		return 1
+	}
+	return cmp(*a, *b)
+}
+
+// aggText is MIN (MAX, descending) of the values, as SQLite compares text.
+func aggText(vs []string, desc bool) string {
 	best := vs[0]
 	for _, v := range vs[1:] {
-		if c := compareValues(v, best); desc && c > 0 || !desc && c < 0 {
+		if c := strings.Compare(v, best); desc && c > 0 || !desc && c < 0 {
 			best = v
 		}
 	}
 	return best
 }
 
-// compareValues compares two field values: as numbers when both are, else
-// as text without case.
-func compareValues(a, b string) int {
-	na, errA := strconv.ParseFloat(a, 64)
-	nb, errB := strconv.ParseFloat(b, 64)
-	if errA == nil && errB == nil {
-		switch {
-		case na < nb:
-			return -1
-		case na > nb:
-			return 1
+// compareNoCase is COLLATE NOCASE: only the ASCII letters fold.
+func compareNoCase(a, b string) int {
+	return strings.Compare(foldASCII(a), foldASCII(b))
+}
+
+func foldASCII(s string) string {
+	return strings.Map(func(r rune) rune {
+		if 'A' <= r && r <= 'Z' {
+			return r + 'a' - 'A'
 		}
-		return 0
+		return r
+	}, s)
+}
+
+func cmpFloat(a, b float64) int {
+	switch {
+	case a < b:
+		return -1
+	case a > b:
+		return 1
 	}
-	return strings.Compare(strings.ToLower(a), strings.ToLower(b))
+	return 0
 }
 
 func cmpInt(a, b int64) int {

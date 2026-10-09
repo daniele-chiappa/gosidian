@@ -612,8 +612,12 @@ func TestRedirectRulesAndHelpers(t *testing.T) {
 	if _, err := parseIssuer("notes.example.com"); err == nil {
 		t.Error("issuer without scheme accepted")
 	}
-	if u, err := parseIssuer("https://notes.example.com/base/"); err != nil || u.String() != "https://notes.example.com/base" {
+	if u, err := parseIssuer("https://notes.example.com/"); err != nil || u.String() != "https://notes.example.com" {
 		t.Errorf("issuer normalization: %v %v", u, err)
+	}
+	// A path broke the flow halfway: refused at start (IMP-159, S1-13).
+	if _, err := parseIssuer("https://notes.example.com/base/"); err == nil || !strings.Contains(err.Error(), "has a path") {
+		t.Errorf("issuer with a path: %v", err)
 	}
 	s, _ := newTestServer(t)
 	if !s.resourceMatches("HTTPS://NOTES.EXAMPLE.COM/mcp/") || s.resourceMatches(issuer+"/mcp?x=1") || s.resourceMatches(issuer) {

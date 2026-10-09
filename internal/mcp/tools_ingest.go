@@ -117,6 +117,8 @@ func (s *Server) resolveIngestKind(as, ext string) (ingestKind, string, *mcp.Cal
 }
 
 func (s *Server) handleIngest(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	// One place in the write rate for the whole ingestion.
+	ctx = withWriteCharge(ctx, false)
 	project, err := req.RequireString("project")
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
@@ -285,10 +287,7 @@ func (s *Server) ingestNoteFromSource(ctx context.Context, project, ext, fnForEx
 		}
 		consumeStaged = staged
 	case sourcePath != "":
-		if err := attach.ValidateSourcePath(sourcePath, s.effectiveUploadRoots()); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		real, srcErr := s.checkSource(ctx, sourcePath)
+		real, srcErr := s.checkSourceFile(ctx, sourcePath)
 		if srcErr != nil {
 			return mcp.NewToolResultError(srcErr.Error()), nil
 		}
@@ -400,12 +399,12 @@ type ingestIntent struct {
 // to the MCP path.
 func (s *Server) ingestRaw(ctx context.Context, in ingestIntent, data []byte) (*mcp.CallToolResult, error) {
 	if in.As == "package" {
-		// The bytes are a .zip; the redemption has charged the write limit.
+		// The bytes are a .zip.
 		entries, skipped, err := pkgimport.ReadZip(data, pkgimport.Limits{MaxFiles: s.packageMaxFiles, MaxBytes: s.packageMaxBytes})
 		if err != nil {
 			return mcp.NewToolResultError("package: " + err.Error()), nil
 		}
-		return s.importPackage(ctx, packageIntent{Project: in.Project, Dest: in.Dest, DryRun: in.DryRun, Overwrite: in.Overwrite, AllowShrink: in.AllowShrink}, entries, skipped, true)
+		return s.importPackage(ctx, packageIntent{Project: in.Project, Dest: in.Dest, DryRun: in.DryRun, Overwrite: in.Overwrite, AllowShrink: in.AllowShrink}, entries, skipped)
 	}
 	if strings.TrimSpace(in.Filename) == "" {
 		return mcp.NewToolResultError("cannot route: missing filename (pass filename with an extension)"), nil

@@ -303,3 +303,13 @@ func TestIndex_BasenameResolutionEscapesWildcards(t *testing.T) {
 		t.Errorf("[[%%]] must stay unresolved, got %q", got["%"])
 	}
 }
+
+// A note whose name is empty once its extension goes (p/.md) is indexed:
+// the links to re-resolve were selected with "AND ()" (IMP-162, S4-12).
+func TestUpsert_EmptyName(t *testing.T) {
+	idx := openTest(t)
+	upsert(t, idx, "p/.md", "", "body")
+	if n, err := idx.Note("p/.md"); err != nil || n == nil {
+		t.Errorf("p/.md not indexed: %v", err)
+	}
+}

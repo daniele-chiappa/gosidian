@@ -224,3 +224,27 @@ func TestSearchScopedBeforeLimit(t *testing.T) {
 		t.Errorf("guest note-titles = %d %s, want the 3 public notes", rec.code, rec.body)
 	}
 }
+
+// A patch is checked whole before any of it is applied: a wrong role came
+// back 400 after the flags sent with it were already saved (IMP-159).
+func TestAdminUserPatch_AllOrNothing(t *testing.T) {
+	f := newNotesFixture(t)
+	u, err := f.webauth.AddUser("partial", "partial-pass-1", webauth.RoleMember)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{
+		`{"restricted":false,"role":"owner"}`,
+		`{"restricted":false,"totp_policy":"sometimes"}`,
+	} {
+		if rec := f.doAuthRecorder(http.MethodPatch, "/api/v1/admin/users/"+u.ID, body, nil); rec.code != http.StatusBadRequest {
+			t.Errorf("%s = %d, want 400 (%s)", body, rec.code, rec.body)
+		}
+		if uu, _ := f.webauth.UserByID(u.ID); !uu.Restricted {
+			t.Errorf("%s: restricted changed by a refused patch", body)
+		}
+	}
+	if rec := f.doAuthRecorder(http.MethodPatch, "/api/v1/admin/users/ghost", `{"restricted":false}`, nil); rec.code != http.StatusNotFound {
+		t.Errorf("unknown user = %d, want 404", rec.code)
+	}
+}

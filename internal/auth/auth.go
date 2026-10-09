@@ -339,6 +339,20 @@ func (s *Store) List() []Token {
 // the CLI made meanwhile is kept; a failed write only loses the timestamp.
 func (s *Store) Touch(id string) {
 	now := time.Now().UTC()
+	// Recent enough: no write lock and no stat of the file, which every
+	// request of an OAuth grant paid (IMP-159).
+	s.mu.RLock()
+	recent := false
+	for i := range s.tokens {
+		if s.tokens[i].ID == id {
+			recent = now.Sub(s.tokens[i].LastUsedAt) < lastUsedEvery
+			break
+		}
+	}
+	s.mu.RUnlock()
+	if recent {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.reloadIfStale()
@@ -373,7 +387,7 @@ func (s *Store) Create(name string, projects []string, scopes []string, ttl time
 		return "", Token{}, err
 	}
 	plaintext = tokenPrefix + base64.RawURLEncoding.EncodeToString(raw)
-	tok, err = s.mint(plaintext, name, cleanProjects, scopes, ttl, ownerUserID)
+	tok, err = s.mint(plaintext, name, cleanProjects, scopes, ttl, ownerUserID, nil)
 	if err != nil {
 		return "", Token{}, err
 	}
@@ -399,22 +413,12 @@ func (s *Store) CreateGrant(name string, projects []string, scopes []string, ttl
 	}
 	// Not a presentable credential: the "plaintext" hashed here is never
 	// returned to anyone.
-	tok, err := s.mint("grant:"+base64.RawURLEncoding.EncodeToString(raw), name, cleanProjects, scopes, ttl, ownerUserID)
-	if err != nil {
-		return Token{}, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.reloadIfStale()
-	for i := range s.tokens {
-		if s.tokens[i].ID == tok.ID {
-			s.tokens[i].Kind = KindOAuth
-			s.tokens[i].ClientID = clientID
-			tok = s.tokens[i]
-			return tok, s.save()
-		}
-	}
-	return Token{}, errors.New("grant vanished after mint")
+	// Kind and client set before the one save: the grant was saved as a
+	// static token and then saved again (IMP-159).
+	return s.mint("grant:"+base64.RawURLEncoding.EncodeToString(raw), name, cleanProjects, scopes, ttl, ownerUserID, func(t *Token) {
+		t.Kind = KindOAuth
+		t.ClientID = clientID
+	})
 }
 
 // validateCreate holds the argument checks shared by Create and CreateGrant.
@@ -446,7 +450,8 @@ func cleanProjectList(projects []string) ([]string, error) {
 
 // mint builds the record for plaintext, appends it and saves. cleanProjects
 // must already be normalized.
-func (s *Store) mint(plaintext, name string, cleanProjects, scopes []string, ttl time.Duration, ownerUserID string) (Token, error) {
+// mint stores a new token; with is applied to it before the save.
+func (s *Store) mint(plaintext, name string, cleanProjects, scopes []string, ttl time.Duration, ownerUserID string, with func(*Token)) (Token, error) {
 	hash := sha256.Sum256([]byte(plaintext))
 	hashHex := hex.EncodeToString(hash[:])
 	tok := Token{
@@ -468,6 +473,9 @@ func (s *Store) mint(plaintext, name string, cleanProjects, scopes []string, ttl
 	}
 	if ttl != 0 {
 		tok.ExpiresAt = tok.CreatedAt.Add(ttl)
+	}
+	if with != nil {
+		with(&tok)
 	}
 
 	s.mu.Lock()

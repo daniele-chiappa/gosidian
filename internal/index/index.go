@@ -314,6 +314,11 @@ func resolveInbound(tx *sql.Tx, notePath string, titles ...string) error {
 		conds = append(conds, `lower(target) LIKE ? ESCAPE '\'`)
 		args = append(args, "%"+likeEscaper.Replace(s)+"%")
 	}
+	// A name that is nothing once trimmed (p/.md) and no title: no link can
+	// name the note, and "AND ()" failed the whole Upsert (IMP-162, S4-12).
+	if len(conds) == 0 {
+		return nil
+	}
 	return reresolveLinks(tx,
 		`SELECT rowid, target FROM links WHERE (target_path IS NULL OR target_path = '') AND (`+strings.Join(conds, " OR ")+`)`,
 		args...)

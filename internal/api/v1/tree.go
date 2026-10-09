@@ -72,9 +72,8 @@ func (r *Router) handleTree(w http.ResponseWriter, req *http.Request) {
 	// Obsidian bases and canvases are no notes, so the index does not hold
 	// them: they are read off the vault, read-only (IMP-118, IMP-144).
 	if r.deps.Vault != nil {
-		bases, _ := r.deps.Vault.ListBases(project)
-		canvases, _ := r.deps.Vault.ListCanvases(project)
-		for _, b := range append(bases, canvases...) {
+		files, _ := r.deps.Vault.ListBasesAndCanvases(project)
+		for _, b := range files {
 			if r.canSee(p, b) {
 				paths = append(paths, b)
 			}

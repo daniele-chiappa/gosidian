@@ -216,7 +216,7 @@ mirror_context() {
   printf '## Local read-only mirror of `%s`\n\n' "$PROJECT"
   printf 'A read-only copy of the project is at `%s/%s` (last sync: %s; a sync has just started in the background). ' \
     "$shown" "$PROJECT" "${last:-none yet — the first one is running, read through MCP until the files appear}"
-  printf 'Read and search it with your file tools. Start from `hot.md`, `README.md` and `_index.md` (every note from the most recent); '
+  printf 'Read and search it with your file tools. Start from `hot.md`, `README.md` and `.gosidian-index.md` (every note from the most recent); '
   printf 'follow tags and [[wikilinks]] (paths from `%s`); try synonyms and the other language before concluding there is no answer; when two notes disagree, prefer the more recent one. ' "$shown"
   printf 'Never edit these files: write only with the gosidian MCP tools; the mirror refreshes after each write.\n'
 }

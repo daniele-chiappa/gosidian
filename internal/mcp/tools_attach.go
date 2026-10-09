@@ -142,7 +142,7 @@ func (s *Server) storeAttachmentFromRequest(ctx context.Context, project, filena
 		if errRes != nil {
 			return nil, 0, errRes
 		}
-		real, err := s.checkSource(ctx, sourcePath)
+		real, err := s.checkSourceFile(ctx, sourcePath)
 		if err != nil {
 			return nil, 0, mcp.NewToolResultError(err.Error())
 		}

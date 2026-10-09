@@ -394,6 +394,9 @@ func Default() *Config {
 	// Here too, as 0 means "forever": applyDefaults turned a saved 0 into
 	// 30 days at the next start, and the prune emptied the trash (BUG-105).
 	cfg.Trash.Retention = 30 * 24 * time.Hour
+	// And here, as 0 turns the cache off: applyDefaults put it back to 128
+	// (IMP-163).
+	cfg.Vault.CacheSize = 128
 	cfg.applyDefaults()
 	return cfg
 }
@@ -838,9 +841,6 @@ func (c *Config) applyDefaults() {
 		c.Webauth.LoginMaxFailures = 5
 	}
 	c.Webauth.TOTPMode, c.totpWarning = TOTPModeOf(c.Webauth.TOTPMode)
-	if c.Vault.CacheSize == 0 {
-		c.Vault.CacheSize = 128
-	}
 	if c.I18n.DefaultLang == "" {
 		c.I18n.DefaultLang = "en"
 	}

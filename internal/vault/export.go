@@ -25,7 +25,7 @@ func (v *Vault) WalkExport(dir string, fn func(rel string, info fs.FileInfo) err
 	}
 	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return err
+			return skipVanished(root, path, err)
 		}
 		if d.IsDir() {
 			if v.skipDir(root, path) {
@@ -38,7 +38,7 @@ func (v *Vault) WalkExport(dir string, fn func(rel string, info fs.FileInfo) err
 		}
 		info, err := d.Info()
 		if err != nil {
-			return err
+			return skipVanished(root, path, err)
 		}
 		rel, err := filepath.Rel(v.Root, path)
 		if err != nil {

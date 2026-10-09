@@ -1,8 +1,12 @@
 package v1
 
 import (
+	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -95,5 +99,31 @@ func TestLoginLimiter_ExpiredEntriesAreDropped(t *testing.T) {
 	}
 	if _, ok := l.attempts["10.0.0.1"]; ok {
 		t.Fatal("expired entry must be deleted, not kept empty")
+	}
+}
+
+// A forwarded request with no trusted proxy set is logged once (IMP-159,
+// S1-14): behind such a proxy every client shares one rate-limit bucket.
+func TestClientIP_WarnsOnceOnAnUntrustedProxy(t *testing.T) {
+	prev := trustedProxies.Load()
+	trustedProxies.Store(nil)
+	untrustedProxyWarn = sync.Once{}
+	var lines []string
+	proxyWarnf = func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) }
+	t.Cleanup(func() {
+		trustedProxies.Store(prev)
+		untrustedProxyWarn = sync.Once{}
+		proxyWarnf = log.Printf
+	})
+	for i := 0; i < 3; i++ {
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/login", nil)
+		r.RemoteAddr = "172.22.0.5:4000"
+		r.Header.Set("X-Forwarded-For", "203.0.113.9")
+		if got := clientIP(r); got != "172.22.0.5" {
+			t.Fatalf("clientIP = %q", got)
+		}
+	}
+	if len(lines) != 1 || !strings.Contains(lines[0], "trusted_proxies") {
+		t.Errorf("warnings = %q", lines)
 	}
 }

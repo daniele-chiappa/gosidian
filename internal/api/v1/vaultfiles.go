@@ -96,14 +96,50 @@ func (r *Router) VaultFileAuthorizer() func(req *http.Request, rel string) int {
 	}
 }
 
+// HealthDetailsAuthorizer says whether a /healthz request carries the
+// owner's credentials (server.SetHealthDetailsAuthorizer): the owner's web
+// session, or an MCP token of the owner or of no account (CLI, admin) that
+// no project list limits. The details are the vault path, the note count
+// and git's last error, about the whole vault (IMP-160, S2-10).
+func (r *Router) HealthDetailsAuthorizer() func(req *http.Request) bool {
+	return func(req *http.Request) bool {
+		d := r.deps.Auth
+		tok := extractBearer(req)
+		if d == nil || tok == "" {
+			return false
+		}
+		if d.SpaAuth != nil && d.WebAuth != nil {
+			if p, ok := r.spaPrincipal(tok); ok {
+				return p.Role == webauth.RoleOwner
+			}
+		}
+		if d.MCPTokens == nil {
+			return false
+		}
+		mt, err := d.MCPTokens.Validate(tok)
+		if err != nil || !mt.IsAdmin() {
+			return false
+		}
+		if mt.OwnerUserID == "" {
+			return true
+		}
+		if d.WebAuth == nil {
+			return false
+		}
+		u, ok := d.WebAuth.UserByID(mt.OwnerUserID)
+		return ok && u.Enabled() && u.Role == webauth.RoleOwner
+	}
+}
+
 // mcpTokenGate is the /vault-files/ gate for an MCP token: its declared
-// scope narrowed to what the account that owns it may read now, as the MCP
-// server narrows it on every call (mcp effectiveToken). The declared scope
-// alone let a token with no project list, which every account may create
-// for itself, read the attachments of every project, and kept working for
-// a disabled owner or a revoked grant (BUG-100). Tokens without an owner
-// (CLI, admin) keep their declared scope. A project hidden from MCP is
-// refused, as by the MCP download ticket.
+// scope narrowed to what the account that owns it may read now, by the rule
+// the MCP server applies on every call (authz.NarrowToken; this gate kept
+// its own copy, IMP-161). The declared scope alone let a token with no
+// project list, which every account may create for itself, read the
+// attachments of every project, and kept working for a disabled owner or a
+// revoked grant (BUG-100). Tokens without an owner (CLI, admin) keep their
+// declared scope. A project hidden from MCP is refused, as by the MCP
+// download ticket.
 func (r *Router) mcpTokenGate(mt *auth.Token, rel string) int {
 	project := projectOf(rel)
 	if !mt.AllowsPath(rel) || (r.deps.Projects != nil && r.deps.Projects.Get(project).HiddenFromMCP) {
@@ -116,7 +152,13 @@ func (r *Router) mcpTokenGate(mt *auth.Token, rel string) int {
 	if !ok || !user.Enabled() {
 		return http.StatusUnauthorized
 	}
-	return r.seeOr404(authz.Principal{UserID: user.ID, Role: user.Role, Restricted: user.Restricted}, rel)
+	// Of every project, only this one matters for the answer.
+	names := func() ([]string, error) { return []string{project}, nil }
+	princ := authz.Principal{UserID: user.ID, Role: user.Role, Restricted: user.Restricted}
+	if eff, err := authz.NarrowToken(mt, princ, r.accessConfig(), names); err != nil || !eff.AllowsPath(rel) {
+		return http.StatusNotFound
+	}
+	return 0
 }
 
 // spaPrincipal resolves a SPA session token to its principal, mirroring the

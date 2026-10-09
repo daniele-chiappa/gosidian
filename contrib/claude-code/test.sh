@@ -144,7 +144,7 @@ out=$(printf '{"hook_event_name":"SessionStart","session_id":"m1","startup_reaso
 ctx=$(printf '%s' "$out" | jq -r '.hookSpecificOutput.additionalContext')
 wait_log 1 || fail "mirror sync not started at SessionStart"
 grep -q "mirror sync --url http://127.0.0.1:$PORT/mcp --project proj --dir $WORK/checkout/.gosidian/mirror token=tok-1" "$FAKE_LOG" || fail "unexpected sync call: $(cat "$FAKE_LOG")"
-case "$ctx" in *"Local read-only mirror of \`proj\`"*".gosidian/mirror/proj"*"_index.md"*"write only with the gosidian MCP tools"*) ;; *) fail "mirror context missing: $ctx";; esac
+case "$ctx" in *"Local read-only mirror of \`proj\`"*".gosidian/mirror/proj"*".gosidian-index.md"*"write only with the gosidian MCP tools"*) ;; *) fail "mirror context missing: $ctx";; esac
 case "$ctx" in *"memory_bootstrap"*) ;; *) fail "bootstrap reminder lost with the mirror on";; esac
 echo "ok  SessionStart syncs the mirror in the background and announces it"
 

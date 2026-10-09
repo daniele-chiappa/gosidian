@@ -15,14 +15,15 @@ type Backlink struct {
 }
 
 // Backlinks returns notes that link to the given note path, from the body
-// or from a frontmatter value.
+// or from a frontmatter value. The fields come a row each: joined by
+// GROUP_CONCAT and split on its comma, a key with a comma in it became two
+// fields that are not there (IMP-162, S4-13).
 func (i *Index) Backlinks(path string) ([]Backlink, error) {
 	rows, err := i.db.Query(`
-        SELECT n.path, n.title, COALESCE(GROUP_CONCAT(DISTINCT l.field), '')
+        SELECT DISTINCT n.path, n.title, COALESCE(l.field, '')
         FROM links l
         JOIN notes n ON n.id = l.src_id
         WHERE l.target_path = ?
-        GROUP BY n.path, n.title
         ORDER BY n.path
     `, path)
 	if err != nil {
@@ -31,17 +32,20 @@ func (i *Index) Backlinks(path string) ([]Backlink, error) {
 	defer rows.Close()
 	var out []Backlink
 	for rows.Next() {
-		var b Backlink
-		var fields string
-		if err := rows.Scan(&b.Path, &b.Title, &fields); err != nil {
+		var p, title, field string
+		if err := rows.Scan(&p, &title, &field); err != nil {
 			return nil, err
 		}
-		if fields != "" {
-			// A field name has no comma (fieldKeyRe), GROUP_CONCAT's separator.
-			b.Fields = strings.Split(fields, ",")
-			sort.Strings(b.Fields)
+		if len(out) == 0 || out[len(out)-1].Path != p {
+			out = append(out, Backlink{Path: p, Title: title})
 		}
-		out = append(out, b)
+		if field != "" {
+			b := &out[len(out)-1]
+			b.Fields = append(b.Fields, field)
+		}
+	}
+	for k := range out {
+		sort.Strings(out[k].Fields)
 	}
 	return out, rows.Err()
 }
@@ -64,7 +68,7 @@ func IsPlaceholder(s string) bool {
 	return open >= 0 && strings.Contains(s[open:], "}}")
 }
 
-// Outlinks returns resolved outgoing link targets from a note path.
+// Outlink is a resolved outgoing link of a note.
 type Outlink struct {
 	Target     string
 	TargetPath string // empty if unresolved
@@ -72,8 +76,8 @@ type Outlink struct {
 	Field      string // the frontmatter key of the link, "" in the body
 }
 
-// Outlinks returns the note's links in the order written: the frontmatter's
-// first, then the body's.
+// Outlinks returns the note's links, resolved where they resolve, in the
+// order written: the frontmatter's first, then the body's.
 func (i *Index) Outlinks(path string) ([]Outlink, error) {
 	rows, err := i.db.Query(`
         SELECT l.target, COALESCE(l.target_path, ''), COALESCE(l.alias, ''), COALESCE(l.field, '')
@@ -97,14 +101,7 @@ func (i *Index) Outlinks(path string) ([]Outlink, error) {
 	return out, rows.Err()
 }
 
-// GraphData returns notes and resolved links for the graph view.
-//
-// If project is non-empty, only notes whose top-level folder matches project
-// are returned, and edges whose endpoints both fall inside that project.
-//
-// Edges are deduplicated as undirected: a wikilink A→B and a reverse B→A
-// collapse to a single edge with Count = sum. Self-loops are dropped.
-// Node.Degree is the number of unique undirected edges the node takes part in.
+// GraphNode is a note of the graph view (GraphData).
 type GraphNode struct {
 	Path    string
 	Title   string
@@ -114,6 +111,8 @@ type GraphNode struct {
 	// cross-project foreign endpoints (unknown without a second query).
 	Mtime int64
 }
+
+// GraphEdge is a link of the graph view, both directions in one.
 type GraphEdge struct {
 	From         string
 	To           string
@@ -135,6 +134,10 @@ func topLevel(path string) string {
 //   - includeCross=true → edges with exactly one endpoint under the project
 //     are also returned, and the "foreign" endpoint is synthesized as a node
 //     so the UI can draw it. Such edges carry CrossProject=true.
+//
+// Edges are deduplicated as undirected: a wikilink A→B and a reverse B→A
+// collapse to a single edge with Count = sum. Self-loops are dropped.
+// Node.Degree is the number of unique undirected edges the node takes part in.
 func (i *Index) GraphData(project string, includeCross bool) ([]GraphNode, []GraphEdge, error) {
 	var (
 		nodeRows interface {

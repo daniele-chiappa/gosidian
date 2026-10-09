@@ -78,12 +78,19 @@ func (s *Server) writeLimitViolation(ctx context.Context, tok *auth.Token, conte
 		metrics.MCPRateLimitHits.Inc()
 		return fmt.Sprintf("note size %d exceeds limit of %d bytes. A body this large usually belongs elsewhere: long tabular data → a table note, an image → a media note, a big generated file already on disk → memory_ingest (bridge_filename/source_path, or transfer:\"http\" for a single-use upload URL)", contentSize, s.maxNoteBytes), 0
 	}
+	charge := writeChargeOf(ctx)
+	if charge != nil && charge.taken.Load() {
+		return "", 0
+	}
 	id := ""
 	if tok != nil {
 		id = tok.ID
 	}
 	ok, wait, tokenLevel := s.limiter.Allow(id, sessionFromContext(ctx))
 	if ok {
+		if charge != nil {
+			charge.taken.Store(true)
+		}
 		return "", 0
 	}
 	metrics.MCPRateLimitHits.Inc()
@@ -984,17 +991,6 @@ func withMinimalFrontmatter(rel, text string) string {
 	return b.String()
 }
 
-// toolErrorText flattens a tool error result to its message.
-func toolErrorText(r *mcp.CallToolResult) string {
-	var sb strings.Builder
-	for _, c := range r.Content {
-		if tc, ok := c.(mcp.TextContent); ok {
-			sb.WriteString(tc.Text)
-		}
-	}
-	return sb.String()
-}
-
 func (s *Server) handleEdit(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	path, err := req.RequireString("path")
 	if err != nil {
@@ -1174,9 +1170,11 @@ func (s *Server) handleRenameNote(ctx context.Context, req mcp.CallToolRequest) 
 	// being moved. The target-exists probe inside RenameNote keeps its own
 	// (benign) race window; locking both endpoints would need deadlock-safe
 	// ordering for little gain.
-	unlock := s.vault.LockPath(fromRel)
-	rewritten, err := s.vault.RenameNote(s.index, fromRel, toRel)
-	unlock()
+	var rewritten []string
+	err = s.underLock(fromRel, func() (err error) {
+		rewritten, err = s.vault.RenameNote(s.index, fromRel, toRel)
+		return err
+	})
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("rename failed", err), nil
 	}
@@ -1222,9 +1220,11 @@ func (s *Server) handleMoveNote(ctx context.Context, req mcp.CallToolRequest) (*
 	if errRes := s.checkWriteLimits(ctx, tok, 0); errRes != nil {
 		return errRes, nil
 	}
-	unlock := s.vault.LockPath(fromRel)
-	rewritten, err := s.vault.MoveNote(s.index, fromRel, project)
-	unlock()
+	var rewritten []string
+	err = s.underLock(fromRel, func() (err error) {
+		rewritten, err = s.vault.MoveNote(s.index, fromRel, project)
+		return err
+	})
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("move failed", err), nil
 	}
@@ -1260,6 +1260,11 @@ func (s *Server) handleRenameProject(ctx context.Context, req mcp.CallToolReques
 	if from == to {
 		return mcp.NewToolResultError("from and to name the same project"), nil
 	}
+	// A project hidden from MCP is out of an agent's reach, to change as to
+	// read (IMP-161): it is renamed and deleted from the web UI.
+	if errRes := s.rejectIfHidden(from); errRes != nil {
+		return errRes, nil
+	}
 	if errRes := s.checkWriteLimits(ctx, tok, 0); errRes != nil {
 		return errRes, nil
 	}
@@ -1293,6 +1298,9 @@ func (s *Server) handleDeleteProject(ctx context.Context, req mcp.CallToolReques
 	name, err := req.RequireString("name")
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
+	}
+	if errRes := s.rejectIfHidden(strings.TrimSpace(name)); errRes != nil {
+		return errRes, nil
 	}
 	if errRes := s.checkWriteLimits(ctx, tok, 0); errRes != nil {
 		return errRes, nil
@@ -1331,7 +1339,7 @@ func (s *Server) handleBacklinks(ctx context.Context, req mcp.CallToolRequest) (
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	path = s.notePathArg(path)
+	path = s.notePathArg(tok, path)
 	if !tok.AllowsPath(path) {
 		return mcp.NewToolResultErrorf("path %q is outside the token's scope", path), nil
 	}
@@ -1349,14 +1357,28 @@ func (s *Server) handleBacklinks(ctx context.Context, req mcp.CallToolRequest) (
 	return mcp.NewToolResultJSON(map[string]any{"backlinks": out})
 }
 
+// underLock runs fn holding rel's path lock, released by a deferred call:
+// when fn panics, recoverMiddleware turns the panic into the call's error,
+// and a lock released by hand after fn stayed taken for good (IMP-161,
+// S3-13).
+func (s *Server) underLock(rel string, fn func() error) error {
+	defer s.vault.LockPath(rel)()
+	return fn()
+}
+
 // notePathArg resolves the path argument of a link tool: a note path, or
 // the same path without its extension, as a wikilink writes it
 // (gosidian/docs/bugs/BUG-091 for …/BUG-091.md). Before, such a path gave
-// an empty list, with nothing to say why (BUG-092).
-func (s *Server) notePathArg(p string) string {
+// an empty list, with nothing to say why (BUG-092). It looks only inside
+// what tok reads: the extension it found outside, in the refusal that
+// followed, said which note existed there (IMP-161, S3-12).
+func (s *Server) notePathArg(tok *auth.Token, p string) string {
 	p = strings.TrimSpace(p)
 	low := strings.ToLower(p)
 	if strings.HasSuffix(low, ".md") || strings.HasSuffix(low, ".html") {
+		return p
+	}
+	if tok == nil || !tok.AllowsPath(p) || s.pathInHiddenProject(p) {
 		return p
 	}
 	for _, ext := range []string{".md", ".html"} {
@@ -1393,7 +1415,7 @@ func (s *Server) handleOutlinks(ctx context.Context, req mcp.CallToolRequest) (*
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	path = s.notePathArg(path)
+	path = s.notePathArg(tok, path)
 	if !tok.AllowsPath(path) {
 		return mcp.NewToolResultErrorf("path %q is outside the token's scope", path), nil
 	}

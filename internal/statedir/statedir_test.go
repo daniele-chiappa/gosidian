@@ -163,3 +163,24 @@ func TestMoveFile_CrossDeviceFallsBackToCopy(t *testing.T) {
 		t.Errorf("source not removed after copy")
 	}
 }
+
+// What the automations already did moves with the rest of the state: left
+// in the vault, the moved server ran every rule's past slots again
+// (IMP-159).
+func TestMigrate_MovesTheAutomationsState(t *testing.T) {
+	vault := t.TempDir()
+	legacy := filepath.Join(vault, DefaultSubdir)
+	target := filepath.Join(t.TempDir(), "state")
+	if err := os.MkdirAll(legacy, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacy, "automations.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Migrate(legacy, target, func(string, ...any) {}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(target, "automations.json")); err != nil {
+		t.Errorf("automations.json stayed behind: %v", err)
+	}
+}

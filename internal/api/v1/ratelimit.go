@@ -2,6 +2,7 @@ package v1
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"strings"
@@ -176,6 +177,25 @@ func SetTrustedProxies(cidrs []string) error {
 	return nil
 }
 
+// untrustedProxyWarn logs once that requests come through a proxy gosidian
+// was not told to trust (IMP-159, S1-14): every client then shares the
+// proxy's address, so five wrong logins lock everyone out and all OAuth
+// /token calls share one budget. Trusting no proxy by default is meant
+// (BUG-047); the log says how to set it.
+var (
+	untrustedProxyWarn sync.Once
+	proxyWarnf         = log.Printf
+)
+
+func warnUntrustedProxy(peer string) {
+	if nets := trustedProxies.Load(); nets != nil && len(*nets) > 0 {
+		return // configured: a client reaching the server directly with the header is not this
+	}
+	untrustedProxyWarn.Do(func() {
+		proxyWarnf("ratelimit: a request from %s carries X-Forwarded-For, but no trusted proxy is set: every client behind the proxy shares one rate-limit bucket. Set [webauth] trusted_proxies (GOSIDIAN_TRUSTED_PROXIES) to the proxy's address; see docs/configuration.md", peer)
+	})
+}
+
 func isTrustedProxy(host string) bool {
 	nets := trustedProxies.Load()
 	if nets == nil {
@@ -205,6 +225,9 @@ func clientIP(r *http.Request) string {
 		remote = host
 	}
 	if !isTrustedProxy(remote) {
+		if r.Header.Get("X-Forwarded-For") != "" {
+			warnUntrustedProxy(remote)
+		}
 		return remote
 	}
 	xff := r.Header.Get("X-Forwarded-For")

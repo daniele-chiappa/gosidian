@@ -65,7 +65,7 @@ working directory.
 
 - `mirror` — file tools only, every project of `-mirror-projects` synced
   into `.gosidian/mirror/`, orientation from the hook's mirror section:
-  the counterpart of `fs-oriented` with `_index.md` and `MIRROR.md`.
+  the counterpart of `fs-oriented` with `.gosidian-index.md` and `MIRROR.md`.
 - `mirror-mcp` — the deployed setup: only `-project` mirrored, the MCP
   server as well (schemas on demand through ToolSearch), the stub's
   "memory_bootstrap first" and the hook's whole context.

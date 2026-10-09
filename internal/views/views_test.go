@@ -451,3 +451,15 @@ func TestRenderNoteWithin(t *testing.T) {
 		t.Errorf("budget 250: cut=%v\n%s", cut, out)
 	}
 }
+
+// A .html row links to itself, not to a .md namesake (IMP-162, S4-11).
+func TestLink_KeepsTheHTMLExtension(t *testing.T) {
+	for p, want := range map[string]string{
+		"p/page.html": `[[p/page.html\|page]]`,
+		"p/note.md":   `[[p/note\|note]]`,
+	} {
+		if got := link(index.QueryHit{Path: p}); got != want {
+			t.Errorf("link(%s) = %s, want %s", p, got, want)
+		}
+	}
+}

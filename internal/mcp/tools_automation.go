@@ -67,7 +67,9 @@ func (s *Server) handleAutomations(ctx context.Context, req mcp.CallToolRequest)
 }
 
 // parseAsOf reads the moment of a dry run; a date alone is its last
-// minute, so the plan covers the whole day.
+// minute, so the plan covers the whole day: 23:59 on the clock, not 24
+// hours after midnight less one minute, which on the days the clocks
+// change was an hour off (IMP-161, S3-15).
 func parseAsOf(v string, loc *time.Location) (time.Time, error) {
 	if t, err := time.Parse(time.RFC3339, v); err == nil {
 		return t, nil
@@ -76,7 +78,7 @@ func parseAsOf(v string, loc *time.Location) (time.Time, error) {
 		return t, nil
 	}
 	if t, err := time.ParseInLocation("2006-01-02", v, loc); err == nil {
-		return t.Add(24*time.Hour - time.Minute), nil
+		return time.Date(t.Year(), t.Month(), t.Day(), 23, 59, 0, 0, loc), nil
 	}
 	return time.Time{}, errAsOf(v)
 }

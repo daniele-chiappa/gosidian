@@ -108,3 +108,57 @@ func TestCanvas_REST(t *testing.T) {
 		t.Errorf("tree = %s", tree.body)
 	}
 }
+
+// The ETag of a canvas is its response's: the cards carry other notes'
+// titles and excerpts, and with the file's own ETag a 304 kept stale ones
+// (IMP-160, S2-8).
+func TestCanvas_ETagFollowsTheCards(t *testing.T) {
+	f := newNotesFixture(t)
+	f.seedNote(t, "p/a.md", "# A\n\nFirst text.\n")
+	c := `{"nodes":[{"id":"f","type":"file","file":"p/a.md","x":0,"y":0,"width":100,"height":100}],"edges":[]}`
+	if err := os.WriteFile(filepath.Join(f.vaultRoot, "p/board.canvas"), []byte(c), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	first := f.doAuthRecorder(http.MethodGet, "/api/v1/notes/p/board.canvas", "", nil)
+	etag := first.headers.Get("ETag")
+	if first.code != http.StatusOK || etag == "" {
+		t.Fatalf("GET = %d etag %q", first.code, etag)
+	}
+	if again := f.doAuthRecorder(http.MethodGet, "/api/v1/notes/p/board.canvas", "", map[string]string{"If-None-Match": etag}); again.code != http.StatusNotModified {
+		t.Errorf("unchanged canvas = %d, want 304", again.code)
+	}
+	f.seedNote(t, "p/a.md", "# A\n\nSecond text.\n")
+	changed := f.doAuthRecorder(http.MethodGet, "/api/v1/notes/p/board.canvas", "", map[string]string{"If-None-Match": etag})
+	if changed.code != http.StatusOK || !strings.Contains(changed.body, "Second text.") {
+		t.Errorf("a card's note changed: %d %s", changed.code, changed.body)
+	}
+}
+
+// A card links only what the web UI can open: an image outside an
+// attachments folder was a 404 on /vault-files/, any other file a 400 on
+// /notes/ (IMP-160, S2-12).
+func TestCanvas_CardsLinkWhatOpens(t *testing.T) {
+	f := newNotesFixture(t)
+	for rel, data := range map[string]string{"p/pics/photo.png": "\x89PNG\r\n", "p/attachments/doc.pdf": "%PDF-1.4\n"} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(f.vaultRoot, rel)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(f.vaultRoot, rel), []byte(data), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c := `{"nodes":[{"id":"i","type":"file","file":"p/pics/photo.png","x":0,"y":0,"width":9,"height":9},{"id":"d","type":"file","file":"p/attachments/doc.pdf","x":0,"y":0,"width":9,"height":9}],"edges":[]}`
+	if err := os.WriteFile(filepath.Join(f.vaultRoot, "p/files.canvas"), []byte(c), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := f.doAuthRecorder(http.MethodGet, "/api/v1/notes/p/files.canvas", "", nil)
+	var note noteResponse
+	if err := json.Unmarshal([]byte(r.body), &note); err != nil || note.Canvas == nil {
+		t.Fatalf("GET = %d %s", r.code, r.body)
+	}
+	for _, card := range note.Canvas.Nodes {
+		if card.Image != "" || card.Path != "" {
+			t.Errorf("card %s links what does not open: %+v", card.ID, card)
+		}
+	}
+}

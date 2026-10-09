@@ -220,14 +220,14 @@ type Result struct {
 	Markdown string // ready-to-insert markdown
 }
 
-// remoteSetupHint is appended to source_path errors to guide users running
+// RemoteSetupHint is appended to source_path errors to guide users running
 // gosidian on a remote server (SSH tunnel, separate host) toward the right
 // pattern: source_path is resolved server-side, so a client-side path will
 // never match the allow-list. A rejection here does NOT mean the filesystem
 // is not shared — the path may simply be outside the allowed roots — so the
 // hint teaches the whole channel hierarchy instead of one fallback. Kept as a
 // const so tests can pin it.
-const remoteSetupHint = "Hint: source_path is resolved on the SERVER filesystem and must sit inside the vault, " +
+const RemoteSetupHint = "Hint: source_path is resolved on the SERVER filesystem and must sit inside the vault, " +
 	"the bridge dir (GOSIDIAN_MCP_BRIDGE_DIR), or an allowed upload root (GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS) — " +
 	"a rejection means the path is outside those roots or not mounted in the container, not necessarily that the filesystem is unshared. " +
 	"Cheapest alternatives in order: stage the file in the bridge dir and pass bridge_filename; " +
@@ -240,7 +240,7 @@ const remoteSetupHint = "Hint: source_path is resolved on the SERVER filesystem 
 //
 // Errors that suggest a likely remote-deployment misuse (path not inside any
 // allowed root, or path simply does not exist on the server) are augmented
-// with remoteSetupHint to guide the caller toward the `data` parameter
+// with RemoteSetupHint to guide the caller toward the `data` parameter
 // instead of guessing at GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS configuration.
 func ValidateSourcePath(sourcePath string, allowedRoots []string) error {
 	clean := filepath.Clean(sourcePath)
@@ -258,7 +258,7 @@ func ValidateSourcePath(sourcePath string, allowedRoots []string) error {
 		}
 	}
 	if !allowed {
-		return fmt.Errorf("source_path %q is not inside any allowed upload root. %s", sourcePath, remoteSetupHint)
+		return fmt.Errorf("source_path %q is not inside any allowed upload root. %s", sourcePath, RemoteSetupHint)
 	}
 	fi, err := os.Stat(clean)
 	if err != nil {
@@ -266,7 +266,7 @@ func ValidateSourcePath(sourcePath string, allowedRoots []string) error {
 		// the caller is on a different host than the server (the path exists
 		// client-side but not server-side). Surface the same hint.
 		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("source_path %q does not exist on the server. %s", sourcePath, remoteSetupHint)
+			return fmt.Errorf("source_path %q does not exist on the server. %s", sourcePath, RemoteSetupHint)
 		}
 		return fmt.Errorf("source_path: %w", err)
 	}

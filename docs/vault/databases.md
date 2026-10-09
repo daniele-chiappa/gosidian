@@ -230,7 +230,9 @@ automations:
   acts again for that row only if the date changes. An `every` rule acts
   once per slot, from the first slot after the server first saw it; a
   slot missed while the server was down acts once, at the next run.
-  Italian day names work too (`lunedì 09:00`).
+  Italian day names work too (`lunedì 09:00`). A rule reads up to
+  10,000 rows, in path order: past that, its runs and its dry run carry a
+  `warning` and the server log says so once; narrow its `where`.
 - **What**: `handoff` writes a handoff note to that agent in the
   project's `handoffs/` folder, from `automation`: for a `due` rule it
   lists the rows that came in, each with its date and how far it is

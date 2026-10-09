@@ -8,6 +8,148 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.72.1] — 2026-10-09 — "server fixes"
+
+The low findings of the same code review on the server side: accounts
+and OAuth, the API, the MCP tools, databases and the index, the vault and
+the example deployments. Pull the image and restart, nothing to migrate.
+A few behaviours change, each described below: `/healthz` without
+credentials no longer shows the vault path, the note count or git sync's
+last error; `gosidian mirror sync` writes its index to
+`<project>/.gosidian-index.md`; an OAuth issuer with a path stops the
+server at start; `cache_size = 0` turns the vault cache off; and the
+example compose files run the container read-only, with no capability.
+
+### Security
+- **`/healthz` keeps its details for the owner** — without credentials
+  the probe says only the status, the version, the MCP tool count and
+  whether git sync is enabled and healthy. The vault path, the note count
+  and git sync's last error (git's stderr may carry the remote's URL)
+  need an owner's web session, or an MCP token of the owner or of no
+  account that no project list limits. The probe counts the notes
+  instead of loading them all.
+- **A git remote's credentials stay hidden in Settings** — a remote that
+  Go does not read as a URL with credentials (a bad escape, a space, a
+  `/`, `?` or `#` in the password) showed them to members.
+- **A note outside a token's reach answers the same whether it exists or
+  not** — `memory_backlinks`, `memory_outlinks` and `memory_snapshot`,
+  given a path without its extension, found the `.html` note there and
+  named it.
+- **A base or a canvas that is a symbolic link is not read**, nor one in
+  a linked folder: it reached files outside the vault, or another
+  project's under this one's name, though the file tree never listed it.
+- **`memory_delete_project` and `memory_rename_project` refuse a project
+  hidden from MCP**, as every other tool does.
+- **The test LDAP directories listen on the loopback only** — the compose
+  files under `deploy/ldap-test` published their ports on every
+  interface, with the admin password written in the file.
+
+### Changed
+- **`gosidian mirror sync` writes its index to
+  `<project>/.gosidian-index.md`** — at `<project>/_index.md` it took the
+  place of a real note with that name, which no sync fetched again. The
+  next sync removes an old generated index, or downloads the note it
+  covered.
+- **An OAuth issuer with a path (`https://host/gosidian`) is refused at
+  start**, with a message that says why: gosidian is served at the root
+  of its host, and the flow broke halfway.
+- **The example compose files harden the container** —
+  `docs/examples/docker-compose.image.yml` and `deploy/docker-compose.yml`
+  run it with a read-only filesystem, a tmpfs on `/tmp`, no capability
+  and no new privileges, and the one in `deploy/` binds the loopback, as
+  its comment says. `docs/deployment.md` explains both.
+
+### Fixed
+- **Accounts and OAuth**:
+  - a client metadata document fetch cut short by the request itself is
+    no longer remembered as a failure for a minute (a timeout still is),
+    and at the cap of 500 cached documents the one closest to expiry
+    makes room, where the whole cache was dropped;
+  - a request that carries `X-Forwarded-For` while no trusted proxy is
+    set logs it once: behind such a proxy every client shares one
+    rate-limit bucket (`[webauth] trusted_proxies`);
+  - upgrading from a version before 2.30 with `member_scope` unset no
+    longer takes write away from a member that had a read membership on a
+    project: that row did nothing then, the member wrote anyway, and it
+    now becomes a write grant;
+  - the access lookups check `projects.json` at most once a second (every
+    write still checks first), an OAuth request no longer takes the token
+    store's write lock to stamp its use, and an OAuth grant is saved once;
+  - `automations.json` moves with the rest of the state when a state
+    directory is set;
+  - a change to an account in Admin → Users is checked whole before any
+    of it is applied: a wrong role answered 400 after the flags sent with
+    it were saved.
+- **API and web server**:
+  - a canvas answers with an ETag of what it shows, the titles and
+    excerpts of its cards included, and a 304 when nothing changed; a
+    card links only what opens in the web UI (a note, an HTML note, a
+    base, a canvas), and an image card only an image under
+    `attachments/`;
+  - a file changed on disk outside gosidian refreshes the tree of every
+    account that sees its project, where only the owner's reloaded;
+  - the `[[` autocompletion with nothing typed yet lists the latest notes
+    of the projects the account sees: it came back empty for an account
+    whose projects were not among the vault's latest edits. As in the
+    search, notes at the root of the vault are not among them for a
+    member;
+  - the hover excerpt of a wikilink reads the frontmatter as the index
+    does: a `----` or `--- text` line no longer cuts the excerpt;
+  - the file tree walks the disk once for bases and canvases, where it
+    walked it twice at every request.
+- **MCP tools**:
+  - an ingestion takes one place in the write rate limit: an upload by
+    ticket counted at the mint, at the upload and at the write, and a
+    refusal at the third lost the bytes with the ticket spent; a CSV or
+    an image that becomes an attachment and its note counted twice, and a
+    refusal at the second left the attachment behind;
+  - `memory_audit_tail` accepts the `ingest_package` action it lists, and
+    the `automation` source;
+  - the access check of a member's MCP token reads the vault's project
+    names instead of counting every project's notes, twice a request;
+  - `memory_bootstrap` and `memory_pending_handoffs` read off the disk
+    only the handoffs of the status asked, picked by the index, where
+    they read every handoff of the vault;
+  - a panic during a rename, a move or a package import no longer leaves
+    the note's lock taken for good.
+- **Automations, databases and views**:
+  - the automations read every row of a database, a page at a time, up
+    to 10,000 per rule: the 501st row never got a handoff, and nothing
+    said so. Past 10,000 the run and the dry run of `memory_automations`
+    carry a `warning`, and the server log says it once;
+  - an automation no longer hands off again, 400 days later, a row still
+    past its date: its state forgot the firing by its age. A row's firing
+    now stays while the row does;
+  - a `memory_automations` dry run at a date (`as_of: 2026-10-25`) covers
+    the day to 23:59 on the days the clocks change too, where it was an
+    hour off;
+  - a view's row link to an HTML note keeps the `.html`: it led to a
+    `.md` note of the same name;
+  - a view sorted by a rollup orders the rows as a query does: `NaN`,
+    `Inf` and hexadecimal values counted as numbers, a date written with
+    a space and one with a `T` sorted apart, a list that mixed dates and
+    text was read by one of its values, and letters outside ASCII were
+    folded where the index keeps them;
+  - a note whose name is empty without its extension (`p/.md`) is
+    indexed: the index refused it with an SQL error;
+  - a frontmatter key with a comma in it is one field of a backlink, not
+    two that do not exist.
+- **Vault, git sync and the container**:
+  - a scan of the vault (the notes, the bases and canvases, the
+    attachments, an export) skips a folder or a file removed while it
+    runs, where it stopped with an error;
+  - the attachment cleanup counts a file as linked however the link
+    writes its name: in another case, URL-escaped with either hex case or
+    `+` for a space, in either Unicode form (an `é` typed on a Mac). It
+    removed a file a note still showed;
+  - `gosidian healthcheck` asks the port of `GOSIDIAN_ADDR`: a server
+    moved off `:8080` failed the container's healthcheck;
+  - `cache_size = 0` (or `GOSIDIAN_VAULT_CACHE_SIZE=0`) turns the vault's
+    load cache off, as documented: it was set back to 128;
+  - git sync takes a vault whose `.git` is a file (a worktree, a
+    submodule) for the repository it is, where it ran `git init` over it
+    and added an init commit to its branch.
+
 ## [2.72.0] — 2026-10-09 — "web UI in Italian"
 
 The first part of a graphic review of the web UI: the editor follows the
