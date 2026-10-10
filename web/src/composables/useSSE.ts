@@ -19,13 +19,13 @@
 import { effectScope, ref, onScopeDispose, watch, type EffectScope } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 
-export type SSETopic = 'tree' | 'note' | 'sidebar' | 'audit' | 'insight'
+export type SSETopic = 'tree' | 'note' | 'sidebar' | 'audit' | 'insight' | 'job'
 
 // ALL_TOPICS is the full known topic set. The singleton subscribes to all of
 // them so any consumer's .on() works regardless of which component opened the
 // connection first (the Sidebar opens it for 'tree', but the owner insights
 // badge still needs 'insight').
-const ALL_TOPICS: SSETopic[] = ['tree', 'note', 'sidebar', 'audit', 'insight']
+const ALL_TOPICS: SSETopic[] = ['tree', 'note', 'sidebar', 'audit', 'insight', 'job']
 
 export interface SSEPayload {
   action?: string

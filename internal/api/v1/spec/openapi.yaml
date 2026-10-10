@@ -45,6 +45,10 @@ tags:
   - name: trash
   - name: history
   - name: events
+  - name: pipelines
+    description: |
+      Pipelines and their runs (IMP-166, docs/pipelines.md). 404 while the
+      server runs no pipelines ([pipelines] enabled off).
 
 # ---------------------------------------------------------------------------
 # Reusable schemas
@@ -970,3 +974,123 @@ paths:
       responses:
         "501":
           $ref: "#/components/responses/NotImplemented"
+
+  /api/v1/pipelines:
+    get:
+      tags: [pipelines]
+      summary: The pipelines of the projects the caller reads.
+      parameters:
+        - {name: project, in: query, schema: {type: string}}
+      responses:
+        "200":
+          description: "`{pipelines: [{path, title, project, trigger, nodes, problem, last_run}]}`"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/pipelines/{path}/runs:
+    get:
+      tags: [pipelines]
+      summary: The runs of one pipeline, newest first.
+      parameters:
+        - {name: path, in: path, required: true, schema: {type: string}, description: "The pipeline note, vault-relative, slashes kept (team/pipelines/arrivals.md)."}
+        - {name: limit, in: query, schema: {type: integer, maximum: 500}}
+      responses:
+        "200":
+          description: "`{pipeline, runs: [...]}`"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [pipelines]
+      summary: Start the pipeline.
+      description: |
+        With a session with write access on the project (trigger manual), or
+        with a run token (`Authorization: Bearer gosidian_run_…`, from
+        `gosidian pipeline token create`), which starts this pipeline only,
+        when it starts on external or manual (trigger external), at most 60
+        times a minute. The same idempotency key (in the body or the
+        `Idempotency-Key` header) gives back the run it started, with 200.
+      parameters:
+        - {name: path, in: path, required: true, schema: {type: string}}
+        - {name: Idempotency-Key, in: header, schema: {type: string}}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                input: {type: object, description: "What the nodes read as trigger. Files by their vault path."}
+                idempotency_key: {type: string}
+                callback_url: {type: string, description: "POSTed the run's summary when it ends; only [pipelines] http_allowlist."}
+      responses:
+        "202":
+          description: "Queued: `{run, existing: false}`"
+        "200":
+          description: "The run of this idempotency key: `{run, existing: true}`"
+        "400":
+          description: The input or the pipeline is wrong, or it does not start from outside.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The project does not run pipelines (use_pipelines off).
+        "429":
+          description: Too many starts with this run token.
+
+  /api/v1/runs:
+    get:
+      tags: [pipelines]
+      summary: The runs of the projects the caller reads.
+      parameters:
+        - {name: project, in: query, schema: {type: string}}
+        - {name: pipeline, in: query, schema: {type: string}}
+        - {name: status, in: query, schema: {type: string, enum: [queued, running, waiting, done, failed, canceled]}}
+        - {name: limit, in: query, schema: {type: integer, maximum: 500}}
+      responses:
+        "200":
+          description: "`{runs: [...]}`"
+
+  /api/v1/runs/{id}:
+    get:
+      tags: [pipelines]
+      summary: A run with its steps (outputs over 64 KiB cut).
+      responses:
+        "200":
+          description: "`{run, steps: [{name, use, status, attempt, error, output, output_truncated, started, finished, wait_until}]}`"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/runs/{id}/resume:
+    post:
+      tags: [pipelines]
+      summary: Hand data to the run's waiting step (wait.call).
+      description: |
+        With the run's key (`?key=`, the `{{ run.resume_url }}` a pipeline
+        hands to a service) and no account, or with a session with write
+        access. The body, any JSON value (empty: `{}`), becomes the step's
+        output. The key works while the run waits, and for this run only.
+      security: []
+      parameters:
+        - {name: key, in: query, schema: {type: string}}
+        - {name: step, in: query, schema: {type: string}, description: "The waiting step, when more than one waits."}
+      responses:
+        "200":
+          description: "`{run}`"
+        "400":
+          description: The body is not JSON, or more than one step waits.
+        "404":
+          description: No such run, or not its key.
+        "409":
+          description: The run is not waiting.
+
+  /api/v1/runs/{id}/cancel:
+    post:
+      tags: [pipelines]
+      summary: Stop the run (write access on the project).
+      responses:
+        "200":
+          description: "`{run}`"
+        "404":
+          $ref: "#/components/responses/NotFound"

@@ -98,7 +98,9 @@ func (s *Server) handleHTTPUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Audit under the authenticated token (reuse the tool audit path).
-	s.auditWrite(context.WithValue(r.Context(), tokenCtxKey, tok), audit.ActionUploadAttachment, res.Path, "", int64(len(data)))
+	tctx := context.WithValue(r.Context(), tokenCtxKey, tok)
+	s.auditWrite(tctx, audit.ActionUploadAttachment, res.Path, "", int64(len(data)))
+	s.arrived(tctx, res.Path, hdr.Filename, "")
 
 	ext := strings.ToLower(filepath.Ext(res.Filename))
 	mime := "application/octet-stream"

@@ -47,6 +47,17 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_AUTOMATIONS_ENABLED` | `automations.enabled` | `true` (the rules of database notes, [automations](vault/databases.md#automations); a rule acts only where a database note declares it) |
 | `GOSIDIAN_AUTOMATIONS_INTERVAL` | `automations.interval` | `5m` (how often the rules run) |
 | `GOSIDIAN_AUTOMATIONS_TIMEZONE` | `automations.timezone` | empty (the server's local zone; an IANA zone such as `Europe/Rome` for the days and times of the rules) |
+| `GOSIDIAN_PIPELINES_ENABLED` | `pipelines.enabled` | `false` (the server runs no [pipelines](pipelines.md); when on, only the projects with `use_pipelines` run theirs) |
+| `GOSIDIAN_PIPELINES_WORKERS` | `pipelines.workers` | `2` (steps run at once) |
+| `GOSIDIAN_PIPELINES_STEP_TIMEOUT` | `pipelines.step_timeout` | `15m` (the longest a step may run) |
+| `GOSIDIAN_PIPELINES_RETENTION` | `pipelines.retention` | `720h` (runs kept in `<state-dir>/jobs.db` after they end; `0` keeps them) |
+| `GOSIDIAN_PIPELINES_MAX_WAIT` | `pipelines.max_wait` | `168h` (the longest a `wait.call` may wait) |
+| `GOSIDIAN_PIPELINES_MAX_LLM_TOKENS` | `pipelines.max_llm_tokens` | `0` (no cap on the LLM tokens of one run) |
+| `GOSIDIAN_PIPELINES_HTTP_ALLOWLIST` | `pipelines.http_allowlist` | empty (comma-separated URL prefixes `http.request` and the callbacks may call; empty: none) |
+| `GOSIDIAN_PIPELINES_PUBLIC_URL` | `pipelines.public_url` | the `[oauth]` issuer (the server's address in `{{ run.resume_url }}`; empty: a path) |
+| `GOSIDIAN_PIPELINES_TIMEZONE` | `pipelines.timezone` | the automations' zone (the days and times of the `schedule` triggers) |
+| `GOSIDIAN_PIPELINES_LLM_URL`, `_LLM_MODEL`, `_LLM_KEY_SECRET` | `[[pipelines.llm]]` | none (one OpenAI-compatible provider named `default`: its URL up to `/v1`, its model, the name of the secret with its key; more providers in the file) |
+| `GOSIDIAN_SECRETS_KEY` | — | empty (32 bytes in base64, `openssl rand -base64 32`: the key of `<state-dir>/secrets.json`, the secrets the pipelines use; without it `gosidian secret` refuses and the nodes that need a secret fail) |
 | `GOSIDIAN_TRASH_ENABLED` | `trash.enabled` | `false` |
 | `GOSIDIAN_TRASH_RETENTION` | `trash.retention` | `720h`; `0` keeps entries until purged |
 | `GOSIDIAN_LOGIN_SESSION_TTL` | `webauth.session_ttl` | `24h` |
@@ -202,6 +213,10 @@ gosidian user disable --vault <path> (--username <s> | --all)
 gosidian user list    --vault <path>
 gosidian healthcheck  [--addr <host:port>]
 gosidian import-vault --vault <path> [flags]
+gosidian secret set <name>               # the value on standard input
+gosidian secret list | delete <name>
+gosidian pipeline token create --pipeline <path.md> --name <service>
+gosidian pipeline token list [--pipeline <path.md>] | revoke <id>
 gosidian version                         # print the build version (also --version)
 ```
 
@@ -212,7 +227,8 @@ Run `gosidian token -h` etc. for per-subcommand options.
 `<state-dir>` is where gosidian keeps its machine-owned files: `auth.json`
 (web accounts), `tokens.json` and `spa_tokens.json` (hashed tokens),
 `gitsync.json`, `config.toml`, `projects.json`, `audit.jsonl` and the
-SQLite index, and, until the owner of the first start has chosen its own
+SQLite index, with [pipelines](pipelines.md) on `jobs.db` (the runs) and
+`secrets.json` (sealed under `GOSIDIAN_SECRETS_KEY`), and, until the owner of the first start has chosen its own
 password, `initial-admin-password`. By default it is `<vault>/.gosidian/`, unchanged from earlier
 releases. Set `--state-dir` (or `GOSIDIAN_STATE_DIR`) to move it **out of
 the vault root** — the recommended layout: nothing that resolves inside the

@@ -231,6 +231,7 @@ func (s *Server) handleUploadAttachment(ctx context.Context, req mcp.CallToolReq
 		return errRes, nil
 	}
 	s.auditWrite(ctx, audit.ActionUploadAttachment, res.Path, "", dataSize)
+	s.arrived(ctx, res.Path, uploadName(req.GetString("filename", ""), req.GetString("source_path", ""), req.GetString("bridge_filename", "")), "")
 	out := map[string]any{
 		"path":     res.Path,
 		"markdown": res.Markdown,
@@ -283,6 +284,7 @@ func (s *Server) handleUploadResource(ctx context.Context, req mcp.CallToolReque
 	}
 
 	s.auditWrite(ctx, audit.ActionUploadAttachment, res.Path, "", dataSize)
+	s.arrived(ctx, res.Path, filename, "")
 
 	// Resolve kind and MIME from the validated extension (always reliable
 	// since attach.Store rejects unknown extensions before reaching here).

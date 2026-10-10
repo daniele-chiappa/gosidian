@@ -32,6 +32,7 @@ var allRules = []ruleSpec{
 	{name: "hot-oversize", defaultSeverity: SeverityWarning, fn: checkHotOversize},
 	{name: "skill-oversize", defaultSeverity: SeverityWarning, fn: checkSkillOversize},
 	{name: "database-field-invalid", defaultSeverity: SeverityWarning, fn: checkDatabaseFields},
+	{name: "pipeline-invalid", defaultSeverity: SeverityWarning, fn: checkPipelines},
 }
 
 // checkDatabaseFields checks the rows of each database note of the project

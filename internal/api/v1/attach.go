@@ -69,6 +69,7 @@ func (r *Router) handleAttach(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, "save: "+err.Error())
 		return
 	}
+	r.arrived(req, res.Path, header.Filename)
 	WriteJSON(w, http.StatusCreated, attachResponse{
 		Path:     res.Path,
 		Filename: res.Filename,
@@ -118,6 +119,7 @@ func (r *Router) handleUpload(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, "save: "+err.Error())
 		return
 	}
+	r.arrived(req, res.Path, header.Filename)
 	kind := "document"
 	if isImage {
 		kind = "image"

@@ -184,7 +184,8 @@
     "settings": "Settings",
     "search": "Search",
     "admin": "Admin",
-    "menu": "Menu"
+    "menu": "Menu",
+    "runs": "Runs"
   },
   "index": {
     "projects_h2": "Projects",
@@ -681,7 +682,10 @@
       "lean_on": "Lean read on: tokens that cannot write here get only the reading directives (fewer tokens, less context). Click to turn off.",
       "lean_off": "Click to give tokens that cannot write here a lean bootstrap: reading directives only.",
       "mirror_on": "Mirror on: tokens that can read this project may keep a read-only copy of its notes on their machine (gosidian mirror sync); every sync is audited. Click to turn off.",
-      "mirror_off": "Click to let tokens that can read this project keep a read-only copy of its notes on their machine: cheaper reading for agents, but the notes leave the server."
+      "mirror_off": "Click to let tokens that can read this project keep a read-only copy of its notes on their machine: cheaper reading for agents, but the notes leave the server.",
+      "pipelines_master_off": "Pipelines are off on the server (GOSIDIAN_PIPELINES_ENABLED): this flag does nothing until they are on.",
+      "pipelines_on": "Pipelines on: the server runs the project's pipelines (notes type: pipeline) and writes their results into the project. Click to turn off.",
+      "pipelines_off": "Click to let the server run this project's pipelines: they write notes into the project as the pipeline."
     },
     "legend": {
       "title": "What the flags do",
@@ -691,7 +695,8 @@
       "anchors": "writes the vault's agents as local subagent files at bootstrap; it needs its switch on the server, and is dimmed while that is off.",
       "tag_vocab": "lets the project extend the lint's tag vocabulary from memory/conventions.md.",
       "lean_read": "gives tokens that cannot write a shorter bootstrap.",
-      "mirror": "lets readers keep a read-only copy of the project: the notes leave the server, and every sync is audited."
+      "mirror": "lets readers keep a read-only copy of the project: the notes leave the server, and every sync is audited.",
+      "pipelines": "lets the server run the project's pipelines, which write notes as themselves; it needs its switch on the server, and is dimmed while that is off."
     }
   },
   "members": {
@@ -1009,5 +1014,47 @@
     "confirm": "Confirm",
     "ok": "OK",
     "error_title": "Something went wrong"
+  },
+  "runs": {
+    "title": "Runs",
+    "intro": "The pipelines of the projects you read and their runs. A pipeline is a note type: pipeline with a ```pipeline block; who writes in the project starts it, resumes a run that waits or cancels one.",
+    "project": "Project",
+    "status": "Status",
+    "all_projects": "All projects",
+    "all_statuses": "All statuses",
+    "refresh": "Refresh",
+    "pipelines": "Pipelines",
+    "runs": "Runs",
+    "no_pipelines": "No pipelines: write a note type: pipeline in a project with the pipelines flag on.",
+    "no_runs": "No runs.",
+    "last_run": "Status of the last run",
+    "start": "Start",
+    "resume": "Resume",
+    "cancel": "Cancel",
+    "by": "{trigger} · {actor}",
+    "attempt": "attempt {n}",
+    "waits_until": "waits until",
+    "truncated": "Output cut: the whole one is in the run.",
+    "input_prompt": "Start data for “{name}”, a JSON object the nodes read as trigger (files by their vault path):",
+    "resume_prompt": "Data for the waiting step, as JSON: it becomes its output.",
+    "bad_json": "That is not valid JSON.",
+    "input_object": "The start data is a JSON object, in braces.",
+    "started": "“{name}” started.",
+    "resumed": "Run resumed.",
+    "canceled": "Run canceled.",
+    "load_failed": "Could not read the runs.",
+    "start_failed": "Could not start the pipeline.",
+    "resume_failed": "Could not resume the run.",
+    "cancel_failed": "Could not cancel the run.",
+    "state": {
+      "pending": "pending",
+      "queued": "queued",
+      "running": "running",
+      "waiting": "waiting",
+      "done": "done",
+      "failed": "failed",
+      "skipped": "skipped",
+      "canceled": "canceled"
+    }
   }
 }

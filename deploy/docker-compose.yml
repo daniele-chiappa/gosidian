@@ -50,7 +50,7 @@ services:
       # remote. Set GITEA_TOKEN in a .env file next to this compose file.
       #
       # GOSIDIAN_GIT_ENABLED: "true"
-      # GOSIDIAN_GIT_REMOTE: "https://git.example.com/you/vault.git"
+      # GOSIDIAN_GIT_REMOTE: "https://gitea.example.com/you/vault.git"
       # GOSIDIAN_GIT_BRANCH: "main"
       # GOSIDIAN_GIT_AUTHOR_NAME: "Gosidian"
       # GOSIDIAN_GIT_AUTHOR_EMAIL: "gosidian@example.com"

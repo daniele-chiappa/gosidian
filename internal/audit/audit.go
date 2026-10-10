@@ -37,6 +37,9 @@ const (
 	// SourceAutomation is a write of the automations of a database note
 	// (IMP-127 iteration 3), made by the server itself.
 	SourceAutomation Source = "automation"
+	// SourcePipeline is a write of a pipeline run (IMP-167, ADR-035), made
+	// by the server as the pipeline: Actor is pipeline:<note path>.
+	SourcePipeline Source = "pipeline"
 )
 
 type Action string
@@ -54,7 +57,13 @@ const (
 	// ActionIngestPackage summarises a memory_ingest package (IMP-116):
 	// Path is the destination folder, Size the notes written. Each note
 	// has its own create or update entry too.
-	ActionIngestPackage    Action = "ingest_package"
+	ActionIngestPackage Action = "ingest_package"
+	// ActionPipelineRun, ActionPipelineResume, ActionPipelineCancel: a
+	// pipeline run started, resumed from outside, canceled (IMP-167). Path
+	// is the pipeline note, To the run's id.
+	ActionPipelineRun      Action = "pipeline_run"
+	ActionPipelineResume   Action = "pipeline_resume"
+	ActionPipelineCancel   Action = "pipeline_cancel"
 	ActionDeleteAttachment Action = "delete_attachment"
 	ActionTokenCreate      Action = "token_create"
 	ActionTokenRevoke      Action = "token_revoke"

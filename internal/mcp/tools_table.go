@@ -169,6 +169,7 @@ func (s *Server) handleCreateTableNote(ctx context.Context, req mcp.CallToolRequ
 		}
 		return werr.result(), nil
 	}
+	s.arrived(ctx, res.Path, fnForExt, rel)
 
 	out := map[string]any{
 		"path": rel,

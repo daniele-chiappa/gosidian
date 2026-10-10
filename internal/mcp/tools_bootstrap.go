@@ -154,6 +154,9 @@ type bootstrapCapabilities struct {
 	// write to the project a bootstrapReadAttachCapability: upload and append
 	// paths it could never use are left out.
 	Attachments any `json:"attachments"`
+	// Pipelines is true when the server runs this project's pipelines
+	// (IMP-166): memory_pipelines and memory_pipeline_run work here.
+	Pipelines bool `json:"pipelines,omitempty"`
 }
 
 // bootstrapReadAttachCapability is the attachments block of a read-only
@@ -227,6 +230,14 @@ func (s *Server) buildCapabilities(readOnly bool) bootstrapCapabilities {
 			QuotaWindow:          quotaWindow(s.uploadQuota),
 		},
 	}
+}
+
+// projectCapabilities is buildCapabilities with what depends on the
+// project.
+func (s *Server) projectCapabilities(project string, readOnly bool) bootstrapCapabilities {
+	c := s.buildCapabilities(readOnly)
+	c.Pipelines = s.pipelines != nil && pipelineHost{s}.Enabled(project)
+	return c
 }
 
 // quotaWindow is the quota's window for the capabilities, "" without one.
@@ -315,7 +326,7 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 		// capabilities: per-instance content-format discovery (plan
 		// 20260706-capability-discovery-bootstrap). Always present — an agent
 		// must see html_notes:false, not silence, to know .html is off here.
-		"capabilities": s.buildCapabilities(readOnly),
+		"capabilities": s.projectCapabilities(project, readOnly),
 	}
 	if readOnly {
 		payload["directives_scope"] = "read"

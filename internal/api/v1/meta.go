@@ -26,6 +26,9 @@ type versionResponse struct {
 	// (GOSIDIAN_OPEN_MODE=readonly). The SPA reads it at boot to allow a
 	// token-less guest session instead of forcing /login. See BUG-018.
 	OpenMode bool `json:"open_mode,omitempty"`
+	// PipelinesEnabled is true when the server runs pipelines ([pipelines]
+	// enabled): the SPA shows the Runs window and the project flag.
+	PipelinesEnabled bool `json:"pipelines_enabled,omitempty"`
 }
 
 // Version is set by cmd/gosidian/main.go before constructing the
@@ -69,11 +72,12 @@ func (r *Router) handleVersion(w http.ResponseWriter, req *http.Request) {
 	}
 	defaultLang, enabled := currentI18n()
 	WriteJSON(w, http.StatusOK, versionResponse{
-		Version:      Version,
-		API:          "v1",
-		DefaultLang:  defaultLang,
-		EnabledLangs: enabled,
-		OpenMode:     OpenMode,
+		Version:          Version,
+		API:              "v1",
+		DefaultLang:      defaultLang,
+		EnabledLangs:     enabled,
+		OpenMode:         OpenMode,
+		PipelinesEnabled: r.deps != nil && r.deps.Pipelines != nil,
 	})
 }
 

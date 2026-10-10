@@ -1,0 +1,230 @@
+# Pipelines
+
+A pipeline is a note that tells the server what to do when something
+happens: a document arrives, an agent or a service calls, the clock
+strikes. Its nodes read notes, call a language model or a web service,
+run a short script, wait for an answer, and write notes back, as the
+pipeline (ADR-035, IMP-166, IMP-167).
+
+Pipelines are **off by default**, twice over:
+
+- the server runs none until `[pipelines] enabled = true`
+  (`GOSIDIAN_PIPELINES_ENABLED=true`);
+- even then, a project's pipelines run only when the project has the
+  `use_pipelines` flag (Projects window, chip `pipelines`, or
+  `PUT /api/v1/projects/<name>` with `{"use_pipelines": true}`).
+
+## Turning them on
+
+```toml
+[pipelines]
+enabled = true
+workers = 2              # steps run at once
+step_timeout = "15m"     # the longest a step may run
+retention = "720h"       # runs kept after they end; 0 keeps them
+max_wait = "168h"        # the longest a wait.call may wait
+max_llm_tokens = 200000  # LLM tokens one run may use; 0: no cap
+http_allowlist = ["https://api.example.com/", "http://gpu.lan:5001/"]
+public_url = "https://vault.example.com"   # default: [oauth] issuer
+timezone = "Europe/Rome"                   # default: [automations] timezone
+
+[[pipelines.llm]]
+name = "default"
+base_url = "http://gpu.lan:11434/v1"  # any OpenAI-compatible API
+model = "qwen2.5vl:7b"
+
+[[pipelines.llm]]
+name = "openrouter"
+base_url = "https://openrouter.ai/api/v1"
+api_key_secret = "openrouter"              # gosidian secret set openrouter
+model = "anthropic/claude-sonnet-4.5"
+```
+
+The environment overrides the file (see [configuration](configuration.md)):
+`GOSIDIAN_PIPELINES_ENABLED`, `_WORKERS`, `_RETENTION`, `_STEP_TIMEOUT`,
+`_MAX_WAIT`, `_MAX_LLM_TOKENS`, `_HTTP_ALLOWLIST` (comma-separated),
+`_PUBLIC_URL`, `_TIMEZONE`, and `_LLM_URL`, `_LLM_MODEL`,
+`_LLM_KEY_SECRET` for one provider named `default`.
+
+The runs live in `<state-dir>/jobs.db` (SQLite, outside the vault and its
+git history). Secrets live in `<state-dir>/secrets.json`, each sealed with
+AES-GCM under `GOSIDIAN_SECRETS_KEY` (32 bytes in base64:
+`openssl rand -base64 32`). Without the key the nodes that need a secret
+fail and say why; the rest work.
+
+## A pipeline note
+
+````markdown
+---
+title: Arrivals
+type: pipeline
+---
+
+# Arrivals
+
+Describes each image that arrives in inbox/ and files a note for it.
+
+```pipeline
+trigger: {on: ingest, kinds: [png, jpg], folder: inbox}
+nodes:
+  - id: describe
+    use: llm.describe
+    with:
+      image: "{{ trigger.file }}"
+      prompt: Describe the image in Italian, in three sentences.
+  - id: file
+    use: note.write
+    with:
+      path: "archive/{{ trigger.stem }}"
+      title: "{{ trigger.stem }}"
+      body: |
+        ![[{{ trigger.file }}]]
+
+        {{ describe.text }}
+```
+````
+
+A note `type: pipeline` holds one ```` ```pipeline ```` block of YAML. The
+rest of the note is free: say what the pipeline is for. `memory_lint`
+(rule `pipeline-invalid`), `memory_pipelines` and the Runs window say
+why a pipeline cannot run.
+
+### Triggers
+
+| `on` | Starts when | `trigger` holds |
+|---|---|---|
+| `manual` (default) | someone starts it: the Runs window, `memory_pipeline_run`, `POST /api/v1/pipelines/<path>/runs` | the input given |
+| `external` | as manual, and also a service with a run token | the input given |
+| `ingest` | a file of one of `kinds` is stored as an attachment of the project (with `folder`: a note made with it in that folder) | `file`, `name`, `stem`, `ext`, `folder`, `note`, `project` |
+| `schedule` | `every: "monday 09:00"`, `"day 18:30"` (the automations' syntax), once per slot; a slot missed by more than 10 minutes is not run late | `slot` |
+
+Every file store counts as an arrival: `memory_ingest`,
+`memory_upload_attachment`, `memory_upload_resource`, the media and table
+notes, the MCP `/upload` endpoint and the web UI's uploads. A file starts
+each pipeline once: its path (named by its content) is the run's
+idempotency key. A package import (`as: package`) starts none.
+
+Any pipeline also starts by hand, whatever its trigger: an ingest pipeline
+run with `{"file": "team/attachments/….pdf", …}` as input works on that
+file again.
+
+### Nodes
+
+| Field | |
+|---|---|
+| `id` | lowercase letters, digits and `_`; not `trigger`, `run`, `item`, `index` |
+| `use` | the node type |
+| `with` | its settings; strings may hold expressions |
+| `after` | the nodes it waits for; default the node before it, `[]` to start at once (in parallel) |
+| `when`, `unless` | an expression: the node is skipped when `when` is false or `unless` is true |
+| `each` | an expression giving a list: the node runs once per element, with `item` and `index`; its output is the list of outputs |
+| `retry` | `{attempts: 3, backoff: 30s}`: tries in all (at most 10), the wait doubling; a service's `Retry-After` is honoured |
+| `timeout` | default `5m`, at most the server's step timeout |
+| `on_error` | `stop` (default: the run fails) or `continue` (the nodes after it run, and read its output as missing) |
+
+A node waits until every node in its `after` is done or skipped. It is
+canceled when one of them failed without `on_error: continue`, or was
+canceled. A run ends `done` when every node ended and none failed (but
+those that continue on error), `failed` otherwise.
+
+### Expressions
+
+`{{ name.field.0 }}` reads `trigger`, `run` (`id`, `pipeline`,
+`project`, `trigger`, `resume_url`, `resume_key`), the output of a node
+that runs before, and `item`/`index` inside an `each`. A string that is
+one expression keeps the value's type (a list, a number); text around
+an expression turns it into text. There are no operators: compute in a
+`starlark` node.
+
+### Node types
+
+| Type | `with` | Output |
+|---|---|---|
+| `note.read` | `path` (inside the project; relative to it) | `path`, `title`, `frontmatter`, `body`, `etag` |
+| `note.write` | `path`, `body`, `title`, `frontmatter` (a map), `mode`: `upsert` (default), `create`, `replace` | `path`, `etag`, `created` |
+| `wait.call` | `timeout` (default `24h`, at most `max_wait`) | the data the resume hands it |
+| `starlark` | `code` setting `output`; `input`; the run's values in `ctx`, `json.encode`/`json.decode`; no `load`, no I/O, 10 million steps at most | `output` |
+| `http.request` | `url` (in `http_allowlist`), `method`, `json` or `body`, `headers`, `secret_header: "Authorization=secret_name"`, `accept_errors` | `status`, `headers`, `json` or `body` (4 MiB at most) |
+| `llm.chat` | `prompt`, `system`, `provider` (default `default`), `model`, `max_tokens` (default 1024), `temperature`, `json: true` | `text`, `json`, `model`, `provider`, `usage` |
+| `llm.describe` | `image` (an attachment of the project, png/jpg/gif/webp, 10 MiB at most), `prompt`, and as `llm.chat` | as `llm.chat`, plus `image` |
+
+A node's output is at most 1 MiB (`max_output_bytes`): write a large text
+into a note and pass its path. A run's input is at most 256 KiB
+(`max_input_bytes`): pass files by their vault path, not their bytes.
+
+## What a run leaves
+
+- **The notes it writes**, as the pipeline: the audit says source
+  `pipeline`, actor `pipeline:<note path>`. Each carries its origin in the
+  frontmatter: `pipeline: '[[team/pipelines/arrivals]]'`, `pipeline_run`,
+  and `source: '[[<file>]]'` for an arrival.
+- **One line a day** in `<pipeline>-runs.md` beside the pipeline: how many
+  runs ended, how many failed, the last one with its time and error.
+- **The run itself**, in `jobs.db`: every step with its status, attempts,
+  error and output, shown by the Runs window and `memory_pipelines`, kept
+  for `retention` after it ends.
+
+A step that was running when the server stopped runs again at the next
+start: a node should be safe to repeat (note.write with `upsert` is).
+
+## Starting, waiting, resuming
+
+**From an agent** — `memory_pipeline_run({path, input, idempotency_key,
+callback_url, wait})` starts a run (write access to the project); `wait`
+(at most 60 s) returns when it ended or waits. `{action: "resume", run,
+data}` hands data to a waiting step, `{action: "cancel", run}` stops it.
+`memory_pipelines({project, path?, run?})` reads pipelines, runs and steps.
+`memory_bootstrap` says `capabilities.pipelines: true` where they run.
+
+**From the web UI** — Menu → Runs: the pipelines and their runs, live.
+Who writes in the project starts a pipeline (with a JSON input), resumes a
+run that waits and cancels one.
+
+**From a service** — a run token starts one pipeline whose trigger is
+`external` or `manual`, and does nothing else:
+
+```bash
+docker exec gosidian gosidian pipeline token create \
+  --pipeline team/pipelines/arrivals.md --name scanner
+curl -X POST https://vault.example.com/api/v1/pipelines/team/pipelines/arrivals.md/runs \
+  -H "Authorization: Bearer gosidian_run_…" -H "Idempotency-Key: scan-0042" \
+  -d '{"input": {"file": "team/attachments/1f3c….pdf"}, "callback_url": "https://scanner.example.com/done"}'
+```
+
+The answer is `202` with the run (`200` and the same run for a key
+already used). The token is shown once; `gosidian pipeline token list`
+and `revoke <id>` manage them. A token starts at most 60 runs a minute.
+
+**An asynchronous job** — a node hands `{{ run.resume_url }}` to a
+service and a `wait.call` node waits for it: the service POSTs its result
+there (any JSON) without an account, the key in the address works for
+that run only and while it waits. The result is the `wait.call` node's
+output. A wait that nobody resumes before its timeout fails.
+
+**A callback** — `callback_url` (in `http_allowlist`) is POSTed the run's
+summary when it ends: `{run, pipeline, project, status, error, started,
+finished, steps: {name: status}}`.
+
+REST reference: `internal/api/v1/spec/openapi.yaml`, tag `pipelines`.
+
+## What a pipeline may do
+
+- Read and write **only in its own project**; attachments are read through
+  the vault's confined path (ADR-021). Every write goes through the same
+  path as the MCP tools (ADR-034): the shrink guard, the size limits, the
+  audit, the live events.
+- Call **only the addresses in `http_allowlist`** (prefixes), redirects
+  included. The language model providers are the owner's configuration.
+- Use secrets **by name**: their values never appear in a note, a run or
+  the audit.
+- Run Starlark without file, network or module access, with a step cap.
+- Spend at most `max_llm_tokens` per run.
+
+## CLI
+
+```
+gosidian secret set <name>        # the value on standard input
+gosidian secret list | delete <name>
+gosidian pipeline token create --pipeline <path.md> --name <service>
+gosidian pipeline token list [--pipeline <path.md>] | revoke <id>
+```

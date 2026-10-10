@@ -283,6 +283,7 @@ func (s *Server) registerTools() {
 	s.registerWaitTool()
 	s.registerSnapshotTool()
 	s.registerAutomationTool()
+	s.registerPipelineTools()
 }
 
 // ---- handlers ----

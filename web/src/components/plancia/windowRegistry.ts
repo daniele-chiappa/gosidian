@@ -29,6 +29,8 @@ export const windowRegistry: Record<string, Component> = {
   tags: lazy(() => import('@/views/TagsView.vue')),
   settings: lazy(() => import('@/views/SettingsView.vue')),
   trash: lazy(() => import('@/views/TrashView.vue')),
+  // The pipelines and their runs (IMP-166), when the server runs them.
+  runs: lazy(() => import('@/views/PipelinesView.vue')),
   history: lazy(() => import('@/views/NoteHistoryView.vue')),
   admin: lazy(() => import('@/views/admin/AdminLayout.vue')),
 }

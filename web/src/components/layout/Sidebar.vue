@@ -7,6 +7,7 @@ import { useSSE } from '@/composables/useSSE'
 import { useWindowsStore, type OpenSpec } from 'plancia'
 import { useAuthStore } from '@/stores/auth'
 import { useAccessStore } from '@/stores/access'
+import { useUIStore } from '@/stores/ui'
 import { planciaKey } from '@/composables/planciaKey'
 import TreeNode from '@/components/domain/TreeNode.vue'
 import TreeContextMenu from '@/components/domain/TreeContextMenu.vue'
@@ -19,6 +20,7 @@ import {
   Folder,
   Tags,
   Trash2,
+  Workflow,
   Settings,
   Shield,
 } from 'lucide-vue-next'
@@ -30,6 +32,7 @@ const recents = useRecentlyViewed()
 const windows = useWindowsStore()
 const auth = useAuthStore()
 const access = useAccessStore()
+const ui = useUIStore()
 const sse = useSSE(['tree', 'sidebar'])
 
 const root = computed(() => treeStore.byProject[''])
@@ -74,6 +77,8 @@ const menuItems = computed<MenuItem[]>(() => {
     item('projects', t('nav.projects'), Folder),
     item('tags', t('nav.tags'), Tags),
   ]
+  // Only on a server that runs pipelines (IMP-166).
+  if (ui.pipelinesEnabled) items.push(item('runs', t('nav.runs'), Workflow))
   if (auth.canWrite) {
     items.push(item('trash', t('nav.trash'), Trash2))
     items.push(item('settings', t('nav.settings'), Settings))

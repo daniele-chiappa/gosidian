@@ -38,6 +38,9 @@ export interface Project {
    *  GET /mcp/manifest (IMP-102). Copies notes onto agents' machines: off by
    *  default, set by a project admin. */
   allow_local_mirror: boolean
+  /** Let the server run the project's pipelines (IMP-166), when its master
+   *  switch is on (VersionInfo.pipelines_enabled). Off by default. */
+  use_pipelines?: boolean
   /** RFC 3339 UTC string of the directory's mtime — proxy for
    *  "last activity" (fs birth time isn't preserved by rsync /
    *  git checkout / container layer copy). Empty when stat failed. */
@@ -60,6 +63,7 @@ export interface UpdateProjectRequest {
   use_tag_vocabulary?: boolean
   lean_read_bootstrap?: boolean
   allow_local_mirror?: boolean
+  use_pipelines?: boolean
 }
 
 export async function listProjects(): Promise<Project[]> {

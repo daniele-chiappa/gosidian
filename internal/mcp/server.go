@@ -20,6 +20,7 @@ import (
 	"github.com/gosidian/gosidian/internal/authz"
 	"github.com/gosidian/gosidian/internal/automation"
 	"github.com/gosidian/gosidian/internal/index"
+	"github.com/gosidian/gosidian/internal/pipeline"
 	"github.com/gosidian/gosidian/internal/projects"
 	"github.com/gosidian/gosidian/internal/server/events"
 	"github.com/gosidian/gosidian/internal/trash"
@@ -199,6 +200,10 @@ type Server struct {
 	// automations runs the rules of database notes (IMP-127 iteration 3);
 	// nil when they are off. memory_automations reads it.
 	automations *automation.Engine
+	// pipelines runs the pipeline notes (IMP-167); nil when [pipelines]
+	// is off. pipelinesOn is the switch, known before the engine exists.
+	pipelines   *pipeline.Engine
+	pipelinesOn bool
 	// accessResolver maps an OAuth access token (internal/oauth) to the grant
 	// it was issued for; nil when OAuth is off. Consulted only for bearers the
 	// static token store does not know.

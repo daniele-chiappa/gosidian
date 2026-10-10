@@ -1,0 +1,263 @@
+package mcp
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/gosidian/gosidian/internal/audit"
+	"github.com/gosidian/gosidian/internal/jobs"
+	"github.com/gosidian/gosidian/internal/pipeline"
+	"github.com/gosidian/gosidian/internal/projects"
+)
+
+const copyPipeline = "---\ntitle: Copy\ntype: pipeline\n---\n\n# Copy\n\n```pipeline\n" + `trigger: {on: external}
+nodes:
+  - id: write
+    use: note.write
+    with: {path: "out/{{ trigger.name }}", body: "Hello {{ trigger.name }}"}
+` + "```\n"
+
+const waitPipeline = "---\ntitle: Ask\ntype: pipeline\n---\n\n```pipeline\n" + `nodes:
+  - {id: ask, use: wait.call, with: {timeout: 1h}}
+  - {id: answer, use: note.write, with: {path: "answers/{{ ask.who }}", body: "{{ ask.text }}"}}
+` + "```\n"
+
+// pipelineServer is a test server where project p runs pipelines and q
+// does not, with a pipeline note in each, and an engine on a running job
+// runner.
+func pipelineServer(t *testing.T) (*Server, *pipeline.Engine) {
+	t.Helper()
+	s, _, _ := newTestServer(t)
+	pstore, err := projects.Open(filepath.Join(t.TempDir(), "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pstore.Set("p", projects.Flags{UsePipelines: true}); err != nil {
+		t.Fatal(err)
+	}
+	s.SetProjects(pstore)
+	s.SetPipelinesSwitch(true)
+	ctx := context.Background()
+	for path, content := range map[string]string{
+		"p/pipelines/copy.md": copyPipeline,
+		"p/pipelines/ask.md":  waitPipeline,
+		"p/pipelines/bad.md":  "---\ntype: pipeline\n---\n\n```pipeline\nnodes: [{id: a, use: shell.run}]\n```\n",
+		"q/pipelines/copy.md": strings.ReplaceAll(copyPipeline, "Copy", "Q copy"),
+		"p/plain.md":          "---\ntitle: Plain\n---\n\nNot a pipeline.\n",
+	} {
+		if res, err := s.handleCreate(ctx, call(map[string]any{"path": path, "content": content})); err != nil || res.IsError {
+			t.Fatalf("create %s: %v %+v", path, err, res)
+		}
+	}
+	store, err := jobs.Open(filepath.Join(t.TempDir(), "jobs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := jobs.NewRunner(store, jobs.Options{Workers: 2, Poll: 10 * time.Millisecond, Lease: time.Minute})
+	e := pipeline.New(s.PipelineHost(), runner, pipeline.Config{Location: time.UTC}, nil, nil)
+	s.SetPipelines(e)
+	rctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+	go func() { runner.Start(rctx); close(stopped) }()
+	t.Cleanup(func() { cancel(); <-stopped; store.Close() })
+	return s, e
+}
+
+func runID(t *testing.T, res string) string {
+	t.Helper()
+	var out struct {
+		Run struct {
+			ID     string      `json:"id"`
+			Status jobs.Status `json:"status"`
+		} `json:"run"`
+	}
+	if err := json.Unmarshal([]byte(res), &out); err != nil || out.Run.ID == "" {
+		t.Fatalf("no run in %s", res)
+	}
+	return out.Run.ID
+}
+
+func TestPipelineRun_StartsAndWaits(t *testing.T) {
+	s, e := pipelineServer(t)
+	al, err := audit.Open(filepath.Join(t.TempDir(), "audit.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.SetAuditLog(al)
+	ctx := context.Background()
+	res, err := s.handlePipelineRun(ctx, call(map[string]any{"path": "p/pipelines/copy.md", "input": map[string]any{"name": "doc"}, "wait": 5}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := resultText(t, res)
+	if !strings.Contains(text, `"status":"done"`) || !strings.Contains(text, `"name":"write"`) {
+		t.Fatalf("result %s", text)
+	}
+	note, err := s.vault.Load("p/out/doc.md")
+	if err != nil || !strings.Contains(string(note.Content), "Hello doc") || !strings.Contains(string(note.Content), "pipeline: '[[p/pipelines/copy]]'") {
+		t.Fatalf("written note: %v\n%s", err, note.Content)
+	}
+	// Written as the pipeline, audited with its source.
+	found := false
+	for _, en := range auditEntries(t, al) {
+		if en.Path == "p/out/doc.md" {
+			found = en.Source == audit.SourcePipeline && en.Actor == "pipeline:p/pipelines/copy.md"
+		}
+	}
+	if !found {
+		t.Fatalf("no pipeline audit entry for the note: %+v", auditEntries(t, al))
+	}
+	// The same key again gives the same run.
+	id := runID(t, text)
+	_ = e
+	first, _ := s.handlePipelineRun(ctx, call(map[string]any{"path": "p/pipelines/copy.md", "input": map[string]any{"name": "x"}, "idempotency_key": "k1"}))
+	again, _ := s.handlePipelineRun(ctx, call(map[string]any{"path": "p/pipelines/copy.md", "input": map[string]any{"name": "x"}, "idempotency_key": "k1"}))
+	if runID(t, resultText(t, first)) != runID(t, resultText(t, again)) || !strings.Contains(resultText(t, again), `"existing":true`) {
+		t.Fatalf("idempotency: %s / %s", resultText(t, first), resultText(t, again))
+	}
+	// memory_pipelines shows the run and its step.
+	res, _ = s.handlePipelines(ctx, call(map[string]any{"project": "p", "run": id}))
+	if text := resultText(t, res); !strings.Contains(text, `"use":"note.write"`) || !strings.Contains(text, `"status":"done"`) {
+		t.Fatalf("run view %s", text)
+	}
+}
+
+func TestPipelineRun_ResumeAndCancel(t *testing.T) {
+	s, _ := pipelineServer(t)
+	ctx := context.Background()
+	res, _ := s.handlePipelineRun(ctx, call(map[string]any{"path": "p/pipelines/ask.md", "wait": 5}))
+	text := resultText(t, res)
+	if !strings.Contains(text, `"status":"waiting"`) {
+		t.Fatalf("not waiting: %s", text)
+	}
+	id := runID(t, text)
+	res, _ = s.handlePipelineRun(ctx, call(map[string]any{"action": "resume", "run": id, "data": map[string]any{"who": "bob", "text": "yes"}}))
+	if res.IsError {
+		t.Fatalf("resume: %s", resultText(t, res))
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if n, err := s.vault.Load("p/answers/bob.md"); err == nil && strings.Contains(string(n.Content), "yes") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the resumed run never wrote its answer")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	// Another run, canceled while it waits.
+	res, _ = s.handlePipelineRun(ctx, call(map[string]any{"path": "p/pipelines/ask.md", "wait": 5}))
+	id = runID(t, resultText(t, res))
+	res, _ = s.handlePipelineRun(ctx, call(map[string]any{"action": "cancel", "run": id}))
+	if !strings.Contains(resultText(t, res), `"status":"canceled"`) {
+		t.Fatalf("cancel: %s", resultText(t, res))
+	}
+}
+
+func TestPipelineRun_Refusals(t *testing.T) {
+	s, _ := pipelineServer(t)
+	ctx := context.Background()
+	for name, a := range map[string]map[string]any{
+		"project without use_pipelines": {"path": "q/pipelines/copy.md"},
+		"a broken pipeline":             {"path": "p/pipelines/bad.md"},
+		"a note that is not a pipeline": {"path": "p/plain.md"},
+		"a missing note":                {"path": "p/pipelines/none.md"},
+		"input not an object":           {"path": "p/pipelines/copy.md", "input": "text"},
+		"an unknown action":             {"action": "explode", "path": "p/pipelines/copy.md"},
+		"resume without a run":          {"action": "resume"},
+	} {
+		res, err := s.handlePipelineRun(ctx, call(a))
+		if err != nil || !res.IsError {
+			t.Errorf("%s: accepted (%v)", name, err)
+		}
+	}
+	// memory_pipelines lists the pipelines with their problems.
+	res, _ := s.handlePipelines(ctx, call(map[string]any{"project": "p"}))
+	text := resultText(t, res)
+	for _, want := range []string{"p/pipelines/copy.md", `"trigger":"external"`, "shell.run"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("listing lacks %q: %s", want, text)
+		}
+	}
+	res, _ = s.handlePipelines(ctx, call(map[string]any{"project": "q"}))
+	if !strings.Contains(resultText(t, res), "use_pipelines is off") {
+		t.Errorf("q's pipeline is not marked off: %s", resultText(t, res))
+	}
+}
+
+func TestPipelineTools_Off(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	ctx := context.Background()
+	for _, fn := range []toolFn{s.handlePipelines, s.handlePipelineRun} {
+		res, _ := fn(ctx, call(map[string]any{"project": "p", "path": "p/x.md"}))
+		if msg := expectError(t, res); !strings.Contains(msg, "pipelines are off") {
+			t.Fatalf("off: %s", msg)
+		}
+	}
+}
+
+func TestPipelineIngest_AttachmentStartsOnce(t *testing.T) {
+	s, e := pipelineServer(t)
+	ctx := context.Background()
+	arrive := "---\ntitle: Arrive\ntype: pipeline\n---\n\n```pipeline\n" + `trigger: {on: ingest, kinds: [csv]}
+nodes:
+  - {id: write, use: note.write, with: {path: "out/{{ trigger.stem }}", body: "From {{ trigger.file }} ({{ trigger.name }})"}}
+` + "```\n"
+	for _, path := range []string{"p/pipelines/arrive.md", "q/pipelines/arrive.md"} {
+		if res, err := s.handleCreate(ctx, call(map[string]any{"path": path, "content": arrive})); err != nil || res.IsError {
+			t.Fatalf("create %s: %v %+v", path, err, res)
+		}
+	}
+	data := base64.StdEncoding.EncodeToString([]byte("a,b\n1,2\n"))
+	upload := func(project string) string {
+		res, err := s.handleUploadResource(ctx, call(map[string]any{"project": project, "data": data, "filename": "report.csv"}))
+		if err != nil || res.IsError {
+			t.Fatalf("upload: %v %s", err, resultText(t, res))
+		}
+		var out struct{ Path string }
+		_ = json.Unmarshal([]byte(resultText(t, res)), &out)
+		return out.Path
+	}
+	att := upload("p")
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if n, err := s.vault.Load("p/out/report.md"); err == nil {
+			if c := string(n.Content); !strings.Contains(c, "From "+att+" (report.csv)") || !strings.Contains(c, "source: '[["+att+"]]'") {
+				t.Fatalf("note:\n%s", c)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the ingest pipeline never wrote its note")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	// The same file again does not start another run; q runs none.
+	upload("p")
+	upload("q")
+	store := e.Runner().Store()
+	if runs, _ := store.Runs(jobs.RunFilter{Ref: "p/pipelines/arrive.md"}); len(runs) != 1 || runs[0].Trigger != pipeline.TriggerIngest {
+		t.Errorf("runs of p: %+v", runs)
+	}
+	if runs, _ := store.Runs(jobs.RunFilter{Ref: "q/pipelines/arrive.md"}); len(runs) != 0 {
+		t.Errorf("q ran: %+v", runs)
+	}
+}
+
+func TestPipelineBootstrap_SaysWherePipelinesRun(t *testing.T) {
+	s, _ := pipelineServer(t)
+	for project, want := range map[string]bool{"p": true, "q": false} {
+		if got := s.projectCapabilities(project, false).Pipelines; got != want {
+			t.Errorf("%s: pipelines %v, want %v", project, got, want)
+		}
+	}
+	off, _, _ := newTestServer(t)
+	if off.projectCapabilities("p", false).Pipelines {
+		t.Error("a server without pipelines says it runs them")
+	}
+}

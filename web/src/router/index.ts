@@ -59,6 +59,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/graph', redirect: () => singleWindow('graph') },
   { path: '/settings', redirect: () => singleWindow('settings') },
   { path: '/trash', redirect: () => singleWindow('trash') },
+  { path: '/runs', redirect: () => singleWindow('runs') },
   {
     path: '/admin/:section(.*)?',
     redirect: (to) => {

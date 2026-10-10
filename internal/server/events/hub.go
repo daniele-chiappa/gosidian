@@ -48,6 +48,10 @@ const (
 	// Payload: {action, path, category, confidence, alert, source}. The
 	// owner SPA badge subscribes to live-update the pending count.
 	TopicInsight Topic = "insight"
+	// TopicJob fires when a pipeline run changes (IMP-167). Payload:
+	// {action, run, pipeline, project, status}; project lets the members
+	// who see it receive it.
+	TopicJob Topic = "job"
 )
 
 // Event is the wire shape. ID is a monotonic ULID-like sequence that

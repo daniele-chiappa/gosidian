@@ -14,6 +14,7 @@ import { getSettings } from '@/api/settings'
 import { useTreeStore } from '@/stores/tree'
 import { useAuthStore } from '@/stores/auth'
 import { useAccessStore } from '@/stores/access'
+import { useUIStore } from '@/stores/ui'
 import { useWindowsStore, type OpenSpec } from 'plancia'
 import { Lock, Globe, Users, UsersRound } from 'lucide-vue-next'
 import { errorText } from '@/api/errors'
@@ -32,6 +33,7 @@ const newName = ref('')
 const treeStore = useTreeStore()
 const auth = useAuthStore()
 const access = useAccessStore()
+const ui = useUIStore()
 const store = useWindowsStore()
 const openWindow = inject<(spec: OpenSpec) => string>('openWindow', (s) => store.open(s))
 
@@ -120,6 +122,11 @@ function anchorsTitle(p: Project): string {
   return p.use_anchors ? t('projects.flag.anchors_on') : t('projects.flag.anchors_off')
 }
 
+function pipelinesTitle(p: Project): string {
+  if (!ui.pipelinesEnabled) return t('projects.flag.pipelines_master_off')
+  return p.use_pipelines ? t('projects.flag.pipelines_on') : t('projects.flag.pipelines_off')
+}
+
 function accessTitle(p: Project): string {
   const who = t('projects.grants', { accounts: p.members_count, teams: p.teams_count })
   return p.access === 'admin' ? t('projects.grants_manage', { who }) : t('projects.grants_see', { who })
@@ -177,7 +184,7 @@ async function destroy(p: Project) {
 }
 
 /** The flag chips, in the order of the row, for the legend. */
-const FLAG_NAMES = ['skip-git', 'hidden', 'globals', 'anchors', 'tag-vocab', 'lean-read', 'mirror'] as const
+const FLAG_NAMES = ['skip-git', 'hidden', 'globals', 'anchors', 'tag-vocab', 'lean-read', 'mirror', 'pipelines'] as const
 
 onMounted(() => {
   load()
@@ -363,6 +370,17 @@ onMounted(() => {
             :aria-pressed="!!p.allow_local_mirror"
             @click="apply(p, { allow_local_mirror: !p.allow_local_mirror }, 'mirror')"
           >mirror</button>
+          <button
+            type="button"
+            class="h-control-sm text-xs px-2 rounded"
+            :class="[
+              p.use_pipelines ? 'bg-accent/20 text-accent' : 'border border-border',
+              ui.pipelinesEnabled ? '' : 'opacity-50',
+            ]"
+            :title="pipelinesTitle(p)"
+            :aria-pressed="!!p.use_pipelines"
+            @click="apply(p, { use_pipelines: !p.use_pipelines }, 'pipelines')"
+          >pipelines</button>
           <button
             type="button"
             class="h-control-sm text-xs px-2 rounded hover:bg-surface-hover"

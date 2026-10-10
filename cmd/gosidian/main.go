@@ -92,6 +92,12 @@ func main() {
 		case "mirror":
 			runMirrorCmd(os.Args[2:])
 			return
+		case "secret":
+			runSecretCmd(os.Args[2:])
+			return
+		case "pipeline":
+			runPipelineCmd(os.Args[2:])
+			return
 		case "version", "--version", "-version":
 			os.Stdout.WriteString(version + "\n")
 			return
@@ -557,6 +563,12 @@ func main() {
 			log.Printf("automations: enabled (every %s, time zone %s, state %s)", cfg.Automations.Interval, loc, filepath.Join(sdir, "automations.json"))
 		}
 	}
+	// The pipelines (IMP-166, ADR-035): after the scan, like the
+	// automations; off unless [pipelines] enabled.
+	stopPipelines := func(time.Duration) {}
+	if cfg.Pipelines.Enabled {
+		stopPipelines = startPipelines(ctx, cfg, sdir, mcpServer)
+	}
 	// A token owned by a web account is narrowed on every request to what
 	// that account may currently read and write (BUG-055): the resolver maps
 	// the token's owner id to its live role; a disabled account fails closed.
@@ -660,7 +672,8 @@ func main() {
 		Projects:   projectsStore,
 		GitSync:    syncer, // nil-safe; History returns "git sync disabled" when cfg off
 		ConfigPath: cfgPath,
-		OAuth:      oauthSrv, // nil when [oauth] is off: /api/v1/oauth/* answers 404
+		OAuth:      oauthSrv,              // nil when [oauth] is off: /api/v1/oauth/* answers 404
+		Pipelines:  mcpServer.Pipelines(), // nil when [pipelines] is off: /pipelines, /runs answer 404
 	})
 	srv.MountAPIv1(apiRouter)
 	srv.SetVaultFileAuthorizer(apiRouter.VaultFileAuthorizer()) // ADR-022: attachments share the API auth
@@ -683,6 +696,9 @@ func main() {
 
 	<-ctx.Done()
 	log.Printf("shutting down")
+	// The runner puts its steps down first: a step a pipeline was writing
+	// lands before the last git commit.
+	stopPipelines(3 * time.Second)
 	// Flush any pending git commit before exit.
 	if cfg.Git.Enabled {
 		syncer.Flush()

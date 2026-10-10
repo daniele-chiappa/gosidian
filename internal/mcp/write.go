@@ -94,8 +94,11 @@ type noteWrite struct {
 	// probed the path before doing other work (storing an attachment).
 	locked bool
 	// automation is the server writing as itself: no token and no limiter,
-	// audited as the automation.
+	// audited as the automation, or as source and actor when they are set
+	// (a pipeline run, IMP-167).
 	automation bool
+	source     audit.Source
+	actor      string
 	// shrinkGuard refuses a content that would empty an existing note
 	// (shrinkRefusal, IMP-147): an agent's whole-note rewrite that did not
 	// say allow_shrink.
@@ -183,7 +186,11 @@ func (s *Server) writeNote(ctx context.Context, tok *auth.Token, w noteWrite) (n
 	}
 	if w.automation {
 		if s.audit != nil {
-			_ = s.audit.Write(audit.Entry{Source: audit.SourceAutomation, Actor: AutomationAgent, Action: action, Path: w.rel, Size: int64(len(content))})
+			source, actor := audit.SourceAutomation, AutomationAgent
+			if w.source != "" {
+				source, actor = w.source, w.actor
+			}
+			_ = s.audit.Write(audit.Entry{Source: source, Actor: actor, Action: action, Path: w.rel, Size: int64(len(content))})
 		}
 	} else {
 		s.auditWrite(ctx, action, w.rel, "", int64(len(content)))

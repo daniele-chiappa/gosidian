@@ -8,6 +8,80 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.74.0] — 2026-10-10 — "pipelines"
+
+Pipelines: a note can tell the server what to do with a file that arrives
+in a project, at a time of the day or week, or when a person, an agent or
+a service starts it. Pull the image and restart, nothing to migrate.
+Pipelines are off unless `[pipelines] enabled`
+(`GOSIDIAN_PIPELINES_ENABLED=true`), and even then they run only in the
+projects with the new `use_pipelines` flag. With them off nothing else
+changes: the two new MCP tools answer that pipelines are off, and the new
+REST routes answer 404. The format, the nodes and a worked example are in
+`docs/pipelines.md`.
+
+### Added
+- **Pipeline notes** — a note `type: pipeline` holds a
+  ```` ```pipeline ```` block of YAML: a trigger and the nodes to run. The
+  trigger is `manual` (the web UI, an MCP tool or the REST API),
+  `external` (a service holding a run token), `ingest` (every file stored
+  as an attachment of the project, once per file) or `schedule`
+  (`every: "day 18:30"`, `"monday 09:00"`, in `[pipelines] timezone`; a
+  slot missed by more than 10 minutes is not run late).
+- **Base nodes** — `note.read` and `note.write` (notes of the pipeline's
+  project), `llm.chat` and `llm.describe` (a text or an image through any
+  OpenAI-compatible API: Ollama, vLLM, OpenRouter…), `http.request`
+  (only addresses in `http_allowlist`), `starlark` (a sandboxed script)
+  and `wait.call`, which waits for an answer from outside, POSTed to
+  `{{ run.resume_url }}`: an asynchronous job, a person's approval. Nodes
+  run in order or in parallel (`after`), with `when` and `unless`, `each`
+  over a list, `retry` with a doubling wait (a service's `Retry-After` is
+  honoured), `timeout` and `on_error`. A node reads the others' output as
+  `{{ node.field }}`.
+- **Durable runs** — runs and their steps live in `<state-dir>/jobs.db`.
+  A step cut by a restart runs again at the next start, a waiting run
+  survives restarts, and the same idempotency key starts a run once. Runs
+  are kept for `retention` after they end; `max_llm_tokens` caps the
+  tokens one run may spend.
+- **Provenance and audit** — every note a pipeline writes goes through the
+  same write path as the tools, is audited with source `pipeline`, and its
+  frontmatter names the pipeline, the run and the file it comes from. A
+  note beside the pipeline, `<pipeline>-runs.md`, keeps one line a day of
+  its runs.
+- **MCP tools** — `memory_pipelines` lists a project's pipelines (trigger,
+  nodes, problems, last run), a pipeline's runs and a run's steps;
+  `memory_pipeline_run` starts (optionally waiting up to 60 seconds for the
+  end), resumes and cancels a run. 63 tools in all. `memory_bootstrap`
+  says whether pipelines run in the project.
+- **REST API** — `GET /api/v1/pipelines`, `POST
+  /api/v1/pipelines/{path}/runs` (202 for a new run, 200 for a known
+  idempotency key), `GET /api/v1/runs`, `GET /api/v1/runs/{id}`, `POST
+  /api/v1/runs/{id}/resume` and `/cancel`, in the OpenAPI spec under the
+  tag `pipelines`. A run token (`gosidian pipeline token create --pipeline
+  <path> --name <service>`) starts one pipeline and nothing else; a
+  `callback_url` in the allowlist receives the run's summary when it ends.
+- **Runs window** in the web UI (in the menu when the server runs
+  pipelines): a project's pipelines with their problems and last run, the
+  runs, updated live, and each run's steps with their output; start,
+  resume and cancel from there. The Projects window gains a `pipelines`
+  flag.
+- **Encrypted secrets** — the API keys and headers the nodes send are
+  sealed with AES-GCM under `GOSIDIAN_SECRETS_KEY` in
+  `<state-dir>/secrets.json` (`gosidian secret set <name>` reads the value
+  from standard input; `list`, `delete`) and named in a pipeline, never
+  written in it: their values appear in no note, run or audit entry.
+- **Lint rule `pipeline-invalid`** (warning) — a pipeline the server would
+  refuse to run, with the reason.
+- **Configuration** — `[pipelines]` with `enabled`, `workers`,
+  `step_timeout`, `retention`, `max_wait`, `max_llm_tokens`,
+  `http_allowlist`, `public_url`, `timezone` and `[[pipelines.llm]]`
+  providers, and the matching `GOSIDIAN_PIPELINES_*` variables
+  (`docs/configuration.md`).
+
+### Changed
+- `npm run dev` proxies the API to `GOSIDIAN_API`, by default
+  `http://127.0.0.1:8084`, where the address was fixed.
+
 ## [2.73.0] — 2026-10-09 — "web UI details"
 
 The low findings of a graphic review of the web UI: hierarchy, control

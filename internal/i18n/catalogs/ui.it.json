@@ -184,7 +184,8 @@
     "settings": "Impostazioni",
     "search": "Ricerca",
     "admin": "Admin",
-    "menu": "Menu"
+    "menu": "Menu",
+    "runs": "Esecuzioni"
   },
   "index": {
     "projects_h2": "Progetti",
@@ -681,7 +682,10 @@
       "lean_on": "Lean read acceso: i token che qui non scrivono ricevono solo le direttive di lettura (meno token, meno contesto). Clic per spegnere.",
       "lean_off": "Clic per dare ai token che qui non scrivono un bootstrap ridotto: solo le direttive di lettura.",
       "mirror_on": "Mirror acceso: i token che leggono il progetto possono tenerne una copia in sola lettura sulla loro macchina (gosidian mirror sync); ogni sincronizzazione è registrata. Clic per spegnere.",
-      "mirror_off": "Clic per lasciare ai token che leggono il progetto una copia in sola lettura sulla loro macchina: letture più economiche per gli agent, ma le note escono dal server."
+      "mirror_off": "Clic per lasciare ai token che leggono il progetto una copia in sola lettura sulla loro macchina: letture più economiche per gli agent, ma le note escono dal server.",
+      "pipelines_master_off": "Le pipeline sono spente sul server (GOSIDIAN_PIPELINES_ENABLED): questo flag non fa niente finché non si accendono.",
+      "pipelines_on": "Pipeline accese: il server esegue le pipeline del progetto (note type: pipeline) e scrive nel progetto i loro risultati. Clic per spegnere.",
+      "pipelines_off": "Clic per lasciare al server eseguire le pipeline del progetto: scrivono note nel progetto a nome della pipeline."
     },
     "legend": {
       "title": "Cosa fanno i flag",
@@ -691,7 +695,8 @@
       "anchors": "scrive al bootstrap gli agent del vault come file di subagent locali; serve il suo interruttore sul server, ed è sbiadito finché è spento.",
       "tag_vocab": "lascia al progetto estendere il vocabolario dei tag del lint da memory/conventions.md.",
       "lean_read": "dà un bootstrap più corto ai token che non possono scrivere.",
-      "mirror": "lascia a chi legge una copia in sola lettura del progetto: le note escono dal server, e ogni sincronizzazione è registrata."
+      "mirror": "lascia a chi legge una copia in sola lettura del progetto: le note escono dal server, e ogni sincronizzazione è registrata.",
+      "pipelines": "lascia al server eseguire le pipeline del progetto, che scrivono note a loro nome; serve il suo interruttore sul server, ed è sbiadito finché è spento."
     }
   },
   "members": {
@@ -1009,5 +1014,47 @@
     "confirm": "Conferma",
     "ok": "OK",
     "error_title": "Qualcosa è andato storto"
+  },
+  "runs": {
+    "title": "Esecuzioni",
+    "intro": "Le pipeline dei progetti che leggi e le loro esecuzioni. Una pipeline è una nota type: pipeline con un blocco ```pipeline; chi scrive nel progetto la avvia, riprende un'esecuzione in attesa o la annulla.",
+    "project": "Progetto",
+    "status": "Stato",
+    "all_projects": "Tutti i progetti",
+    "all_statuses": "Tutti gli stati",
+    "refresh": "Aggiorna",
+    "pipelines": "Pipeline",
+    "runs": "Esecuzioni",
+    "no_pipelines": "Nessuna pipeline: crea una nota type: pipeline in un progetto con il flag pipelines acceso.",
+    "no_runs": "Nessuna esecuzione.",
+    "last_run": "Stato dell'ultima esecuzione",
+    "start": "Avvia",
+    "resume": "Riprendi",
+    "cancel": "Annulla",
+    "by": "{trigger} · {actor}",
+    "attempt": "tentativo {n}",
+    "waits_until": "attende fino a",
+    "truncated": "Uscita tagliata: quella intera è nell'esecuzione.",
+    "input_prompt": "Dati di avvio di «{name}», un oggetto JSON che i nodi leggono come trigger (i file con il loro percorso nel vault):",
+    "resume_prompt": "Dati per il passo in attesa, in JSON: diventano la sua uscita.",
+    "bad_json": "Non è JSON valido.",
+    "input_object": "I dati di avvio sono un oggetto JSON, fra graffe.",
+    "started": "«{name}» avviata.",
+    "resumed": "Esecuzione ripresa.",
+    "canceled": "Esecuzione annullata.",
+    "load_failed": "Non riesco a leggere le esecuzioni.",
+    "start_failed": "Non riesco ad avviare la pipeline.",
+    "resume_failed": "Non riesco a riprendere l'esecuzione.",
+    "cancel_failed": "Non riesco ad annullare l'esecuzione.",
+    "state": {
+      "pending": "da fare",
+      "queued": "in coda",
+      "running": "in corso",
+      "waiting": "in attesa",
+      "done": "finita",
+      "failed": "fallita",
+      "skipped": "saltata",
+      "canceled": "annullata"
+    }
   }
 }

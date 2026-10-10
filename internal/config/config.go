@@ -35,6 +35,7 @@ type Config struct {
 	AgentAnchors AgentAnchorsConfig `toml:"agent_anchors"`
 	OAuth        OAuthConfig        `toml:"oauth"`
 	Uploads      UploadsConfig      `toml:"uploads"`
+	Pipelines    PipelinesConfig    `toml:"pipelines"`
 
 	// totpWarning says why the configured TOTP mode was read otherwise
 	// (TOTPModeOf); "" when it was read as written.
@@ -317,6 +318,50 @@ type AutomationsConfig struct {
 	Timezone string `toml:"timezone"`
 }
 
+// PipelinesConfig runs the pipelines of the vault (IMP-166/167, ADR-035):
+// notes `type: pipeline` executed by a job runner in the server. Off by
+// default: with it off there is no runner, no route and no tool at work.
+// A project also needs its use_pipelines flag.
+type PipelinesConfig struct {
+	Enabled bool `toml:"enabled"`
+	// Workers is how many steps run at once; default 2.
+	Workers int `toml:"workers"`
+	// Retention is how long the runs that ended are kept in jobs.db;
+	// default 30 days, 0 keeps them.
+	Retention time.Duration `toml:"retention"`
+	// StepTimeout is the longest a step may run (its lease); default 15m.
+	StepTimeout time.Duration `toml:"step_timeout"`
+	// MaxInputBytes caps a run's input; default 256 KiB.
+	MaxInputBytes int `toml:"max_input_bytes"`
+	// MaxOutputBytes caps a step's output; default 1 MiB.
+	MaxOutputBytes int `toml:"max_output_bytes"`
+	// MaxLLMTokens caps the LLM tokens of one run; 0: no cap.
+	MaxLLMTokens int `toml:"max_llm_tokens"`
+	// MaxWait is the longest a wait.call may wait; default 7 days.
+	MaxWait time.Duration `toml:"max_wait"`
+	// HTTPAllowlist holds the URL prefixes http.request and the callbacks
+	// may call; empty: none.
+	HTTPAllowlist []string `toml:"http_allowlist"`
+	// PublicURL is the server's address in the resume URLs; default the
+	// OAuth issuer, else a path.
+	PublicURL string `toml:"public_url"`
+	// Timezone is the zone of the schedule triggers; default the
+	// automations' one.
+	Timezone string `toml:"timezone"`
+	// LLM lists the language model services ([[pipelines.llm]]).
+	LLM []LLMProvider `toml:"llm"`
+}
+
+// LLMProvider is a service with an OpenAI-compatible API.
+type LLMProvider struct {
+	Name    string `toml:"name"`
+	BaseURL string `toml:"base_url"` // up to /v1
+	// APIKeySecret names the secret with the key (gosidian secret set);
+	// empty for a service without keys (Ollama).
+	APIKeySecret string `toml:"api_key_secret"`
+	Model        string `toml:"model"` // the default model
+}
+
 // MCPConfig caps how aggressively an MCP client may mutate the vault.
 // The write rate counts per MCP session, the note size per write. Zero
 // values mean "use defaults".
@@ -394,6 +439,7 @@ func Default() *Config {
 	// Here too, as 0 means "forever": applyDefaults turned a saved 0 into
 	// 30 days at the next start, and the prune emptied the trash (BUG-105).
 	cfg.Trash.Retention = 30 * 24 * time.Hour
+	cfg.Pipelines.Retention = 30 * 24 * time.Hour
 	// And here, as 0 turns the cache off: applyDefaults put it back to 128
 	// (IMP-163).
 	cfg.Vault.CacheSize = 128
@@ -596,6 +642,9 @@ func (c *Config) ApplyEnv() error {
 			}
 		}
 		c.MCP.IngestURLAllowlist = prefixes
+	}
+	if err := c.applyPipelinesEnv(); err != nil {
+		return err
 	}
 	if v := os.Getenv("GOSIDIAN_AUTOMATIONS_ENABLED"); v != "" {
 		c.Automations.Enabled = envBool(v)
@@ -831,6 +880,21 @@ func (c *Config) applyDefaults() {
 	if c.Automations.Interval <= 0 {
 		c.Automations.Interval = 5 * time.Minute
 	}
+	if c.Pipelines.Workers <= 0 {
+		c.Pipelines.Workers = 2
+	}
+	if c.Pipelines.StepTimeout <= 0 {
+		c.Pipelines.StepTimeout = 15 * time.Minute
+	}
+	if c.Pipelines.MaxInputBytes <= 0 {
+		c.Pipelines.MaxInputBytes = 256 << 10
+	}
+	if c.Pipelines.MaxOutputBytes <= 0 {
+		c.Pipelines.MaxOutputBytes = 1 << 20
+	}
+	if c.Pipelines.MaxWait <= 0 {
+		c.Pipelines.MaxWait = 7 * 24 * time.Hour
+	}
 	if c.Webauth.SessionTTL == 0 {
 		c.Webauth.SessionTTL = 24 * time.Hour
 	}
@@ -871,4 +935,71 @@ func (c *Config) applyDefaults() {
 	if c.Global.PrivateProject == "" {
 		c.Global.PrivateProject = "global-private"
 	}
+}
+
+// applyPipelinesEnv reads the GOSIDIAN_PIPELINES_* variables. One LLM
+// provider can come from the environment too, named "default", for a
+// compose file that has no config.toml.
+func (c *Config) applyPipelinesEnv() error {
+	if v := os.Getenv("GOSIDIAN_PIPELINES_ENABLED"); v != "" {
+		c.Pipelines.Enabled = envBool(v)
+	}
+	if v := os.Getenv("GOSIDIAN_PIPELINES_WORKERS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("GOSIDIAN_PIPELINES_WORKERS: %w", err)
+		}
+		c.Pipelines.Workers = n
+	}
+	for _, d := range []struct {
+		env string
+		dst *time.Duration
+	}{
+		{"GOSIDIAN_PIPELINES_RETENTION", &c.Pipelines.Retention},
+		{"GOSIDIAN_PIPELINES_STEP_TIMEOUT", &c.Pipelines.StepTimeout},
+		{"GOSIDIAN_PIPELINES_MAX_WAIT", &c.Pipelines.MaxWait},
+	} {
+		if v := os.Getenv(d.env); v != "" {
+			dur, err := time.ParseDuration(v)
+			if err != nil {
+				return fmt.Errorf("%s: %w", d.env, err)
+			}
+			*d.dst = dur
+		}
+	}
+	if v := os.Getenv("GOSIDIAN_PIPELINES_MAX_LLM_TOKENS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("GOSIDIAN_PIPELINES_MAX_LLM_TOKENS: %w", err)
+		}
+		c.Pipelines.MaxLLMTokens = n
+	}
+	if v := os.Getenv("GOSIDIAN_PIPELINES_HTTP_ALLOWLIST"); v != "" {
+		var prefixes []string
+		for _, p := range strings.Split(v, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				prefixes = append(prefixes, p)
+			}
+		}
+		c.Pipelines.HTTPAllowlist = prefixes
+	}
+	if v := os.Getenv("GOSIDIAN_PIPELINES_PUBLIC_URL"); v != "" {
+		c.Pipelines.PublicURL = v
+	}
+	if v := os.Getenv("GOSIDIAN_PIPELINES_TIMEZONE"); v != "" {
+		c.Pipelines.Timezone = v
+	}
+	if v := os.Getenv("GOSIDIAN_PIPELINES_LLM_URL"); v != "" {
+		p := LLMProvider{Name: "default", BaseURL: v, Model: os.Getenv("GOSIDIAN_PIPELINES_LLM_MODEL"), APIKeySecret: os.Getenv("GOSIDIAN_PIPELINES_LLM_KEY_SECRET")}
+		replaced := false
+		for i := range c.Pipelines.LLM {
+			if c.Pipelines.LLM[i].Name == "default" {
+				c.Pipelines.LLM[i], replaced = p, true
+			}
+		}
+		if !replaced {
+			c.Pipelines.LLM = append([]LLMProvider{p}, c.Pipelines.LLM...)
+		}
+	}
+	return nil
 }

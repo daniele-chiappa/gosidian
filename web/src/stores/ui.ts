@@ -46,6 +46,9 @@ interface UIState {
   /** The languages the operator enables (`i18n.enabled_langs`), read from
    *  /api/v1/version at every hydrate; not persisted. */
   enabledLocales: LocaleCode[]
+  /** The server runs pipelines (VersionInfo.pipelines_enabled), read with
+   *  the languages; not persisted. */
+  pipelinesEnabled: boolean
 }
 
 const VALID_PRESETS: ThemePreset[] = [
@@ -68,6 +71,7 @@ export const useUIStore = defineStore('ui', {
     planciaViewMode: 'strip',
     graphMode: '2d',
     enabledLocales: [...VALID_LOCALES],
+    pipelinesEnabled: false,
   }),
   actions: {
     setPreset(preset: ThemePreset) {
@@ -117,6 +121,7 @@ export const useUIStore = defineStore('ui', {
       } catch {
         v = null
       }
+      this.pipelinesEnabled = Boolean(v?.pipelines_enabled)
       const enabled = (v?.enabled_langs ?? []).filter(isLocale)
       this.enabledLocales = enabled.length ? enabled : [...VALID_LOCALES]
       if (!this.locale || !this.enabledLocales.includes(this.locale)) {

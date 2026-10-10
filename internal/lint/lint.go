@@ -30,6 +30,7 @@ import (
 
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/parser"
+	"github.com/gosidian/gosidian/internal/pipeline"
 	"github.com/gosidian/gosidian/internal/vault"
 )
 
@@ -101,6 +102,9 @@ type Linter struct {
 	// skillOversizeBytes is the skill-oversize threshold; <= 0 means
 	// DefaultSkillOversizeBytes. The MCP server passes memory_get's cap.
 	skillOversizeBytes int
+	// pipelineTypes are the node types pipeline-invalid accepts; nil means
+	// the base ones (WithPipelineTypes).
+	pipelineTypes pipeline.Types
 }
 
 // New wires a Linter against a live vault + index.

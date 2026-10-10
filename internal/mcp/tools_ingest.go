@@ -240,6 +240,7 @@ func (s *Server) handleIngest(ctx context.Context, req mcp.CallToolRequest) (*mc
 			return errRes, nil
 		}
 		s.auditWrite(ctx, audit.ActionUploadAttachment, res.Path, "", size)
+		s.arrived(ctx, res.Path, uploadName(filename, sourcePath, bridgeFilename), "")
 		out := map[string]any{
 			"path":     res.Path,
 			"kind":     string(ingestAttachment),
@@ -459,6 +460,7 @@ func (s *Server) ingestRaw(ctx context.Context, in ingestIntent, data []byte) (*
 		}
 		return s.handleCreateMediaNote(ctx, delegated)
 	default: // ingestAttachment
+		s.arrived(ctx, res.Path, in.Filename, "")
 		out := map[string]any{
 			"path":     res.Path,
 			"kind":     string(ingestAttachment),

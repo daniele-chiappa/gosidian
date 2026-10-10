@@ -54,6 +54,16 @@ describe('ui store', () => {
     expect(document.documentElement.lang).toBe('fr')
   })
 
+  it('reads whether the server runs pipelines (IMP-166)', async () => {
+    mockedGetVersion.mockResolvedValue({ version: 'test', api: 'v1', pipelines_enabled: true })
+    const ui = useUIStore()
+    await ui.hydrate()
+    expect(ui.pipelinesEnabled).toBe(true)
+    mockedGetVersion.mockResolvedValue({ version: 'test', api: 'v1' })
+    await ui.refreshLocales()
+    expect(ui.pipelinesEnabled).toBe(false)
+  })
+
   describe('enabled languages (IMP-148)', () => {
     it('first boot takes the default and offers only the enabled languages', async () => {
       mockedGetVersion.mockResolvedValue({ version: 'test', api: 'v1', default_lang: 'it', enabled_langs: ['it', 'en'] })

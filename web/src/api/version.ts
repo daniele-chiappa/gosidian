@@ -11,6 +11,9 @@ export interface VersionInfo {
    *  (GOSIDIAN_OPEN_MODE=readonly): the SPA may show a token-less guest
    *  session instead of forcing /login. See BUG-018. */
   open_mode?: boolean
+  /** True when the server runs pipelines ([pipelines] enabled): the Runs
+   *  window and the project flag use_pipelines are shown (IMP-166). */
+  pipelines_enabled?: boolean
 }
 
 /**

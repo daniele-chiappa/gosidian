@@ -1,6 +1,6 @@
 # MCP tool catalogue
 
-**61 tools** cover the full retrieval → write → workflow →
+**63 tools** cover the full retrieval → write → workflow →
 orchestration → self-check cycle for agent memory.
 
 Consult each tool's `description` via your client's `tools/list` call
@@ -329,6 +329,18 @@ from the caller's token identity and cannot be forged, while
   those already handed off, the rules that do not parse and the last runs.
   `run: true` runs the rules now (write access to the project)
   ([automations](../vault/databases.md#automations)).
+- `memory_pipelines(project?, path?, run?, limit?)` — the pipelines
+  (notes `type: pipeline`) with their trigger and nodes, or the problem
+  that keeps one from running; with `path` its last runs, with `run` one
+  run and its steps (outputs cut at 4 KiB). Read-only. Off unless the
+  server runs pipelines and the project has `use_pipelines`
+  ([pipelines](../pipelines.md)).
+- `memory_pipeline_run(action?, path?, input?, idempotency_key?,
+  callback_url?, wait?, run?, step?, data?)` — `start` (default) runs a
+  pipeline with `input` as `trigger`; the same `idempotency_key` gives
+  back the same run; `wait` (max 60 s) waits for it to end or stop at a
+  `wait.call`. `resume` hands `data` to the waiting step of `run`,
+  `cancel` stops it. Write access to the pipeline's project.
 - `memory_self_stats()` — token identity (including the multi-project
   scope list), `access` (every project the token reaches with its live
   level, `read` or `write`: a write-scoped token can still be read-only
@@ -368,7 +380,10 @@ from the caller's token identity and cannot be forged, while
   configurable via `[lint] hot_oversize_bytes`), `skill-oversize` (a
   `type:skill` note over 24 KiB, which `memory_get` hands back truncated
   to its outline and first chunk: split it into an entry note plus
-  reference notes under `skills/<slug>/`). Zero
+  reference notes under `skills/<slug>/`), `pipeline-invalid` (a
+  `type: pipeline` note the server would refuse to run: no ```` ```pipeline ````
+  block, YAML that does not parse, an unknown node type, a reference to
+  a node that does not run before; [pipelines](../pipelines.md)). Zero
   `severity:error` on a coherent vault.
 - `memory_self_improve(category, title, friction, confidence, …)` —
   *experimental, opt-in, off by default*: record a structured insight

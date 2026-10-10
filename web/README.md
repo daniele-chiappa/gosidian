@@ -10,7 +10,8 @@ phasing.
 ```bash
 nvm use            # picks node from .nvmrc (22)
 npm ci
-npm run dev        # http://localhost:5173, proxies API to 127.0.0.1:8080
+npm run dev        # http://localhost:5173, proxies API to the lab, 127.0.0.1:8084
+                   # (GOSIDIAN_API=http://localhost:8080 npm run dev for another server)
 ```
 
 Build artifacts are emitted into `../internal/server/web/dist/` so the

@@ -263,6 +263,14 @@ func writeConformanceCases() []conformanceCase {
 			call:   args(func(s *Server) toolFn { return s.handleAutomations }, map[string]any{"project": "p", "run": true}),
 			audit:  []auditWant{{audit.ActionCreate, "p/handoffs/*"}},
 			events: []seenEvent{{events.TopicNote, "create", "p/handoffs/*"}, {events.TopicTree, "create", "p/handoffs/*"}}},
+		// A run it starts writes as the pipeline, on the runner, without the
+		// caller's budget; the start itself takes a place and is audited.
+		{tool: "memory_pipeline_run",
+			server: func(t *testing.T) *Server { s, _ := pipelineServer(t); return s },
+			setup:  none,
+			call:   args(func(s *Server) toolFn { return s.handlePipelineRun }, map[string]any{"path": "p/pipelines/copy.md", "input": map[string]any{"name": "doc"}}),
+			audit:  []auditWant{{audit.ActionPipelineRun, "p/pipelines/copy.md"}},
+			events: []seenEvent{{events.TopicNote, "create", "p/out/doc.md"}}},
 	}
 }
 
@@ -278,7 +286,7 @@ var readOnlyTools = map[string]bool{
 	"memory_lint": true, "memory_list_attachments": true, "memory_list_bootstrap_templates": true,
 	"memory_list_notes": true, "memory_list_projects": true, "memory_list_tags": true,
 	"memory_notes_by_importance": true, "memory_notes_by_tag": true, "memory_outlinks": true,
-	"memory_path": true, "memory_pending_handoffs": true, "memory_pinned": true,
+	"memory_path": true, "memory_pending_handoffs": true, "memory_pinned": true, "memory_pipelines": true,
 	"memory_plans": true, "memory_query": true, "memory_recent": true,
 	"memory_search": true, "memory_self_stats": true, "memory_skills": true,
 	"memory_stale": true, "memory_todos": true, "memory_wait_changes": true,

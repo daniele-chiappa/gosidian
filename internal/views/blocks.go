@@ -22,7 +22,12 @@ var fenceRe = regexp.MustCompile("^ {0,3}(`{3,}|~{3,})\\s*([^`\\s]*)")
 
 // FindBlocks returns the view blocks of body, in order. A ```view inside
 // another fence (a code sample showing a view) is not a block.
-func FindBlocks(body []byte) []Block {
+func FindBlocks(body []byte) []Block { return FindFenced(body, "view") }
+
+// FindFenced returns the fenced blocks of body whose info string is lang
+// (```pipeline, IMP-167), in order, with the same rules as the view
+// blocks: one inside another fence is not a block.
+func FindFenced(body []byte, lang string) []Block {
 	var out []Block
 	var fence string // the open fence's marker, "" outside a fence
 	var cur *Block
@@ -37,7 +42,7 @@ func FindBlocks(body []byte) []Block {
 		switch {
 		case fence == "" && m != nil:
 			fence = m[1]
-			if m[2] == "view" {
+			if m[2] == lang {
 				cur = &Block{Start: off}
 			}
 		case fence != "" && m != nil && m[2] == "" && strings.HasPrefix(m[1], fence[:1]) && len(m[1]) >= len(fence):

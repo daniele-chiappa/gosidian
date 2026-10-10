@@ -18,6 +18,9 @@ const planciaSrc = process.env.PLANCIA_SRC ? resolve(process.env.PLANCIA_SRC) : 
 // URLs are rooted at /static/dist/ so the embed handler can serve
 // them with aggressive cache headers; the generated index.html and
 // HTML shell stays at /, served by handlers_spa.go.
+// The Go server `npm run dev` proxies to: the development lab by default.
+const devApi = process.env.GOSIDIAN_API ?? 'http://127.0.0.1:8084'
+
 export default defineConfig({
   plugins: [
     vue(),
@@ -67,8 +70,10 @@ export default defineConfig({
       // server so the SPA can run with `npm run dev` while the binary
       // serves data. Not /static/dist: that is this server's own base, and
       // proxying it sent even /src/main.ts to the Go server (a 404).
-      '/api': 'http://127.0.0.1:8080',
-      '/vault-files': 'http://127.0.0.1:8080',
+      // The default is the lab, never the production server: GOSIDIAN_API
+      // points it elsewhere (GOSIDIAN_API=http://localhost:8080 npm run dev).
+      '/api': devApi,
+      '/vault-files': devApi,
     },
   },
   build: {

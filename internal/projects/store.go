@@ -77,6 +77,11 @@ type Flags struct {
 	// copy (IMP-102). It moves the project's notes onto other machines, so
 	// a project admin opts in; off by default.
 	AllowLocalMirror bool `json:"allow_local_mirror,omitempty"`
+	// UsePipelines lets the project's pipeline notes run (IMP-167,
+	// ADR-035), when the server's [pipelines] switch is on too. A pipeline
+	// writes notes and calls services on the project's behalf, so a project
+	// admin opts in; off by default.
+	UsePipelines bool `json:"use_pipelines,omitempty"`
 	// Since is when the project took its name, in unix nanoseconds: set by
 	// projectops.Create, by a rename (Store.Rename) and, from the saved
 	// access, by RestoreProject. A note trashed under the name before it
@@ -590,6 +595,12 @@ func (s *Store) UsesLeanReadBootstrap(name string) bool {
 // mirrors (IMP-102). Unknown projects default to false.
 func (s *Store) AllowsLocalMirror(name string) bool {
 	return s.Get(name).AllowLocalMirror
+}
+
+// UsesPipelines reports whether the project runs its pipelines (IMP-167).
+// Unknown projects default to false.
+func (s *Store) UsesPipelines(name string) bool {
+	return s.Get(name).UsePipelines
 }
 
 // MemberLevel returns the grant level a user holds on a project, and whether

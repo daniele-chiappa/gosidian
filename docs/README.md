@@ -15,7 +15,7 @@ trial, read the [root README](../README.md) first.
 ## MCP server
 
 - [Overview](mcp/overview.md) — what MCP is, why gosidian uses it
-- [Tool catalogue](mcp/tools.md) — all 61 typed tools, grouped by purpose
+- [Tool catalogue](mcp/tools.md) — all 63 typed tools, grouped by purpose
 - [Authentication](mcp/authentication.md) — bearer tokens, scopes,
   rotation
 - [Self-improvement loop](mcp/self-improvement.md) — *experimental, off
@@ -58,6 +58,8 @@ trial, read the [root README](../README.md) first.
   schema: backlogs and lists that `memory_query` can filter
 - [Views](vault/views.md) — `view` blocks: notes that list other notes
   by folder and frontmatter, computed when the note is read
+- [Pipelines](pipelines.md) — notes `type: pipeline` the server runs
+  when a document arrives, a service calls or the clock strikes (opt-in)
 - [Obsidian compatibility](vault/obsidian-compat.md) — what's fully
   compatible, what degrades, what's ignored
 

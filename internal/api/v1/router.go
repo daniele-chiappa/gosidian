@@ -8,6 +8,7 @@ import (
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/oauth"
 	"github.com/gosidian/gosidian/internal/parser"
+	"github.com/gosidian/gosidian/internal/pipeline"
 	"github.com/gosidian/gosidian/internal/projects"
 	"github.com/gosidian/gosidian/internal/ratelimit"
 	"github.com/gosidian/gosidian/internal/server/events"
@@ -37,6 +38,9 @@ type Deps struct {
 	GitSync     *gitsync.Sync // optional; nil disables /history
 	ConfigPath  string        // path to cfg.toml; "" disables /settings PUT
 	OAuth       *oauth.Server // optional; nil disables the consent API (IMP-092)
+	// Pipelines is the pipeline engine (IMP-166); nil while [pipelines] is
+	// off, and the /pipelines and /runs routes answer 404.
+	Pipelines *pipeline.Engine
 }
 
 // Router owns the http.Handler tree under /api/v1/*. A separate type
@@ -49,6 +53,7 @@ type Router struct {
 	mux           *http.ServeMux
 	loginLimiter  *loginLimiter
 	exportLimiter *ratelimit.Window // per account, see export.go
+	runLimiter    *ratelimit.Window // per run token and resume key, see pipelines.go
 }
 
 // NewRouter wires the v1 routes against the given dependencies. The
@@ -59,6 +64,7 @@ func NewRouter(deps *Deps) *Router {
 		mux:           http.NewServeMux(),
 		loginLimiter:  newLoginLimiter(),
 		exportLimiter: ratelimit.New(exportWindow, exportMax),
+		runLimiter:    ratelimit.New(runTokenWindow, runTokenMax),
 	}
 	r.registerPublic()
 	r.registerAuthed()
@@ -166,6 +172,14 @@ func (r *Router) registerAuthed() {
 	r.mux.Handle("/api/v1/admin/export.zip", owner(r.handleVaultExport))
 
 	r.mux.Handle("/api/v1/insights/pending", owner(r.handleInsightsPending))
+
+	// Pipelines (IMP-166, IMP-167). Starting one and resuming a waiting run
+	// also take a run token or a resume key, without an account: those
+	// handlers authenticate themselves and fall back to authed.
+	r.mux.Handle("/api/v1/pipelines", authed(r.handlePipelines))
+	r.mux.Handle("/api/v1/pipelines/", r.pipelineRoutes(authed))
+	r.mux.Handle("/api/v1/runs", authed(r.handleRuns))
+	r.mux.Handle("/api/v1/runs/", r.runRoutes(authed))
 }
 
 // handleHealth confirms the v1 mux is wired and reachable.
