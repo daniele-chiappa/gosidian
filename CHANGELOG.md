@@ -8,6 +8,43 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.76.0] — 2026-10-10 — "diagrams"
+
+Diagrams in the notes, first as a format: a block of YAML that describes
+a flow, a tree, a mind map, a fishbone, a Venn, a matrix or a Gantt chart,
+which an agent writes and reads as text and the server checks. Pull the
+image and restart, nothing to migrate: the first start re-indexes the
+vault, since the links of a diagram's nodes are now links of the note
+(seconds for a vault of a few thousand notes). The drawing and the editor
+of the web UI come in the next releases; until then a diagram shows as
+its YAML. The format, its kinds and examples are in `docs/diagrams.md`.
+
+### Added
+- **The diagram format** — a ```` ```diagram ```` block in any note, or
+  a note `type: diagram` holding one that other notes embed with
+  `![[…]]`: `diagram: 1`, a `kind` (`flow`, `tree`, `mindmap`,
+  `fishbone`, `venn`, `matrix`, `gantt`), its content (nodes and edges
+  with shapes, classes and groups; branches; sets and the areas they
+  share; quadrants or a grid of cells; tasks with dates, lengths,
+  dependencies and milestones) and an optional `layout` of positions by
+  id, for an editor. Short forms are accepted: an edge as
+  `"from -> to: label"`, a leaf as a text, a branch as
+  `{Label: [children]}`.
+- **Checks** — a write through the MCP tools that saves a block that does
+  not read gets a notice with the problems on the note's own lines, and
+  the note is saved as written; the lint rule `diagram-invalid` reports
+  the same, and a note `type: diagram` without exactly one block.
+- **Links** — a node, a branch, a set, an item or a task can carry
+  `link: "[[note]]"` (or a web address): the note it names shows a
+  backlink.
+- **For agents** — `memory_get` adds `diagrams` for a note that has some:
+  each one's kind, title, line, the diagram said in words and its
+  problems; `memory_bootstrap` gives the format with an example in
+  `capabilities.diagrams`.
+- **Examples** — `docs/diagrams/examples/` holds valid examples of every
+  kind and broken ones, each naming its problem: the format's contract,
+  which the server's tests read.
+
 ## [2.75.0] — 2026-10-10 — "pipeline plugins"
 
 Plugins for the pipelines: an MCP server running beside gosidian adds

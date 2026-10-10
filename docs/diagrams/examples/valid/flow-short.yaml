@@ -1,0 +1,8 @@
+# The short forms of a flow: a node as its id, an edge as "from -> to: label".
+kind: flow
+direction: LR
+nodes: [start, check, done]
+edges:
+  - "start -> check"
+  - "check -> done: ok"
+  - "check -> start: retry"

@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gosidian/gosidian/internal/attach"
+	"github.com/gosidian/gosidian/internal/diagram"
 	"github.com/gosidian/gosidian/internal/initprompt"
 	"github.com/gosidian/gosidian/internal/lint"
 	"github.com/gosidian/gosidian/internal/parser"
@@ -157,6 +158,29 @@ type bootstrapCapabilities struct {
 	// Pipelines is true when the server runs this project's pipelines
 	// (IMP-166): memory_pipelines and memory_pipeline_run work here.
 	Pipelines bool `json:"pipelines,omitempty"`
+	// Diagrams is the diagram format the server reads (ADR-036).
+	Diagrams bootstrapDiagrams `json:"diagrams"`
+}
+
+// bootstrapDiagrams tells an agent how a diagram is written: a ```diagram
+// block of YAML in a note, or a note type: diagram holding one.
+type bootstrapDiagrams struct {
+	Format   int      `json:"format"`
+	Block    string   `json:"block"`
+	NoteType string   `json:"note_type"`
+	Kinds    []string `json:"kinds"`
+	Example  string   `json:"example"`
+}
+
+func diagramCapability() bootstrapDiagrams {
+	kinds := make([]string, len(diagram.Kinds))
+	for i, k := range diagram.Kinds {
+		kinds[i] = string(k)
+	}
+	return bootstrapDiagrams{
+		Format: diagram.Version, Block: "```" + diagram.Lang, NoteType: diagram.NoteType, Kinds: kinds,
+		Example: "kind: flow\nnodes: [{id: a, label: Start, link: \"[[project/note]]\"}, {id: b, label: Done}]\nedges: [\"a -> b: label\"]",
+	}
 }
 
 // bootstrapReadAttachCapability is the attachments block of a read-only
@@ -205,6 +229,7 @@ func (s *Server) buildCapabilities(readOnly bool) bootstrapCapabilities {
 			MediaNotes:  s.vault.MediaNotesEnabled(),
 			TableNotes:  s.vault.TableNotesEnabled(),
 			Attachments: bootstrapReadAttachCapability{DownloadEndpointHint: downloadEndpointHint},
+			Diagrams:    diagramCapability(),
 		}
 	}
 	exts := make([]string, 0, len(attach.AllowedExt))
@@ -216,6 +241,7 @@ func (s *Server) buildCapabilities(readOnly bool) bootstrapCapabilities {
 		HTMLNotes:  s.vault.HTMLNotesEnabled(),
 		MediaNotes: s.vault.MediaNotesEnabled(),
 		TableNotes: s.vault.TableNotesEnabled(),
+		Diagrams:   diagramCapability(),
 		Attachments: bootstrapAttachCapability{
 			MaxMiB:               attach.MaxBytes >> 20,
 			Extensions:           exts,

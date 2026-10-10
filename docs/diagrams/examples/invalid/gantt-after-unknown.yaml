@@ -1,0 +1,4 @@
+# error: which is no task
+kind: gantt
+tasks:
+  - {label: A, after: zz, days: 1}

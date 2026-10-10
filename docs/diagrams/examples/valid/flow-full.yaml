@@ -1,0 +1,22 @@
+# A flow in the full form: shapes, classes, a group, a link, positions.
+diagram: 1
+kind: flow
+title: Arrival of a document
+direction: TB
+nodes:
+  - {id: upload, label: "Upload", shape: pill, class: user}
+  - {id: convert, label: "docling.convert", link: "[[team/pipelines/arrivals]]"}
+  - {id: pictures, label: "Pictures?", shape: decision}
+  - {id: describe, label: "llm.describe", class: ext}
+  - {id: note, label: "The note", shape: doc, class: data}
+edges:
+  - {from: upload, to: convert}
+  - {from: convert, to: pictures, label: markdown}
+  - {from: pictures, to: describe, label: "yes"}
+  - {from: pictures, to: note, label: "no", style: dashed}
+  - {from: describe, to: note}
+groups:
+  - {id: plugin, label: "Plugin", nodes: [convert]}
+layout:
+  convert: {x: 240, y: 120}
+  plugin: {x: 200, y: 90, w: 180, h: 100}

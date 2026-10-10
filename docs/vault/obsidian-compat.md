@@ -62,6 +62,9 @@ backlinks appear — without editing a single file.
 ### gosidian → Obsidian (things gosidian has that Obsidian ignores)
 
 - **`.gosidian/` folder** — hidden, Obsidian doesn't touch it.
+- **```` ```diagram ```` blocks** ([diagrams](../diagrams.md)) — Obsidian
+  shows their YAML as code. The links of their nodes are links for
+  gosidian, not for Obsidian.
 - **Custom frontmatter fields** (`importance`, `type`, `status`,
   `pinned`, `trigger_phrase`) — Obsidian preserves them but doesn't
   interpret them. You can query them with the **Dataview** plugin,

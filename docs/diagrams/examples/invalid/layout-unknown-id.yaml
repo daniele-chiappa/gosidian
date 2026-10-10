@@ -1,0 +1,5 @@
+# error: which is no id of the diagram
+kind: flow
+nodes: [a]
+layout:
+  b: {x: 1, y: 2}

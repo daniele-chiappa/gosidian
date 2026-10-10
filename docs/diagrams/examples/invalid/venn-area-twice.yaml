@@ -1,0 +1,6 @@
+# error: is there twice
+kind: venn
+sets: [a, b]
+areas:
+  - {sets: [a, b]}
+  - {sets: [b, a]}

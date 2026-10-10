@@ -1,0 +1,6 @@
+# error: a node is in one group
+kind: flow
+nodes: [a, b]
+groups:
+  - {id: g1, nodes: [a]}
+  - {id: g2, nodes: [a, b]}

@@ -1,0 +1,4 @@
+# error: which is no node or group
+kind: flow
+nodes: [a, b]
+edges: ["a -> c"]

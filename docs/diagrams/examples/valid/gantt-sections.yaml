@@ -1,0 +1,11 @@
+kind: gantt
+title: Pipelines, phase 1
+sections:
+  - label: R1
+    tasks:
+      - {id: runner, label: "Job runner", start: 2026-10-08, end: 2026-10-09, status: done}
+      - {id: nodes, label: "Base nodes", after: runner, days: 1, status: done}
+  - label: R2
+    tasks:
+      - {id: plugins, label: "Plugins", after: nodes, days: 2, status: active, link: "[[gosidian/docs/improvements/IMP-168]]"}
+      - {label: "Release", after: plugins, status: milestone}

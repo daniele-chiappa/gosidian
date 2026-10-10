@@ -60,6 +60,9 @@ trial, read the [root README](../README.md) first.
   by folder and frontmatter, computed when the note is read
 - [Pipelines](pipelines.md) — notes `type: pipeline` the server runs
   when a document arrives, a service calls or the clock strikes (opt-in)
+- [Diagrams](diagrams.md) — ```` ```diagram ```` blocks of YAML: flows,
+  trees, mind maps, fishbones, Venn, matrices and Gantt charts, checked
+  by the server and read by agents as text
 - [Obsidian compatibility](vault/obsidian-compat.md) — what's fully
   compatible, what degrades, what's ignored
 

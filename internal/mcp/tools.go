@@ -15,6 +15,7 @@ import (
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/gosidian/gosidian/internal/dbschema"
+	"github.com/gosidian/gosidian/internal/diagram"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/metrics"
 	"github.com/gosidian/gosidian/internal/parser"
@@ -144,7 +145,7 @@ func (s *Server) registerTools() {
 	), s.handleNotesByTag)
 
 	s.impl.AddTool(mcp.NewTool("memory_get",
-		mcp.WithDescription("Read a note by its vault-relative path (e.g. 'project/note.md'). Oversize guard: when the body exceeds 24 KiB (and raw is not set) the response is truncated — frontmatter + heading outline + the first chunk, with truncated:true, the full size, and the note's real etag (if_match still works). Fetch just the section you need via memory_get_section, or pass raw:true only when you really need the whole body. To get a large note onto your own disk without spending context tokens, GET the HTTP /download endpoint instead (your MCP base URL plus /download?path=<path>, bearer token), or pass transfer:\"http\" for a single-use URL that needs no bearer — see bootstrap capabilities. An Obsidian base ('project/books.base') reads as a note too, read-only: kind \"base\", its views translated into ```view blocks (render_views computes them), what has no equivalent in a warning, and its YAML in source."),
+		mcp.WithDescription("Read a note by its vault-relative path (e.g. 'project/note.md'). Oversize guard: when the body exceeds 24 KiB (and raw is not set) the response is truncated — frontmatter + heading outline + the first chunk, with truncated:true, the full size, and the note's real etag (if_match still works). Fetch just the section you need via memory_get_section, or pass raw:true only when you really need the whole body. To get a large note onto your own disk without spending context tokens, GET the HTTP /download endpoint instead (your MCP base URL plus /download?path=<path>, bearer token), or pass transfer:\"http\" for a single-use URL that needs no bearer — see bootstrap capabilities. An Obsidian base ('project/books.base') reads as a note too, read-only: kind \"base\", its views translated into ```view blocks (render_views computes them), what has no equivalent in a warning, and its YAML in source. A note with ```diagram blocks (YAML, kind flow, tree, mindmap, fishbone, venn, matrix or gantt; bootstrap capabilities.diagrams) also returns diagrams: each one said in words, with its problems."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative path to the .md file; an Obsidian .base or .canvas reads too, read-only, with kind base or canvas.")),
 		mcp.WithBoolean("raw", mcp.Description("Bypass the oversize guard and return the full body regardless of size; for a .canvas, also its JSON in source.")),
 		mcp.WithNumber("max_bytes", mcp.Description("Explicit body cap in bytes — truncates even below the default threshold. Ignored when raw:true.")),
@@ -602,6 +603,9 @@ type noteContent struct {
 	// getTruncMaxHeadings) so a 300-section log can't flood via its outline.
 	OutlineTotal int    `json:"outline_total,omitempty"`
 	Hint         string `json:"hint,omitempty"`
+	// Diagrams says the note's ```diagram blocks in words, with their
+	// problems (ADR-036), from the whole note even when the body is cut.
+	Diagrams []diagram.Summary `json:"diagrams,omitempty"`
 }
 
 // getBodySoftCap is the memory_get oversize threshold: a larger body comes
@@ -656,6 +660,9 @@ func (s *Server) handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	if ref, kind := s.vault.MediaRefForNote(note.Path, note.Content); kind != "" {
 		nc.Kind = kind
 		nc.Media = ref
+	}
+	if strings.HasSuffix(strings.ToLower(note.Path), ".md") {
+		nc.Diagrams = diagram.Summaries(note.Content)
 	}
 	viewsNote := ""
 	if req.GetBool("render_views", false) {

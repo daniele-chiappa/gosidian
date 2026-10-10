@@ -1,0 +1,6 @@
+# Tasks without sections.
+kind: gantt
+tasks:
+  - {id: a, label: Draft, start: 2026-11-02, days: 3}
+  - {id: b, label: Review, after: a, days: 2, status: critical}
+  - {label: Go live, start: 2026-11-09, status: milestone}

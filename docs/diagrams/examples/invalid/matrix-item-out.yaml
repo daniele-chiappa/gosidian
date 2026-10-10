@@ -1,0 +1,6 @@
+# error: is from 0 to 1
+kind: matrix
+x: Urgency
+y: Importance
+items:
+  - {label: x, x: 1.2, y: 0.5}

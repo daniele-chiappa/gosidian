@@ -1,0 +1,5 @@
+# error: which is no set
+kind: venn
+sets: [a, b]
+areas:
+  - {sets: [a, c], label: x}

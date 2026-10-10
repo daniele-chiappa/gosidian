@@ -1,0 +1,4 @@
+# error: a task has end (YYYY-MM-DD) or days
+kind: gantt
+tasks:
+  - {label: A, start: 2026-10-10}

@@ -1,0 +1,10 @@
+kind: fishbone
+title: Late deliveries
+root: Deliveries are late
+children:
+  - Methods: [No order checklist, Manual routing]
+  - Machines: [Old printer]
+  - Materials: [Packaging out of stock]
+  - Manpower: [Peak season shifts]
+  - Measurement: [No tracking of delays]
+  - Environment: [Strikes, Weather]

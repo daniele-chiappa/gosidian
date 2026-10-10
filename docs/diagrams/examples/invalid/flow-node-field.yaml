@@ -1,0 +1,4 @@
+# error: a node has no field "colour"
+kind: flow
+nodes:
+  - {id: a, colour: red}

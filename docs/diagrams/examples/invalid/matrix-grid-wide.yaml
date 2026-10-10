@@ -1,0 +1,6 @@
+# error: the row has 3 cells
+kind: matrix
+rows: [r]
+columns: [a, b]
+cells:
+  - [1, 2, 3]

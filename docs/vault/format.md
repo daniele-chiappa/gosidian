@@ -141,6 +141,14 @@ what was found. To know whether the original has moved on, compare
 `git ls-remote <upstream> HEAD` with `upstream_commit` — agents do it when
 asked; the server makes no network call for it.
 
+### Diagram notes
+
+A ```` ```diagram ```` block of YAML draws a flow, a tree, a mind map, a
+fishbone, a Venn, a matrix or a Gantt (ADR-036). It can sit in any note,
+or in a note of its own with `type: diagram` in the frontmatter, which
+other notes embed with `![[…]]`. The links of its nodes count as the
+note's links. Format and examples: [diagrams](../diagrams.md).
+
 ### `.html` notes
 
 A single-file `.html` document can be a **first-class note** alongside

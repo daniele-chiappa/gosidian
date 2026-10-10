@@ -1,0 +1,5 @@
+# error: waits for itself
+kind: gantt
+tasks:
+  - {id: a, label: A, after: b, days: 1}
+  - {id: b, label: B, after: a, days: 1}

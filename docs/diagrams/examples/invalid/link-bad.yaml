@@ -1,0 +1,4 @@
+# error: is a [[note]] or an http(s) address
+kind: flow
+nodes:
+  - {id: a, link: "team/note"}

@@ -1,0 +1,4 @@
+# error: is a format this server does not read
+diagram: 2
+kind: flow
+nodes: [a]

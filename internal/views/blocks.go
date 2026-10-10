@@ -9,14 +9,12 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/gosidian/gosidian/internal/parser"
 )
 
-// Block is one ```view fence of a note: Start and End are the byte offsets
-// of the whole fence (End just past its closing line), Spec its content.
-type Block struct {
-	Start, End int
-	Spec       string
-}
+// Block is one fenced block of a note (parser.FencedBlock).
+type Block = parser.FencedBlock
 
 var fenceRe = regexp.MustCompile("^ {0,3}(`{3,}|~{3,})\\s*([^`\\s]*)")
 
@@ -25,40 +23,8 @@ var fenceRe = regexp.MustCompile("^ {0,3}(`{3,}|~{3,})\\s*([^`\\s]*)")
 func FindBlocks(body []byte) []Block { return FindFenced(body, "view") }
 
 // FindFenced returns the fenced blocks of body whose info string is lang
-// (```pipeline, IMP-167), in order, with the same rules as the view
-// blocks: one inside another fence is not a block.
-func FindFenced(body []byte, lang string) []Block {
-	var out []Block
-	var fence string // the open fence's marker, "" outside a fence
-	var cur *Block
-	off := 0
-	for off < len(body) {
-		end := len(body)
-		if i := bytes.IndexByte(body[off:], '\n'); i >= 0 {
-			end = off + i + 1
-		}
-		line := strings.TrimRight(string(body[off:end]), "\r\n")
-		m := fenceRe.FindStringSubmatch(line)
-		switch {
-		case fence == "" && m != nil:
-			fence = m[1]
-			if m[2] == lang {
-				cur = &Block{Start: off}
-			}
-		case fence != "" && m != nil && m[2] == "" && strings.HasPrefix(m[1], fence[:1]) && len(m[1]) >= len(fence):
-			if cur != nil {
-				cur.End = end
-				cur.Spec = string(body[cur.Start:off])
-				cur.Spec = cur.Spec[strings.IndexByte(cur.Spec, '\n')+1:]
-				out = append(out, *cur)
-				cur = nil
-			}
-			fence = ""
-		}
-		off = end
-	}
-	return out
-}
+// (```pipeline, IMP-167); see parser.FindFenced.
+func FindFenced(body []byte, lang string) []Block { return parser.FindFenced(body, lang) }
 
 // Result markers: what Expand inserts after a block for a reader that keeps
 // the spec (an agent). They let Expand drop a result that was copied into

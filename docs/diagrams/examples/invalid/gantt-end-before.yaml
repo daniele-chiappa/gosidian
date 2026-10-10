@@ -1,0 +1,4 @@
+# error: comes before start
+kind: gantt
+tasks:
+  - {label: A, start: 2026-10-10, end: 2026-10-01}

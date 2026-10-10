@@ -1,0 +1,9 @@
+kind: matrix
+title: Eisenhower
+x: {label: Urgency, low: Not urgent, high: Urgent}
+y: {label: Importance, low: Not important, high: Important}
+quadrants: [Plan, Do now, Drop, Delegate]
+items:
+  - {label: "Release v2.76", x: 0.8, y: 0.9}
+  - {label: "Tidy the hot file", x: 0.3, y: 0.6, link: "[[gosidian/hot]]"}
+  - {label: "Newsletter", x: 0.7, y: 0.2}

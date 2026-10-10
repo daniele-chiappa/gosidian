@@ -1,0 +1,5 @@
+# error: is used twice
+kind: flow
+nodes:
+  - {id: a, label: One}
+  - {id: a, label: Two}

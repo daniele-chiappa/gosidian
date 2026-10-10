@@ -1,0 +1,7 @@
+kind: matrix
+title: SWOT
+rows: [Internal, External]
+columns: [Helpful, Harmful]
+cells:
+  - [Strengths, Weaknesses]
+  - [Opportunities, Threats]

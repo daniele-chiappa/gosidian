@@ -43,6 +43,10 @@ var extractionDigests = map[int]string{
 	// 9: a short word of lowercase letters is a tag, not a color (#cafe,
 	// BUG-114 S4-5); the corpus gained one.
 	9: "4f32086ff6d60eacbee1723c93379aa81ad643fefd50adbc4c1beace9dbc1cf7",
+	// 10: the [[links]] of a ```diagram block are links of the note
+	// (ADR-036); the corpus gained a diagram, and a code sample of one,
+	// whose link is not.
+	10: "065cbc0cbb875c315c30df7ad87cac17efd6646f5ef59aa317154572ac190b3b",
 }
 
 // goldenCorpus covers every extracted row kind: title from frontmatter and
@@ -54,7 +58,8 @@ var extractionDigests = map[int]string{
 // trailing comment, a block scalar, a number kept as text; and relations,
 // links in frontmatter values (a list with an alias, a link in inline code
 // and one in a nested map, which are not links); and hex colors, which are
-// not tags (IMP-145), but for a short lowercase word (BUG-114).
+// not tags (IMP-145), but for a short lowercase word (BUG-114); and a
+// diagram whose node links a note (ADR-036).
 var goldenCorpus = []NoteDoc{
 	{Path: "p/plan.md", Title: "plan", Body: "---\ntitle: The plan\ntags: [p, type:plan, status:draft]\nimportance: 4\nupdated: 2026-09-28\nimplements_imp:\n  - IMP-104\n  - IMP-099\nratio: 0.5\nsubtitle: Sync v1.12 \"Agent workflow\"\n---\n\n# Heading\n\nSee [[p/bugs#BUG-065|the bug]], [[#Heading]], [[Other Note]] and ![[img.webp]].\n\nInline #topic/sub and #todo.\n"},
 	{Path: "p/bugs.md", Title: "bugs", Body: "# Bug tracker\n\n## BUG-065\n\nNo frontmatter, [[p/plan]] back.\n"},
@@ -62,6 +67,7 @@ var goldenCorpus = []NoteDoc{
 	{Path: "p/reader.md", Title: "reader", Body: "---\ntitle: Reader cases\ntags: [p, type:doc]\nrelated: [[p/plan]]\naliases: [\"a, b\", c]\nstatus: open # a comment\nsummary: |\n  two\n  lines\ncode: 007\n---\n\nBody.\n"},
 	{Path: "p/relations.md", Title: "relations", Body: "---\ntitle: Relations\ntags: [p, type:doc]\nrelated: [\"[[p/plan|The plan]]\", \"[[p/bugs#BUG-065]]\"]\norigin: \"[[p/sync]]\"\ndescription: \"a `[[p/plan]]` sample\"\nharness:\n  link: \"[[p/reader]]\"\n---\n\nBody with [[p/plan]].\n"},
 	{Path: "p/brand.md", Title: "brand", Body: "# Brand\n\nRed #AC1F24, white #fff, #topic/brand and #cafebabe1; palette #FAFAFA/#EFEFEF; a #cafe.\n"},
+	{Path: "p/diagram.md", Title: "diagram", Body: "# Diagram\n\n```diagram\nkind: flow\nnodes:\n  - {id: a, label: Start, link: \"[[p/plan]]\"}\n  - {id: b, link: \"https://example.com\"}\nedges: [\"a -> b\"]\n```\n\n````md\n```diagram\nkind: flow\nnodes:\n  - {id: c, link: \"[[p/bugs]]\"}\n```\n````\n"},
 	{Path: "p/report.html", Title: "report", Body: "<!--\n---\ntitle: Report\ntags: [p, type:doc]\n---\n-->\n<html><body><h1>Report</h1><p>Links <a href=\"x\">out</a> and [[p/plan]].</p></body></html>\n"},
 }
 
@@ -123,4 +129,37 @@ func extractionDigest(t *testing.T, db *sql.DB) string {
 	dump("fts", `SELECT n.path, f.title, f.meta, f.body FROM notes_fts f JOIN notes n ON n.id = f.rowid ORDER BY n.path`)
 	sum := sha256.Sum256([]byte(b.String()))
 	return hex.EncodeToString(sum[:])
+}
+
+// A diagram's node links its note: the link is the note's, resolved and a
+// backlink of the target; a link in a code sample of a diagram is not
+// (ADR-036).
+func TestDiagramLinks(t *testing.T) {
+	idx := openTest(t)
+	for _, d := range goldenCorpus {
+		d.ModTime, d.Size = 1, int64(len(d.Body))
+		if err := idx.Upsert(d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, err := idx.Outlinks("p/diagram.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 1 || out[0].Target != "p/plan" || out[0].TargetPath != "p/plan.md" {
+		t.Fatalf("outlinks = %+v", out)
+	}
+	back, err := idx.Backlinks("p/plan.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, b := range back {
+		if b.Path == "p/diagram.md" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("p/plan.md has no backlink from the diagram: %+v", back)
+	}
 }

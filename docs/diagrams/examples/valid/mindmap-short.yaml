@@ -1,0 +1,9 @@
+# Branches as {Label: [children]}, leaves as texts.
+kind: mindmap
+root: Archive
+children:
+  - Arrival: [PDF, DOCX, Images]
+  - Search:
+      - Text
+      - Similarity: [Embeddings, Questions]
+  - Reports

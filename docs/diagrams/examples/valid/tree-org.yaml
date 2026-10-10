@@ -1,0 +1,12 @@
+kind: tree
+title: Team
+root: {id: lead, label: "Lead"}
+children:
+  - label: Backend
+    children: [Go, SQLite]
+  - label: Frontend
+    id: front
+    link: "[[team/frontend]]"
+    children:
+      - Vue
+      - plancia

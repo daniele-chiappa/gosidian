@@ -1,0 +1,4 @@
+# error: is a date, YYYY-MM-DD
+kind: gantt
+tasks:
+  - {label: A, start: 10/10/2026, days: 1}

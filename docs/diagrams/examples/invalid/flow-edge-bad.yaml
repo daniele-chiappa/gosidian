@@ -1,0 +1,4 @@
+# error: is "from -> to"
+kind: flow
+nodes: [a, b]
+edges: ["a to b"]

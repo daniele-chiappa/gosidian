@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/gosidian/gosidian/internal/diagram"
 	"github.com/gosidian/gosidian/internal/parser"
 	_ "modernc.org/sqlite"
 )
@@ -77,7 +78,7 @@ const schemaVersion = 5
 // keeping rows extracted by the old code. TestContentVersion_Golden fails
 // when the extraction output changes without a bump. Link resolution is not
 // covered: the boot scan runs ResolveAll every time.
-const ContentVersion = 9
+const ContentVersion = 10
 
 // migrate brings an index file to schemaVersion and reports whether it had
 // to. The index is a cache of the vault — the boot scan re-upserts every
@@ -222,6 +223,9 @@ func extractForPath(path, body string) (links []parser.WikiLinkRef, tags []strin
 		return links, tags, title, parser.SearchText(ftsBody)
 	}
 	links, tags, title = parser.Extract([]byte(body))
+	// The [[links]] of a diagram's nodes are links of the note (ADR-036),
+	// which the code fences hide from Extract.
+	links = append(links, diagram.LinksIn([]byte(body))...)
 	// The FTS reads a link as its words, not its path (IMP-120).
 	return links, tags, title, parser.SearchText(parser.BodyAfterFrontmatter([]byte(body)))
 }

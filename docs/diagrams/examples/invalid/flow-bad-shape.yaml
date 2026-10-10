@@ -1,0 +1,4 @@
+# error: shape "star" is one of
+kind: flow
+nodes:
+  - {id: a, shape: star}

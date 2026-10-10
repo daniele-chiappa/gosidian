@@ -99,6 +99,10 @@ a note naming it (and the likely intended argument, e.g. `Project` →
   connections (`A → B: label`); its JSON in `source` with `raw:true`
   only, since it is mostly coordinates
   ([compatibility](../vault/obsidian-compat.md#obsidian-canvases)).
+  A note with ```` ```diagram ```` blocks also returns `diagrams`: for
+  each its `kind`, `title`, `line`, the diagram in words (`text`) and its
+  `problems` ([diagrams](../diagrams.md)); `memory_bootstrap` gives the
+  format in `capabilities.diagrams`.
   `memory_get_section` takes the start of a heading when it names only
   one, such as an ID (`BUG-014` for `## BUG-014 — …`), and answers with
   the full heading; among several, the one of the highest level wins
@@ -385,7 +389,10 @@ from the caller's token identity and cannot be forged, while
   reference notes under `skills/<slug>/`), `pipeline-invalid` (a
   `type: pipeline` note the server would refuse to run: no ```` ```pipeline ````
   block, YAML that does not parse, an unknown node type, a reference to
-  a node that does not run before; [pipelines](../pipelines.md)). Zero
+  a node that does not run before; [pipelines](../pipelines.md)),
+  `diagram-invalid` (a ```` ```diagram ```` block that does not read as a
+  diagram of the format, on the line of the problem, or a `type: diagram`
+  note without exactly one block; [diagrams](../diagrams.md)). Zero
   `severity:error` on a coherent vault.
 - `memory_self_improve(category, title, friction, confidence, …)` —
   *experimental, opt-in, off by default*: record a structured insight

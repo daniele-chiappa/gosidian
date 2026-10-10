@@ -87,8 +87,9 @@ type noteWrite struct {
 	// action is the audit action; empty means create or update, after
 	// whether the note existed.
 	action audit.Action
-	// schemaCheck adds the database-schema problems of the written note to
-	// the result (noteSchemaProblems).
+	// schemaCheck adds the database-schema problems of the written note,
+	// and those of its diagrams, to the result (noteSchemaProblems,
+	// noteDiagramProblems).
 	schemaCheck bool
 	// locked says the caller already holds the per-path lock, because it
 	// probed the path before doing other work (storing an attachment).
@@ -197,6 +198,7 @@ func (s *Server) writeNote(ctx context.Context, tok *auth.Token, w noteWrite) (n
 	}
 	if w.schemaCheck {
 		s.noteSchemaProblems(ctx, w.rel, content)
+		s.noteDiagramProblems(ctx, w.rel, content)
 	}
 	out := noteWritten{Path: w.rel, Created: created, Size: len(content)}
 	if fresh, err := s.vault.Load(w.rel); err == nil {

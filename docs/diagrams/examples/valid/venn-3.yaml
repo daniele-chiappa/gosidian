@@ -1,0 +1,9 @@
+kind: venn
+sets:
+  - {id: inv, label: "Invoices"}
+  - {id: con, label: "Contracts", link: "[[team/contracts]]"}
+  - Quotes
+areas:
+  - {sets: [inv, con], label: "Framework agreements", size: 3}
+  - {sets: [con, Quotes], label: "Accepted quotes"}
+  - {sets: [inv, con, Quotes], label: "Full cycle", size: 1}

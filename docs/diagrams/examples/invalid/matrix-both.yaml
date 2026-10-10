@@ -1,0 +1,6 @@
+# error: not both
+kind: matrix
+x: Urgency
+y: Importance
+rows: [a]
+columns: [b]

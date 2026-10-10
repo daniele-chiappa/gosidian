@@ -1,0 +1,4 @@
+# error: a flow diagram has no field "sets"
+kind: flow
+nodes: [a]
+sets: [x, y]
