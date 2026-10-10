@@ -8,6 +8,7 @@ import type { PipelineInfo, RunBrief } from '@/api/pipelines'
 vi.mock('@/api/pipelines', async (orig) => ({
   ...(await orig<typeof import('@/api/pipelines')>()),
   listPipelines: vi.fn(),
+  listPlugins: vi.fn(),
   listRuns: vi.fn(),
   getRun: vi.fn(),
   startRun: vi.fn(),
@@ -24,7 +25,7 @@ vi.mock('plancia', async (orig) => ({
   useWindowsStore: () => ({ windows: [], open: vi.fn() }),
 }))
 
-import { getRun, listPipelines, listRuns, resumeRun, startRun } from '@/api/pipelines'
+import { getRun, listPipelines, listPlugins, listRuns, resumeRun, startRun } from '@/api/pipelines'
 import { askText } from '@/composables/useConfirm'
 import PipelinesView from '@/views/PipelinesView.vue'
 
@@ -51,6 +52,7 @@ describe('PipelinesView (IMP-166)', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.mocked(listPipelines).mockResolvedValue(pipelines)
+    vi.mocked(listPlugins).mockResolvedValue([])
     vi.mocked(listRuns).mockResolvedValue([
       run({ id: 'r1', status: 'waiting' }),
       run({ id: 'r2', status: 'failed', error: 'boom', pipeline: 'theirs/pipelines/copy.md', project: 'theirs' }),
@@ -71,6 +73,36 @@ describe('PipelinesView (IMP-166)', () => {
     expect(rows[1]!.text()).toContain('unknown node type shell.run')
     expect(rows[1]!.text()).not.toContain('Start')
     expect(rows[2]!.text()).not.toContain('Start')
+  })
+
+  it('lists no plugins section without plugins, and the plugins with their state and the accept command', async () => {
+    let w = mount(PipelinesView, { global: { plugins: [i18n()] } })
+    await flushPromises()
+    expect(w.find('[data-plugins]').exists()).toBe(false)
+    vi.mocked(listPlugins).mockResolvedValue([
+      { name: 'docling', status: 'ok', version: '1.0', sha: 'abcdef012345', nodes: [{ type: 'docling.convert' }] },
+      { name: 'ocr', status: 'changed', version: '2.0', sha: '0123456789ab', nodes: [{ type: 'ocr.read' }] },
+      { name: 'gone', status: 'down', nodes: [], error: 'connection refused' },
+    ])
+    w = mount(PipelinesView, { global: { plugins: [i18n()] } })
+    await flushPromises()
+    const rows = w.find('[data-plugins]').findAll('li')
+    expect(rows).toHaveLength(3)
+    expect(rows[0]!.text()).toContain('running')
+    expect(rows[0]!.text()).toContain('docling.convert')
+    expect(rows[0]!.text()).not.toContain('gosidian plugin accept')
+    expect(rows[1]!.text()).toContain('manifest changed')
+    expect(rows[1]!.text()).toContain('gosidian plugin accept ocr 0123456789ab')
+    expect(rows[2]!.text()).toContain('unreachable')
+    expect(rows[2]!.text()).toContain('connection refused')
+  })
+
+  it('works without the list of plugins', async () => {
+    vi.mocked(listPlugins).mockRejectedValue(new Error('404'))
+    const w = mount(PipelinesView, { global: { plugins: [i18n()] } })
+    await flushPromises()
+    expect(w.find('[data-pipelines]').exists()).toBe(true)
+    expect(w.find('[data-plugins]').exists()).toBe(false)
   })
 
   it('shows runs with Resume and Cancel for a writer, and a run’s steps on click', async () => {

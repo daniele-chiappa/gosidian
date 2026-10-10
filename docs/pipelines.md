@@ -4,7 +4,8 @@ A pipeline is a note that tells the server what to do when something
 happens: a document arrives, an agent or a service calls, the clock
 strikes. Its nodes read notes, call a language model or a web service,
 run a short script, wait for an answer, and write notes back, as the
-pipeline (ADR-035, IMP-166, IMP-167).
+pipeline (ADR-035, IMP-166, IMP-167). [Plugins](plugins.md), MCP servers
+beside gosidian, add more node types: converting documents, for one.
 
 Pipelines are **off by default**, twice over:
 
@@ -38,13 +39,19 @@ name = "openrouter"
 base_url = "https://openrouter.ai/api/v1"
 api_key_secret = "openrouter"              # gosidian secret set openrouter
 model = "anthropic/claude-sonnet-4.5"
+
+[[pipelines.plugins]]                      # docs/plugins.md
+name = "docling"
+url = "http://gosidian-docling:8000/mcp"
+token_secret = "docling-token"
 ```
 
 The environment overrides the file (see [configuration](configuration.md)):
 `GOSIDIAN_PIPELINES_ENABLED`, `_WORKERS`, `_RETENTION`, `_STEP_TIMEOUT`,
 `_MAX_WAIT`, `_MAX_LLM_TOKENS`, `_HTTP_ALLOWLIST` (comma-separated),
-`_PUBLIC_URL`, `_TIMEZONE`, and `_LLM_URL`, `_LLM_MODEL`,
-`_LLM_KEY_SECRET` for one provider named `default`.
+`_PUBLIC_URL`, `_TIMEZONE`, `_LLM_URL`, `_LLM_MODEL`,
+`_LLM_KEY_SECRET` for one provider named `default`, and `_PLUGINS`
+(`name=url,…`, plugins without a token).
 
 The runs live in `<state-dir>/jobs.db` (SQLite, outside the vault and its
 git history). Secrets live in `<state-dir>/secrets.json`, each sealed with
@@ -143,10 +150,15 @@ an expression turns it into text. There are no operators: compute in a
 | `note.read` | `path` (inside the project; relative to it) | `path`, `title`, `frontmatter`, `body`, `etag` |
 | `note.write` | `path`, `body`, `title`, `frontmatter` (a map), `mode`: `upsert` (default), `create`, `replace` | `path`, `etag`, `created` |
 | `wait.call` | `timeout` (default `24h`, at most `max_wait`) | the data the resume hands it |
-| `starlark` | `code` setting `output`; `input`; the run's values in `ctx`, `json.encode`/`json.decode`; no `load`, no I/O, 10 million steps at most | `output` |
+| `starlark` | `code` setting `output`, a script (loops and `if` at the top level, `while`, `set`); `input`; the run's values in `ctx`, `json.encode`/`json.decode`; no `load`, no I/O, 10 million steps at most | the value of `output` itself: `{{ node }}`, or `{{ node.field }}` for a map |
 | `http.request` | `url` (in `http_allowlist`), `method`, `json` or `body`, `headers`, `secret_header: "Authorization=secret_name"`, `accept_errors` | `status`, `headers`, `json` or `body` (4 MiB at most) |
 | `llm.chat` | `prompt`, `system`, `provider` (default `default`), `model`, `max_tokens` (default 1024), `temperature`, `json: true` | `text`, `json`, `model`, `provider`, `usage` |
 | `llm.describe` | `image` (an attachment of the project, png/jpg/gif/webp, 10 MiB at most), `prompt`, and as `llm.chat` | as `llm.chat`, plus `image` |
+| `<plugin>.<node>` | what the plugin's manifest says; a setting it lists in `files` names an attachment of the project | the plugin tool's result, plus `files` (`name`, `path`, `mime`, `markdown`): the files it gave back, stored as attachments |
+
+A plugin's nodes exist once the owner accepted its manifest
+(`gosidian plugin accept`, [plugins](plugins.md)); `memory_pipelines`
+and the Runs window list them.
 
 A node's output is at most 1 MiB (`max_output_bytes`): write a large text
 into a note and pass its path. A run's input is at most 256 KiB
@@ -217,6 +229,10 @@ REST reference: `internal/api/v1/spec/openapi.yaml`, tag `pipelines`.
   included. The language model providers are the owner's configuration.
 - Use secrets **by name**: their values never appear in a note, a run or
   the audit.
+- Call **only the registered plugins**, and only through the nodes of the
+  manifest the owner accepted. A plugin gets the files the node names,
+  nothing else of the vault; the files it gives back become attachments
+  of the project and start no ingest pipeline.
 - Run Starlark without file, network or module access, with a step cap.
 - Spend at most `max_llm_tokens` per run.
 
@@ -227,4 +243,5 @@ gosidian secret set <name>        # the value on standard input
 gosidian secret list | delete <name>
 gosidian pipeline token create --pipeline <path.md> --name <service>
 gosidian pipeline token list [--pipeline <path.md>] | revoke <id>
+gosidian plugin list | show <name> | accept <name> <sha> | forget <name>
 ```

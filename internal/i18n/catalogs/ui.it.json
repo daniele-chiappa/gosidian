@@ -1046,6 +1046,17 @@
     "start_failed": "Non riesco ad avviare la pipeline.",
     "resume_failed": "Non riesco a riprendere l'esecuzione.",
     "cancel_failed": "Non riesco ad annullare l'esecuzione.",
+    "plugins": "Plugin",
+    "plugins_intro": "Server MCP i cui nodi le pipeline usano come <plugin>.<nodo>.",
+    "plugin_nodes": "Nodi",
+    "plugin_accept": "Lo accetta il proprietario sul server:",
+    "plugin_state": {
+      "ok": "attivo",
+      "unaccepted": "da accettare",
+      "changed": "manifest cambiato",
+      "down": "irraggiungibile",
+      "unknown": "non ancora controllato"
+    },
     "state": {
       "pending": "da fare",
       "queued": "in coda",

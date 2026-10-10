@@ -467,3 +467,44 @@ func TestCacheSize_ZeroDisables(t *testing.T) {
 		t.Errorf("GOSIDIAN_VAULT_CACHE_SIZE=0: %d, %v", cfg.Vault.CacheSize, err)
 	}
 }
+
+// The plugins come from [[pipelines.plugins]] and GOSIDIAN_PIPELINES_PLUGINS:
+// an env entry replaces the URL of the file's plugin of the same name and
+// keeps its token (IMP-168).
+func TestPipelinesPlugins(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	body := `
+[[pipelines.plugins]]
+name = "docling"
+url = "http://old:8000/mcp"
+token_secret = "docling-token"
+timeout = "20m"
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOSIDIAN_PIPELINES_PLUGINS", " docling=http://new:8000/mcp , echo=http://echo:9000/mcp")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.ApplyEnv(); err != nil {
+		t.Fatal(err)
+	}
+	want := []PluginConfig{
+		{Name: "docling", URL: "http://new:8000/mcp", TokenSecret: "docling-token", Timeout: 20 * time.Minute},
+		{Name: "echo", URL: "http://echo:9000/mcp"},
+	}
+	if len(cfg.Pipelines.Plugins) != len(want) {
+		t.Fatalf("plugins = %+v", cfg.Pipelines.Plugins)
+	}
+	for i := range want {
+		if cfg.Pipelines.Plugins[i] != want[i] {
+			t.Errorf("plugin %d = %+v, want %+v", i, cfg.Pipelines.Plugins[i], want[i])
+		}
+	}
+	t.Setenv("GOSIDIAN_PIPELINES_PLUGINS", "docling")
+	if err := Default().ApplyEnv(); err == nil {
+		t.Error("an entry without =url is accepted")
+	}
+}

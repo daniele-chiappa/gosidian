@@ -8,12 +8,14 @@ import (
 	"path"
 	"strings"
 
+	"github.com/gosidian/gosidian/internal/attach"
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/jobs"
 	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/gosidian/gosidian/internal/pipeline"
+	"github.com/gosidian/gosidian/internal/plugins"
 	"github.com/gosidian/gosidian/internal/server/events"
 )
 
@@ -27,6 +29,13 @@ func (s *Server) SetPipelines(e *pipeline.Engine) { s.pipelines = e }
 
 // Pipelines is the pipeline engine, nil when off.
 func (s *Server) Pipelines() *pipeline.Engine { return s.pipelines }
+
+// SetPlugins gives the server the plugin registry (IMP-168); nil while
+// [pipelines] is off.
+func (s *Server) SetPlugins(r *plugins.Registry) { s.plugins = r }
+
+// Plugins is the plugin registry, nil when the pipelines are off.
+func (s *Server) Plugins() *plugins.Registry { return s.plugins }
 
 // SetPipelinesSwitch tells the server whether [pipelines] is on, before
 // the engine exists (the host is built first).
@@ -155,6 +164,20 @@ func (h pipelineHost) ReadAttachment(project, rel string) ([]byte, error) {
 		return nil, err
 	}
 	return h.s.vault.ReadAttachment(rel, maxAttachmentRead)
+}
+
+// StoreAttachment stores a file a node made (a plugin's images) as an
+// attachment of the project, audited as the pipeline. It does not call
+// arrived: a run's files start no runs.
+func (h pipelineHost) StoreAttachment(project, name string, data []byte, actor string) (string, error) {
+	res, err := attach.Store(h.s.vault, data, name, project)
+	if err != nil {
+		return "", err
+	}
+	if h.s.audit != nil {
+		_ = h.s.audit.Write(audit.Entry{Source: audit.SourcePipeline, Actor: actor, Action: audit.ActionUploadAttachment, Path: res.Path, Size: int64(len(data))})
+	}
+	return res.Path, nil
 }
 
 // arrived starts the ingest pipelines of the attachment's project for a

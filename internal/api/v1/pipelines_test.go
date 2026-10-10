@@ -12,6 +12,7 @@ import (
 	"github.com/gosidian/gosidian/internal/jobs"
 	mcpsrv "github.com/gosidian/gosidian/internal/mcp"
 	"github.com/gosidian/gosidian/internal/pipeline"
+	"github.com/gosidian/gosidian/internal/plugins"
 	"github.com/gosidian/gosidian/internal/projects"
 	"github.com/gosidian/gosidian/internal/vault"
 )
@@ -113,7 +114,7 @@ func (f *pipelineFixture) waitStatus(t *testing.T, id string, want jobs.Status) 
 
 func TestPipelinesREST_Off(t *testing.T) {
 	f := newAdminFixture(t)
-	for _, p := range []string{"/api/v1/pipelines", "/api/v1/runs", "/api/v1/runs/x"} {
+	for _, p := range []string{"/api/v1/pipelines", "/api/v1/runs", "/api/v1/runs/x", "/api/v1/plugins"} {
 		if w := f.doAuthRecorder(http.MethodGet, p, "", nil); w.code != http.StatusNotFound {
 			t.Errorf("%s: %d %s", p, w.code, w.body)
 		}
@@ -279,5 +280,30 @@ func TestProjectFlags_UsePipelines(t *testing.T) {
 	}
 	if w = f.doAuthRecorder(http.MethodPut, "/api/v1/projects/Alpha", `{"use_pipelines":false}`, nil); f.projects.UsesPipelines("Alpha") {
 		t.Fatalf("off: %d %s", w.code, w.body)
+	}
+}
+
+// GET /api/v1/plugins lists the plugins and their status to every signed-in
+// account; only the owner sees their addresses and errors (IMP-168).
+func TestPluginsREST(t *testing.T) {
+	f := newPipelineFixture(t)
+	w := f.doAuthRecorder(http.MethodGet, "/api/v1/plugins", "", nil)
+	if w.code != http.StatusOK || !strings.Contains(w.body, `"plugins":[]`) {
+		t.Fatalf("no plugins: %d %s", w.code, w.body)
+	}
+	reg, err := plugins.New([]plugins.Config{{Name: "docling", URL: "http://127.0.0.1:1/mcp"}}, t.TempDir(), nil, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.Check(context.Background())
+	f.router.deps.Plugins = reg
+	w = f.doAuthRecorder(http.MethodGet, "/api/v1/plugins", "", nil)
+	if w.code != http.StatusOK || !strings.Contains(w.body, `"status":"down"`) || !strings.Contains(w.body, `"url":"http://127.0.0.1:1/mcp"`) || !strings.Contains(w.body, `"error":`) {
+		t.Fatalf("owner: %d %s", w.code, w.body)
+	}
+	member := f.memberToken(t)
+	m := f.req(t, http.MethodGet, "/api/v1/plugins", "", member)
+	if m.code != http.StatusOK || !strings.Contains(m.body, `"name":"docling"`) || strings.Contains(m.body, "127.0.0.1") || strings.Contains(m.body, `"error"`) {
+		t.Fatalf("member: %d %s", m.code, m.body)
 	}
 }

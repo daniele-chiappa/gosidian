@@ -110,3 +110,27 @@ export async function cancelRun(id: string): Promise<RunBrief> {
   const { data } = await client.post<{ run: RunBrief }>(`/runs/${encodeURIComponent(id)}/cancel`, {})
   return data.run
 }
+
+/** A plugin's status (IMP-168): ok runs its nodes; unaccepted and changed
+ *  wait for the owner's `gosidian plugin accept`. */
+export type PluginStatus = 'ok' | 'unaccepted' | 'changed' | 'down' | 'unknown'
+
+export interface PluginInfo {
+  name: string
+  status: PluginStatus
+  /** The manifest the plugin serves. */
+  version?: string
+  sha?: string
+  /** The node types of the accepted manifest. */
+  nodes: { type: string; description?: string }[]
+  accepted?: { version: string; sha: string; at: string; by?: string }
+  checked?: string
+  /** The owner's only: they name hosts of the network. */
+  error?: string
+  url?: string
+}
+
+export async function listPlugins(): Promise<PluginInfo[]> {
+  const { data } = await client.get<{ plugins: PluginInfo[] | null }>('/plugins')
+  return data.plugins ?? []
+}

@@ -259,6 +259,11 @@ func buildNode(rn rawNode, i int, all []rawNode, types Types) (Node, error) {
 		return n, fmt.Errorf("node %q: use names the node type (note.write, llm.describe…)", n.ID)
 	}
 	if types != nil && !types.Known(n.Use) {
+		if h, ok := types.(interface{ Why(use string) string }); ok {
+			if why := h.Why(n.Use); why != "" {
+				return n, fmt.Errorf("node %q: there is no node type %q: %s", n.ID, n.Use, why)
+			}
+		}
 		return n, fmt.Errorf("node %q: there is no node type %q", n.ID, n.Use)
 	}
 	switch {

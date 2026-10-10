@@ -46,7 +46,19 @@ func (f TypeFunc) Run(ctx context.Context, env *Env, with map[string]any) (any, 
 // Registry holds the node types.
 type Registry struct {
 	types map[string]Type
+	ext   Extension
 }
+
+// Extension adds node types the registry looks up by name: the plugins'
+// (IMP-168), which come and go while the server runs.
+type Extension interface {
+	Known(use string) bool
+	Type(use string) (Type, bool)
+}
+
+// Extend adds the node types of x, after the base ones. Call it before
+// the engine runs.
+func (r *Registry) Extend(x Extension) { r.ext = x }
 
 // NewRegistry is a registry with the base node types.
 func NewRegistry() *Registry {
@@ -65,9 +77,23 @@ func NewRegistry() *Registry {
 func (r *Registry) Register(name string, t Type) { r.types[name] = t }
 
 // Known says whether a node type exists.
-func (r *Registry) Known(use string) bool { _, ok := r.types[use]; return ok }
+func (r *Registry) Known(use string) bool {
+	if _, ok := r.types[use]; ok {
+		return true
+	}
+	return r.ext != nil && r.ext.Known(use)
+}
 
-// Names lists the node types.
+// Why says why use is no node type, when an extension knows (a plugin
+// whose manifest is not accepted yet).
+func (r *Registry) Why(use string) string {
+	if h, ok := r.ext.(interface{ Why(use string) string }); ok {
+		return h.Why(use)
+	}
+	return ""
+}
+
+// Names lists the base node types.
 func (r *Registry) Names() []string {
 	out := make([]string, 0, len(r.types))
 	for n := range r.types {
@@ -77,7 +103,15 @@ func (r *Registry) Names() []string {
 	return out
 }
 
-func (r *Registry) get(use string) (Type, bool) { t, ok := r.types[use]; return t, ok }
+func (r *Registry) get(use string) (Type, bool) {
+	if t, ok := r.types[use]; ok {
+		return t, true
+	}
+	if r.ext != nil {
+		return r.ext.Type(use)
+	}
+	return nil, false
+}
 
 // WaitFor is returned by a node that suspends the run until a call
 // resumes it (wait.call), or Until passes.
@@ -137,6 +171,24 @@ func (env *Env) projectPath(p string) (string, error) {
 		return "", fmt.Errorf("path %q: it must be a plain path inside the project", p)
 	}
 	return clean, nil
+}
+
+// ReadAttachment reads an attachment the node names, inside the run's
+// project.
+func (env *Env) ReadAttachment(p string) (string, []byte, error) {
+	rel, err := env.projectPath(p)
+	if err != nil {
+		return "", nil, err
+	}
+	data, err := env.Engine.host.ReadAttachment(env.Project, rel)
+	return rel, data, err
+}
+
+// StoreAttachment stores a file a node made as an attachment of the run's
+// project, as the pipeline; it starts no ingest pipeline. name gives the
+// extension. It returns the attachment's vault path.
+func (env *Env) StoreAttachment(name string, data []byte) (string, error) {
+	return env.Engine.host.StoreAttachment(env.Project, name, data, Actor(env.Run.Ref))
 }
 
 // --- note.read, note.write ---

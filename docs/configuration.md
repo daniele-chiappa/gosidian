@@ -57,6 +57,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_PIPELINES_PUBLIC_URL` | `pipelines.public_url` | the `[oauth]` issuer (the server's address in `{{ run.resume_url }}`; empty: a path) |
 | `GOSIDIAN_PIPELINES_TIMEZONE` | `pipelines.timezone` | the automations' zone (the days and times of the `schedule` triggers) |
 | `GOSIDIAN_PIPELINES_LLM_URL`, `_LLM_MODEL`, `_LLM_KEY_SECRET` | `[[pipelines.llm]]` | none (one OpenAI-compatible provider named `default`: its URL up to `/v1`, its model, the name of the secret with its key; more providers in the file) |
+| `GOSIDIAN_PIPELINES_PLUGINS` | `[[pipelines.plugins]]` | none (comma-separated `name=url` entries: [plugins](plugins.md) whose MCP endpoint is the url, without a token; an entry replaces the url of the file's plugin of the same name. A token needs `token_secret` in the file) |
 | `GOSIDIAN_SECRETS_KEY` | — | empty (32 bytes in base64, `openssl rand -base64 32`: the key of `<state-dir>/secrets.json`, the secrets the pipelines use; without it `gosidian secret` refuses and the nodes that need a secret fail) |
 | `GOSIDIAN_TRASH_ENABLED` | `trash.enabled` | `false` |
 | `GOSIDIAN_TRASH_RETENTION` | `trash.retention` | `720h`; `0` keeps entries until purged |
@@ -217,6 +218,9 @@ gosidian secret set <name>               # the value on standard input
 gosidian secret list | delete <name>
 gosidian pipeline token create --pipeline <path.md> --name <service>
 gosidian pipeline token list [--pipeline <path.md>] | revoke <id>
+gosidian plugin list | show <name>       # the plugins and the manifest one serves
+gosidian plugin accept <name> <sha>      # let its nodes run (docs/plugins.md)
+gosidian plugin forget <name>
 gosidian version                         # print the build version (also --version)
 ```
 
@@ -227,8 +231,9 @@ Run `gosidian token -h` etc. for per-subcommand options.
 `<state-dir>` is where gosidian keeps its machine-owned files: `auth.json`
 (web accounts), `tokens.json` and `spa_tokens.json` (hashed tokens),
 `gitsync.json`, `config.toml`, `projects.json`, `audit.jsonl` and the
-SQLite index, with [pipelines](pipelines.md) on `jobs.db` (the runs) and
-`secrets.json` (sealed under `GOSIDIAN_SECRETS_KEY`), and, until the owner of the first start has chosen its own
+SQLite index, with [pipelines](pipelines.md) on `jobs.db` (the runs),
+`secrets.json` (sealed under `GOSIDIAN_SECRETS_KEY`) and `plugins.json`
+(the accepted plugin manifests), and, until the owner of the first start has chosen its own
 password, `initial-admin-password`. By default it is `<vault>/.gosidian/`, unchanged from earlier
 releases. Set `--state-dir` (or `GOSIDIAN_STATE_DIR`) to move it **out of
 the vault root** — the recommended layout: nothing that resolves inside the

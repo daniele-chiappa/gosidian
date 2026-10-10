@@ -45,6 +45,11 @@ type Host interface {
 	WriteNote(project, path string, content []byte, mode WriteMode, actor string) (WriteResult, error)
 	// ReadAttachment reads an attachment of the project.
 	ReadAttachment(project, path string) ([]byte, error)
+	// StoreAttachment stores data as an attachment of the project, as the
+	// pipeline (actor), named after its content with name's extension. It
+	// starts no ingest pipeline: a run must not start runs on the files it
+	// makes.
+	StoreAttachment(project, name string, data []byte, actor string) (string, error)
 	// Changed is told that a run changed, for the live updates.
 	Changed(run jobs.Run)
 }

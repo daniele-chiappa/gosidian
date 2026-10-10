@@ -9,6 +9,7 @@ import (
 	"github.com/gosidian/gosidian/internal/oauth"
 	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/gosidian/gosidian/internal/pipeline"
+	"github.com/gosidian/gosidian/internal/plugins"
 	"github.com/gosidian/gosidian/internal/projects"
 	"github.com/gosidian/gosidian/internal/ratelimit"
 	"github.com/gosidian/gosidian/internal/server/events"
@@ -41,6 +42,9 @@ type Deps struct {
 	// Pipelines is the pipeline engine (IMP-166); nil while [pipelines] is
 	// off, and the /pipelines and /runs routes answer 404.
 	Pipelines *pipeline.Engine
+	// Plugins is the registry of the pipelines' plugins (IMP-168), nil
+	// when the pipelines are off.
+	Plugins *plugins.Registry
 }
 
 // Router owns the http.Handler tree under /api/v1/*. A separate type
@@ -177,6 +181,7 @@ func (r *Router) registerAuthed() {
 	// also take a run token or a resume key, without an account: those
 	// handlers authenticate themselves and fall back to authed.
 	r.mux.Handle("/api/v1/pipelines", authed(r.handlePipelines))
+	r.mux.Handle("/api/v1/plugins", authed(r.handlePlugins))
 	r.mux.Handle("/api/v1/pipelines/", r.pipelineRoutes(authed))
 	r.mux.Handle("/api/v1/runs", authed(r.handleRuns))
 	r.mux.Handle("/api/v1/runs/", r.runRoutes(authed))

@@ -2,12 +2,15 @@ package pipeline
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -26,6 +29,7 @@ type fakeHost struct {
 	enabled map[string]bool
 	types   Types
 	changed int
+	stored  []string // "actor path" of each StoreAttachment
 }
 
 func newFakeHost() *fakeHost {
@@ -109,6 +113,19 @@ func (h *fakeHost) ReadAttachment(project, path string) ([]byte, error) {
 		return nil, errors.New("no such attachment")
 	}
 	return b, nil
+}
+
+func (h *fakeHost) StoreAttachment(project, name string, data []byte, actor string) (string, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	sum := sha256.Sum256(data)
+	rel := project + "/attachments/" + hex.EncodeToString(sum[:8]) + strings.ToLower(path.Ext(name))
+	if h.att == nil {
+		h.att = map[string][]byte{}
+	}
+	h.att[rel] = data
+	h.stored = append(h.stored, actor+" "+rel)
+	return rel, nil
 }
 
 func (h *fakeHost) Changed(jobs.Run) {
@@ -499,7 +516,8 @@ func TestStarlark_Sandbox(t *testing.T) {
 	host.notes["p/load.md"] = pipelineNote("nodes: [{id: a, use: starlark, with: {code: \"load('x.star', 'y')\\noutput = 1\"}}]")
 	host.notes["p/loop.md"] = pipelineNote("nodes: [{id: a, use: starlark, with: {code: \"def f():\\n  n = 0\\n  for i in range(100000000):\\n    n += i\\n  return n\\noutput = f()\"}}]")
 	host.notes["p/none.md"] = pipelineNote("nodes: [{id: a, use: starlark, with: {code: 'x = 1'}}]")
-	for path, want := range map[string]string{"p/load.md": "load is not available", "p/loop.md": "too many steps", "p/none.md": "sets no output"} {
+	host.notes["p/while.md"] = pipelineNote("nodes: [{id: a, use: starlark, with: {code: \"n = 0\\nwhile True:\\n  n += 1\\noutput = n\"}}]")
+	for path, want := range map[string]string{"p/load.md": "load is not available", "p/loop.md": "too many steps", "p/none.md": "sets no output", "p/while.md": "too many steps"} {
 		run, _, err := e.Start(StartRequest{Path: path, Trigger: TriggerManual})
 		if err != nil {
 			t.Fatal(err)
@@ -508,5 +526,35 @@ func TestStarlark_Sandbox(t *testing.T) {
 		if !strings.Contains(got.Error, want) {
 			t.Errorf("%s: error %q, want %q", path, got.Error, want)
 		}
+	}
+}
+
+// A node's code is a script: loops and ifs at the top level, a name set
+// again, while (lab, R2: md = md.replace(…) in a for over the files).
+func TestStarlark_ScriptAtTopLevel(t *testing.T) {
+	e, host := newEngine(t, Config{})
+	host.notes["p/script.md"] = pipelineNote(`nodes:
+  - id: a
+    use: starlark
+    with:
+      input: {md: "a fig-1.png b fig-2.png", files: [{name: fig-1.png, path: x/1.png}, {name: fig-2.png, path: x/2.png}]}
+      code: |
+        md = input["md"]
+        for f in input["files"]:
+            md = md.replace(f["name"], f["path"])
+        n = 0
+        while n < 3:
+            n += 1
+        if n == 3:
+            output = {"md": md, "seen": set([1, 1, 2]) == set([1, 2])}`)
+	run, _, err := e.Start(StartRequest{Path: "p/script.md", Trigger: TriggerManual})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, e, run.ID, jobs.Done)
+	var out map[string]any
+	_ = json.Unmarshal(stepOf(t, e, run.ID, "a").Output, &out)
+	if out["md"] != "a x/1.png b x/2.png" || out["seen"] != true {
+		t.Errorf("output = %v", out)
 	}
 }

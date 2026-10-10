@@ -3,7 +3,9 @@
  * Runs window (IMP-166): the pipelines of the projects the account reads,
  * their runs, and a run's steps. A writer of the project starts a
  * pipeline, resumes a run that waits (wait.call) and cancels one. The
- * window follows the runs live through the `job` event topic.
+ * window follows the runs live through the `job` event topic. It also
+ * lists the plugins whose nodes the pipelines use (IMP-168), read-only:
+ * the owner accepts a plugin's manifest on the server.
  */
 import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -13,11 +15,14 @@ import {
   cancelRun,
   getRun,
   listPipelines,
+  listPlugins,
   listRuns,
   resumeRun,
   runEnded,
   startRun,
   type PipelineInfo,
+  type PluginInfo,
+  type PluginStatus,
   type RunBrief,
   type RunStatus,
   type StepView,
@@ -37,6 +42,7 @@ const openWindow = inject<(spec: OpenSpec) => string>('openWindow', (s) => store
 const sse = useSSE()
 
 const pipelines = ref<PipelineInfo[]>([])
+const plugins = ref<PluginInfo[]>([])
 const runs = ref<RunBrief[]>([])
 const loading = ref(false)
 const loaded = ref(false)
@@ -59,12 +65,15 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const [ps, rs] = await Promise.all([
+    const [ps, rs, pl] = await Promise.all([
       listPipelines(),
       listRuns({ project: project.value, status: status.value, limit: 100 }),
+      // The list of plugins is a help: without it the window still works.
+      listPlugins().catch(() => [] as PluginInfo[]),
     ])
     pipelines.value = ps
     runs.value = rs
+    plugins.value = pl
     loaded.value = true
     if (openRun.value) await loadSteps(openRun.value)
   } catch (e) {
@@ -170,6 +179,19 @@ const STATUS_CLASS: Record<RunStatus, string> = {
   canceled: 'text-text-muted border border-border',
 }
 
+const PLUGIN_CLASS: Record<PluginStatus, string> = {
+  ok: 'text-success bg-success/15',
+  unaccepted: 'text-warning bg-warning/15',
+  changed: 'text-warning bg-warning/15',
+  down: 'text-danger bg-danger/15',
+  unknown: 'text-text-muted border border-border',
+}
+
+/** The command that accepts the manifest a plugin serves. */
+function acceptCommand(p: PluginInfo): string {
+  return `gosidian plugin accept ${p.name} ${p.sha ?? '<sha>'}`
+}
+
 /** A step's output as text: JSON indented, a cut output as it came. */
 function outputText(s: StepView): string {
   if (s.output === undefined || s.output === null) return ''
@@ -267,6 +289,32 @@ onMounted(() => {
           </p>
         </li>
       </ul>
+
+      <template v-if="plugins.length">
+        <h2 class="text-sm font-semibold mb-1">{{ t('runs.plugins') }}</h2>
+        <p class="text-xs text-text-muted mb-2">{{ t('runs.plugins_intro') }}</p>
+        <ul class="space-y-2 mb-8" data-plugins>
+          <li
+            v-for="p in plugins"
+            :key="p.name"
+            class="rounded border border-border bg-surface px-4 py-3 flex items-center gap-2 flex-wrap text-sm"
+          >
+            <span class="font-mono">{{ p.name }}</span>
+            <span v-if="p.version" class="text-xs text-text-muted">{{ p.version }}</span>
+            <span class="text-xs px-1.5 rounded" :class="PLUGIN_CLASS[p.status]">{{ t(`runs.plugin_state.${p.status}`) }}</span>
+            <span class="flex-1" />
+            <span v-if="p.url" class="text-xs text-text-muted font-mono truncate" :title="p.url">{{ p.url }}</span>
+            <p v-if="p.nodes.length" class="basis-full text-xs text-text-muted">
+              {{ t('runs.plugin_nodes') }}:
+              <span v-for="(n, i) in p.nodes" :key="n.type" class="font-mono" :title="n.description">{{ i ? ', ' : '' }}{{ n.type }}</span>
+            </p>
+            <p v-if="p.status === 'unaccepted' || p.status === 'changed'" class="basis-full text-xs text-text-muted">
+              {{ t('runs.plugin_accept') }} <code class="font-mono">{{ acceptCommand(p) }}</code>
+            </p>
+            <p v-if="p.error" class="basis-full text-xs text-danger break-words">{{ p.error }}</p>
+          </li>
+        </ul>
+      </template>
 
       <h2 class="text-sm font-semibold mb-2">{{ t('runs.runs') }}</h2>
       <p v-if="!runs.length" class="text-sm text-text-muted">{{ t('runs.no_runs') }}</p>

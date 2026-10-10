@@ -58,7 +58,11 @@ func runStarlark(ctx context.Context, env *Env, with map[string]any) (any, error
 		}
 	}()
 	predeclared := starlark.StringDict{"input": in, "ctx": all, "json": starjson.Module}
-	globals, err := starlark.ExecFileOptions(&syntax.FileOptions{}, thread, env.Node.ID+".star", code, predeclared)
+	// A node's code is a short script, not a module: loops and ifs at the
+	// top level, a name set again (md = md.replace(…) in a loop), while
+	// and set are allowed. The step cap bounds it all the same.
+	opts := &syntax.FileOptions{TopLevelControl: true, GlobalReassign: true, While: true, Set: true}
+	globals, err := starlark.ExecFileOptions(opts, thread, env.Node.ID+".star", code, predeclared)
 	if err != nil {
 		var ee *starlark.EvalError
 		if errors.As(err, &ee) {

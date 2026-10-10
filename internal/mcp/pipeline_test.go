@@ -12,6 +12,7 @@ import (
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/jobs"
 	"github.com/gosidian/gosidian/internal/pipeline"
+	"github.com/gosidian/gosidian/internal/plugins"
 	"github.com/gosidian/gosidian/internal/projects"
 )
 
@@ -259,5 +260,69 @@ func TestPipelineBootstrap_SaysWherePipelinesRun(t *testing.T) {
 	off, _, _ := newTestServer(t)
 	if off.projectCapabilities("p", false).Pipelines {
 		t.Error("a server without pipelines says it runs them")
+	}
+}
+
+// A file a node makes (a plugin's image) is stored as an attachment of the
+// project, audited as the pipeline, and starts no ingest pipeline: a run
+// must not start runs on its own files (IMP-168).
+func TestPipelineHost_StoreAttachment(t *testing.T) {
+	s, e := pipelineServer(t)
+	al, err := audit.Open(filepath.Join(t.TempDir(), "audit.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.SetAuditLog(al)
+	ctx := context.Background()
+	arrive := "---\ntitle: Images\ntype: pipeline\n---\n\n```pipeline\n" + `trigger: {on: ingest, kinds: [png]}
+nodes:
+  - {id: write, use: note.write, with: {path: "out/{{ trigger.stem }}", body: "x"}}
+` + "```\n"
+	if res, err := s.handleCreate(ctx, call(map[string]any{"path": "p/pipelines/images.md", "content": arrive})); err != nil || res.IsError {
+		t.Fatalf("create: %v %+v", err, res)
+	}
+	png := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82")
+	rel, err := s.PipelineHost().StoreAttachment("p", "fig-1.png", png, "pipeline:p/pipelines/convert.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(rel, "p/attachments/") || !strings.HasSuffix(rel, ".png") {
+		t.Fatalf("stored at %s", rel)
+	}
+	if b, err := s.vault.ReadAttachment(rel, 1<<20); err != nil || string(b) != string(png) {
+		t.Fatalf("read back: %v", err)
+	}
+	found := false
+	for _, en := range auditEntries(t, al) {
+		if en.Path == rel {
+			found = en.Source == audit.SourcePipeline && en.Actor == "pipeline:p/pipelines/convert.md" && en.Action == audit.ActionUploadAttachment
+		}
+	}
+	if !found {
+		t.Errorf("no pipeline audit entry: %+v", auditEntries(t, al))
+	}
+	if _, err := s.PipelineHost().StoreAttachment("p", "run.sh", []byte("#!/bin/sh"), "pipeline:x"); err == nil {
+		t.Error("a shell script is stored")
+	}
+	time.Sleep(100 * time.Millisecond)
+	if runs, _ := e.Runner().Store().Runs(jobs.RunFilter{Ref: "p/pipelines/images.md"}); len(runs) != 0 {
+		t.Errorf("a stored file started runs: %+v", runs)
+	}
+}
+
+// memory_pipelines lists the plugins with their node types, without their
+// addresses (IMP-168).
+func TestPipelineTools_ListPlugins(t *testing.T) {
+	s, _ := pipelineServer(t)
+	reg, err := plugins.New([]plugins.Config{{Name: "docling", URL: "http://127.0.0.1:1/mcp"}}, t.TempDir(), nil, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.Check(context.Background())
+	s.SetPlugins(reg)
+	res, _ := s.handlePipelines(context.Background(), call(map[string]any{"project": "p"}))
+	text := resultText(t, res)
+	if !strings.Contains(text, `"plugins":[{"name":"docling","status":"down","nodes":[]}]`) || strings.Contains(text, "127.0.0.1") {
+		t.Errorf("listing: %s", text)
 	}
 }

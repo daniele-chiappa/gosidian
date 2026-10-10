@@ -97,7 +97,16 @@ func startPipelines(ctx context.Context, cfg *config.Config, sdir string, mcpSer
 		Providers:      providers,
 		Location:       loc,
 	}, sec, slog.Default())
+	reg, err := newPlugins(pc, sdir, sec, slog.Default())
+	if err != nil {
+		log.Fatalf("plugins: %v", err)
+	}
+	engine.Types().Extend(reg)
 	mcpServer.SetPipelines(engine)
+	mcpServer.SetPlugins(reg)
+	if len(reg.Names()) > 0 {
+		go reg.Start(ctx, pluginCheckEvery)
+	}
 	done := make(chan struct{})
 	go func() { runner.Start(ctx); close(done) }()
 	go engine.StartSchedules(ctx)
@@ -105,8 +114,8 @@ func startPipelines(ctx context.Context, cfg *config.Config, sdir string, mcpSer
 	for _, p := range providers {
 		names = append(names, p.Name)
 	}
-	log.Printf("pipelines: enabled (%d workers, step timeout %s, retention %s, time zone %s, llm %v, http allowlist %d, state %s)",
-		max(pc.Workers, 1), pc.StepTimeout, pc.Retention, loc, names, len(pc.HTTPAllowlist), dbPath)
+	log.Printf("pipelines: enabled (%d workers, step timeout %s, retention %s, time zone %s, llm %v, plugins %v, http allowlist %d, state %s)",
+		max(pc.Workers, 1), pc.StepTimeout, pc.Retention, loc, names, reg.Names(), len(pc.HTTPAllowlist), dbPath)
 	return func(d time.Duration) {
 		select {
 		case <-done:

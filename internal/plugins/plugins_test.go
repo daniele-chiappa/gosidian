@@ -1,0 +1,366 @@
+package plugins
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"image"
+	"image/color"
+	"image/png"
+	"net/http"
+	"net/http/httptest"
+	"path"
+	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/mark3labs/mcp-go/server"
+
+	"github.com/gosidian/gosidian/internal/jobs"
+	"github.com/gosidian/gosidian/internal/pipeline"
+)
+
+// --- a plugin ---
+
+func pngOf(c color.Color) []byte {
+	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	for x := 0; x < 2; x++ {
+		for y := 0; y < 2; y++ {
+			img.Set(x, y, c)
+		}
+	}
+	var b bytes.Buffer
+	_ = png.Encode(&b, img)
+	return b.Bytes()
+}
+
+// fakePlugin is a converter: convert takes a file and gives back its
+// markdown, one image as an embedded resource and one as image content.
+// It wants the bearer t0k; version is its manifest's.
+func fakePlugin(t *testing.T, version *atomic.Value) *httptest.Server {
+	t.Helper()
+	s := server.NewMCPServer("docling", "1.0.0", server.WithToolCapabilities(false))
+	s.AddTool(mcp.NewTool(ManifestTool), func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		b, _ := json.Marshal(map[string]any{
+			"name": "docling", "version": version.Load(), "gosidian": 1,
+			"nodes": []any{map[string]any{
+				"name": "convert", "tool": "convert", "description": "A document to markdown", "files": []string{"file"},
+				"input_schema": map[string]any{"type": "object"},
+			}},
+			"permissions": map[string]any{"files": true, "network": []string{}},
+		})
+		return mcp.NewToolResultText(string(b)), nil
+	})
+	s.AddTool(mcp.NewTool("convert", mcp.WithObject("file"), mcp.WithBoolean("ocr")), func(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := req.GetArguments()
+		file, _ := args["file"].(map[string]any)
+		data, err := base64.StdEncoding.DecodeString(fmt.Sprint(file["data"]))
+		if err != nil || file["mime"] != "application/pdf" {
+			return mcp.NewToolResultError(fmt.Sprintf("bad file %v", file["name"])), nil
+		}
+		res := mcp.NewToolResultStructured(map[string]any{
+			"markdown": "# " + string(data) + "\n\n![](fig-1.png)\n", "name": file["name"], "ocr": args["ocr"],
+		}, "converted")
+		res.Content = append(res.Content,
+			mcp.NewEmbeddedResource(mcp.BlobResourceContents{URI: "file:///fig-1.png", MIMEType: "image/png", Blob: base64.StdEncoding.EncodeToString(pngOf(color.White))}),
+			mcp.NewImageContent(base64.StdEncoding.EncodeToString(pngOf(color.Black)), "image/png"),
+			mcp.NewEmbeddedResource(mcp.BlobResourceContents{URI: "file:///run.sh", MIMEType: "text/x-sh", Blob: base64.StdEncoding.EncodeToString([]byte("#!/bin/sh"))}),
+		)
+		return res, nil
+	})
+	h := server.NewStreamableHTTPServer(s)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer t0k" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		h.ServeHTTP(w, r)
+	}))
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+type secretsMap map[string]string
+
+func (m secretsMap) Get(name string) (string, error) {
+	if v, ok := m[name]; ok {
+		return v, nil
+	}
+	return "", fmt.Errorf("no secret %q", name)
+}
+
+// --- a vault ---
+
+type memHost struct {
+	mu     sync.Mutex
+	notes  map[string]string
+	att    map[string][]byte
+	actors []string
+	types  pipeline.Types
+}
+
+func (h *memHost) Pipelines(project string) ([]pipeline.Pipeline, error) { return nil, nil }
+
+func (h *memHost) Pipeline(p string) (pipeline.Pipeline, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	c, ok := h.notes[p]
+	if !ok {
+		return pipeline.Pipeline{}, pipeline.ErrNoNote
+	}
+	return pipeline.FromNote(p, "p", p, []byte(c), h.types), nil
+}
+
+func (h *memHost) Enabled(string) bool { return true }
+
+func (h *memHost) ReadNote(project, p string) (pipeline.NoteData, error) {
+	return pipeline.NoteData{}, pipeline.ErrNoNote
+}
+
+func (h *memHost) WriteNote(project, p string, content []byte, _ pipeline.WriteMode, actor string) (pipeline.WriteResult, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.notes[p] = string(content)
+	return pipeline.WriteResult{Path: p}, nil
+}
+
+func (h *memHost) ReadAttachment(project, p string) ([]byte, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if b, ok := h.att[p]; ok {
+		return b, nil
+	}
+	return nil, errors.New("no such attachment")
+}
+
+func (h *memHost) StoreAttachment(project, name string, data []byte, actor string) (string, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	ext := strings.ToLower(path.Ext(name))
+	if ext != ".png" && ext != ".pdf" {
+		return "", fmt.Errorf("extension %q not allowed", ext)
+	}
+	sum := sha256.Sum256(data)
+	rel := project + "/attachments/" + hex.EncodeToString(sum[:8]) + ext
+	h.att[rel] = data
+	h.actors = append(h.actors, actor)
+	return rel, nil
+}
+
+func (h *memHost) Changed(jobs.Run) {}
+
+func newEngine(t *testing.T, reg *Registry) (*pipeline.Engine, *memHost) {
+	t.Helper()
+	st, err := jobs.Open(filepath.Join(t.TempDir(), "jobs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := jobs.NewRunner(st, jobs.Options{Workers: 2, Poll: 10 * time.Millisecond, Lease: time.Minute})
+	host := &memHost{notes: map[string]string{}, att: map[string][]byte{}}
+	e := pipeline.New(host, runner, pipeline.Config{}, nil, nil)
+	e.Types().Extend(reg)
+	host.types = e.Types()
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+	go func() { runner.Start(ctx); close(stopped) }()
+	t.Cleanup(func() { cancel(); <-stopped; st.Close() })
+	return e, host
+}
+
+func waitEnd(t *testing.T, e *pipeline.Engine, id string) jobs.Run {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		run, err := e.Runner().Store().Run(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if run.Status.Terminal() {
+			return run
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("run is still %s", run.Status)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+const convertPipeline = "---\ntype: pipeline\n---\n\n```pipeline\ntrigger: {on: manual}\nnodes:\n" +
+	"  - id: convert\n    use: docling.convert\n    with: {file: \"{{ trigger.file }}\", ocr: true}\n" +
+	"  - id: save\n    use: note.write\n    with: {path: out/doc.md, body: \"{{ convert.markdown }}\"}\n```\n"
+
+// --- tests ---
+
+func TestManifest_Check(t *testing.T) {
+	good := `{"name":"docling","version":"1.0","gosidian":1,"nodes":[{"name":"convert","tool":"convert","files":["file"],"input_schema":{"type": "object"}}],"permissions":{"files":true}}`
+	m, err := ParseManifest([]byte(good), "docling")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spaced := strings.Replace(good, `{"type": "object"}`, "{ \"type\" :\n \"object\" }", 1)
+	if m2, _ := ParseManifest([]byte(spaced), "docling"); m2 == nil || m2.SHA() != m.SHA() {
+		t.Error("the spacing of a schema changes the sha")
+	}
+	if m3, _ := ParseManifest([]byte(strings.Replace(good, `"1.0"`, `"1.1"`, 1)), "docling"); m3.SHA() == m.SHA() {
+		t.Error("a new version keeps the sha")
+	}
+	for name, bad := range map[string]string{
+		"another name":            good,
+		"format 2":                strings.Replace(good, `"gosidian":1`, `"gosidian":2`, 1),
+		"files without the grant": strings.Replace(good, `"files":true`, `"files":false`, 1),
+		"the manifest tool":       strings.Replace(good, `"tool":"convert"`, `"tool":"gosidian_manifest"`, 1),
+		"a bad node name":         strings.Replace(good, `"name":"convert"`, `"name":"Convert"`, 1),
+	} {
+		want := "docling"
+		if name == "another name" {
+			want = "converter"
+		}
+		if _, err := ParseManifest([]byte(bad), want); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+func TestNew_RefusesBadRegistrations(t *testing.T) {
+	for _, c := range [][]Config{
+		{{Name: "Docling", URL: "http://x/mcp"}},
+		{{Name: "llm", URL: "http://x/mcp"}},
+		{{Name: "docling", URL: "ftp://x/mcp"}},
+		{{Name: "docling", URL: "http://x/mcp"}, {Name: "docling", URL: "http://y/mcp"}},
+	} {
+		if _, err := New(c, t.TempDir(), nil, "test", nil); err == nil {
+			t.Errorf("%+v accepted", c)
+		}
+	}
+}
+
+// A plugin's nodes exist once its manifest is accepted; they run through
+// the plugin with the file's content, and the files it gives back become
+// attachments; a manifest that changed stops them until accepted again.
+func TestRegistry_AcceptRunAndChange(t *testing.T) {
+	var version atomic.Value
+	version.Store("1.0")
+	ts := fakePlugin(t, &version)
+	reg, err := New([]Config{{Name: "docling", URL: ts.URL + "/mcp", TokenSecret: "docling-token"}}, t.TempDir(), secretsMap{"docling-token": "t0k"}, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	reg.Check(ctx)
+	st, _ := reg.State("docling")
+	if st.Status != StatusUnaccepted || st.Version != "1.0" || len(st.SHA) != 64 {
+		t.Fatalf("before the accept: %+v", st)
+	}
+	if reg.Known("docling.convert") {
+		t.Error("a node of a manifest not accepted is known")
+	}
+	if why := reg.Why("docling.convert"); !strings.Contains(why, "not accepted") {
+		t.Errorf("why = %q", why)
+	}
+	if _, err := reg.Accept(ctx, "docling", "deadbeef", "test"); err == nil {
+		t.Error("accepted with another sha")
+	}
+	if _, err := reg.Accept(ctx, "docling", st.SHA[:12], "test"); err != nil {
+		t.Fatal(err)
+	}
+	reg.Check(ctx)
+	if st, _ = reg.State("docling"); st.Status != StatusOK || len(st.Nodes) != 1 || st.Nodes[0].Type != "docling.convert" {
+		t.Fatalf("after the accept: %+v", st)
+	}
+	if why := reg.Why("docling.convertx"); !strings.Contains(why, "docling.convert") {
+		t.Errorf("why for a missing node = %q", why)
+	}
+
+	e, host := newEngine(t, reg)
+	host.notes["p/pipelines/convert.md"] = convertPipeline
+	host.att["p/attachments/doc.pdf"] = []byte("%PDF-1.4 Report")
+	run, _, err := e.Start(pipeline.StartRequest{Path: "p/pipelines/convert.md", Trigger: pipeline.TriggerManual, Input: map[string]any{"file": "p/attachments/doc.pdf"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run = waitEnd(t, e, run.ID); run.Status != jobs.Done {
+		steps, _ := e.Runner().Store().Steps(run.ID)
+		t.Fatalf("run %s: %s %+v", run.Status, run.Error, steps)
+	}
+	if got := host.notes["p/out/doc.md"]; !strings.Contains(got, "# %PDF-1.4 Report") {
+		t.Errorf("the note = %q", got)
+	}
+	steps, _ := e.Runner().Store().Steps(run.ID)
+	var out map[string]any
+	for _, s := range steps {
+		if s.Name == "convert" {
+			_ = json.Unmarshal(s.Output, &out)
+		}
+	}
+	files, _ := out["files"].([]any)
+	skipped, _ := out["skipped"].([]any)
+	if out["name"] != "doc.pdf" || out["ocr"] != true || len(files) != 2 || len(skipped) != 1 {
+		t.Fatalf("output = %v", out)
+	}
+	f0 := files[0].(map[string]any)
+	if f0["name"] != "fig-1.png" || !strings.HasPrefix(fmt.Sprint(f0["path"]), "p/attachments/") || !strings.Contains(fmt.Sprint(f0["markdown"]), "/vault-files/p/attachments/") {
+		t.Errorf("first file = %v", f0)
+	}
+	if files[1].(map[string]any)["name"] != "image-1.png" {
+		t.Errorf("second file = %v", files[1])
+	}
+	if len(host.actors) != 2 || host.actors[0] != "pipeline:p/pipelines/convert.md" {
+		t.Errorf("stored as %v", host.actors)
+	}
+
+	version.Store("1.1")
+	reg.Check(ctx)
+	if st, _ = reg.State("docling"); st.Status != StatusChanged || !reg.Known("docling.convert") {
+		t.Fatalf("after the change: %+v", st)
+	}
+	run, _, err = e.Start(pipeline.StartRequest{Path: "p/pipelines/convert.md", Trigger: pipeline.TriggerManual, Input: map[string]any{"file": "p/attachments/doc.pdf"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run = waitEnd(t, e, run.ID)
+	if run.Status != jobs.Failed {
+		t.Fatalf("a changed manifest ran: %s", run.Status)
+	}
+	if conv, _ := e.Runner().Store().Steps(run.ID); !strings.Contains(fmt.Sprint(conv), "another manifest") {
+		t.Errorf("steps = %+v", conv)
+	}
+
+	if err := reg.Forget("docling"); err != nil {
+		t.Fatal(err)
+	}
+	if reg.Known("docling.convert") {
+		t.Error("a forgotten plugin's node is known")
+	}
+}
+
+func TestRegistry_Down(t *testing.T) {
+	var version atomic.Value
+	version.Store("1.0")
+	ts := fakePlugin(t, &version)
+	reg, err := New([]Config{
+		{Name: "notoken", URL: ts.URL + "/mcp"},
+		{Name: "gone", URL: "http://127.0.0.1:1/mcp"},
+		{Name: "nokey", URL: ts.URL + "/mcp", TokenSecret: "x"},
+	}, t.TempDir(), nil, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.Check(context.Background())
+	for _, s := range reg.States() {
+		if s.Status != StatusDown || s.Error == "" {
+			t.Errorf("%s: %+v", s.Name, s)
+		}
+	}
+	if s, _ := reg.State("nokey"); !strings.Contains(s.Error, "secrets key") {
+		t.Errorf("nokey: %q", s.Error)
+	}
+}

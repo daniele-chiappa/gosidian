@@ -14,6 +14,7 @@ import (
 	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/gosidian/gosidian/internal/jobs"
 	"github.com/gosidian/gosidian/internal/pipeline"
+	"github.com/gosidian/gosidian/internal/plugins"
 )
 
 // Two tools for the pipelines (IMP-167), to keep the catalogue small:
@@ -31,7 +32,7 @@ const maxWaitSeconds = 60
 
 func (s *Server) registerPipelineTools() {
 	s.impl.AddTool(mcp.NewTool("memory_pipelines",
-		mcp.WithDescription("Read the pipelines of a project (notes `type: pipeline` with a ```pipeline YAML block, run by the server when [pipelines] is on and the project has use_pipelines): with project only, the pipelines with their trigger, nodes, problems and last run; with path, the runs of that pipeline, newest first; with run, one run with the status, error and output of each step. Start, resume or cancel a run with memory_pipeline_run. Format and node types: docs/pipelines.md."),
+		mcp.WithDescription("Read the pipelines of a project (notes `type: pipeline` with a ```pipeline YAML block, run by the server when [pipelines] is on and the project has use_pipelines): with project only, the pipelines with their trigger, nodes, problems and last run, and the plugins with the node types they add (<plugin>.<node>, status ok when they run); with path, the runs of that pipeline, newest first; with run, one run with the status, error and output of each step. Start, resume or cancel a run with memory_pipeline_run. Format and node types: docs/pipelines.md."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Project of the pipelines. "+scopedProjectNote)),
 		mcp.WithString("path", mcp.Description("A pipeline note's path: list its runs.")),
 		mcp.WithString("run", mcp.Description("A run's id: show it with its steps.")),
@@ -94,8 +95,33 @@ func (s *Server) handlePipelines(ctx context.Context, req mcp.CallToolRequest) (
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("pipelines", err), nil
 	}
-	out := pipeline.Infos(ps, store)
-	return mcp.NewToolResultJSON(map[string]any{"project": project, "pipelines": out})
+	res := map[string]any{"project": project, "pipelines": pipeline.Infos(ps, store)}
+	if s.plugins != nil && len(s.plugins.Names()) > 0 {
+		res["plugins"] = pluginBriefs(s.plugins.States())
+	}
+	return mcp.NewToolResultJSON(res)
+}
+
+// pluginBrief is a plugin as an agent writing a pipeline needs it: its
+// node types, and whether they run now. No address, no error: they name
+// hosts of the network.
+type pluginBrief struct {
+	Name    string             `json:"name"`
+	Status  string             `json:"status"`
+	Version string             `json:"version,omitempty"`
+	Nodes   []plugins.NodeInfo `json:"nodes"`
+}
+
+func pluginBriefs(states []plugins.State) []pluginBrief {
+	out := make([]pluginBrief, 0, len(states))
+	for _, st := range states {
+		b := pluginBrief{Name: st.Name, Status: st.Status, Version: st.Version, Nodes: st.Nodes}
+		if b.Nodes == nil {
+			b.Nodes = []plugins.NodeInfo{}
+		}
+		out = append(out, b)
+	}
+	return out
 }
 
 func (s *Server) handlePipelineRun(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

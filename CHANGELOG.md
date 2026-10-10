@@ -8,6 +8,57 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.75.0] — 2026-10-10 — "pipeline plugins"
+
+Plugins for the pipelines: an MCP server running beside gosidian adds
+node types to the pipelines, once the owner has accepted what it asks
+for. Pull the image and restart, nothing to migrate. Like the pipelines,
+plugins do nothing unless `[pipelines] enabled` is on and a plugin is
+registered; with them off nothing changes. The contract for whoever
+writes a plugin, and how to register and accept one, are in
+`docs/plugins.md`.
+
+### Added
+- **Plugins** — a plugin is an MCP server reached over Streamable HTTP,
+  registered in `[[pipelines.plugins]]` (`name`, `url`, `token_secret`,
+  `timeout`) or `GOSIDIAN_PIPELINES_PLUGINS` (`name=url,…`, without a
+  token). It serves its manifest through a tool `gosidian_manifest`: its
+  nodes, the MCP tool behind each, the settings that name files, the
+  permissions it asks for. Its nodes, `<plugin>.<node>`, run once the
+  owner accepted that manifest: `gosidian plugin show <name>` prints it
+  with its sha, `gosidian plugin accept <name> <sha>` accepts it
+  (`<state-dir>/plugins.json`), `list` and `forget` complete the set.
+  The manifest is read again at every call: a plugin that serves another
+  one (a new version, other permissions) stops running until it is
+  accepted again.
+- **What a plugin sees and gives back** — a setting the manifest lists
+  in `files` names an attachment of the pipeline's project; the plugin
+  gets its content (`{name, mime, data}`), nothing else of the vault. The
+  files it gives back (embedded resources, images) are stored as
+  attachments of the project, as the pipeline, listed in the node's
+  output `files` (`name`, `path`, `mime`, `markdown`), and start no
+  ingest pipeline. Its bearer token is a sealed secret; redirects are not
+  followed.
+- **Where plugins show** — the server checks its plugins once a minute.
+  `GET /api/v1/plugins` (signed-in accounts, while the pipelines are on),
+  the Runs window and `memory_pipelines` list each one's status (`ok`,
+  `unaccepted`, `changed`, `down`) and node types; only the owner sees
+  their addresses and errors, which name hosts of the network. The lint
+  rule `pipeline-invalid` says why a plugin's node is missing (not
+  registered, manifest not accepted, no such node).
+- **A first plugin**, `gosidian-docling`, converts PDF, DOCX, XLSX, PPTX,
+  HTML and images to markdown with docling on the CPU, its pictures given
+  back as files; `docs/plugins.md` shows a pipeline that turns each
+  arriving document into a note, its pictures described by a vision
+  model. It will be published in a repository of its own.
+
+### Changed
+- **A `starlark` node's code is a script** — loops and `if` at the top
+  level, a name set again (`md = md.replace(…)` in a `for`), `while` and
+  `set` are allowed, where the code had to wrap them in a function. The
+  step cap bounds them the same. The docs now say that a starlark node's
+  output is the value of `output` itself (`{{ node }}`).
+
 ## [2.74.0] — 2026-10-10 — "pipelines"
 
 Pipelines: a note can tell the server what to do with a file that arrives

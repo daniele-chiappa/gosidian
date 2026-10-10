@@ -332,7 +332,9 @@ from the caller's token identity and cannot be forged, while
 - `memory_pipelines(project?, path?, run?, limit?)` — the pipelines
   (notes `type: pipeline`) with their trigger and nodes, or the problem
   that keeps one from running; with `path` its last runs, with `run` one
-  run and its steps (outputs cut at 4 KiB). Read-only. Off unless the
+  run and its steps (outputs cut at 4 KiB). Without `path` and `run` it
+  also lists the plugins with their status and the node types they add
+  (`<plugin>.<node>`, [plugins](../plugins.md)). Read-only. Off unless the
   server runs pipelines and the project has `use_pipelines`
   ([pipelines](../pipelines.md)).
 - `memory_pipeline_run(action?, path?, input?, idempotency_key?,

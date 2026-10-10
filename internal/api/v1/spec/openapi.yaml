@@ -987,6 +987,19 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /api/v1/plugins:
+    get:
+      tags: [pipelines]
+      summary: The plugins of the pipelines, their status and node types.
+      description: |
+        Every signed-in account while the pipelines are on (docs/plugins.md).
+        Only the owner gets `url` and `error`, which name hosts of the network.
+      responses:
+        "200":
+          description: "`{plugins: [{name, status (ok, unaccepted, changed, down, unknown), version, sha, nodes: [{type, description}], accepted: {version, sha, at, by}, checked, error, url}]}`"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /api/v1/pipelines/{path}/runs:
     get:
       tags: [pipelines]

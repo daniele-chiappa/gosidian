@@ -350,6 +350,23 @@ type PipelinesConfig struct {
 	Timezone string `toml:"timezone"`
 	// LLM lists the language model services ([[pipelines.llm]]).
 	LLM []LLMProvider `toml:"llm"`
+	// Plugins lists the plugins, MCP servers whose nodes the pipelines
+	// use ([[pipelines.plugins]], IMP-168, docs/plugins.md).
+	Plugins []PluginConfig `toml:"plugins"`
+}
+
+// PluginConfig registers a plugin: an MCP server reached over Streamable
+// HTTP. Its nodes are <name>.<node>, usable once the owner accepted its
+// manifest (gosidian plugin accept).
+type PluginConfig struct {
+	Name string `toml:"name"`
+	URL  string `toml:"url"` // the MCP endpoint, http://host:port/mcp
+	// TokenSecret names the secret with the plugin's bearer token
+	// (gosidian secret set); empty for a plugin without one.
+	TokenSecret string `toml:"token_secret"`
+	// Timeout is the longest a call to the plugin may take; default the
+	// step timeout.
+	Timeout time.Duration `toml:"timeout"`
 }
 
 // LLMProvider is a service with an OpenAI-compatible API.
@@ -937,6 +954,42 @@ func (c *Config) applyDefaults() {
 	}
 }
 
+// parsePluginsEnv reads GOSIDIAN_PIPELINES_PLUGINS: name=url entries,
+// comma-separated, for plugins without a token (a token needs
+// [[pipelines.plugins]] token_secret in config.toml).
+func parsePluginsEnv(v string) ([]PluginConfig, error) {
+	var out []PluginConfig
+	for _, e := range strings.Split(v, ",") {
+		if e = strings.TrimSpace(e); e == "" {
+			continue
+		}
+		name, url, ok := strings.Cut(e, "=")
+		name, url = strings.TrimSpace(name), strings.TrimSpace(url)
+		if !ok || name == "" || url == "" {
+			return nil, fmt.Errorf("%q is not name=url", e)
+		}
+		out = append(out, PluginConfig{Name: name, URL: url})
+	}
+	return out, nil
+}
+
+// mergePlugins adds env to file, an entry of env replacing the URL of the
+// plugin of the same name (its token and timeout stay).
+func mergePlugins(file, env []PluginConfig) []PluginConfig {
+	for _, p := range env {
+		found := false
+		for i := range file {
+			if file[i].Name == p.Name {
+				file[i].URL, found = p.URL, true
+			}
+		}
+		if !found {
+			file = append(file, p)
+		}
+	}
+	return file
+}
+
 // applyPipelinesEnv reads the GOSIDIAN_PIPELINES_* variables. One LLM
 // provider can come from the environment too, named "default", for a
 // compose file that has no config.toml.
@@ -988,6 +1041,13 @@ func (c *Config) applyPipelinesEnv() error {
 	}
 	if v := os.Getenv("GOSIDIAN_PIPELINES_TIMEZONE"); v != "" {
 		c.Pipelines.Timezone = v
+	}
+	if v := os.Getenv("GOSIDIAN_PIPELINES_PLUGINS"); v != "" {
+		plugins, err := parsePluginsEnv(v)
+		if err != nil {
+			return fmt.Errorf("GOSIDIAN_PIPELINES_PLUGINS: %w", err)
+		}
+		c.Pipelines.Plugins = mergePlugins(c.Pipelines.Plugins, plugins)
 	}
 	if v := os.Getenv("GOSIDIAN_PIPELINES_LLM_URL"); v != "" {
 		p := LLMProvider{Name: "default", BaseURL: v, Model: os.Getenv("GOSIDIAN_PIPELINES_LLM_MODEL"), APIKeySecret: os.Getenv("GOSIDIAN_PIPELINES_LLM_KEY_SECRET")}

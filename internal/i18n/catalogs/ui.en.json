@@ -1046,6 +1046,17 @@
     "start_failed": "Could not start the pipeline.",
     "resume_failed": "Could not resume the run.",
     "cancel_failed": "Could not cancel the run.",
+    "plugins": "Plugins",
+    "plugins_intro": "MCP servers whose nodes the pipelines use as <plugin>.<node>.",
+    "plugin_nodes": "Nodes",
+    "plugin_accept": "The owner accepts it on the server:",
+    "plugin_state": {
+      "ok": "running",
+      "unaccepted": "not accepted",
+      "changed": "manifest changed",
+      "down": "unreachable",
+      "unknown": "not checked yet"
+    },
     "state": {
       "pending": "pending",
       "queued": "queued",

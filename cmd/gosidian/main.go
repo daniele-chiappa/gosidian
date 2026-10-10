@@ -98,6 +98,9 @@ func main() {
 		case "pipeline":
 			runPipelineCmd(os.Args[2:])
 			return
+		case "plugin":
+			runPluginCmd(os.Args[2:])
+			return
 		case "version", "--version", "-version":
 			os.Stdout.WriteString(version + "\n")
 			return
@@ -674,6 +677,7 @@ func main() {
 		ConfigPath: cfgPath,
 		OAuth:      oauthSrv,              // nil when [oauth] is off: /api/v1/oauth/* answers 404
 		Pipelines:  mcpServer.Pipelines(), // nil when [pipelines] is off: /pipelines, /runs answer 404
+		Plugins:    mcpServer.Plugins(),   // nil when [pipelines] is off
 	})
 	srv.MountAPIv1(apiRouter)
 	srv.SetVaultFileAuthorizer(apiRouter.VaultFileAuthorizer()) // ADR-022: attachments share the API auth
