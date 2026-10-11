@@ -118,6 +118,16 @@ const baseCodec: PlanciaCodec = createArgCodec({
     note: PATH_TYPE(),
     edit: PATH_TYPE(),
     history: PATH_TYPE(),
+    // A diagram of a note (IMP-169): `<path>#<index>`, the index of its
+    // block in the note's text.
+    diagram: {
+      arg: (p) => (str(p.path) && Number.isInteger(p.index) ? `${p.path}#${p.index}` : null),
+      props: (a) => {
+        const i = a?.lastIndexOf('#') ?? -1
+        return a && i > 0 ? { path: a.slice(0, i), index: Number(a.slice(i + 1)) || 0 } : {}
+      },
+      title: (a) => (a ? tr('diagram.window_title', { name: base(a.slice(0, a.lastIndexOf('#'))) }) : ''),
+    },
     graph: {
       arg: graphArgFromProps,
       props: graphPropsFromArg,

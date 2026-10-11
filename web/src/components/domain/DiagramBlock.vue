@@ -3,18 +3,22 @@
  * DiagramBlock — a ```diagram block of a note, drawn (IMP-169, ADR-036).
  * plancia-diagrams reads its YAML, lists what is wrong in it, and draws it;
  * a link of the drawing comes back as `link`, which MarkdownPreview opens
- * as a note window or a tab. «Code» shows the YAML as written, and «Export
- * SVG» saves the drawing with the page's colours: the two sit in the head
- * of the diagram, beside its zoom buttons. The drawing loads on first use;
+ * as a note window or a tab. «Edit» (for who may change the note) opens
+ * the diagram window, «Code» shows the YAML as written, and «Export SVG»
+ * saves the drawing with the page's colours: they sit in the head of the
+ * diagram, beside its zoom buttons. The drawing loads on first use;
  * when it cannot load, the block shows its code.
  */
 import { computed, defineAsyncComponent, h, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { saveBlob } from '@/api/download'
+import { useDiagramLabels } from './diagramLabels'
 
-const props = defineProps<{ source: string }>()
+// editable: the reader may change the note the block is written in.
+const props = defineProps<{ source: string; editable?: boolean }>()
 const emit = defineEmits<{
   link: [link: { target: string; kind: 'note' | 'url'; label: string }]
+  edit: []
 }>()
 const { t } = useI18n()
 
@@ -34,18 +38,7 @@ const DiagramView = defineAsyncComponent({
   },
 })
 
-const labels = computed(() => ({
-  problems: t('diagram.problems'),
-  line: t('diagram.line'),
-  pending: t('diagram.pending'),
-  loading: t('diagram.loading'),
-  failed: t('diagram.failed'),
-  links: t('diagram.links'),
-  zoomIn: t('diagram.zoom_in'),
-  zoomOut: t('diagram.zoom_out'),
-  fit: t('diagram.fit'),
-  open: t('diagram.open'),
-}))
+const labels = useDiagramLabels().view
 
 /** The file name of the export: the diagram's title, else «diagram». */
 const fileName = computed(() => {
@@ -87,6 +80,15 @@ function exportSvg() {
     </template>
     <DiagramView v-else ref="view" :source="source" :labels="labels" @link="(l) => emit('link', l)">
       <template #actions="{ drawable }">
+        <button
+          v-if="editable"
+          type="button"
+          class="gosidian-diagram__button"
+          data-diagram-edit
+          @click="emit('edit')"
+        >
+          {{ t('diagram.edit') }}
+        </button>
         <button
           type="button"
           class="gosidian-diagram__button"

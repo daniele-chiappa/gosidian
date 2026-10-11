@@ -45,7 +45,10 @@ import type { ViewData } from '@/api/preview'
 import ViewTable from '@/components/views/ViewTable.vue'
 import ViewBoard from '@/components/views/ViewBoard.vue'
 import ViewCount from '@/components/views/ViewCount.vue'
-import { hasDiagrams, splitViews } from '@/components/views/segments'
+import { hasDiagrams, splitViews, type DiagramSegment } from '@/components/views/segments'
+import { getNote } from '@/api/notes'
+import { useAccessStore } from '@/stores/access'
+import { i18n } from '@/locales'
 import DiagramBlock from './DiagramBlock.vue'
 import { findHeading } from './headings'
 import { linkTarget } from './noteLinks'
@@ -59,6 +62,8 @@ const props = defineProps<{
   notePath?: string
   compact?: boolean
   diagramLinks?: Record<string, string>
+  /** Diagrams get «Edit» for who may change the note they are written in. */
+  diagramsEditable?: boolean
 }>()
 
 const store = useWindowsStore()
@@ -134,6 +139,41 @@ function onClick(e: MouseEvent) {
   else if (target.kind === 'tab') window.open(target.url, '_blank', 'noopener,noreferrer')
 }
 
+// The access store only where diagrams may be edited: a caption or a
+// canvas card shows none, and needs no store.
+let access: ReturnType<typeof useAccessStore> | null = null
+
+/** Whether a diagram may be edited: its own note, or an embed's that resolved. */
+function canEditDiagram(s: DiagramSegment): boolean {
+  if (!props.diagramsEditable) return false
+  const path = s.origin === undefined ? props.notePath : s.origin
+  access ??= useAccessStore()
+  return !!path && access.canWrite(path)
+}
+
+/**
+ * Opens a diagram in the diagram window: its block found in the text of the
+ * note it is written in, by its YAML and how many blocks of the same text
+ * come before it, so the window's address holds the block's index.
+ */
+async function editDiagram(s: DiagramSegment) {
+  const path = s.origin === undefined ? props.notePath : s.origin
+  if (!path) return
+  const [{ findDiagramBlocks }, note] = await Promise.all([import('./diagramView'), getNote(path)])
+  const same = (a: string) => a === s.source || a.trimEnd() === s.source.trimEnd()
+  const blocks = findDiagramBlocks(note.content)
+    .map((b, i) => ({ b, i }))
+    .filter((x) => same(x.b.source))
+  const hit = blocks[s.occurrence] ?? blocks[0]
+  if (!hit) return
+  openWindow({
+    type: 'diagram',
+    key: planciaKey('diagram', `${path}#${hit.i}`),
+    title: i18n.global.t('diagram.window_title', { name: base(path) }),
+    props: { path, index: hit.i },
+  })
+}
+
 /** Opens a link of a diagram: a note it resolves to as a window, an address in a tab. */
 function openDiagramLink(l: { target: string; kind: 'note' | 'url' }) {
   if (l.kind === 'url') {
@@ -165,7 +205,13 @@ function openNote(path: string, anchor: string | null) {
   <div v-else ref="root" :class="proseClass" @click="onClick">
     <template v-for="(s, i) in segments" :key="s.kind === 'html' ? `html-${i}` : `${s.kind}-${s.index}`">
       <div v-if="s.kind === 'html'" class="contents" v-html="s.html" />
-      <DiagramBlock v-else-if="s.kind === 'diagram'" :source="s.source" @link="openDiagramLink" />
+      <DiagramBlock
+        v-else-if="s.kind === 'diagram'"
+        :source="s.source"
+        :editable="canEditDiagram(s)"
+        @link="openDiagramLink"
+        @edit="editDiagram(s)"
+      />
       <div v-else-if="viewAs(s.index, 'table')" class="gosidian-view" :data-view="s.index">
         <ViewTable :view="viewAs(s.index, 'table')!" />
       </div>

@@ -5,7 +5,22 @@
 export type Segment =
   | { kind: 'html'; html: string }
   | { kind: 'view'; index: number; html: string }
-  | { kind: 'diagram'; index: number; source: string; html: string }
+  | DiagramSegment
+
+/**
+ * A diagram's block. `origin` is the note it was written in when an embed
+ * brought it (null when the embed's note did not resolve), undefined when
+ * it is the note's own; `occurrence` counts the blocks of the same text
+ * before it in that note, so an editor finds it among the note's blocks.
+ */
+export interface DiagramSegment {
+  kind: 'diagram'
+  index: number
+  source: string
+  html: string
+  origin?: string | null
+  occurrence: number
+}
 
 /**
  * The YAML of a top-level `<pre><code class="language-diagram">`, the HTML
@@ -42,7 +57,15 @@ export function splitViews(html: string): Segment[] {
     buf = ''
   }
   const scratch = document.createElement('div')
+  // The note an embed's text comes from, between its head and its end.
+  let origin: string | null | undefined
+  const seen = new Map<string, number>()
   for (const node of Array.from(tpl.content.childNodes)) {
+    if (node instanceof HTMLElement && node.classList.contains('gosidian-embed-start')) {
+      origin = node.querySelector('a[data-preview-path]')?.getAttribute('data-preview-path') ?? null
+    } else if (node instanceof HTMLElement && node.classList.contains('gosidian-embed-end')) {
+      origin = undefined
+    }
     if (
       node instanceof HTMLElement &&
       node.classList.contains('gosidian-view') &&
@@ -55,11 +78,16 @@ export function splitViews(html: string): Segment[] {
     const source = diagramSource(node)
     if (source !== null) {
       flush()
+      const key = `${origin === undefined ? '' : `@${origin}`}\u0000${source}`
+      const occurrence = seen.get(key) ?? 0
+      seen.set(key, occurrence + 1)
       out.push({
         kind: 'diagram',
         index: diagrams++,
         source,
         html: (node as HTMLElement).outerHTML,
+        origin,
+        occurrence,
       })
       continue
     }

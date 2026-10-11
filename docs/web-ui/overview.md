@@ -132,7 +132,10 @@ with its `+`, `−` and fit buttons (the wheel scrolls the note). A node
 with a `[[link]]` opens its note, at the heading the link names; an
 address opens in a tab. **Code** shows the YAML as written, **Export
 SVG** saves the drawing in the theme's colours. What is wrong in a block
-is listed above its drawing, line by line.
+is listed above its drawing, line by line. **Edit** opens the diagram
+window, where a flow is edited on its drawing, a tree, a mind map or a
+fishbone as indented lines, and every kind in its YAML; **Save** writes
+the block back in its note. The **+** of a folder makes a diagram note.
 
 ## Language switching
 

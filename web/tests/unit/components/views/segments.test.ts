@@ -49,3 +49,28 @@ describe('splitViews and diagrams (IMP-169)', () => {
     expect(s.map((x) => x.kind)).toEqual(['html'])
   })
 })
+
+describe('splitViews: where a diagram is written (IMP-169, F2)', () => {
+  it('knows an embed’s note, and counts the blocks of the same text', () => {
+    const block = (y: string) => `<pre><code class="language-diagram">${y}</code></pre>`
+    const html =
+      '<p>Own</p>' +
+      block('kind: tree\nroot: A\n') +
+      block('kind: tree\nroot: A\n') +
+      '<div class="gosidian-embed-start" data-embed="p/other"><a class="wikilink" data-preview-path="p/other.md">other</a></div>' +
+      block('kind: tree\nroot: A\n') +
+      '<div class="gosidian-embed-end"></div>' +
+      '<div class="gosidian-embed-start" data-embed="p/gone"><a class="wikilink unresolved">gone</a></div>' +
+      block('kind: tree\nroot: B\n') +
+      '<div class="gosidian-embed-end"></div>' +
+      block('kind: tree\nroot: B\n')
+    const d = splitViews(html).filter((s) => s.kind === 'diagram')
+    expect(d.map((s) => s.kind === 'diagram' && [s.origin, s.occurrence])).toEqual([
+      [undefined, 0],
+      [undefined, 1],
+      ['p/other.md', 0],
+      [null, 0],
+      [undefined, 0],
+    ])
+  })
+})

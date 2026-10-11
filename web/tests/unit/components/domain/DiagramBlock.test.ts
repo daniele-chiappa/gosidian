@@ -1,14 +1,17 @@
 import { describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { defineComponent, h } from 'vue'
 import enUI from '@catalogs/ui.en.json'
+// Loaded before the tests: the mocks below import it again, then at once.
+import 'plancia-diagrams'
 
 // The drawing itself is plancia-diagrams' (its own tests draw it): here a
 // stand-in that shows the source and sends a link, to test what gosidian
 // does around it.
 const exportSVG = vi.fn(() => '<svg xmlns="http://www.w3.org/2000/svg"/>')
-vi.mock('@/components/domain/diagramView', () => ({
+vi.mock('@/components/domain/diagramView', async () => ({
+  findDiagramBlocks: (await import('plancia-diagrams')).findDiagramBlocks,
   DiagramView: defineComponent({
     props: { source: String, labels: Object },
     emits: ['link'],
@@ -38,6 +41,20 @@ const saved: { blob: Blob; name: string }[] = []
 vi.mock('@/api/download', () => ({
   saveBlob: (blob: Blob, name: string) => saved.push({ blob, name }),
 }))
+const notes: Record<string, string> = {}
+vi.mock('@/api/notes', () => ({
+  getNote: async (path: string) => ({
+    path,
+    title: path,
+    content: notes[path] ?? '',
+    etag: 'e1',
+    size: 0,
+    mod_time: '',
+  }),
+}))
+vi.mock('@/stores/access', () => ({
+  useAccessStore: () => ({ canWrite: (p: string) => !p.startsWith('ro/') }),
+}))
 const store = { open: vi.fn(), identify: vi.fn() }
 vi.mock('plancia', async (orig) => ({
   ...(await orig<typeof import('plancia')>()),
@@ -56,7 +73,7 @@ describe('DiagramBlock (IMP-169)', () => {
       props: { html },
       global: { plugins: [i18n()], provide: { openWindow: vi.fn() } },
     })
-    await flushPromises()
+    await vi.waitFor(() => expect(w.find('.stand-in').exists()).toBe(true), { timeout: 10000 })
     expect(w.find('.stand-in').text()).toContain('kind: flow')
     expect(JSON.parse(w.find('.stand-in').attributes('data-labels')!)).toMatchObject({
       open: 'Open',
@@ -73,7 +90,7 @@ describe('DiagramBlock (IMP-169)', () => {
       props: { html, diagramLinks: { 'p/plans/a#Steps': 'p/plans/a.md' } },
       global: { plugins: [i18n()], provide: { openWindow } },
     })
-    await flushPromises()
+    await vi.waitFor(() => expect(w.find('.stand-in').exists()).toBe(true), { timeout: 10000 })
     await w.find('#note').trigger('click')
     expect(openWindow).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -93,7 +110,7 @@ describe('DiagramBlock (IMP-169)', () => {
       props: { html },
       global: { plugins: [i18n()], provide: { openWindow: vi.fn() } },
     })
-    await flushPromises()
+    await vi.waitFor(() => expect(w.find('.stand-in').exists()).toBe(true), { timeout: 10000 })
     await w.find('[data-diagram-export]').trigger('click')
     expect(saved.at(-1)?.name).toBe('arrival-docs.svg')
     expect(saved.at(-1)?.blob.type).toBe('image/svg+xml')
@@ -113,8 +130,46 @@ describe('DiagramBlock of a kind not drawn yet (IMP-169)', () => {
       },
       global: { plugins: [i18n()], provide: { openWindow: vi.fn() } },
     })
-    await flushPromises()
+    await vi.waitFor(() => expect(w.find('.stand-in').exists()).toBe(true), { timeout: 10000 })
     expect(w.find('[data-diagram-code]').exists()).toBe(true)
     expect(w.find('[data-diagram-export]').exists()).toBe(false)
+  })
+})
+
+describe('DiagramBlock Edit (IMP-169, F2)', () => {
+  const yaml = 'kind: tree\nroot: R\n'
+  const block = `<pre><code class="language-diagram">${yaml}</code></pre>`
+
+  it('shows Edit only for who may write the note, and opens the window on the block’s index', async () => {
+    // The note has a nested sample, then two blocks of the same text: the sample is no block, so the second drawn one is index 1.
+    notes['p/n.md'] =
+      '# N\n\n````md\n```diagram\nkind: venn\n```\n````\n\n```diagram\n' +
+      yaml +
+      '```\n\n```diagram\n' +
+      yaml +
+      '```\n'
+    const openWindow = vi.fn(() => 'w1')
+    const w = mount(MarkdownPreview, {
+      props: { html: `<p>x</p>${block}${block}`, notePath: 'p/n.md', diagramsEditable: true },
+      global: { plugins: [i18n()], provide: { openWindow } },
+    })
+    // Both drawings, each loaded on its own.
+    await vi.waitFor(() => expect(w.findAll('[data-diagram-edit]')).toHaveLength(2), { timeout: 10000 })
+    const edits = w.findAll('[data-diagram-edit]')
+    await edits[1]!.trigger('click')
+    await vi.waitFor(() => expect(openWindow).toHaveBeenCalled(), { timeout: 10000 })
+    expect(openWindow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'diagram',
+        key: 'diagram:p/n.md#1',
+        props: { path: 'p/n.md', index: 1 },
+      }),
+    )
+    const ro = mount(MarkdownPreview, {
+      props: { html: `<p>x</p>${block}`, notePath: 'ro/n.md', diagramsEditable: true },
+      global: { plugins: [i18n()], provide: { openWindow } },
+    })
+    await vi.waitFor(() => expect(ro.find('.stand-in').exists()).toBe(true), { timeout: 10000 })
+    expect(ro.find('[data-diagram-edit]').exists()).toBe(false)
   })
 })

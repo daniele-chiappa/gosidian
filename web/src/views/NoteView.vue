@@ -813,6 +813,7 @@ watch(path, load)
           :html="previewHTML"
           :views="previewViews"
           :diagram-links="previewDiagramLinks"
+          :diagrams-editable="canEdit"
           :note-path="note?.path"
         />
         <!-- A row of a database: the views its schema declares (IMP-139) -->

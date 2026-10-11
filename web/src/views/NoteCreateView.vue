@@ -6,6 +6,8 @@
  *   - Markdown: a normal .md note (frontmatter title), opened in edit mode.
  *   - Image:    a media note (ADR-013) — upload an image, then create a .md
  *               with `type: image` + `media:` + the caption as body.
+ *   - Diagram:  a note `type: diagram` (IMP-169) holding the template of the
+ *               kind chosen, opened in the diagram window.
  *
  * Restores manual note creation, which the v2.0 HTMX→Vue migration never
  * ported (IMP-058); the backend (POST /notes, POST /attach) was already there.
@@ -20,6 +22,7 @@ import { planciaKey } from '@/composables/planciaKey'
 import { noteFrontmatter } from './noteFrontmatter'
 import { errorText } from '@/api/errors'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
+import { DIAGRAM_KINDS, useDiagramLabels } from '@/components/domain/diagramLabels'
 
 // name: the note's name to start from (a missing note's "create it here").
 const props = defineProps<{ path?: string; name?: string }>()
@@ -30,8 +33,10 @@ const treeStore = useTreeStore()
 const store = useWindowsStore()
 const openWindow = inject<(spec: OpenSpec) => string>('openWindow', (s) => store.open(s))
 
-type Kind = 'markdown' | 'image'
+type Kind = 'markdown' | 'image' | 'diagram'
 const kind = ref<Kind>('markdown')
+const diagramKind = ref<(typeof DIAGRAM_KINDS)[number]>('flow')
+const diagramWords = useDiagramLabels()
 
 // Target folder (no trailing slash). Empty means the vault root.
 const folder = computed(() => (props.path ?? '').replace(/\/+$/, ''))
@@ -80,12 +85,27 @@ async function submit() {
           ['media', res.path],
           ['tags', [project.value, 'type:image']],
         ]) + `${caption.value.trim()}\n`
+    } else if (kind.value === 'diagram') {
+      const { diagramTemplate } = await import('@/components/domain/diagramView')
+      const yaml = diagramTemplate(diagramKind.value, diagramWords.template.value)
+      content = frontmatter([['type', 'diagram']]) + '```diagram\n' + yaml + '```\n'
     } else {
       content = frontmatter()
       mode = 'edit'
     }
     const created = await createNote(notePath.value, content)
     treeStore.refresh()
+    if (kind.value === 'diagram') {
+      // Its one block, at index 0, straight into the editor.
+      openWindow({
+        type: 'diagram',
+        key: planciaKey('diagram', `${created.path}#0`),
+        title: t('diagram.window_title', { name: created.title || created.path }),
+        props: { path: created.path, index: 0 },
+      })
+      emit('close')
+      return
+    }
     openWindow({
       type: 'note',
       key: planciaKey('note', created.path),
@@ -123,6 +143,13 @@ async function submit() {
         :class="kind === 'image' ? 'bg-accent text-accent-fg' : 'hover:bg-surface-hover'"
         @click="kind = 'image'"
       >{{ t('note_create.kind_image') }}</button>
+      <button
+        type="button"
+        class="px-3"
+        data-kind-diagram
+        :class="kind === 'diagram' ? 'bg-accent text-accent-fg' : 'hover:bg-surface-hover'"
+        @click="kind = 'diagram'"
+      >{{ t('note_create.kind_diagram') }}</button>
     </div>
 
     <form
@@ -151,6 +178,17 @@ async function submit() {
           :placeholder="slug || t('note_create.title_placeholder')"
           class="mt-1 h-control py-0 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
         >
+      </label>
+
+      <label v-if="kind === 'diagram'" class="block">
+        <span class="text-sm text-text-muted">{{ t('note_create.diagram_kind') }}</span>
+        <select
+          v-model="diagramKind"
+          data-diagram-kind
+          class="mt-1 h-control py-0 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
+        >
+          <option v-for="k in DIAGRAM_KINDS" :key="k" :value="k">{{ diagramWords.kinds.value[k] }}</option>
+        </select>
       </label>
 
       <template v-if="kind === 'image'">

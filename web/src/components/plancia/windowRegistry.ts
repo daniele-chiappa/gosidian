@@ -32,5 +32,7 @@ export const windowRegistry: Record<string, Component> = {
   // The pipelines and their runs (IMP-166), when the server runs them.
   runs: lazy(() => import('@/views/PipelinesView.vue')),
   history: lazy(() => import('@/views/NoteHistoryView.vue')),
+  // A diagram of a note in the editor (IMP-169): path and block index.
+  diagram: lazy(() => import('@/views/DiagramWindow.vue')),
   admin: lazy(() => import('@/views/admin/AdminLayout.vue')),
 }

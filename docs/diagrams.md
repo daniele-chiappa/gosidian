@@ -42,7 +42,36 @@ a package of the plancia repository.
 - What is wrong in a block is listed above the drawing, which leaves those parts out.
 - A block at the top level of a note is drawn; one inside a list or a quote stays its code.
 
-The editor comes in the next release of the plan `20261010-diagrammi`.
+**Editing in the web UI**: **Edit**, in the head of a drawn diagram (for
+who may change the note), opens the diagram window beside the note. A
+diagram embedded with `![[…]]` opens in the note it is written in; the
+window's address keeps the note and the block's index, so a reload opens
+it again.
+- A **flow** is edited on its drawing: drag a node (the first drag fixes
+  every node where it is, in `layout:`), add a node, join two by dragging
+  from the dot of one onto the other, delete what is selected with Delete;
+  a panel sets a node's label, shape, class, link (with the notes found as
+  you type) and group, and an edge's label and line; **Lay out again**
+  empties `layout:`.
+- A **tree**, a **mind map** and a **fishbone** are edited as indented
+  lines beside their drawing: Enter adds a branch after, Tab and Shift+Tab
+  change its level, Alt+↑ and Alt+↓ move it, Backspace on an empty line
+  takes it away, a line dragged by its grip goes after the one it is
+  dropped on; a branch's link is set below the lines.
+- The **YAML** tab edits the text itself, every kind included (a Venn, a
+  matrix and a Gantt are edited there for now), and the problems are
+  listed under both tabs, line by line.
+- Ctrl+Z and Ctrl+Shift+Z undo and redo; **Save** (Ctrl+S) writes the
+  block in place of the old one, and nothing else of the note.
+- The editor changes only what it edits: comments, short forms and the
+  order of the fields stay as written, what it adds is in the full form.
+- A note changed since the window opened gets a banner: reload (the draft
+  goes), or put the diagram in the new version of the note, whose other
+  changes stay.
+
+**A new diagram**: the **+** of a folder in the tree has the kind
+**Diagram**, which makes a note `type: diagram` from a small template of
+the kind chosen, opened in the editor.
 
 ## Common fields
 

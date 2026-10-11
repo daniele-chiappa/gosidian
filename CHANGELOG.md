@@ -8,6 +8,44 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.78.1] — 2026-10-11 — "diagram editor"
+
+The diagrams of the notes are edited in the web UI. Pull the image and
+restart, nothing to migrate. Version 2.78.0 was not released: three new
+tests that counted on time held its build.
+
+### Added
+- **The diagram editor** — **Edit**, in the head of a drawn diagram (for
+  who may change the note), opens the diagram window beside the note, on
+  the diagram's block in the note it is written in (a diagram embedded
+  with `![[…]]` opens in its own note). The window's address keeps the
+  note and the block, so a reload opens it again. Drawn and edited by
+  [plancia-diagrams](https://github.com/daniele-chiappa/plancia/tree/main/diagrams) 0.2.0:
+  - a **flow** on its drawing: drag a node (the first drag fixes every
+    node where it is, in `layout`), add one, join two by dragging from a
+    node's dot onto the other, delete what is selected; a panel for a
+    node's label, shape, class, link (with the notes found as you type)
+    and group, and an edge's label and line; groups; **Lay out again**;
+  - a **tree**, a **mind map** or a **fishbone** as indented lines beside
+    their drawing: Enter, Tab and Shift+Tab, Alt+↑ and Alt+↓, drag;
+  - a **YAML** tab for every kind (a Venn, a matrix and a Gantt chart are
+    edited there for now), with the problems listed line by line;
+  - undo and redo.
+- **Only what changes** — the editor changes only what it edits in the
+  YAML: comments, short forms and the order of the fields stay as written,
+  what it adds is in the full form.
+- **Saving** — **Save** (Ctrl+S) writes the block in place of the old one,
+  and nothing else of the note, with the note's etag. A note changed since
+  the window opened gets a banner: reload, or put the diagram in the new
+  version of the note, whose other changes stay.
+- **A new diagram** — the **+** of a folder in the tree has the kind
+  **Diagram**: a note `type: diagram` from a small template of the kind
+  chosen, opened in the editor.
+
+### Changed
+- An edge between nodes placed by hand curves from side to side instead
+  of a straight line, and two edges between the same nodes bend apart.
+
 ## [2.77.1] — 2026-10-11 — "diagrams drawn"
 
 The diagrams of the notes are drawn in the web UI. Pull the image and
