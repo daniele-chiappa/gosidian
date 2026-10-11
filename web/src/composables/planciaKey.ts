@@ -134,6 +134,12 @@ const baseCodec: PlanciaCodec = createArgCodec({
       props: (a) => (a ? { path: a } : {}),
       title: (a) => (a ? tr('pipeline_editor.window_title', { name: base(a) }) : ''),
     },
+    // A project's IN folder (IMP-172): the project.
+    in: {
+      arg: (p) => str(p.project) || null,
+      props: (a) => (a ? { project: a } : {}),
+      title: (a) => (a ? tr('in.window_title', { name: a }) : ''),
+    },
     graph: {
       arg: graphArgFromProps,
       props: graphPropsFromArg,

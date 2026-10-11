@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"path"
 	"strings"
 	"time"
 
+	"github.com/gosidian/gosidian/internal/infolder"
 	"github.com/gosidian/gosidian/internal/jobs"
 )
 
@@ -43,8 +45,14 @@ type Host interface {
 	// WriteNote writes a note of the project, as the pipeline: actor is
 	// pipeline:<the pipeline note's path>, for the audit.
 	WriteNote(project, path string, content []byte, mode WriteMode, actor string) (WriteResult, error)
-	// ReadAttachment reads an attachment of the project.
+	// ReadAttachment reads an attachment of the project, or a file of its
+	// IN folder.
 	ReadAttachment(project, path string) ([]byte, error)
+	// StatFile describes an attachment of the project, or a file of its IN
+	// folder, with its SHA-256; OpenFile opens one for reading (a plugin
+	// fetching it by reference).
+	StatFile(project, path string) (FileStat, error)
+	OpenFile(project, path string) (io.ReadSeekCloser, FileStat, error)
 	// StoreAttachment stores data as an attachment of the project, as the
 	// pipeline (actor), named after its content with name's extension. It
 	// starts no ingest pipeline: a run must not start runs on the files it
@@ -88,6 +96,9 @@ type Config struct {
 	Providers []Provider
 	// Location is the zone of the schedule triggers; nil: local.
 	Location *time.Location
+	// FileTicketTTL is how long a plugin may fetch a file it got by
+	// reference; default 15 minutes (the server's step timeout).
+	FileTicketTTL time.Duration
 }
 
 // Engine runs pipelines on a job runner.
@@ -100,6 +111,10 @@ type Engine struct {
 	client  *http.Client
 	log     *slog.Logger
 	now     func() time.Time
+	// in is the state of the IN folders (SetIN), nil when none.
+	in *infolder.Service
+	// tickets are the files the plugins fetch by reference.
+	tickets fileTickets
 }
 
 // New is an engine acting through host, running on runner (which it
@@ -119,6 +134,9 @@ func New(host Host, runner *jobs.Runner, cfg Config, secrets Secrets, logger *sl
 	}
 	if cfg.Location == nil {
 		cfg.Location = time.Local
+	}
+	if cfg.FileTicketTTL <= 0 {
+		cfg.FileTicketTTL = 15 * time.Minute
 	}
 	if logger == nil {
 		logger = slog.Default()
@@ -180,7 +198,7 @@ func (e *Engine) Start(req StartRequest) (jobs.Run, bool, error) {
 		if p.Spec.Trigger.On != TriggerExternal && p.Spec.Trigger.On != TriggerManual {
 			return jobs.Run{}, false, fmt.Errorf("the pipeline starts on %s, not from outside", p.Spec.Trigger.On)
 		}
-	case TriggerIngest, TriggerSchedule:
+	case TriggerIngest, TriggerSchedule, TriggerIN:
 	default:
 		return jobs.Run{}, false, fmt.Errorf("unknown trigger %q", req.Trigger)
 	}
@@ -494,6 +512,13 @@ func (e *Engine) skips(node *Node, sc scope) (bool, error) {
 // Ended writes the day's line of the pipeline's runs note and calls the
 // run's callback (jobs.Executor).
 func (e *Engine) Ended(run jobs.Run, steps []jobs.Step) {
+	e.tickets.dropRun(run.ID)
+	if e.in != nil {
+		// The files the run took, and left working, are done or not.
+		if err := e.in.RunEnded(run.ID, run.Status == jobs.Done); err != nil {
+			e.log.Warn("pipeline: the IN files of a run", "run", run.ID, "err", err)
+		}
+	}
 	if err := e.summarize(run); err != nil {
 		e.log.Warn("pipeline: the runs note", "run", run.ID, "pipeline", run.Ref, "err", err)
 	}

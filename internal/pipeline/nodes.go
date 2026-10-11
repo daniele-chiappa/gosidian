@@ -70,6 +70,8 @@ func NewRegistry() *Registry {
 	r.Register("http.request", TypeFunc(httpRequest))
 	r.Register("llm.chat", TypeFunc(llmChat))
 	r.Register("llm.describe", TypeFunc(llmDescribe))
+	r.Register("in.list", TypeFunc(inList))
+	r.Register("in.move", TypeFunc(inMove))
 	return r
 }
 

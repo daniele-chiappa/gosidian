@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/gosidian/gosidian/internal/config"
 	"github.com/gosidian/gosidian/internal/metrics"
 	"github.com/gosidian/gosidian/internal/projects"
+	"github.com/gosidian/gosidian/internal/vault"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -51,6 +53,10 @@ type Sync struct {
 	// index in this process: the state dir, the projects with git sync off.
 	// The ignore lines keep them out afterwards. Used by commitAndPush only.
 	untracked map[string]bool
+	// bigIN holds the files over INMaxTrackedBytes of the IN folders git
+	// tracks (track_in_git), taken out of a commit in this process: the
+	// managed .gitignore names them afterwards. Used by commitAndPush only.
+	bigIN map[string]bool
 
 	// workMu runs one commit at a time: a timer's flush and Flush at
 	// shutdown ran together, the second met the first's index.lock, and the
@@ -475,6 +481,15 @@ func (s *Sync) refreshGitignore() error {
 		for _, name := range s.projects.SkipNamesForGit() {
 			managedLines = append(managedLines, gitignoreDir(name))
 		}
+		// The IN folders (ADR-037): left out, unless the project tracks
+		// its own; then only its files over the cap.
+		ignored, tracked := s.projects.INFoldersForGit()
+		for _, name := range ignored {
+			managedLines = append(managedLines, gitignoreDir(name+"/"+vault.INFolder))
+		}
+		for _, p := range s.bigINUnder(tracked) {
+			managedLines = append(managedLines, gitignoreFile(p))
+		}
 	}
 	managedLines = append(managedLines, gitignoreManagedEnd)
 
@@ -515,6 +530,85 @@ func gitignoreDir(rel string) string {
 	}
 	b.WriteByte('/')
 	return b.String()
+}
+
+// gitignoreFile is the .gitignore line for the file at the vault-relative
+// path rel, anchored and escaped as gitignoreDir does; trailing spaces,
+// which git drops from a line, are escaped too.
+func gitignoreFile(rel string) string {
+	line := strings.TrimSuffix(gitignoreDir(rel), "/")
+	trimmed := strings.TrimRight(line, " ")
+	return trimmed + strings.Repeat(`\ `, len(line)-len(trimmed))
+}
+
+// INMaxTrackedBytes is the largest file of an IN folder git tracks, for a
+// project with track_in_git (IMP-172): a bigger one stays out of the
+// history, and of a push that could not carry it.
+const INMaxTrackedBytes = 50 << 20
+
+// bigINUnder returns, sorted, the files of bigIN in the IN folders of the
+// projects listed.
+func (s *Sync) bigINUnder(projects []string) []string {
+	var out []string
+	for p := range s.bigIN {
+		for _, name := range projects {
+			if strings.HasPrefix(p, name+"/"+vault.INFolder+"/") {
+				out = append(out, p)
+				break
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// unstageBigIN takes out of the commit being made the files over
+// INMaxTrackedBytes that `git add -A` staged in the IN folders git tracks,
+// and names them in the managed .gitignore from then on.
+func (s *Sync) unstageBigIN() error {
+	if s.projects == nil {
+		return nil
+	}
+	_, tracked := s.projects.INFoldersForGit()
+	if len(tracked) == 0 {
+		return nil
+	}
+	args := []string{"diff", "--cached", "--name-only", "-z", "--diff-filter=AM", "--"}
+	for _, name := range tracked {
+		args = append(args, ":(literal)"+name+"/"+vault.INFolder)
+	}
+	out, err := s.capture("git", args...)
+	if err != nil {
+		return fmt.Errorf("staged IN files: %w", err)
+	}
+	var big []string
+	for _, p := range strings.Split(out, "\x00") {
+		if p == "" {
+			continue
+		}
+		if st, err := os.Lstat(filepath.Join(s.vaultDir, filepath.FromSlash(p))); err == nil && st.Size() > INMaxTrackedBytes {
+			big = append(big, p)
+		}
+	}
+	if len(big) == 0 {
+		return nil
+	}
+	rm := []string{"rm", "-q", "--cached", "--ignore-unmatch", "--"}
+	for _, p := range big {
+		rm = append(rm, ":(literal)"+p)
+		if s.bigIN == nil {
+			s.bigIN = map[string]bool{}
+		}
+		s.bigIN[p] = true
+		log.Printf("gitsync: %s is over %d MiB: left out of git", p, INMaxTrackedBytes>>20)
+	}
+	if err := s.run("git", rm...); err != nil {
+		return fmt.Errorf("untrack big IN files: %w", err)
+	}
+	if err := s.refreshGitignore(); err != nil {
+		return fmt.Errorf("refresh gitignore: %w", err)
+	}
+	return s.run("git", "add", "--", ".gitignore")
 }
 
 // stripManagedBlock removes the gosidian-managed marker block (and everything
@@ -575,6 +669,12 @@ func (s *Sync) commitAndPush() error {
 	if err := s.run("git", "add", "-A"); err != nil {
 		return fmt.Errorf("git add: %w", err)
 	}
+	if err := s.unstageBigIN(); err != nil {
+		return err
+	}
+	if s.run("git", "diff", "--cached", "--quiet") == nil {
+		return nil // all it staged was left out
+	}
 
 	msg := "auto: " + time.Now().UTC().Format(time.RFC3339)
 	author := fmt.Sprintf("%s <%s>", s.cfg.AuthorName, s.cfg.AuthorEmail)
@@ -603,6 +703,10 @@ func (s *Sync) untrackIgnored() error {
 	if s.projects != nil {
 		for _, name := range s.projects.SkipNamesForGit() {
 			want[name] = true
+		}
+		ignored, _ := s.projects.INFoldersForGit()
+		for _, name := range ignored {
+			want[name+"/"+vault.INFolder] = true
 		}
 	}
 	for dir := range s.untracked {

@@ -33,6 +33,21 @@ var ErrIncomplete = errors.New("the project folder changed, but not everything f
 // source project on rollback (IMP-124).
 var projectMu sync.Mutex
 
+// renamed, when set, is told of each project renamed, once its folder
+// moved (SetRenameHook).
+var renamed func(from, to string)
+
+// SetRenameHook sets who is told of each project renamed, after its folder
+// moved: the state of the IN folders (IMP-172), kept by project. Call it
+// at start, before any rename.
+func SetRenameHook(f func(from, to string)) { renamed = f }
+
+func tellRenamed(from, to string) {
+	if renamed != nil {
+		renamed(from, to)
+	}
+}
+
 // Rename renames project from to to everywhere it is known: its flags and
 // member and team grants (projects.Store), its folder and index entries
 // (vault.RenameProject), and the scope of the MCP tokens naming it, which
@@ -93,9 +108,11 @@ func Rename(v *vault.Vault, idx *index.Index, ps *projects.Store, tokens *auth.S
 		}
 		// The folder moved but the index did not fully follow: the rename
 		// stands, so the token scopes follow it too.
+		tellRenamed(from, to)
 		n, _ := renameScopes(tokens, from, to)
 		return n, fmt.Errorf("%w: index: %v", ErrIncomplete, err)
 	}
+	tellRenamed(from, to)
 	n, err := renameScopes(tokens, from, to)
 	if err != nil {
 		return n, fmt.Errorf("%w: MCP token scopes: %v", ErrIncomplete, err)

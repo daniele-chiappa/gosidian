@@ -165,3 +165,23 @@ func TestRename_Checks(t *testing.T) {
 		t.Error("the stale grant under ghost was merged into the renamed project")
 	}
 }
+
+// The rename hook hears of a rename once its folder moved, not of a
+// refused one (IMP-172: the state of the IN folders follows).
+func TestRename_TellsTheHook(t *testing.T) {
+	f := newFixture(t)
+	f.note(t, "alpha/a.md")
+	f.note(t, "beta/b.md")
+	var heard []string
+	SetRenameHook(func(from, to string) { heard = append(heard, from+">"+to) })
+	t.Cleanup(func() { SetRenameHook(nil) })
+	if _, err := Rename(f.v, f.idx, f.ps, f.tokens, "alpha", "beta"); err == nil {
+		t.Fatal("a rename over another project")
+	}
+	if _, err := Rename(f.v, f.idx, f.ps, f.tokens, "alpha", "gamma"); err != nil {
+		t.Fatal(err)
+	}
+	if len(heard) != 1 || heard[0] != "alpha>gamma" {
+		t.Errorf("heard %v", heard)
+	}
+}

@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -114,6 +115,28 @@ func (h *fakeHost) ReadAttachment(project, path string) ([]byte, error) {
 	}
 	return b, nil
 }
+
+func (h *fakeHost) StatFile(project, path string) (FileStat, error) {
+	data, err := h.ReadAttachment(project, path)
+	if err != nil {
+		return FileStat{}, err
+	}
+	sum := sha256.Sum256(data)
+	return FileStat{Path: path, Name: path[strings.LastIndex(path, "/")+1:], Size: int64(len(data)), SHA256: hex.EncodeToString(sum[:])}, nil
+}
+
+func (h *fakeHost) OpenFile(project, path string) (io.ReadSeekCloser, FileStat, error) {
+	st, err := h.StatFile(project, path)
+	if err != nil {
+		return nil, FileStat{}, err
+	}
+	data, _ := h.ReadAttachment(project, path)
+	return readSeekNopCloser{bytes.NewReader(data)}, st, nil
+}
+
+type readSeekNopCloser struct{ *bytes.Reader }
+
+func (readSeekNopCloser) Close() error { return nil }
 
 func (h *fakeHost) StoreAttachment(project, name string, data []byte, actor string) (string, error) {
 	h.mu.Lock()

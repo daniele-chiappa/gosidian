@@ -29,6 +29,9 @@ type Config struct {
 	TokenSecret string
 	// Timeout caps a call; 0: the step's own timeout.
 	Timeout time.Duration
+	// FilesURL is the server's address as the plugin reaches it, for the
+	// files a node with file_refs fetches; "" is the engine's PublicURL.
+	FilesURL string
 }
 
 // Secrets resolves a secret's name to its value.
@@ -49,7 +52,7 @@ const (
 const checkTimeout = 20 * time.Second
 
 // reserved are the base node types' prefixes, no plugin's name.
-var reserved = map[string]bool{"note": true, "wait": true, "starlark": true, "http": true, "llm": true, "pipeline": true}
+var reserved = map[string]bool{"note": true, "wait": true, "starlark": true, "http": true, "llm": true, "pipeline": true, "in": true}
 
 // State is what the server knows of a plugin.
 type State struct {

@@ -100,6 +100,8 @@ async function apply(p: Project, patch: Parameters<typeof updateProject>[1], lab
   try {
     await updateProject(p.name, patch)
     await refresh()
+    // The IN folder's node of the tree comes and goes with these.
+    if ('use_in' in patch || 'use_pipelines' in patch) treeStore.refresh()
   } catch (e) {
     error.value = errorText(e, t, t('projects.update_failed', { what: label }))
   }
@@ -125,6 +127,21 @@ function anchorsTitle(p: Project): string {
 function pipelinesTitle(p: Project): string {
   if (!ui.pipelinesEnabled) return t('projects.flag.pipelines_master_off')
   return p.use_pipelines ? t('projects.flag.pipelines_on') : t('projects.flag.pipelines_off')
+}
+
+function inTitle(p: Project): string {
+  return p.use_in ? t('projects.flag.in_on') : t('projects.flag.in_off')
+}
+
+function inGitTitle(p: Project): string {
+  return p.track_in_git ? t('projects.flag.in_git_on') : t('projects.flag.in_git_off')
+}
+
+/** Putting the IN folder in git can mean gigabytes in the history: asked first. */
+async function toggleINGit(p: Project) {
+  if (!p.track_in_git && !(await confirmAction(t('projects.flag.in_git_confirm', { name: p.name }), { confirmLabel: t('projects.flag.in_git_confirm_ok') })))
+    return
+  await apply(p, { track_in_git: !p.track_in_git }, 'IN git')
 }
 
 function accessTitle(p: Project): string {
@@ -184,7 +201,7 @@ async function destroy(p: Project) {
 }
 
 /** The flag chips, in the order of the row, for the legend. */
-const FLAG_NAMES = ['skip-git', 'hidden', 'globals', 'anchors', 'tag-vocab', 'lean-read', 'mirror', 'pipelines'] as const
+const FLAG_NAMES = ['skip-git', 'hidden', 'globals', 'anchors', 'tag-vocab', 'lean-read', 'mirror', 'pipelines', 'IN', 'IN git'] as const
 
 onMounted(() => {
   load()
@@ -207,7 +224,7 @@ onMounted(() => {
         <dl class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-text-muted">
           <template v-for="f in FLAG_NAMES" :key="f">
             <dt class="font-mono text-xs text-text">{{ f }}</dt>
-            <dd>{{ t(`projects.legend.${f.replace('-', '_')}`) }}</dd>
+            <dd>{{ t(`projects.legend.${f.replace(/[- ]/g, '_')}`) }}</dd>
           </template>
         </dl>
       </details>
@@ -381,6 +398,25 @@ onMounted(() => {
             :aria-pressed="!!p.use_pipelines"
             @click="apply(p, { use_pipelines: !p.use_pipelines }, 'pipelines')"
           >pipelines</button>
+          <button
+            type="button"
+            class="h-control-sm text-xs px-2 rounded"
+            :class="p.use_in ? 'bg-accent/20 text-accent' : 'border border-border'"
+            :title="inTitle(p)"
+            :aria-pressed="!!p.use_in"
+            data-flag="use_in"
+            @click="apply(p, { use_in: !p.use_in }, 'IN')"
+          >IN</button>
+          <button
+            v-if="p.use_in"
+            type="button"
+            class="h-control-sm text-xs px-2 rounded"
+            :class="p.track_in_git ? 'bg-accent/20 text-accent' : 'border border-border'"
+            :title="inGitTitle(p)"
+            :aria-pressed="!!p.track_in_git"
+            data-flag="track_in_git"
+            @click="toggleINGit(p)"
+          >IN git</button>
           <button
             type="button"
             class="h-control-sm text-xs px-2 rounded hover:bg-surface-hover"

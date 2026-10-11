@@ -53,6 +53,10 @@ type NodeSpec struct {
 	// Files are the settings that name a vault file: the plugin gets the
 	// file's content ({name, mime, data} in base64) in their place.
 	Files []string `json:"files,omitempty"`
+	// FileRefs gives the plugin, in place of each file's content, where
+	// to fetch it ({name, mime, size, sha256, url}), while the step may
+	// run (IMP-172): a file of any size, the IN folder's too.
+	FileRefs bool `json:"file_refs,omitempty"`
 	// Input and Output are JSON Schemas of the settings and the output,
 	// for the reader and the editor.
 	Input  json.RawMessage `json:"input_schema,omitempty"`

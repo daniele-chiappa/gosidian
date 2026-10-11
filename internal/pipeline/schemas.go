@@ -85,7 +85,33 @@ var baseSchemas = []NodeSchema{
 	"system": {"type": "string", "format": "multiline"},` + llmSettings + `}}`),
 		Output: json.RawMessage(`{"type": "object", "properties": {` + llmOutput + `,
 	"image": {"type": "string"}}}`)},
+	{Type: "in.list", Description: "Lists files of the project's IN folder",
+		Input: json.RawMessage(`{"type": "object", "properties": {
+	"folder": {"type": "string", "description": "A folder of the IN folder; empty for all of it"},
+	"recursive": {"type": "boolean", "default": true, "description": "Its subfolders too"},
+	"match": {"type": "string", "description": "A glob on the file name: *.pdf, fattura_??.xml"},
+	"kinds": {"type": "array", "items": {"type": "string"}, "description": "Extensions: pdf, xml"},
+	"status": {"type": "string", "enum": ["new", "working", "done", "error", "ignored"]},
+	"batch": {"type": "string", "description": "The files of a batch: {{ trigger.batch }}"},
+	"limit": {"type": "integer", "default": 500, "description": "At most 5000 a page"},
+	"cursor": {"type": "string", "description": "The next of the page before"}}}`),
+		Output: json.RawMessage(`{"type": "object", "properties": {` + inFilesOutput + `,
+	"count": {"type": "integer"},
+	"next": {"type": "string", "description": "The cursor of the next page; empty at the last"}}}`)},
+	{Type: "in.move", Description: "Moves a file of the IN folder, or sets its status",
+		Input: json.RawMessage(`{"type": "object", "required": ["file"], "properties": {
+	"file": {"type": "string", "description": "The file, in the IN folder: {{ trigger.file }}, {{ item.path }}"},
+	"to": {"type": "string", "description": "Where in the IN folder: a folder (done/) or a path; empty does not move it"},
+	"status": {"type": "string", "enum": ["done", "error", "ignored", "new"], "description": "Its status from now on"}}}`),
+		Output: json.RawMessage(`{"type": "object", "properties": {
+	"path": {"type": "string"}, "from": {"type": "string"}, "status": {"type": "string"}}}`)},
 }
+
+// inFilesOutput is the files an in.list gives.
+const inFilesOutput = `"files": {"type": "array", "items": {"type": "object", "properties": {
+	"path": {"type": "string"}, "name": {"type": "string"}, "stem": {"type": "string"}, "ext": {"type": "string"},
+	"dir": {"type": "string"}, "size": {"type": "integer"}, "sha256": {"type": "string"}, "status": {"type": "string"},
+	"modified": {"type": "string"}, "batch": {"type": "string"}, "source": {"type": "string"}}}}`
 
 // BaseSchemas lists the base node types with their schemas.
 func BaseSchemas() []NodeSchema { return append([]NodeSchema(nil), baseSchemas...) }

@@ -50,6 +50,10 @@ type projectView struct {
 	// UsePipelines lets the server run the project's pipelines (IMP-166),
 	// when its master switch is on (versionResponse.PipelinesEnabled).
 	UsePipelines bool `json:"use_pipelines"`
+	// UseIN gives the project its IN folder (IMP-172); TrackINInGit puts it
+	// in the vault's git history.
+	UseIN        bool `json:"use_in"`
+	TrackINInGit bool `json:"track_in_git"`
 	// ModTime drives "most recent" sorting in the SPA's project
 	// pickers (graph filter, switcher). RFC 3339 UTC. Empty when
 	// the vault entry hasn't been stat-able.
@@ -78,6 +82,8 @@ type updateProjectRequest struct {
 	LeanReadBootstrap *bool `json:"lean_read_bootstrap,omitempty"`
 	AllowLocalMirror  *bool `json:"allow_local_mirror,omitempty"`
 	UsePipelines      *bool `json:"use_pipelines,omitempty"`
+	UseIN             *bool `json:"use_in,omitempty"`
+	TrackINInGit      *bool `json:"track_in_git,omitempty"`
 }
 
 // handleProjects dispatches GET (list) / POST (create) on /projects.
@@ -196,6 +202,8 @@ func (r *Router) projectViewFor(name string, lvl authz.Level, noteCount int) pro
 		LeanReadBootstrap: flags.LeanReadBootstrap,
 		AllowLocalMirror:  flags.AllowLocalMirror,
 		UsePipelines:      flags.UsePipelines,
+		UseIN:             flags.UseIN,
+		TrackINInGit:      flags.TrackINInGit,
 	}
 }
 
@@ -336,8 +344,9 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 	// Apply flags first (cheap, no fs movement) so a failing rename
 	// still leaves the flags durable.
 	flagsChanged := false
-	if body.HiddenFromMCP != nil || body.SkipGitSync != nil || newVisibility != "" || body.UseGlobals != nil || body.UseAnchors != nil || body.UseTagVocabulary != nil || body.LeanReadBootstrap != nil || body.AllowLocalMirror != nil || body.UsePipelines != nil {
+	if body.HiddenFromMCP != nil || body.SkipGitSync != nil || newVisibility != "" || body.UseGlobals != nil || body.UseAnchors != nil || body.UseTagVocabulary != nil || body.LeanReadBootstrap != nil || body.AllowLocalMirror != nil || body.UsePipelines != nil || body.UseIN != nil || body.TrackINInGit != nil {
 		current := r.projectFlag(name)
+		prev := current
 		if body.HiddenFromMCP != nil {
 			current.HiddenFromMCP = *body.HiddenFromMCP
 		}
@@ -365,6 +374,23 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 		}
 		if body.UsePipelines != nil {
 			current.UsePipelines = *body.UsePipelines
+			// The IN folder comes with the pipelines, and stays when they
+			// go (IMP-172).
+			if current.UsePipelines {
+				current.UseIN = true
+			}
+		}
+		if body.UseIN != nil {
+			current.UseIN = *body.UseIN
+		}
+		if body.TrackINInGit != nil {
+			current.TrackINInGit = *body.TrackINInGit
+		}
+		if current.UseIN && !prev.UseIN {
+			if code, msg := r.openIN(name); code != 0 {
+				WriteError(w, code, CodeConflict, msg)
+				return
+			}
 		}
 		if r.deps.Projects != nil {
 			if err := r.deps.Projects.Set(name, current); err != nil {
@@ -372,6 +398,9 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 				return
 			}
 			flagsChanged = true
+			if current.UseIN != prev.UseIN || current.TrackINInGit != prev.TrackINInGit {
+				r.inChanged(name, prev.UseIN && !current.UseIN)
+			}
 		}
 	}
 

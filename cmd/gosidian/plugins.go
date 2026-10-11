@@ -31,7 +31,12 @@ const pluginCheckEvery = time.Minute
 func newPlugins(pc config.PipelinesConfig, sdir string, sec pipeline.Secrets, logger *slog.Logger) (*plugins.Registry, error) {
 	cfgs := make([]plugins.Config, 0, len(pc.Plugins))
 	for _, p := range pc.Plugins {
-		cfgs = append(cfgs, plugins.Config{Name: p.Name, URL: p.URL, TokenSecret: p.TokenSecret, Timeout: p.Timeout})
+		files := p.FilesURL
+		if files == "" {
+			files = pc.FilesURL
+		}
+		cfgs = append(cfgs, plugins.Config{Name: p.Name, URL: p.URL, TokenSecret: p.TokenSecret, Timeout: p.Timeout,
+			FilesURL: strings.TrimSuffix(files, "/")})
 	}
 	// A nil pipeline.Secrets must stay a nil plugins.Secrets.
 	var ps plugins.Secrets
@@ -179,6 +184,9 @@ func printManifest(m *plugins.Manifest) {
 		fmt.Printf("  %s.%s (tool %s)", m.Name, n.Name, n.Tool)
 		if len(n.Files) > 0 {
 			fmt.Printf(", files in %s", strings.Join(n.Files, ", "))
+			if n.FileRefs {
+				fmt.Print(", by reference")
+			}
 		}
 		fmt.Println()
 		if n.Description != "" {

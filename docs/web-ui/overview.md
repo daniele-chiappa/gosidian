@@ -158,6 +158,17 @@ pipelines run, the window also starts a run, resumes a waiting one and
 cancels one, and draws a run's state on the nodes, live; so does the Runs
 window for the run it opens.
 
+## The IN folder
+
+A project with `use_in` has, at the top of its tree, one **IN** row with
+its new files and its files ([the IN folder](../in.md)). A click opens the
+**IN window**: the folder a level at a time, its subfolders and its files
+with their size, date, status and the run that took them; a search looks
+under the folder. Who writes in the project moves the files chosen, sets
+them aside or back as new, deletes them into the trash, or starts a
+pipeline on them. The window follows the folder live; the address keeps it
+(`w=in:<project>`).
+
 ## Language switching
 
 The language selector lives in **Settings** and offers the languages the

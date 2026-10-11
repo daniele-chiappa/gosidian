@@ -27,6 +27,8 @@ type Vault struct {
 	// stateRel is the state dir's vault-relative path when it sits inside
 	// the vault, hidden like a dot folder (SetStateDir, BUG-098).
 	stateRel string
+	// hasIN says which projects have an IN folder (SetINProjects).
+	hasIN func(project string) bool
 }
 
 // New returns a Vault rooted at the given directory. A 128-entry LRU load
@@ -171,8 +173,8 @@ func (v *Vault) Load(rel string) (*Note, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !v.IsNoteFile(r) {
-		return nil, fmt.Errorf("%w: %q", ErrNotNote, r)
+	if err := v.checkNote(r); err != nil {
+		return nil, err
 	}
 	// Stat first so we can validate any cache entry against the current
 	// filesystem state. A cache hit saves the full file read.
@@ -199,44 +201,38 @@ func (v *Vault) Load(rel string) (*Note, error) {
 // Delete removes a note. Like Save it refuses non-note paths (ADR-021);
 // attachments are removed with DeleteAttachment.
 func (v *Vault) Delete(rel string) error {
-	abs, err := v.Abs(rel)
+	r, err := v.Rel(rel)
 	if err != nil {
 		return err
 	}
-	if !v.IsNoteFile(abs) {
-		return fmt.Errorf("%w: %q", ErrNotNote, rel)
-	}
-	r, rErr := v.Rel(rel)
-	if v.cache != nil && rErr == nil {
-		// We need the cleaned relative path for the cache key; reuse Rel.
-		v.cache.Invalidate(r)
-	}
-	if err := os.Remove(abs); err != nil {
+	if err := v.checkNote(r); err != nil {
 		return err
 	}
-	if rErr == nil {
-		PruneEmptyParents(v.Root, r)
+	if v.cache != nil {
+		v.cache.Invalidate(r)
 	}
+	if err := os.Remove(filepath.Join(v.Root, filepath.FromSlash(r))); err != nil {
+		return err
+	}
+	PruneEmptyParents(v.Root, r)
 	return nil
 }
 
 // Save writes a note. Only note files (IsNoteFile) can be written through the
 // vault layer (ADR-021); attachment bytes go through SaveAttachment.
 func (v *Vault) Save(rel string, content []byte) error {
-	abs, err := v.Abs(rel)
+	r, err := v.Rel(rel)
 	if err != nil {
 		return err
 	}
-	if !v.IsNoteFile(abs) {
-		return fmt.Errorf("%w: %q", ErrNotNote, rel)
+	if err := v.checkNote(r); err != nil {
+		return err
 	}
-	if err := writeInDir(abs, content); err != nil {
+	if err := writeInDir(filepath.Join(v.Root, filepath.FromSlash(r)), content); err != nil {
 		return err
 	}
 	if v.cache != nil {
-		if r, rErr := v.Rel(rel); rErr == nil {
-			v.cache.Invalidate(r)
-		}
+		v.cache.Invalidate(r)
 	}
 	return nil
 }
@@ -251,7 +247,7 @@ func (v *Vault) SaveAttachment(rel string, content []byte, allowedExt map[string
 	if err != nil {
 		return err
 	}
-	if err := checkAttachmentPath(r, allowedExt); err != nil {
+	if err := v.checkAttachmentPath(r, allowedExt); err != nil {
 		return err
 	}
 	return writeInDir(filepath.Join(v.Root, filepath.FromSlash(r)), content)
@@ -264,7 +260,7 @@ func (v *Vault) DeleteAttachment(rel string, allowedExt map[string]bool) error {
 	if err != nil {
 		return err
 	}
-	if err := checkAttachmentPath(r, allowedExt); err != nil {
+	if err := v.checkAttachmentPath(r, allowedExt); err != nil {
 		return err
 	}
 	if err := os.Remove(filepath.Join(v.Root, filepath.FromSlash(r))); err != nil {
@@ -380,7 +376,8 @@ func (v *Vault) removeStaleWrites() {
 // empty, up to its project folder, which stays even when empty (IMP-129):
 // a deleted, trashed or moved note left them on disk, where nothing showed
 // them and nothing removed them. A folder that still holds anything stops
-// it. rel is vault-relative and already cleaned.
+// it, and so does a project's IN folder (ADR-037), which stays when empty
+// as the project folder does. rel is vault-relative and already cleaned.
 func PruneEmptyParents(root, rel string) {
 	rel = filepath.ToSlash(rel)
 	project, _, nested := strings.Cut(rel, "/")
@@ -388,8 +385,9 @@ func PruneEmptyParents(root, rel string) {
 		return
 	}
 	stop := filepath.Join(root, project)
+	in := filepath.Join(stop, INFolder)
 	dir := filepath.Dir(filepath.Join(root, filepath.FromSlash(rel)))
-	for dir != stop && strings.HasPrefix(dir, stop+string(filepath.Separator)) {
+	for dir != stop && dir != in && strings.HasPrefix(dir, stop+string(filepath.Separator)) {
 		if os.Remove(dir) != nil { // not empty, or gone already
 			return
 		}
@@ -397,7 +395,22 @@ func PruneEmptyParents(root, rel string) {
 	}
 }
 
-func checkAttachmentPath(r string, allowedExt map[string]bool) error {
+// checkNote refuses the cleaned path r as a note when it is no note file,
+// or lies in an IN folder, where nothing is a note (ADR-037).
+func (v *Vault) checkNote(r string) error {
+	if !v.IsNoteFile(r) {
+		return fmt.Errorf("%w: %q", ErrNotNote, r)
+	}
+	if v.InArea(r) {
+		return fmt.Errorf("%w: %q is in an IN folder, which holds files, not notes", ErrNotNote, r)
+	}
+	return nil
+}
+
+func (v *Vault) checkAttachmentPath(r string, allowedExt map[string]bool) error {
+	if v.InArea(r) {
+		return fmt.Errorf("%w: %q is in an IN folder, which holds files, not attachments", ErrNotAttachment, r)
+	}
 	if !strings.Contains("/"+r, "/attachments/") {
 		return fmt.Errorf("%w: %q is not inside an attachments/ directory", ErrNotAttachment, r)
 	}
@@ -893,9 +906,16 @@ func (v *Vault) RenameNote(idx *index.Index, from, to string) ([]string, error) 
 	if filepath.Ext(toRel) == "" {
 		toRel += filepath.Ext(fromRel)
 	}
-	// ADR-021: a rename never turns a note into a non-note (or vice versa).
+	// ADR-021: a rename never turns a note into a non-note (or vice versa),
+	// nor takes one into an IN folder or out of it (ADR-037).
 	if !v.IsNoteFile(fromRel) || !v.IsNoteFile(toRel) {
 		return nil, fmt.Errorf("%w: %q -> %q", ErrNotNote, fromRel, toRel)
+	}
+	if err := v.checkNote(fromRel); err != nil {
+		return nil, err
+	}
+	if err := v.checkNote(toRel); err != nil {
+		return nil, err
 	}
 	if fromRel == toRel {
 		return nil, nil

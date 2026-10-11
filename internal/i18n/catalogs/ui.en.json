@@ -942,7 +942,13 @@
       "mirror_off": "Click to let tokens that can read this project keep a read-only copy of its notes on their machine: cheaper reading for agents, but the notes leave the server.",
       "pipelines_master_off": "Pipelines are off on the server (GOSIDIAN_PIPELINES_ENABLED): this flag does nothing until they are on.",
       "pipelines_on": "Pipelines on: the server runs the project's pipelines (notes type: pipeline) and writes their results into the project. Click to turn off.",
-      "pipelines_off": "Click to let the server run this project's pipelines: they write notes into the project as the pipeline."
+      "pipelines_off": "Click to let the server run this project's pipelines: they write notes into the project as the pipeline.",
+      "in_on": "IN on: the project's IN folder holds the files to work on, outside the notes. Click to turn it off: the folder stays, and its .md files are notes again.",
+      "in_off": "Click to give the project its IN folder: files to work on, under their own names and in their own tree, which the pipelines take. It comes with the pipelines too.",
+      "in_git_on": "IN in git: the IN folder goes into the vault's history, but its files over 50 MiB. Click to leave it out.",
+      "in_git_off": "The IN folder is out of git (it can weigh gigabytes). Click to track it, but its files over 50 MiB.",
+      "in_git_confirm": "Put the IN folder of {name} in git? All it holds, up to 50 MiB a file, goes into the vault's history and stays there.",
+      "in_git_confirm_ok": "Put in git"
     },
     "legend": {
       "title": "What the flags do",
@@ -953,7 +959,9 @@
       "tag_vocab": "lets the project extend the lint's tag vocabulary from memory/conventions.md.",
       "lean_read": "gives tokens that cannot write a shorter bootstrap.",
       "mirror": "lets readers keep a read-only copy of the project: the notes leave the server, and every sync is audited.",
-      "pipelines": "lets the server run the project's pipelines, which write notes as themselves; it needs its switch on the server, and is dimmed while that is off."
+      "pipelines": "lets the server run the project's pipelines, which write notes as themselves; it needs its switch on the server, and is dimmed while that is off.",
+      "IN": "gives the project its IN folder, with the files to work on under their own names: the pipelines take them, they are not notes. It comes with the pipelines too, and stays.",
+      "IN_git": "puts the IN folder in the vault's git history, but its files over 50 MiB; it usually stays out, as it can weigh gigabytes."
     }
   },
   "members": {
@@ -1331,7 +1339,8 @@
       "manual": "By hand",
       "external": "From outside",
       "ingest": "On arrival",
-      "schedule": "On schedule"
+      "schedule": "On schedule",
+      "in": "In the IN folder"
     },
     "statuses": {
       "pending": "Pending",
@@ -1377,6 +1386,8 @@
     "kinds": "File extensions",
     "folder": "Folder",
     "every": "Every",
+    "match": "Name matching",
+    "batch": "One run per batch",
     "required": "needed",
     "structured": "YAML or JSON",
     "invalid_value": "Not valid YAML:",
@@ -1433,5 +1444,57 @@
     "invalid_json": "Not valid JSON:",
     "unsaved_start": "Save first: a run uses the saved pipeline.",
     "run_label": "{status} · {time}"
+  },
+  "in": {
+    "window_title": "IN · {name}",
+    "path": "Path in the IN folder",
+    "counts": "no files | {files} file, {size} | {files} files, {size}",
+    "count_new": "{count} new",
+    "count_working": "{count} in progress",
+    "count_errors": "{count} with errors",
+    "download_folder": "Download this folder as a zip",
+    "search": "Search the folder",
+    "search_placeholder": "Search by name…",
+    "any_status": "Any status",
+    "status": {
+      "new": "new",
+      "working": "in progress",
+      "done": "done",
+      "error": "error",
+      "ignored": "set aside"
+    },
+    "intro": "The files to work on, under their own names and in their own tree: the pipelines take them from here. They are not notes.",
+    "selected": "none selected | {count} selected | {count} selected",
+    "move_to": "Move to",
+    "move_placeholder": "folder/",
+    "move": "Move",
+    "moved": "Moved to {to} | Moved to {to} | {count} files moved to {to}",
+    "mark_new": "Make new again",
+    "mark_ignored": "Set aside",
+    "choose_pipeline": "Choose a pipeline…",
+    "run": "Start",
+    "confirm_delete": "Delete {what}? It goes to the trash.",
+    "confirm_delete_forever": "Delete {what} for good? The trash is off: it cannot be restored.",
+    "deleted_trash": "Nothing deleted | Moved to the trash | {count} items moved to the trash",
+    "deleted": "Nothing deleted | Deleted for good | {count} items deleted for good",
+    "files_count": "no files | {count} file | {count} files",
+    "load_failed": "Could not read the IN folder",
+    "action_failed": "The action failed",
+    "nothing_found": "No file matches.",
+    "empty": "The folder is empty. Files arrive from disk (rsync, a mounted folder) or, later, from a remote store.",
+    "select_all": "Select all the files shown",
+    "name": "Name",
+    "size": "Size",
+    "modified": "Modified",
+    "status_label": "Status",
+    "select": "Select {name}",
+    "open_runs": "Open Runs",
+    "more": "More files",
+    "tree_hint": "The IN folder: {files} files, {size}. Click to open it.",
+    "runs_started": "No run started. | Run {id} started: it is in Runs. | {count} runs started, one per file: they are in Runs.",
+    "no_run": "No run started: the pipeline takes none of the files chosen.",
+    "skipped_folder": "{name} skipped: the pipeline takes the folder {value} only.",
+    "skipped_kinds": "{name} skipped: the pipeline takes {value} only.",
+    "skipped_match": "{name} skipped: its name does not match {value}."
   }
 }

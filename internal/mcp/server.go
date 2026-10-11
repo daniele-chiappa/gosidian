@@ -20,6 +20,7 @@ import (
 	"github.com/gosidian/gosidian/internal/authz"
 	"github.com/gosidian/gosidian/internal/automation"
 	"github.com/gosidian/gosidian/internal/index"
+	"github.com/gosidian/gosidian/internal/infolder"
 	"github.com/gosidian/gosidian/internal/pipeline"
 	"github.com/gosidian/gosidian/internal/plugins"
 	"github.com/gosidian/gosidian/internal/projects"
@@ -205,6 +206,8 @@ type Server struct {
 	// is off. pipelinesOn is the switch, known before the engine exists.
 	pipelines   *pipeline.Engine
 	pipelinesOn bool
+	// in is the state of the IN folders (IMP-172), nil in tests.
+	in *infolder.Service
 	// plugins are the MCP servers whose nodes the pipelines use (IMP-168).
 	plugins *plugins.Registry
 	// accessResolver maps an OAuth access token (internal/oauth) to the grant

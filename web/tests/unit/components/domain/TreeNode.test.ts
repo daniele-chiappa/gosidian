@@ -4,9 +4,10 @@ import { createI18n } from 'vue-i18n'
 import enUI from '@catalogs/ui.en.json'
 import type { TreeNode as TN } from '@/api/tree'
 
+const open = vi.hoisted(() => vi.fn())
 vi.mock('plancia', async (orig) => ({
   ...(await orig<typeof import('plancia')>()),
-  useWindowsStore: () => ({ open: vi.fn() }),
+  useWindowsStore: () => ({ open }),
 }))
 vi.mock('@/stores/access', () => ({
   useAccessStore: () => ({ canWrite: () => false, visibility: () => 'internal' }),
@@ -44,5 +45,20 @@ describe('TreeNode', () => {
     await sub.trigger('toggle')
     expect(w.findAll('summary > svg').map((c) => c.classes('rotate-90'))).toEqual([true, true, false])
     expect(localStorage.getItem('gosidian.tree.open:p/docs/bugs')).toBe('1')
+  })
+
+  it('draws the IN folder of a project as one row with what it holds, which opens the IN window', async () => {
+    const i18n = createI18n({ legacy: false, locale: 'en', messages: { en: enUI } })
+    const w = mount(TreeNode, {
+      props: { node: { name: 'IN', path: 'p/IN', is_dir: true, kind: 'in', in: { files: 12, bytes: 4096, new: 3, working: 0, errors: 0 } } },
+      global: { plugins: [i18n] },
+    })
+    const row = w.find('[data-tree-in]')
+    expect(row.text()).toContain('IN')
+    expect(row.text()).toContain('3')
+    expect(row.text()).toContain('12')
+    expect(w.find('details').exists()).toBe(false)
+    await row.trigger('click')
+    expect(open).toHaveBeenCalledWith(expect.objectContaining({ type: 'in', key: 'in:p', props: { project: 'p' } }))
   })
 })

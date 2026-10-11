@@ -345,6 +345,11 @@ type PipelinesConfig struct {
 	// PublicURL is the server's address in the resume URLs; default the
 	// OAuth issuer, else a path.
 	PublicURL string `toml:"public_url"`
+	// FilesURL is the server's address as the plugins reach it, for the
+	// files they fetch by reference (IMP-172): http://gosidian:8080 on the
+	// network of a compose file. Default PublicURL, which can go through a
+	// proxy that caps the size of an answer. A plugin's own files_url wins.
+	FilesURL string `toml:"files_url"`
 	// Timezone is the zone of the schedule triggers; default the
 	// automations' one.
 	Timezone string `toml:"timezone"`
@@ -367,6 +372,9 @@ type PluginConfig struct {
 	// Timeout is the longest a call to the plugin may take; default the
 	// step timeout.
 	Timeout time.Duration `toml:"timeout"`
+	// FilesURL is the server's address as this plugin reaches it, for the
+	// files it fetches by reference; default [pipelines] files_url.
+	FilesURL string `toml:"files_url"`
 }
 
 // LLMProvider is a service with an OpenAI-compatible API.
@@ -1038,6 +1046,9 @@ func (c *Config) applyPipelinesEnv() error {
 	}
 	if v := os.Getenv("GOSIDIAN_PIPELINES_PUBLIC_URL"); v != "" {
 		c.Pipelines.PublicURL = v
+	}
+	if v := os.Getenv("GOSIDIAN_PIPELINES_FILES_URL"); v != "" {
+		c.Pipelines.FilesURL = v
 	}
 	if v := os.Getenv("GOSIDIAN_PIPELINES_TIMEZONE"); v != "" {
 		c.Pipelines.Timezone = v

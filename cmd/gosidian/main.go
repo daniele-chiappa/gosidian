@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
+	"io/fs"
 	"log"
 	"log/slog"
 	"net/http"
@@ -21,12 +23,14 @@ import (
 	"github.com/gosidian/gosidian/internal/config"
 	"github.com/gosidian/gosidian/internal/gitsync"
 	"github.com/gosidian/gosidian/internal/index"
+	"github.com/gosidian/gosidian/internal/infolder"
 	"github.com/gosidian/gosidian/internal/insights"
 	"github.com/gosidian/gosidian/internal/ldap"
 	mcpsrv "github.com/gosidian/gosidian/internal/mcp"
 	"github.com/gosidian/gosidian/internal/metrics"
 	"github.com/gosidian/gosidian/internal/oauth"
 	"github.com/gosidian/gosidian/internal/parser"
+	"github.com/gosidian/gosidian/internal/projectops"
 	"github.com/gosidian/gosidian/internal/projects"
 	"github.com/gosidian/gosidian/internal/scaffold"
 	"github.com/gosidian/gosidian/internal/server"
@@ -325,6 +329,14 @@ func main() {
 	if rel := v.StateDirInside(); rel != "" && !sdirDefault {
 		log.Printf("state dir: %s is inside the vault: hidden from notes, exports and git sync, but better moved outside it", sdir)
 	}
+	// The IN folders of the projects with use_in (IMP-172, ADR-037): files
+	// to work on, never notes. One removed by hand comes back empty.
+	v.SetINProjects(projectsStore.UsesIN)
+	for _, name := range projectsStore.INNames() {
+		if err := v.EnsureIN(name); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			log.Printf("the IN folder of %s: %v", name, err)
+		}
+	}
 	// One-time conversion of projects.json to the visibility + grants model
 	// (v2.30, ADR-026). Accounts that could read and write everywhere keep
 	// that access on the existing projects through explicit write grants.
@@ -566,11 +578,29 @@ func main() {
 			log.Printf("automations: enabled (every %s, time zone %s, state %s)", cfg.Automations.Interval, loc, filepath.Join(sdir, "automations.json"))
 		}
 	}
+	// The state of the IN folders (IMP-172): in.db, a scan every 20 s,
+	// with the pipelines on or off.
+	inFolders, err := infolder.Open(filepath.Join(sdir, "in.db"), v, projectsStore.INNames, infolder.Options{Log: slog.Default()})
+	if err != nil {
+		log.Fatalf("IN folders: %v", err)
+	}
+	defer inFolders.Close()
+	mcpServer.SetIN(inFolders)
+	// The web UI hears of a change of an IN folder as of the tree's.
+	inFolders.SetOnChange(func(project string) {
+		eventsHub.Publish(events.TopicTree, map[string]any{"action": "in", "project": project, "path": vault.INRoot(project)})
+	})
+	projectops.SetRenameHook(func(from, to string) {
+		if err := inFolders.Store().ProjectRenamed(from, to); err != nil {
+			log.Printf("IN folders: the rename of %s to %s: %v", from, to, err)
+		}
+	})
+	go inFolders.Run(ctx)
 	// The pipelines (IMP-166, ADR-035): after the scan, like the
 	// automations; off unless [pipelines] enabled.
 	stopPipelines := func(time.Duration) {}
 	if cfg.Pipelines.Enabled {
-		stopPipelines = startPipelines(ctx, cfg, sdir, mcpServer)
+		stopPipelines = startPipelines(ctx, cfg, sdir, mcpServer, inFolders)
 	}
 	// A token owned by a web account is narrowed on every request to what
 	// that account may currently read and write (BUG-055): the resolver maps
@@ -678,6 +708,7 @@ func main() {
 		OAuth:      oauthSrv,              // nil when [oauth] is off: /api/v1/oauth/* answers 404
 		Pipelines:  mcpServer.Pipelines(), // nil when [pipelines] is off: /pipelines, /runs answer 404
 		Plugins:    mcpServer.Plugins(),   // nil when [pipelines] is off
+		IN:         inFolders,
 	})
 	srv.MountAPIv1(apiRouter)
 	srv.SetVaultFileAuthorizer(apiRouter.VaultFileAuthorizer()) // ADR-022: attachments share the API auth

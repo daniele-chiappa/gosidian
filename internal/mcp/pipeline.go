@@ -2,8 +2,11 @@ package mcp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"path"
 	"strings"
@@ -12,6 +15,7 @@ import (
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/gosidian/gosidian/internal/index"
+	"github.com/gosidian/gosidian/internal/infolder"
 	"github.com/gosidian/gosidian/internal/jobs"
 	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/gosidian/gosidian/internal/pipeline"
@@ -36,6 +40,9 @@ func (s *Server) SetPlugins(r *plugins.Registry) { s.plugins = r }
 
 // Plugins is the plugin registry, nil when the pipelines are off.
 func (s *Server) Plugins() *plugins.Registry { return s.plugins }
+
+// SetIN gives the server the state of the IN folders (IMP-172).
+func (s *Server) SetIN(svc *infolder.Service) { s.in = svc }
 
 // SetPipelinesSwitch tells the server whether [pipelines] is on, before
 // the engine exists (the host is built first).
@@ -163,7 +170,53 @@ func (h pipelineHost) ReadAttachment(project, rel string) ([]byte, error) {
 	if err := inProject(project, rel); err != nil {
 		return nil, err
 	}
+	if h.s.vault.InArea(rel) {
+		return h.s.vault.INRead(rel, maxAttachmentRead)
+	}
 	return h.s.vault.ReadAttachment(rel, maxAttachmentRead)
+}
+
+// OpenFile opens an attachment of the project, or a file of its IN folder
+// (IMP-172), for a plugin that fetches it by reference.
+func (h pipelineHost) OpenFile(project, rel string) (io.ReadSeekCloser, pipeline.FileStat, error) {
+	if err := inProject(project, rel); err != nil {
+		return nil, pipeline.FileStat{}, err
+	}
+	if h.s.vault.InArea(rel) {
+		f, e, err := h.s.vault.INOpen(rel)
+		if err != nil {
+			return nil, pipeline.FileStat{}, err
+		}
+		return f, pipeline.FileStat{Path: e.Path, Name: path.Base(e.Path), Size: e.Size, ModTime: e.ModTime}, nil
+	}
+	f, info, clean, err := h.s.vault.OpenAttachment(rel)
+	if err != nil {
+		return nil, pipeline.FileStat{}, err
+	}
+	return f, pipeline.FileStat{Path: clean, Name: path.Base(clean), Size: info.Size(), ModTime: info.ModTime()}, nil
+}
+
+// StatFile describes a file OpenFile opens, with its SHA-256: the one the
+// IN folder's state holds, while the file did not change, else read.
+func (h pipelineHost) StatFile(project, rel string) (pipeline.FileStat, error) {
+	f, st, err := h.OpenFile(project, rel)
+	if err != nil {
+		return pipeline.FileStat{}, err
+	}
+	defer f.Close()
+	if h.s.in != nil && h.s.vault.InArea(st.Path) {
+		if row, err := h.s.in.Store().File(project, st.Path); err == nil && row.SHA256 != "" &&
+			row.Size == st.Size && row.Modified.Equal(st.ModTime.UTC()) {
+			st.SHA256 = row.SHA256
+			return st, nil
+		}
+	}
+	sum := sha256.New()
+	if _, err := io.Copy(sum, f); err != nil {
+		return pipeline.FileStat{}, err
+	}
+	st.SHA256 = hex.EncodeToString(sum.Sum(nil))
+	return st, nil
 }
 
 // StoreAttachment stores a file a node made (a plugin's images) as an

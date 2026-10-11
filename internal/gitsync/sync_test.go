@@ -651,3 +651,91 @@ func TestSync_WorktreeVaultIsARepository(t *testing.T) {
 		t.Errorf("an init commit on the worktree's branch:\n%s", log)
 	}
 }
+
+// An IN folder stays out of git, unless its project tracks it; then its
+// files over the cap stay out (IMP-172).
+func TestSync_INFolders(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	pstore, err := projects.Open(filepath.Join(t.TempDir(), "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"p/a.md", "p/IN/small.pdf", "p/IN/sub/note.md"} {
+		full := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(rel), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	big := filepath.Join(dir, "p", "IN", "big file .bin")
+	f, err := os.Create(big)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Truncate(INMaxTrackedBytes + 1); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	if err := pstore.Set("p", projects.Flags{UseIN: true}); err != nil {
+		t.Fatal(err)
+	}
+	s := New(dir, testCfg())
+	s.SetProjects(pstore)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	files := func() string {
+		s.TriggerCommit()
+		s.Flush()
+		out, err := exec.Command("git", "-C", dir, "ls-files").Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(out)
+	}
+	if out := files(); out != "p/a.md\n" && out != ".gitignore\np/a.md\n" {
+		t.Errorf("an IN folder left out by default, tracked:\n%s", out)
+	}
+
+	if err := pstore.Set("p", projects.Flags{UseIN: true, TrackINInGit: true}); err != nil {
+		t.Fatal(err)
+	}
+	out := files()
+	if !strings.Contains(out, "p/IN/small.pdf") || !strings.Contains(out, "p/IN/sub/note.md") || strings.Contains(out, "big") {
+		t.Errorf("a tracked IN folder, tracked:\n%s", out)
+	}
+	ignore, _ := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if !strings.Contains(string(ignore), "/p/IN/big file .bin\n") {
+		t.Errorf("the big file is not in .gitignore:\n%s", ignore)
+	}
+	if st, _ := exec.Command("git", "-C", dir, "status", "--porcelain").Output(); len(st) != 0 {
+		t.Errorf("left out, the big file still shows:\n%s", st)
+	}
+
+	if err := pstore.Set("p", projects.Flags{UseIN: true}); err != nil {
+		t.Fatal(err)
+	}
+	if out := files(); strings.Contains(out, "p/IN/") {
+		t.Errorf("tracked after track_in_git went off:\n%s", out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "p", "IN", "small.pdf")); err != nil {
+		t.Errorf("untracking removed the file: %v", err)
+	}
+}
+
+func TestGitignoreFile(t *testing.T) {
+	for in, want := range map[string]string{
+		"p/IN/a b.pdf": "/p/IN/a b.pdf",
+		"p/IN/x  ":     `/p/IN/x\ \ `,
+		"p/IN/*.pdf":   `/p/IN/\*.pdf`,
+	} {
+		if got := gitignoreFile(in); got != want {
+			t.Errorf("gitignoreFile(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

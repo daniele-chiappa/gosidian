@@ -8,6 +8,71 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.81.0] — 2026-10-11 — "IN folder"
+
+A project can hold files to work on, under their own names and in their
+own tree, and the pipelines take them in. Pull the image and restart,
+nothing to migrate: a new file of the state dir, `in.db`, is made at
+start, and nothing changes for a project that does not turn the folder on.
+
+### Added
+- **The IN folder** — a project with `use_in` (the **IN** chip of the
+  Projects window; turning `use_pipelines` on turns it on too, and it stays)
+  has `<project>/IN/`: files of any kind, under their own names, in
+  folders. Nothing in it is a note, a `.md` included: the scan, the search,
+  the graph, the note count and the zips of the vault and of the project
+  leave it out, and the note and attachment operations refuse its paths;
+  links and hidden entries are not there. A folder named `IN` that already
+  holds notes keeps the flag off, as they would leave the index. See
+  [docs/in.md](docs/in.md).
+- **Arrivals and batches** — files arrive on the server's disk (rsync, a
+  sync client, a volume mounted at the folder). A scan every 20 seconds
+  keeps their state in `<state-dir>/in.db`: size, SHA-256, status (new,
+  working, done, error, ignored) and the run that took them. Files that
+  arrive together in a first-level folder form a batch, which closes after
+  60 seconds without a change, or at once when a `.done` marker appears.
+- **Out of git by default** — the managed `.gitignore` leaves each IN
+  folder out; `track_in_git` (the **IN git** chip, asked first) puts it in
+  the vault's history, but its files over 50 MiB.
+- **The IN window** — the tree shows the IN folder as one row, with its
+  new files and its files; a click opens a window that lists it a folder
+  at a time, with each file's size, date, status and run, and searches
+  under a folder. Who writes in the project moves the files chosen, sets
+  them aside or back as new, deletes them into the trash, downloads a file
+  or a folder as a zip, and starts a pipeline on them, the way its trigger
+  would (a run per file for a pipeline that runs per file; the files its
+  trigger does not take are skipped, and the window says why). It follows
+  the folder live; the address keeps it.
+- **The `in` trigger, `in.list` and `in.move`** — `trigger: {on: in}`
+  starts a pipeline when a batch closes: one run per file (`trigger.file`,
+  `name`, `stem`, `ext`, `dir`, `size`, `sha256`), keyed by path and
+  content, or, with `batch: true`, one run per batch (`trigger.batch`,
+  `count`, `bytes`, `files`). `folder`, `kinds` and `match` (a glob on the
+  name) choose the files. Each file a run takes is marked working, then
+  done or error as the run ends. `in.list` pages through the IN folder
+  (folder, recursive, match, kinds, status, batch); `in.move` moves a file
+  or a folder inside it and sets its status. The pipeline editor has the
+  trigger and the nodes ([plancia-diagrams](https://github.com/daniele-chiappa/plancia/tree/main/diagrams) 0.5.0).
+- **Files by reference for the plugins** — a plugin node whose manifest
+  says `file_refs` gets, for each file it names, its name, type, size,
+  SHA-256 and a URL, `/api/v1/run-files/<ticket>`, to fetch it from: a file
+  of any size, an attachment or a file of the IN folder. The ticket is
+  bound to the run and to the file, lasts the step timeout, and goes when
+  the run ends; ranges and retries work. `files_url`, per plugin or in
+  `[pipelines]` (`GOSIDIAN_PIPELINES_FILES_URL`), is the address the
+  plugins reach the server at, `http://gosidian:8080` on a compose
+  network. `llm.describe` and the plugins without `file_refs` read the
+  IN folder's files too, 20 MiB at most.
+- **The API** — `GET /api/v1/in/<project>` (counts, subfolders, a page of
+  files, filters) and `POST /api/v1/in/<project>/move`, `/status`,
+  `/delete` and `/run`; `/vault-files/` serves the IN folder's files, inert,
+  with ranges. The project API takes `use_in` and `track_in_git`.
+
+### Fixed
+- **`/vault-files/` followed a symbolic link** under an `attachments/`
+  folder, and could serve a file from outside the vault to an account that
+  sees the project. Attachments now open with no link along the way.
+
 ## [2.80.0] — 2026-10-11 — "pipeline editor"
 
 Pipeline notes are drawn in the web UI and edited on their drawing, and

@@ -9,6 +9,7 @@ import (
 
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/server/events"
+	"github.com/gosidian/gosidian/internal/vault"
 )
 
 // handleFolderByPath serves the folder actions of the tree's context menu
@@ -76,6 +77,10 @@ func (r *Router) deleteFolder(w http.ResponseWriter, req *http.Request, dir stri
 	}
 	if !strings.Contains(clean, "/") {
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "a project is deleted from the projects page, not as a folder")
+		return
+	}
+	if r.deps.Vault.InArea(clean) && clean == vault.INRoot(projectOf(clean)) {
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "the IN folder itself stays: delete what it holds")
 		return
 	}
 	princ := user.principal()

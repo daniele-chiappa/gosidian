@@ -6,6 +6,7 @@ import (
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/gitsync"
 	"github.com/gosidian/gosidian/internal/index"
+	"github.com/gosidian/gosidian/internal/infolder"
 	"github.com/gosidian/gosidian/internal/oauth"
 	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/gosidian/gosidian/internal/pipeline"
@@ -45,6 +46,9 @@ type Deps struct {
 	// Plugins is the registry of the pipelines' plugins (IMP-168), nil
 	// when the pipelines are off.
 	Plugins *plugins.Registry
+	// IN is the state of the projects' IN folders (IMP-172); nil in tests
+	// that need none.
+	IN *infolder.Service
 }
 
 // Router owns the http.Handler tree under /api/v1/*. A separate type
@@ -103,6 +107,8 @@ func (r *Router) registerPublic() {
 	r.mux.HandleFunc("/api/v1/i18n", r.handleI18nCatalog)
 	r.mux.HandleFunc("/api/v1/login", r.handleLogin)
 	r.mux.HandleFunc("/api/v1/signup", r.handleSignup)
+	// A file a plugin fetches by reference (IMP-172): the ticket is the key.
+	r.mux.HandleFunc(pipeline.FileTicketPath, r.handleRunFile)
 	// SSE events endpoint is "public" in the routing sense — its own
 	// handler validates the token from the query string because
 	// EventSource cannot send custom headers.
@@ -188,6 +194,8 @@ func (r *Router) registerAuthed() {
 	// The pipeline editor (IMP-169, F4): there with the pipelines off too.
 	r.mux.Handle("/api/v1/pipeline-nodes", authed(r.handlePipelineNodes))
 	r.mux.Handle("/api/v1/pipeline-check", authed(r.handlePipelineCheck))
+	// The IN folders (IMP-172).
+	r.mux.Handle("/api/v1/in/", authed(r.handleIN))
 }
 
 // handleHealth confirms the v1 mux is wired and reachable.

@@ -27,6 +27,7 @@ max_wait = "168h"        # the longest a wait.call may wait
 max_llm_tokens = 200000  # LLM tokens one run may use; 0: no cap
 http_allowlist = ["https://api.example.com/", "http://gpu.lan:5001/"]
 public_url = "https://vault.example.com"   # default: [oauth] issuer
+files_url = "http://gosidian:8080"         # where plugins fetch files; default: public_url
 timezone = "Europe/Rome"                   # default: [automations] timezone
 
 [[pipelines.llm]]
@@ -49,7 +50,7 @@ token_secret = "docling-token"
 The environment overrides the file (see [configuration](configuration.md)):
 `GOSIDIAN_PIPELINES_ENABLED`, `_WORKERS`, `_RETENTION`, `_STEP_TIMEOUT`,
 `_MAX_WAIT`, `_MAX_LLM_TOKENS`, `_HTTP_ALLOWLIST` (comma-separated),
-`_PUBLIC_URL`, `_TIMEZONE`, `_LLM_URL`, `_LLM_MODEL`,
+`_PUBLIC_URL`, `_FILES_URL`, `_TIMEZONE`, `_LLM_URL`, `_LLM_MODEL`,
 `_LLM_KEY_SECRET` for one provider named `default`, and `_PLUGINS`
 (`name=url,…`, plugins without a token).
 
@@ -104,6 +105,7 @@ why a pipeline cannot run.
 | `external` | as manual, and also a service with a run token | the input given |
 | `ingest` | a file of one of `kinds` is stored as an attachment of the project (with `folder`: a note made with it in that folder) | `file`, `name`, `stem`, `ext`, `folder`, `note`, `project` |
 | `schedule` | `every: "monday 09:00"`, `"day 18:30"` (the automations' syntax), once per slot; a slot missed by more than 10 minutes is not run late | `slot` |
+| `in` | a batch of files of the project's [IN folder](in.md) closes: one run per file it takes, or one per batch with `batch: true`; `folder` (of the IN folder), `kinds` (none: all) and `match` (a glob on the name) choose the files | per file: `file`, `name`, `stem`, `ext`, `dir`, `size`, `sha256`, `source`, `project`; per batch: `batch`, `dir`, `count`, `bytes`, `files` (the files, when they fit in the input; else `files_listed` is false and `in.list` reads them), `project` |
 
 Every file store counts as an arrival: `memory_ingest`,
 `memory_upload_attachment`, `memory_upload_resource`, the media and table
@@ -111,9 +113,16 @@ notes, the MCP `/upload` endpoint and the web UI's uploads. A file starts
 each pipeline once: its path (named by its content) is the run's
 idempotency key. A package import (`as: package`) starts none.
 
+An `in` run per file is keyed by the file's path and content: the same file
+again starts no run, a changed one does. A batch run is keyed by its batch.
+Each file a run takes is marked `working` with the run, then `done` or
+`error` as the run ends, unless the pipeline set its status itself.
+
 Any pipeline also starts by hand, whatever its trigger: an ingest pipeline
 run with `{"file": "team/attachments/….pdf", …}` as input works on that
-file again.
+file again, and the IN window starts a pipeline on the files chosen, the
+way its trigger would: once per file for an `in` pipeline per file, once
+for the others.
 
 ### Nodes
 
@@ -154,7 +163,9 @@ an expression turns it into text. There are no operators: compute in a
 | `http.request` | `url` (in `http_allowlist`), `method`, `json` or `body`, `headers`, `secret_header: "Authorization=secret_name"`, `accept_errors` | `status`, `headers`, `json` or `body` (4 MiB at most) |
 | `llm.chat` | `prompt`, `system`, `provider` (default `default`), `model`, `max_tokens` (default 1024), `temperature`, `json: true` | `text`, `json`, `model`, `provider`, `usage` |
 | `llm.describe` | `image` (an attachment of the project, png/jpg/gif/webp, 10 MiB at most), `prompt`, and as `llm.chat` | as `llm.chat`, plus `image` |
-| `<plugin>.<node>` | what the plugin's manifest says; a setting it lists in `files` names an attachment of the project | the plugin tool's result, plus `files` (`name`, `path`, `mime`, `markdown`): the files it gave back, stored as attachments |
+| `in.list` | `folder` (of the IN folder; empty: all), `recursive` (default yes), `match` (a glob on the name), `kinds`, `status`, `batch` (`{{ trigger.batch }}`), `limit` (default 500, at most 5000), `cursor` | `files` (`path`, `name`, `stem`, `ext`, `dir`, `size`, `sha256`, `status`, `modified`, `batch`, `source`), `count`, `next` (the cursor of the next page; empty at the last) |
+| `in.move` | `file` (in the IN folder), `to` (a folder, `done/`, or a path, in the IN folder; empty: it stays), `status` (`done`, `error`, `ignored`, `new`) | `path`, `from`, `status` |
+| `<plugin>.<node>` | what the plugin's manifest says; a setting it lists in `files` names an attachment of the project or a file of its IN folder | the plugin tool's result, plus `files` (`name`, `path`, `mime`, `markdown`): the files it gave back, stored as attachments |
 
 A plugin's nodes exist once the owner accepted its manifest
 (`gosidian plugin accept`, [plugins](plugins.md)); `memory_pipelines`
@@ -163,6 +174,58 @@ and the Runs window list them.
 A node's output is at most 1 MiB (`max_output_bytes`): write a large text
 into a note and pass its path. A run's input is at most 256 KiB
 (`max_input_bytes`): pass files by their vault path, not their bytes.
+
+`llm.describe` and a plugin node read the file they name whole, 20 MiB at
+most, unless the plugin takes files **by reference** (`file_refs` in its
+manifest, [plugins](plugins.md#a-nodes-call)): then it gets the file's
+name, type, size, SHA-256 and a URL to fetch it from while the step runs,
+a file of any size.
+
+## The IN folder
+
+The files of a project's [IN folder](in.md) arrive in batches; the `in`
+trigger takes them. Per file:
+
+```pipeline
+trigger: {on: in, folder: fatture, kinds: [pdf]}
+nodes:
+  - id: convert
+    use: docling.convert
+    with: {file: "{{ trigger.file }}"}
+    timeout: 14m
+  - id: save
+    use: note.write
+    with:
+      path: "fatture/{{ trigger.stem }}"
+      body: "{{ convert.markdown }}"
+  - id: done
+    use: in.move
+    with: {file: "{{ trigger.file }}", to: "done/", status: done}
+```
+
+Per batch, deciding on all the files at once and working on each:
+
+```pipeline
+trigger: {on: in, batch: true, match: "*.xml"}
+nodes:
+  - id: files
+    use: in.list
+    with: {batch: "{{ trigger.batch }}", kinds: [xml]}
+  - id: read
+    use: starlark
+    with:
+      input: "{{ files.files }}"
+      code: |
+        output = [f["path"] for f in input if f["size"] > 0]
+  - id: done
+    use: in.move
+    each: "{{ read }}"
+    with: {file: "{{ item }}", to: "done/{{ trigger.dir }}/", status: done}
+```
+
+A run per batch reads its files with `in.list`, a page at a time
+(`cursor: "{{ files.next }}"`), and spends the LLM tokens of one run
+(`max_llm_tokens`): for heavy work on each file, a run per file is better.
 
 ## Editing in the web UI
 
@@ -191,8 +254,8 @@ types only, and runs nothing.
   `retry`, `timeout` and `on_error`. A text field offers, as you type
   `{{`, what the node may read: the trigger's fields, the run's, the
   outputs of the nodes that run before it, from their types' output
-  schema. The trigger's panel sets its kind, its `kinds` and `folder` or
-  its `every`.
+  schema. The trigger's panel sets its kind, its `kinds` and `folder`, its
+  `every`, or, for `in`, its `match` and whether it runs per batch.
 - **YAML**: the block as text. Every change is read as the server reads
   it (`POST /api/v1/pipeline-check`), and the problem shown under the
   drawing.
@@ -270,8 +333,9 @@ REST reference: `internal/api/v1/spec/openapi.yaml`, tag `pipelines`.
 
 ## What a pipeline may do
 
-- Read and write **only in its own project**; attachments are read through
-  the vault's confined path (ADR-021). Every write goes through the same
+- Read and write **only in its own project**; attachments and the files of
+  the IN folder are read through the vault's confined paths (ADR-021,
+  ADR-037), and moved only inside the IN folder. Every write goes through the same
   path as the MCP tools (ADR-034): the shrink guard, the size limits, the
   audit, the live events.
 - Call **only the addresses in `http_allowlist`** (prefixes), redirects

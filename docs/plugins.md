@@ -20,6 +20,7 @@ name = "docling"                          # its node types: docling.<node>
 url = "http://gosidian-docling:8000/mcp"  # the MCP endpoint
 token_secret = "docling-token"            # gosidian secret set docling-token
 timeout = "10m"                           # default: the step timeout
+files_url = "http://gosidian:8080"        # where it fetches files; default [pipelines] files_url
 ```
 
 `GOSIDIAN_PIPELINES_PLUGINS="docling=http://gosidian-docling:8000/mcp,…"`
@@ -93,6 +94,7 @@ structured content or as JSON text:
 | `nodes[].name` | the node's name: lower-case letters, digits and `_` (at most 32 nodes) |
 | `nodes[].tool` | the MCP tool that runs it |
 | `nodes[].files` | the settings that name a vault file: the tool gets the file's content in their place |
+| `nodes[].file_refs` | `true`: the tool gets where to fetch each file instead of its content (below) |
 | `nodes[].input_schema`, `output_schema` | JSON Schemas of the settings (as a pipeline writes them) and of the output, for the reader and the editor |
 | `permissions.files` | the plugin reads the files a pipeline hands it (needed by `files`) |
 | `permissions.network` | the hosts the plugin itself calls; empty for none. Declared: whoever runs its container enforces it |
@@ -110,9 +112,11 @@ When a pipeline runs `docling.convert`, gosidian:
    accepted one fails the node;
 2. calls the node's tool with the node's settings (`with`, expressions
    resolved) as arguments. Each setting listed in `files` names a vault
-   file of the pipeline's project, and is replaced by
+   file of the pipeline's project, an attachment or a file of its
+   [IN folder](in.md), and is replaced by
    `{"name": "1f3c….pdf", "mime": "application/pdf", "data": "<base64>"}`
-   (20 MiB at most);
+   (20 MiB at most), or, for a node with `file_refs`, by
+   `{"name": "fattura.pdf", "mime": "application/pdf", "size": 1048576, "sha256": "…", "url": "…/api/v1/run-files/<ticket>"}`;
 3. takes the tool's **structured content** (else its text, read as JSON,
    else `{"text": …}`) as the node's output;
 4. stores every **file** in the result as an attachment of the project,
@@ -132,6 +136,20 @@ conversion wants `timeout: 14m` on its node.
 A node's output is at most 1 MiB, as any node's: a plugin that makes a
 long text should keep it in its output once, not twice.
 
+### Files by reference
+
+A node with `file_refs` fetches each file it is handed with a plain
+`GET` of its `url`, without a token: the ticket in the address is the key,
+bound to the run and to the file, valid while the step may run (the step
+timeout) and gone when the run ends. Ranges and retries work. The plugin
+should check the size and the SHA-256 it was given. The URL starts with
+the plugin's `files_url`, else `[pipelines] files_url`
+(`GOSIDIAN_PIPELINES_FILES_URL`), else the public URL: on the network of
+a compose file, `http://gosidian:8080` lets the plugin reach gosidian
+directly, not through a proxy that caps the size of an answer. The
+plugin then calls that address, which its manifest declares in
+`permissions.network`.
+
 ### What gosidian does not do for a plugin
 
 - It does not run it: the plugin is a container or a service its owner
@@ -139,14 +157,16 @@ long text should keep it in its output once, not twice.
 - It does not pass secrets: a plugin that calls a paid service keeps its
   own key.
 - It does not let it read the vault: the plugin gets the files a node
-  names, in the pipeline's project, and gives back files and data.
+  names, in the pipeline's project, or a ticket for each, and gives back
+  files and data.
 
 ## The docling plugin
 
 `gosidian-docling` (repo `gosidian-plugins`, folder `docling/`) converts
 PDF, DOCX, XLSX, PPTX, HTML and images to markdown with
 [docling](https://github.com/docling-project/docling), on the CPU, its
-models inside the image. Its node `docling.convert` takes `file`, `ocr`
+models inside the image. Since 0.2.0 it takes its file by reference, any
+size up to 512 MiB. Its node `docling.convert` takes `file`, `ocr`
 (default true), `pictures` (default true), `max_pages` and
 `images_scale`, and returns `markdown` (a picture is `![caption](fig-N.png)`),
 `title`, `pages`, `tables` and `pictures` (`name`, `page`, `caption`);

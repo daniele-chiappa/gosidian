@@ -5,6 +5,7 @@
  * Vue idiomaticness — `is_dir` becomes `isDir`).
  */
 import client from './client'
+import type { INCounts } from './in'
 
 export interface TreeNode {
   name: string
@@ -16,6 +17,8 @@ export interface TreeNode {
   in_progress?: boolean
   hidden_from_mcp?: boolean
   skip_git_sync?: boolean
+  /** What the project's IN folder holds, on its node (kind "in", IMP-172). */
+  in?: INCounts
   children?: TreeNode[]
 }
 

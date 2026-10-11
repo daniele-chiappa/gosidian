@@ -41,6 +41,12 @@ export interface Project {
   /** Let the server run the project's pipelines (IMP-166), when its master
    *  switch is on (VersionInfo.pipelines_enabled). Off by default. */
   use_pipelines?: boolean
+  /** The project's IN folder (IMP-172): files to work on, outside the notes.
+   *  Turning use_pipelines on turns it on. */
+  use_in?: boolean
+  /** The IN folder goes in the vault's git history (but its files over
+   *  50 MiB); off by default. */
+  track_in_git?: boolean
   /** RFC 3339 UTC string of the directory's mtime — proxy for
    *  "last activity" (fs birth time isn't preserved by rsync /
    *  git checkout / container layer copy). Empty when stat failed. */
@@ -64,6 +70,8 @@ export interface UpdateProjectRequest {
   lean_read_bootstrap?: boolean
   allow_local_mirror?: boolean
   use_pipelines?: boolean
+  use_in?: boolean
+  track_in_git?: boolean
 }
 
 export async function listProjects(): Promise<Project[]> {

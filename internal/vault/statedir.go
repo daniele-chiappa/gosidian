@@ -74,8 +74,13 @@ func (v *Vault) hides(rel string) bool {
 }
 
 // skipDir reports whether a walk rooted at root leaves out the folder at
-// path: a hidden one, node_modules, or the state dir.
-func (v *Vault) skipDir(root, path string) bool {
+// path: a hidden one, node_modules, the state dir, or a project's IN folder
+// (ADR-037).
+func (v *Vault) skipDir(root, path string) bool { return v.skipDirIn(root, path, false) }
+
+// skipDirIn is skipDir, keeping the IN folders when inOK: a walk of an IN
+// folder itself (its zip) goes into its folders.
+func (v *Vault) skipDirIn(root, path string, inOK bool) bool {
 	if path == root {
 		return false
 	}
@@ -83,11 +88,15 @@ func (v *Vault) skipDir(root, path string) bool {
 	if strings.HasPrefix(name, ".") || name == "node_modules" {
 		return true
 	}
-	if v.stateRel == "" {
+	if v.stateRel == "" && (inOK || v.hasIN == nil) {
 		return false
 	}
 	rel, err := filepath.Rel(v.Root, path)
-	return err == nil && v.hides(filepath.ToSlash(rel))
+	if err != nil {
+		return false
+	}
+	rel = filepath.ToSlash(rel)
+	return v.hides(rel) || (!inOK && v.InArea(rel))
 }
 
 // relInside returns the slash path of dir relative to root when dir lies

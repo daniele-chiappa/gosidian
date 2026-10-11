@@ -6,6 +6,7 @@ package pipeline
 
 import (
 	"fmt"
+	"path"
 	"regexp"
 	"slices"
 	"strings"
@@ -31,6 +32,9 @@ const (
 	TriggerIngest = "ingest"
 	// TriggerSchedule: at a time of the week or day, like the automations.
 	TriggerSchedule = "schedule"
+	// TriggerIN: files arrive in the project's IN folder (IMP-172), one
+	// run per file or per batch.
+	TriggerIN = "in"
 )
 
 // Limits of a spec.
@@ -44,11 +48,17 @@ const (
 // Trigger is what starts a pipeline.
 type Trigger struct {
 	On string `json:"on"`
-	// Kinds are the file extensions an ingest trigger takes (pdf, docx).
+	// Kinds are the file extensions an ingest or in trigger takes (pdf,
+	// docx); for in, none is all.
 	Kinds []string `json:"kinds,omitempty"`
 	// Folder, for ingest, is the folder of the project the document
-	// must arrive in (the folder of the note it is ingested with).
+	// must arrive in (the folder of the note it is ingested with); for in,
+	// a folder of the IN folder.
 	Folder string `json:"folder,omitempty"`
+	// Match, for in, is a glob on the file name (*_T?.pdf).
+	Match string `json:"match,omitempty"`
+	// Batch, for in, starts one run per batch instead of one per file.
+	Batch bool `json:"batch,omitempty"`
 	// Every, for schedule: "monday 09:00", "day 18:30".
 	Every    string               `json:"every,omitempty"`
 	Schedule *automation.Schedule `json:"-"`
@@ -136,6 +146,8 @@ type rawSpec struct {
 		Kinds  []string `yaml:"kinds"`
 		Folder string   `yaml:"folder"`
 		Every  string   `yaml:"every"`
+		Match  string   `yaml:"match"`
+		Batch  bool     `yaml:"batch"`
 	} `yaml:"trigger"`
 	Nodes yaml.Node `yaml:"nodes"`
 }
@@ -156,6 +168,8 @@ func Parse(src string, types Types) (*Spec, error) {
 		On:     strings.TrimSpace(r.Trigger.On),
 		Folder: strings.Trim(strings.TrimSpace(r.Trigger.Folder), "/"),
 		Every:  strings.TrimSpace(r.Trigger.Every),
+		Match:  strings.TrimSpace(r.Trigger.Match),
+		Batch:  r.Trigger.Batch,
 	}}
 	for _, k := range r.Trigger.Kinds {
 		k = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(k), "."))
@@ -178,8 +192,15 @@ func Parse(src string, types Types) (*Spec, error) {
 			return nil, fmt.Errorf("trigger schedule: %w", err)
 		}
 		s.Trigger.Schedule = &sc
+	case TriggerIN:
+		s.Trigger.Folder = inRelative(s.Trigger.Folder)
+		if s.Trigger.Match != "" {
+			if _, err := path.Match(s.Trigger.Match, ""); err != nil {
+				return nil, fmt.Errorf("trigger in: match %q is not a glob (*.pdf, fattura_??.xml)", s.Trigger.Match)
+			}
+		}
 	default:
-		return nil, fmt.Errorf("trigger on %q: it is manual, external, ingest or schedule", s.Trigger.On)
+		return nil, fmt.Errorf("trigger on %q: it is manual, external, ingest, schedule or in", s.Trigger.On)
 	}
 
 	raws, err := rawNodes(&r.Nodes)

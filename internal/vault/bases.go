@@ -47,7 +47,7 @@ func (v *Vault) loadReadOnly(rel string, is func(string) bool, max int64, notKin
 	if err != nil {
 		return nil, err
 	}
-	if !is(r) {
+	if !is(r) || v.InArea(r) {
 		return nil, fmt.Errorf("%w: %q", notKind, r)
 	}
 	full := filepath.Join(v.Root, filepath.FromSlash(r))

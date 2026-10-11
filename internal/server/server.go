@@ -6,8 +6,9 @@
 package server
 
 import (
+	"io"
+	"mime"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -143,12 +144,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleVaultFile serves attachments under attachments/ subpaths from
-// the vault. Restricted to those subpaths: the rest of the vault
-// stays opaque from this endpoint to avoid accidental disclosure of
-// arbitrary notes. Auth on this surface is handled by the same
-// browser session that drives the SPA — attachments are referenced
-// from inside the vault content the user already has access to, so
-// the access bar is "you're on the page".
+// the vault, and the files of the projects' IN folders (IMP-172).
+// Restricted to those: the rest of the vault stays opaque from this
+// endpoint to avoid accidental disclosure of arbitrary notes. Auth is the
+// API's (ADR-022). The bytes are inert (ADR-021), and a link, under an
+// attachments/ folder or in an IN folder, is not followed (BUG-118).
 func (s *Server) handleVaultFile(w http.ResponseWriter, r *http.Request) {
 	rel := strings.TrimPrefix(r.URL.Path, "/vault-files/")
 	if rel == "" {
@@ -160,7 +160,8 @@ func (s *Server) handleVaultFile(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid path", http.StatusBadRequest)
 		return
 	}
-	if !strings.Contains("/"+clean, "/attachments/") {
+	inFile := s.vault.InArea(clean)
+	if !inFile && !strings.Contains("/"+clean, "/attachments/") {
 		http.NotFound(w, r)
 		return
 	}
@@ -180,18 +181,23 @@ func (s *Server) handleVaultFile(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	abs, err := s.vault.Abs(clean)
+	if inFile {
+		s.serveINFile(w, r, clean)
+		return
+	}
+	f, info, _, err := s.vault.OpenAttachment(clean)
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
+	defer f.Close()
 	// ?inline returns the file as an RFC 2397 data: URI (text/plain) so the
 	// sandboxed HTML-note iframe (CSP img-src data:) can render it. The bytes
 	// are content-addressed and immutable, so the data: URI is permanently
 	// cacheable — the browser keeps it and never regenerates the base64.
 	if r.URL.Query().Has("inline") {
-		data, rerr := os.ReadFile(abs)
-		if rerr != nil {
+		data, rerr := io.ReadAll(io.LimitReader(f, attach.MaxBytes+1))
+		if rerr != nil || len(data) > attach.MaxBytes {
 			http.NotFound(w, r)
 			return
 		}
@@ -207,6 +213,28 @@ func (s *Server) handleVaultFile(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(uri))
 		return
 	}
+	setFileHeaders(w.Header(), clean)
+	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	http.ServeContent(w, r, filepath.Base(clean), info.ModTime(), f)
+}
+
+// serveINFile serves a file of an IN folder (IMP-172): its name is its
+// own, not its content's, so a browser revalidates it.
+func (s *Server) serveINFile(w http.ResponseWriter, r *http.Request, clean string) {
+	f, e, err := s.vault.INOpen(clean)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer f.Close()
+	setFileHeaders(w.Header(), clean)
+	w.Header().Set("Cache-Control", "private, no-cache")
+	http.ServeContent(w, r, filepath.Base(clean), e.ModTime, f)
+}
+
+// setFileHeaders sets the inert headers of a file served from the vault
+// (ADR-021), its type, and, but for an image, makes it a download.
+func setFileHeaders(h http.Header, clean string) {
 	ext := strings.ToLower(filepath.Ext(clean))
 	ct := "application/octet-stream"
 	isImage := false
@@ -214,15 +242,13 @@ func (s *Server) handleVaultFile(w http.ResponseWriter, r *http.Request) {
 		ct = info.MIME
 		isImage = info.IsImage
 	}
-	attach.SetInertHeaders(w.Header())
+	attach.SetInertHeaders(h)
 	if !isImage {
 		// Non-image attachments are downloads, never documents rendered in the
 		// app origin. Images stay inline so <img> embedding keeps working.
-		w.Header().Set("Content-Disposition", `attachment; filename="`+filepath.Base(clean)+`"`)
+		h.Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filepath.Base(clean)}))
 	}
-	w.Header().Set("Content-Type", ct)
-	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
-	http.ServeFile(w, r, abs)
+	h.Set("Content-Type", ct)
 }
 
 // statusRecorder lets the metrics middleware observe the final status

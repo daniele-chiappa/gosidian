@@ -55,6 +55,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_PIPELINES_MAX_LLM_TOKENS` | `pipelines.max_llm_tokens` | `0` (no cap on the LLM tokens of one run) |
 | `GOSIDIAN_PIPELINES_HTTP_ALLOWLIST` | `pipelines.http_allowlist` | empty (comma-separated URL prefixes `http.request` and the callbacks may call; empty: none) |
 | `GOSIDIAN_PIPELINES_PUBLIC_URL` | `pipelines.public_url` | the `[oauth]` issuer (the server's address in `{{ run.resume_url }}`; empty: a path) |
+| `GOSIDIAN_PIPELINES_FILES_URL` | `pipelines.files_url` | the public URL (the server's address as the [plugins](plugins.md#files-by-reference) reach it, for the files they fetch by reference: `http://gosidian:8080` on a compose network; a plugin's own `files_url` wins) |
 | `GOSIDIAN_PIPELINES_TIMEZONE` | `pipelines.timezone` | the automations' zone (the days and times of the `schedule` triggers) |
 | `GOSIDIAN_PIPELINES_LLM_URL`, `_LLM_MODEL`, `_LLM_KEY_SECRET` | `[[pipelines.llm]]` | none (one OpenAI-compatible provider named `default`: its URL up to `/v1`, its model, the name of the secret with its key; more providers in the file) |
 | `GOSIDIAN_PIPELINES_PLUGINS` | `[[pipelines.plugins]]` | none (comma-separated `name=url` entries: [plugins](plugins.md) whose MCP endpoint is the url, without a token; an entry replaces the url of the file's plugin of the same name. A token needs `token_secret` in the file) |

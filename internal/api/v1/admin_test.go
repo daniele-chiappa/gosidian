@@ -12,6 +12,7 @@ import (
 	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/gosidian/gosidian/internal/config"
 	"github.com/gosidian/gosidian/internal/index"
+	"github.com/gosidian/gosidian/internal/infolder"
 	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/gosidian/gosidian/internal/projects"
 	"github.com/gosidian/gosidian/internal/server/events"
@@ -28,6 +29,7 @@ type adminFixture struct {
 	configPath string
 	trashBin   *trash.Bin
 	mcpStore   *auth.Store
+	in         *infolder.Service
 }
 
 func newAdminFixture(t *testing.T) *adminFixture {
@@ -52,6 +54,12 @@ func newAdminFixture(t *testing.T) *adminFixture {
 	t.Cleanup(func() { idx.Close() })
 	hub := events.New(events.HubOptions{Logger: slog.Default()})
 	pstore, _ := projects.Open(filepath.Join(dir, "projects.json"))
+	v.SetINProjects(pstore.UsesIN)
+	inSvc, err := infolder.Open(filepath.Join(dir, "in.db"), v, pstore.INNames, infolder.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { inSvc.Close() })
 
 	cfgPath := filepath.Join(dir, "config.toml")
 	if err := config.Save(cfgPath, config.Default()); err != nil {
@@ -74,6 +82,7 @@ func newAdminFixture(t *testing.T) *adminFixture {
 		Projects:   pstore,
 		Trash:      bin,
 		ConfigPath: cfgPath,
+		IN:         inSvc,
 	})
 
 	bearer, _, _ := spa.Create(owner.ID, "test")
@@ -88,7 +97,7 @@ func newAdminFixture(t *testing.T) *adminFixture {
 		owner:     owner,
 	}
 	nf := &notesFixture{authFixture: af, vaultRoot: vaultRoot, idx: idx, projects: pstore, bearer: bearer}
-	return &adminFixture{notesFixture: nf, configPath: cfgPath, trashBin: bin, mcpStore: mcpStore}
+	return &adminFixture{notesFixture: nf, configPath: cfgPath, trashBin: bin, mcpStore: mcpStore, in: inSvc}
 }
 
 // memberToken adds a member account and returns a bearer token for it.

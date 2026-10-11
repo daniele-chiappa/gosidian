@@ -50,6 +50,18 @@ func (n node) Run(ctx context.Context, env *pipeline.Env, with map[string]any) (
 		if strings.TrimSpace(p) == "" {
 			return nil, fmt.Errorf("with.%s names the file for %s", f, n.use)
 		}
+		if spec.FileRefs {
+			base := c.FilesURL
+			if base == "" {
+				base = env.Engine.Config().PublicURL
+			}
+			ref, err := env.FileRef(p, base)
+			if err != nil {
+				return nil, err
+			}
+			args[f] = ref
+			continue
+		}
 		rel, data, err := env.ReadAttachment(p)
 		if err != nil {
 			return nil, err

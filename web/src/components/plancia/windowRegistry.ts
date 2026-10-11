@@ -36,5 +36,7 @@ export const windowRegistry: Record<string, Component> = {
   diagram: lazy(() => import('@/views/DiagramWindow.vue')),
   // A pipeline note in the editor (IMP-169, F4): its path.
   pipeline: lazy(() => import('@/views/PipelineWindow.vue')),
+  // A project's IN folder (IMP-172): its project.
+  in: lazy(() => import('@/views/INWindow.vue')),
   admin: lazy(() => import('@/views/admin/AdminLayout.vue')),
 }

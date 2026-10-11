@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gosidian/gosidian/internal/infolder"
 	"github.com/gosidian/gosidian/internal/vault"
 )
 
@@ -16,16 +17,19 @@ import (
 // JSON keys here lets us evolve the HTML side without breaking the
 // SPA contract.
 type apiTreeNode struct {
-	Name          string         `json:"name"`
-	Path          string         `json:"path"`
-	IsDir         bool           `json:"is_dir"`
-	IsProjectRoot bool           `json:"is_project_root,omitempty"`
-	Kind          string         `json:"kind"`
-	NoteCount     int            `json:"note_count,omitempty"`
-	InProgress    bool           `json:"in_progress,omitempty"`
-	HiddenFromMCP bool           `json:"hidden_from_mcp,omitempty"`
-	SkipGitSync   bool           `json:"skip_git_sync,omitempty"`
-	Children      []*apiTreeNode `json:"children,omitempty"`
+	Name          string `json:"name"`
+	Path          string `json:"path"`
+	IsDir         bool   `json:"is_dir"`
+	IsProjectRoot bool   `json:"is_project_root,omitempty"`
+	Kind          string `json:"kind"`
+	NoteCount     int    `json:"note_count,omitempty"`
+	InProgress    bool   `json:"in_progress,omitempty"`
+	HiddenFromMCP bool   `json:"hidden_from_mcp,omitempty"`
+	SkipGitSync   bool   `json:"skip_git_sync,omitempty"`
+	// IN is what the project's IN folder holds, on its node (kind "in"):
+	// the tree shows the folder, not its files (IMP-172).
+	IN       *infolder.Counts `json:"in,omitempty"`
+	Children []*apiTreeNode   `json:"children,omitempty"`
 }
 
 // handleTree returns the sidebar tree as JSON. Filters: ?project=X
@@ -215,5 +219,14 @@ func (r *Router) annotateProjectFlags(root *apiTreeNode) {
 		flags := r.deps.Projects.Get(c.Name)
 		c.HiddenFromMCP = flags.HiddenFromMCP
 		c.SkipGitSync = flags.SkipGitSync
+		if flags.UseIN {
+			n := &apiTreeNode{Name: vault.INFolder, Path: vault.INRoot(c.Name), IsDir: true, Kind: "in", IN: &infolder.Counts{}}
+			if r.deps.IN != nil {
+				if counts, err := r.deps.IN.Store().Counts(c.Name); err == nil {
+					n.IN = &counts
+				}
+			}
+			c.Children = append([]*apiTreeNode{n}, c.Children...)
+		}
 	}
 }

@@ -9,18 +9,20 @@
  * internal draws nothing) and the "+" (new note here) shows only where
  * the account may write — both from the access store, never from the role.
  * A right-click on a row (or the Menu key, or Shift+F10) opens the tree's
- * context menu (IMP-150).
+ * context menu (IMP-150). A project's IN folder (kind "in", IMP-172) is
+ * one row, with what it holds: it opens the IN window, not its files.
  */
 import type { TreeNode as TN } from '@/api/tree'
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronRight, Dot, Plus, Lock, Globe } from 'lucide-vue-next'
+import { ChevronRight, Dot, Plus, Lock, Globe, Inbox } from 'lucide-vue-next'
 import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
 import { useWindowsStore } from 'plancia'
 import { useAccessStore } from '@/stores/access'
 import { visibilityHelp } from '@/api/access'
 import { planciaKey } from '@/composables/planciaKey'
 import { useTreeMenu } from '@/composables/useTreeMenu'
+import { formatSize } from '@/api/format'
 
 const props = defineProps<{ node: TN }>()
 const { t } = useI18n()
@@ -69,6 +71,16 @@ function openNote() {
   })
 }
 
+function openIN() {
+  const project = props.node.path.split('/')[0]
+  windows.open({
+    type: 'in',
+    key: planciaKey('in', project),
+    title: t('in.window_title', { name: project }),
+    props: { project },
+  })
+}
+
 // The context menu opens at the pointer; from the keyboard, under the row.
 // The Menu key can fire both a keydown and a contextmenu (at 0,0): both
 // land on the same spot.
@@ -103,7 +115,28 @@ function createHere() {
 
 <template>
   <li class="text-sm">
-    <template v-if="node.is_dir">
+    <template v-if="node.kind === 'in'">
+      <button
+        type="button"
+        aria-haspopup="menu"
+        class="w-full flex items-center gap-1.5 py-0.5 px-1 rounded text-left hover:bg-surface-hover"
+        :title="t('in.tree_hint', { files: node.in?.files ?? 0, size: formatSize(node.in?.bytes ?? 0) })"
+        data-tree-in
+        @click="openIN"
+        @contextmenu.prevent="onContextMenu"
+        @keydown="onRowKeydown"
+      >
+        <Inbox class="h-3.5 w-3.5 shrink-0 text-text-muted" aria-hidden="true" />
+        <span class="flex-1 truncate font-mono">{{ node.name }}</span>
+        <span
+          v-if="node.in?.new"
+          class="text-xs text-info px-1"
+          :aria-label="t('in.count_new', { count: node.in.new })"
+        >{{ node.in.new }}</span>
+        <span v-if="node.in?.files" class="text-xs text-text-muted px-1">{{ node.in.files }}</span>
+      </button>
+    </template>
+    <template v-else-if="node.is_dir">
       <details
         :open="isOpen"
         @toggle="toggleExpanded(($event.target as HTMLDetailsElement).open)"

@@ -12,6 +12,7 @@ import (
 	"image"
 	"image/color"
 	"image/png"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path"
@@ -141,6 +142,28 @@ func (h *memHost) ReadAttachment(project, p string) ([]byte, error) {
 	}
 	return nil, errors.New("no such attachment")
 }
+
+func (h *memHost) StatFile(project, p string) (pipeline.FileStat, error) {
+	data, err := h.ReadAttachment(project, p)
+	if err != nil {
+		return pipeline.FileStat{}, err
+	}
+	sum := sha256.Sum256(data)
+	return pipeline.FileStat{Path: p, Name: path.Base(p), Size: int64(len(data)), SHA256: hex.EncodeToString(sum[:])}, nil
+}
+
+func (h *memHost) OpenFile(project, p string) (io.ReadSeekCloser, pipeline.FileStat, error) {
+	st, err := h.StatFile(project, p)
+	if err != nil {
+		return nil, pipeline.FileStat{}, err
+	}
+	data, _ := h.ReadAttachment(project, p)
+	return nopSeekCloser{bytes.NewReader(data)}, st, nil
+}
+
+type nopSeekCloser struct{ *bytes.Reader }
+
+func (nopSeekCloser) Close() error { return nil }
 
 func (h *memHost) StoreAttachment(project, name string, data []byte, actor string) (string, error) {
 	h.mu.Lock()
@@ -383,5 +406,110 @@ func TestRegistry_Down(t *testing.T) {
 	}
 	if s, _ := reg.State("nokey"); !strings.Contains(s.Error, "secrets key") {
 		t.Errorf("nokey: %q", s.Error)
+	}
+}
+
+// refPlugin's node read takes its file by reference (file_refs): it fetches
+// the URL whole, then its first three bytes with a range.
+func refPlugin(t *testing.T) *httptest.Server {
+	t.Helper()
+	s := server.NewMCPServer("fetch", "1.0.0", server.WithToolCapabilities(false))
+	s.AddTool(mcp.NewTool(ManifestTool), func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		b, _ := json.Marshal(map[string]any{
+			"name": "fetch", "version": "1.0", "gosidian": 1,
+			"nodes":       []any{map[string]any{"name": "read", "tool": "read", "files": []string{"file"}, "file_refs": true}},
+			"permissions": map[string]any{"files": true, "network": []string{"gosidian"}},
+		})
+		return mcp.NewToolResultText(string(b)), nil
+	})
+	s.AddTool(mcp.NewTool("read", mcp.WithObject("file")), func(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		file, _ := req.GetArguments()["file"].(map[string]any)
+		url, _ := file["url"].(string)
+		whole, err := http.Get(url)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		body, _ := io.ReadAll(whole.Body)
+		whole.Body.Close()
+		r, _ := http.NewRequest(http.MethodGet, url, nil)
+		r.Header.Set("Range", "bytes=0-2")
+		part, err := http.DefaultClient.Do(r)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		head, _ := io.ReadAll(part.Body)
+		part.Body.Close()
+		return mcp.NewToolResultStructured(map[string]any{
+			"whole": string(body), "status": whole.StatusCode, "head": string(head), "range": part.StatusCode,
+			"name": file["name"], "size": file["size"], "sha256": file["sha256"], "data": file["data"], "url": url,
+		}, "read"), nil
+	})
+	ts := httptest.NewServer(server.NewStreamableHTTPServer(s))
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+func TestNode_FileRefs(t *testing.T) {
+	ts := refPlugin(t)
+	var e *pipeline.Engine
+	files := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f, st, _, err := e.OpenTicketFile(strings.TrimPrefix(r.URL.Path, pipeline.FileTicketPath))
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		defer f.Close()
+		http.ServeContent(w, r, st.Name, st.ModTime, f)
+	}))
+	t.Cleanup(files.Close)
+	reg, err := New([]Config{{Name: "fetch", URL: ts.URL + "/mcp", FilesURL: files.URL}}, t.TempDir(), nil, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	reg.Check(ctx)
+	st, _ := reg.State("fetch")
+	if _, err := reg.Accept(ctx, "fetch", st.SHA, "test"); err != nil {
+		t.Fatal(err)
+	}
+	e, host := newEngine(t, reg)
+	host.mu.Lock()
+	host.notes["p/pipelines/read.md"] = "---\ntype: pipeline\n---\n\n```pipeline\nnodes: [{id: r, use: fetch.read, with: {file: attachments/doc.pdf}}]\n```\n"
+	host.att["p/attachments/doc.pdf"] = []byte("%PDF the whole file")
+	host.mu.Unlock()
+	run, _, err := e.Start(pipeline.StartRequest{Path: "p/pipelines/read.md", Trigger: pipeline.TriggerManual})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run = waitEnd(t, e, run.ID); run.Status != jobs.Done {
+		steps, _ := e.Runner().Store().Steps(run.ID)
+		t.Fatalf("run %s: %s %+v", run.Status, run.Error, steps)
+	}
+	steps, _ := e.Runner().Store().Steps(run.ID)
+	var out map[string]any
+	_ = json.Unmarshal(steps[0].Output, &out)
+	sum := sha256.Sum256([]byte("%PDF the whole file"))
+	if out["whole"] != "%PDF the whole file" || out["status"] != float64(200) || out["head"] != "%PD" || out["range"] != float64(206) ||
+		out["name"] != "doc.pdf" || out["size"] != float64(19) || out["sha256"] != hex.EncodeToString(sum[:]) || out["data"] != nil {
+		t.Fatalf("output = %v", out)
+	}
+	url, _ := out["url"].(string)
+	if !strings.HasPrefix(url, files.URL+pipeline.FileTicketPath) {
+		t.Errorf("url %q", url)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		res, err := http.Get(url)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode == http.StatusNotFound {
+			break // the run ended: its tickets went with it
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the ticket still works after the run: %d", res.StatusCode)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

@@ -264,8 +264,8 @@ export function useDiagramLabels() {
       Object.fromEntries(keys.map((x) => [x, t(`pipeline_editor.${ns}.${x}`)]))
     return {
       trigger: k('trigger'),
-      triggers: map(['manual', 'external', 'ingest', 'schedule'], 'triggers') as Record<
-        'manual' | 'external' | 'ingest' | 'schedule',
+      triggers: map(['manual', 'external', 'ingest', 'schedule', 'in'], 'triggers') as Record<
+        'manual' | 'external' | 'ingest' | 'schedule' | 'in',
         string
       >,
       statuses: map(RUN_STATUSES, 'statuses') as Record<(typeof RUN_STATUSES)[number], string>,
@@ -303,6 +303,8 @@ export function useDiagramLabels() {
       kinds: k('kinds'),
       folder: k('folder'),
       every: k('every'),
+      match: k('match'),
+      batch: k('batch'),
       required: k('required'),
       structured: k('structured'),
       invalidValue: k('invalid_value'),

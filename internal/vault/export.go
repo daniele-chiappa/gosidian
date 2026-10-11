@@ -11,24 +11,28 @@ import (
 // .base, a PDF outside attachments/…), so the archive opened in Obsidian is
 // the vault itself. Skipped, as List skips them: hidden files and folders
 // (.gosidian with the trash and the default state dir, .git, .obsidian),
-// node_modules and a state dir set inside the vault under a visible name
-// (SetStateDir). Also skipped: symlinks, which could point outside the
-// vault, and anything that is not a regular file.
+// node_modules, a state dir set inside the vault under a visible name
+// (SetStateDir) and the projects' IN folders, which can hold gigabytes
+// (ADR-037), but in the export of an IN folder or of a folder in it. Also
+// skipped: symlinks, which could point outside the vault, and anything that
+// is not a regular file.
 func (v *Vault) WalkExport(dir string, fn func(rel string, info fs.FileInfo) error) error {
 	root := v.Root
+	inOK := false
 	if dir != "" {
 		r, err := v.Rel(dir)
 		if err != nil {
 			return err
 		}
 		root = filepath.Join(v.Root, filepath.FromSlash(r))
+		inOK = v.InArea(r)
 	}
 	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return skipVanished(root, path, err)
 		}
 		if d.IsDir() {
-			if v.skipDir(root, path) {
+			if v.skipDirIn(root, path, inOK) {
 				return fs.SkipDir
 			}
 			return nil

@@ -52,6 +52,10 @@ const items = computed<Item[]>(() => {
   if (n.is_dir && n.is_project_root) {
     return [download(t('tree.menu.download_zip'), (x) => exportProject(x.name))]
   }
+  // The IN folder itself stays (IMP-172): what it holds is deleted in its window.
+  if (n.kind === 'in') {
+    return [download(t('tree.menu.download_zip'), (x) => exportFolder(x.path))]
+  }
   if (n.is_dir) {
     const out = [download(t('tree.menu.download_zip'), (x) => exportFolder(x.path))]
     if (access.canWrite(n.path) && access.trash !== false) out.push(remove(removeFolder))

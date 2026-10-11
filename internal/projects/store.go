@@ -82,6 +82,14 @@ type Flags struct {
 	// writes notes and calls services on the project's behalf, so a project
 	// admin opts in; off by default.
 	UsePipelines bool `json:"use_pipelines,omitempty"`
+	// UseIN gives the project its IN folder (IMP-172, ADR-037): files to
+	// work on, under their own names and outside the notes. Turning
+	// use_pipelines on turns it on; turning them off leaves it.
+	UseIN bool `json:"use_in,omitempty"`
+	// TrackINInGit puts the project's IN folder in the vault's git
+	// history, but its files over 50 MiB. Off, the managed .gitignore
+	// leaves the folder out: the default, as it can hold gigabytes.
+	TrackINInGit bool `json:"track_in_git,omitempty"`
 	// Since is when the project took its name, in unix nanoseconds: set by
 	// projectops.Create, by a rename (Store.Rename) and, from the saved
 	// access, by RestoreProject. A note trashed under the name before it
@@ -601,6 +609,42 @@ func (s *Store) AllowsLocalMirror(name string) bool {
 // Unknown projects default to false.
 func (s *Store) UsesPipelines(name string) bool {
 	return s.Get(name).UsePipelines
+}
+
+// UsesIN reports whether the project has its IN folder (IMP-172). Unknown
+// projects default to false.
+func (s *Store) UsesIN(name string) bool {
+	return s.Get(name).UseIN
+}
+
+// INNames returns the projects with an IN folder, sorted.
+func (s *Store) INNames() []string {
+	ignored, tracked := s.INFoldersForGit()
+	out := append(ignored, tracked...)
+	sort.Strings(out)
+	return out
+}
+
+// INFoldersForGit returns, sorted, the projects with an IN folder that git
+// leaves out (the default) and those whose IN folder it tracks
+// (track_in_git). Used by gitsync for the managed block of .gitignore.
+func (s *Store) INFoldersForGit() (ignored, tracked []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reloadIfStale()
+	ignored, tracked = []string{}, []string{}
+	for n, f := range s.data {
+		switch {
+		case !f.UseIN:
+		case f.TrackINInGit:
+			tracked = append(tracked, n)
+		default:
+			ignored = append(ignored, n)
+		}
+	}
+	sort.Strings(ignored)
+	sort.Strings(tracked)
+	return ignored, tracked
 }
 
 // MemberLevel returns the grant level a user holds on a project, and whether

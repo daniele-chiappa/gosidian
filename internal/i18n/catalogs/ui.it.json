@@ -942,7 +942,13 @@
       "mirror_off": "Clic per lasciare ai token che leggono il progetto una copia in sola lettura sulla loro macchina: letture più economiche per gli agent, ma le note escono dal server.",
       "pipelines_master_off": "Le pipeline sono spente sul server (GOSIDIAN_PIPELINES_ENABLED): questo flag non fa niente finché non si accendono.",
       "pipelines_on": "Pipeline accese: il server esegue le pipeline del progetto (note type: pipeline) e scrive nel progetto i loro risultati. Clic per spegnere.",
-      "pipelines_off": "Clic per lasciare al server eseguire le pipeline del progetto: scrivono note nel progetto a nome della pipeline."
+      "pipelines_off": "Clic per lasciare al server eseguire le pipeline del progetto: scrivono note nel progetto a nome della pipeline.",
+      "in_on": "IN acceso: la cartella IN del progetto raccoglie i file da lavorare, fuori dalle note. Clic per spegnere: la cartella resta, e le sue .md tornano note.",
+      "in_off": "Clic per dare al progetto la cartella IN: file da lavorare con il loro nome e il loro albero, che le pipeline prendono. Si accende anche con le pipeline.",
+      "in_git_on": "IN in git: la cartella IN entra nella storia del vault, tranne i file sopra i 50 MiB. Clic per lasciarla fuori.",
+      "in_git_off": "La cartella IN è fuori da git (può pesare GB). Clic per versionarla, tranne i file sopra i 50 MiB.",
+      "in_git_confirm": "Mettere in git la cartella IN di {name}? Tutto quello che contiene, fino a 50 MiB a file, entra nella storia del vault e ci resta anche dopo.",
+      "in_git_confirm_ok": "Metti in git"
     },
     "legend": {
       "title": "Cosa fanno i flag",
@@ -953,7 +959,9 @@
       "tag_vocab": "lascia al progetto estendere il vocabolario dei tag del lint da memory/conventions.md.",
       "lean_read": "dà un bootstrap più corto ai token che non possono scrivere.",
       "mirror": "lascia a chi legge una copia in sola lettura del progetto: le note escono dal server, e ogni sincronizzazione è registrata.",
-      "pipelines": "lascia al server eseguire le pipeline del progetto, che scrivono note a loro nome; serve il suo interruttore sul server, ed è sbiadito finché è spento."
+      "pipelines": "lascia al server eseguire le pipeline del progetto, che scrivono note a loro nome; serve il suo interruttore sul server, ed è sbiadito finché è spento.",
+      "IN": "dà al progetto la cartella IN, con i file da lavorare sotto il loro nome: le pipeline li prendono, non sono note. Si accende anche con le pipeline, e resta.",
+      "IN_git": "mette la cartella IN nella storia git del vault, tranne i file sopra i 50 MiB; di solito resta fuori, perché può pesare GB."
     }
   },
   "members": {
@@ -1331,7 +1339,8 @@
       "manual": "A mano",
       "external": "Da fuori",
       "ingest": "All'arrivo",
-      "schedule": "A orario"
+      "schedule": "A orario",
+      "in": "Nella cartella IN"
     },
     "statuses": {
       "pending": "In attesa",
@@ -1377,6 +1386,8 @@
     "kinds": "Estensioni dei file",
     "folder": "Cartella",
     "every": "Ogni",
+    "match": "Nome che corrisponde",
+    "batch": "Una run per lotto",
     "required": "obbligatorio",
     "structured": "YAML o JSON",
     "invalid_value": "YAML non valido:",
@@ -1433,5 +1444,57 @@
     "invalid_json": "JSON non valido:",
     "unsaved_start": "Salva prima di avviare: la run usa la pipeline salvata.",
     "run_label": "{status} · {time}"
+  },
+  "in": {
+    "window_title": "IN · {name}",
+    "path": "Percorso nella cartella IN",
+    "counts": "nessun file | {files} file, {size} | {files} file, {size}",
+    "count_new": "{count} nuovi",
+    "count_working": "{count} in lavorazione",
+    "count_errors": "{count} con errore",
+    "download_folder": "Scarica questa cartella come zip",
+    "search": "Cerca nella cartella",
+    "search_placeholder": "Cerca per nome…",
+    "any_status": "Qualunque stato",
+    "status": {
+      "new": "nuovo",
+      "working": "in lavorazione",
+      "done": "fatto",
+      "error": "errore",
+      "ignored": "messo da parte"
+    },
+    "intro": "I file da lavorare, con il loro nome e il loro albero: le pipeline li prendono da qui. Non sono note.",
+    "selected": "nessuno selezionato | {count} selezionato | {count} selezionati",
+    "move_to": "Sposta in",
+    "move_placeholder": "cartella/",
+    "move": "Sposta",
+    "moved": "Spostato in {to} | Spostato in {to} | {count} file spostati in {to}",
+    "mark_new": "Rimetti come nuovi",
+    "mark_ignored": "Metti da parte",
+    "choose_pipeline": "Scegli una pipeline…",
+    "run": "Avvia",
+    "confirm_delete": "Eliminare {what}? Va nel cestino.",
+    "confirm_delete_forever": "Eliminare {what} per sempre? Il cestino è spento: non si potrà ripristinare.",
+    "deleted_trash": "Niente eliminato | Messo nel cestino | {count} elementi messi nel cestino",
+    "deleted": "Niente eliminato | Eliminato per sempre | {count} elementi eliminati per sempre",
+    "files_count": "nessun file | {count} file | {count} file",
+    "load_failed": "Non si riesce a leggere la cartella IN",
+    "action_failed": "L'operazione non è riuscita",
+    "nothing_found": "Nessun file corrisponde.",
+    "empty": "La cartella è vuota. I file arrivano da disco (rsync, una cartella montata) o, più avanti, da un archivio remoto.",
+    "select_all": "Seleziona tutti i file mostrati",
+    "name": "Nome",
+    "size": "Dimensione",
+    "modified": "Modificato",
+    "status_label": "Stato",
+    "select": "Seleziona {name}",
+    "open_runs": "Apri le Esecuzioni",
+    "more": "Altri file",
+    "tree_hint": "La cartella IN: {files} file, {size}. Clic per aprirla.",
+    "runs_started": "Nessuna run avviata. | Run {id} avviata: la trovi nelle Esecuzioni. | {count} run avviate, una per file: le trovi nelle Esecuzioni.",
+    "no_run": "Nessuna run avviata: la pipeline non prende nessuno dei file scelti.",
+    "skipped_folder": "{name} saltato: la pipeline prende solo la cartella {value}.",
+    "skipped_kinds": "{name} saltato: la pipeline prende solo {value}.",
+    "skipped_match": "{name} saltato: il nome non corrisponde a {value}."
   }
 }

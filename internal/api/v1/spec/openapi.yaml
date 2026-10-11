@@ -49,6 +49,8 @@ tags:
     description: |
       Pipelines and their runs (IMP-166, docs/pipelines.md). 404 while the
       server runs no pipelines ([pipelines] enabled off).
+  - name: in
+    description: The IN folders of the projects (IMP-172, docs/in.md).
 
 # ---------------------------------------------------------------------------
 # Reusable schemas
@@ -1145,3 +1147,140 @@ paths:
           description: "`{run}`"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /api/v1/run-files/{ticket}:
+    get:
+      tags: [pipelines]
+      summary: A file a plugin node got by reference (file_refs).
+      description: |
+        No account: the ticket in the address, bound to the run and to the
+        file, is the key, while the step may run; it goes when the run
+        ends. Ranges and conditional requests work. Rate limited per ticket.
+      security: []
+      parameters:
+        - {name: ticket, in: path, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: The file's bytes, inert (a download).
+        "206":
+          description: A range of them.
+        "404":
+          description: No such ticket, an expired one, or one of a run that ended.
+        "429":
+          description: Too many requests for this ticket.
+
+  /api/v1/in/{project}:
+    get:
+      tags: [in]
+      summary: What a project's IN folder holds, a folder at a time.
+      description: |
+        Read access to a project with use_in. Without recursive, the
+        subfolders of dir with what they hold, and a page of its files;
+        with recursive=true, a page of the files under dir that the
+        filters select.
+      parameters:
+        - {name: project, in: path, required: true, schema: {type: string}}
+        - {name: dir, in: query, schema: {type: string}, description: "A folder of the IN folder; empty for its root."}
+        - {name: recursive, in: query, schema: {type: boolean}}
+        - {name: match, in: query, schema: {type: string}, description: "A glob on the file name."}
+        - {name: kinds, in: query, schema: {type: string}, description: "Extensions, comma-separated."}
+        - {name: status, in: query, schema: {type: string, enum: [new, working, done, error, ignored]}}
+        - {name: limit, in: query, schema: {type: integer, maximum: 5000}}
+        - {name: cursor, in: query, schema: {type: string}}
+      responses:
+        "200":
+          description: "`{project, root, dir, counts: {files, bytes, new, working, errors}, folders: [{path, files, bytes, new}], files: [{path, name, stem, ext, dir, size, modified, sha256, status, run, source, batch, first_seen, updated}], next, track_in_git}`"
+        "400":
+          description: A bad glob.
+        "404":
+          description: No such project, or it has no IN folder.
+
+  /api/v1/in/{project}/move:
+    post:
+      tags: [in]
+      summary: Move a file or a folder inside the IN folder (write access).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from, to]
+              properties:
+                from: {type: string, description: "Relative to the IN folder, or the vault path."}
+                to: {type: string, description: "A path; one ending in / is a folder to move it into."}
+      responses:
+        "200":
+          description: "`{path, from}`"
+        "400":
+          description: A path outside the IN folder, or through a link.
+        "404":
+          description: No such file.
+        "409":
+          description: The target is there.
+
+  /api/v1/in/{project}/status:
+    post:
+      tags: [in]
+      summary: Set the status of files of the IN folder (write access).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [paths, status]
+              properties:
+                paths: {type: array, items: {type: string}}
+                status: {type: string, enum: [new, working, done, error, ignored]}
+      responses:
+        "200":
+          description: "`{updated}`"
+
+  /api/v1/in/{project}/delete:
+    post:
+      tags: [in]
+      summary: Delete files or folders of the IN folder (write access).
+      description: Into the trash when it is on; a folder needs it, a file without it goes for good.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [paths]
+              properties:
+                paths: {type: array, items: {type: string}}
+      responses:
+        "200":
+          description: "`{removed, trash}`"
+        "503":
+          description: A folder, and the trash is off.
+
+  /api/v1/in/{project}/run:
+    post:
+      tags: [in]
+      summary: Start a pipeline of the project on files of the IN folder (write access).
+      description: |
+        By hand, the way the pipeline's trigger would: an `in` pipeline per
+        file gets one run per file it takes, with a file's trigger; an `in`
+        pipeline per batch one run with the files it takes; any other
+        pipeline one run with all the files. The trigger of a run with
+        files has the shape of a batch's (`files`, `count`, `bytes`, `batch`
+        empty). The files an `in` trigger does not take are skipped, with
+        why. The files are marked working with their run.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pipeline, paths]
+              properties:
+                pipeline: {type: string, description: "The pipeline note, vault-relative."}
+                paths: {type: array, items: {type: string}}
+      responses:
+        "202":
+          description: "`{runs: [...], skipped: [{path, reason (folder, kinds, match), value, why}]}`"
+        "404":
+          description: The pipelines are off, or a path is no file of the IN folder.
