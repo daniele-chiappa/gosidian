@@ -116,8 +116,8 @@ context menu, names starting at the folder) and
   lazy-loaded
 - **plancia-diagrams** for the diagrams of the notes (Vue Flow and dagre,
   Mermaid for mind maps, fishbones, Venns and Gantts, an SVG of its own for
-  matrices), loaded by the first note that shows one
-  ([diagrams](../diagrams.md))
+  matrices) and the pipelines' drawing and editor, loaded by the first
+  note that shows one ([diagrams](../diagrams.md))
 - **vue-i18n** with catalogues precompiled at build time from
   `internal/i18n/catalogs/` (shared with the Go side); a strict CSP
   (`script-src 'self'`, no eval) is enforced
@@ -143,6 +143,20 @@ block under the diagram for Obsidian; **Save** writes the block back in
 its note. The **+** of a folder makes a diagram note, empty or from a
 ready template. A ```` ```mermaid ```` block of a note and an Obsidian
 canvas have **Convert to a diagram**.
+
+## Pipelines
+
+A pipeline note's ```` ```pipeline ```` block is drawn too: its trigger,
+its nodes and what each waits for ([pipelines](../pipelines.md#editing-in-the-web-ui)).
+**Edit** opens the pipeline window, where a node comes from the palette
+of the node types (the base ones and the accepted plugins'), a line
+dragged between two makes one wait for the other, and a panel sets a
+node's settings as a form made from its type's schema, offering the
+`{{ }}` it may read; the YAML tab edits the text, checked by the server as
+it is typed; **Save** writes the block back in its note. Where the
+pipelines run, the window also starts a run, resumes a waiting one and
+cancels one, and draws a run's state on the nodes, live; so does the Runs
+window for the run it opens.
 
 ## Language switching
 

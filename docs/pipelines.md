@@ -164,6 +164,54 @@ A node's output is at most 1 MiB (`max_output_bytes`): write a large text
 into a note and pass its path. A run's input is at most 256 KiB
 (`max_input_bytes`): pass files by their vault path, not their bytes.
 
+## Editing in the web UI
+
+A pipeline note's block is drawn where it stands: the trigger, the nodes
+with their types, and what each waits for. **Code** shows the YAML as
+written. **Edit**, for who writes in the project, opens the **pipeline
+window** beside the note; so does **Edit** beside a pipeline in the Runs
+window, and the address keeps the note, so a reload opens it again. The
+window works with the pipelines off too: it then offers the base node
+types only, and runs nothing.
+
+- **The drawing.** **Add a node** lists the node types, the base ones and
+  those of each accepted plugin, with what they do; the new node comes
+  after the last one. A line dragged from a node's dot onto another node
+  makes the second wait for the first; from the trigger's dot, the node
+  starts with the run (`after: []`). A click selects a node or a line,
+  **Delete** takes it away: what waited for a node taken away waits for
+  what it waited for. The first drag fixes every node where it is, in
+  `layout:` (the server ignores it, Obsidian shows it as YAML); **Lay out
+  again** takes it away.
+- **The panel** of the selected node: its id (renamed, the `after`, the
+  `{{ }}` and the `layout:` that name it follow), its type, its settings as
+  a form made from the type's schema (a text, several lines, a script, a
+  choice, yes or no, a number, a duration, YAML for a list or a map, and
+  any setting the schema does not name), then `when`, `unless`, `each`,
+  `retry`, `timeout` and `on_error`. A text field offers, as you type
+  `{{`, what the node may read: the trigger's fields, the run's, the
+  outputs of the nodes that run before it, from their types' output
+  schema. The trigger's panel sets its kind, its `kinds` and `folder` or
+  its `every`.
+- **YAML**: the block as text. Every change is read as the server reads
+  it (`POST /api/v1/pipeline-check`), and the problem shown under the
+  drawing.
+
+**Save** (Ctrl+S) writes the block in place of the old one and nothing
+else: the rest of the note, the comments and the order of the fields stay
+as written. A note changed meanwhile gets the conflict banner: reload it,
+or put the pipeline into the new version.
+
+Where the pipelines run (the server and the project), the window shows the
+pipeline's runs: the last one, or one chosen, drawn on its nodes (each
+with its state and attempts; selected, its output, error and times),
+live while it goes. **Start** runs the saved pipeline with a JSON input,
+**Resume** hands its data to a run that waits, **Cancel** stops one. The
+Runs window draws the run it opens, too.
+
+The node types and the schemas of their settings and outputs:
+`GET /api/v1/pipeline-nodes`, which answers with the pipelines off too.
+
 ## What a run leaves
 
 - **The notes it writes**, as the pipeline: the audit says source
@@ -190,7 +238,8 @@ data}` hands data to a waiting step, `{action: "cancel", run}` stops it.
 
 **From the web UI** — Menu → Runs: the pipelines and their runs, live.
 Who writes in the project starts a pipeline (with a JSON input), resumes a
-run that waits and cancels one.
+run that waits and cancels one; the pipeline window does the same beside
+the drawing ([above](#editing-in-the-web-ui)).
 
 **From a service** — a run token starts one pipeline whose trigger is
 `external` or `manual`, and does nothing else:

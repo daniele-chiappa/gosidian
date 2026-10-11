@@ -7,7 +7,7 @@
  * lists the plugins whose nodes the pipelines use (IMP-168), read-only:
  * the owner accepts a plugin's manifest on the server.
  */
-import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, defineAsyncComponent } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWindowsStore, type OpenSpec } from 'plancia'
 import { ChevronRight, Play, RefreshCw, RotateCcw, Square } from 'lucide-vue-next'
@@ -19,7 +19,9 @@ import {
   listRuns,
   resumeRun,
   runEnded,
+  runStateOf,
   startRun,
+  type RunDetail,
   type PipelineInfo,
   type PluginInfo,
   type PluginStatus,
@@ -34,6 +36,15 @@ import { askText } from '@/composables/useConfirm'
 import { base, planciaKey } from '@/composables/planciaKey'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
 import DateTime from '@/components/primitives/DateTime.vue'
+import { getNote } from '@/api/notes'
+import { usePipelineCatalog } from '@/composables/pipelineCatalog'
+import { useDiagramLabels } from '@/components/domain/diagramLabels'
+
+// The open run drawn (IMP-169, F4): the pipeline as its note has it now,
+// each node with how it went.
+const PipelineView = defineAsyncComponent(() => import('@/components/domain/diagramView').then((m) => m.PipelineView))
+const pipelineLabels = useDiagramLabels().pipeline
+const { catalog, load: loadCatalog } = usePipelineCatalog()
 
 const { t } = useI18n()
 const access = useAccessStore()
@@ -53,6 +64,9 @@ const status = ref<RunStatus | ''>('')
 /** The run whose steps are open, and its steps. */
 const openRun = ref<string | null>(null)
 const steps = ref<StepView[]>([])
+const detail = ref<RunDetail | null>(null)
+/** The ```pipeline block of the open run's pipeline, for its drawing. */
+const runSource = ref('')
 
 const STATUSES: RunStatus[] = ['queued', 'running', 'waiting', 'done', 'failed', 'canceled']
 
@@ -85,9 +99,24 @@ async function load() {
 
 async function loadSteps(id: string) {
   try {
-    steps.value = (await getRun(id)).steps ?? []
+    const d = await getRun(id)
+    detail.value = d
+    steps.value = d.steps ?? []
+    void loadRunSource(d.run.pipeline)
   } catch (e) {
     error.value = errorText(e, t, t('runs.load_failed'))
+  }
+}
+
+let sourceOf = ''
+async function loadRunSource(path: string) {
+  if (sourceOf === path && runSource.value) return
+  sourceOf = path
+  try {
+    const [lib, n] = await Promise.all([import('@/components/domain/diagramView'), getNote(path), loadCatalog()])
+    if (sourceOf === path) runSource.value = lib.findDiagramBlocks(n.content, 'pipeline')[0]?.source ?? ''
+  } catch {
+    runSource.value = ''
   }
 }
 
@@ -95,11 +124,22 @@ async function toggleRun(id: string) {
   if (openRun.value === id) {
     openRun.value = null
     steps.value = []
+    detail.value = null
     return
   }
   openRun.value = id
   steps.value = []
+  detail.value = null
   await loadSteps(id)
+}
+
+function editPipeline(path: string) {
+  openWindow({
+    type: 'pipeline',
+    key: planciaKey('pipeline', path),
+    title: t('pipeline_editor.window_title', { name: base(path) }),
+    props: { path },
+  })
 }
 
 /** JSON the user typed, or undefined after telling them it is not. */
@@ -278,6 +318,13 @@ onMounted(() => {
           >{{ t(`runs.state.${p.last_run.status}`) }}</span>
           <span class="flex-1" />
           <button
+            v-if="access.canWrite(p.path)"
+            type="button"
+            class="h-control-sm text-xs px-2 rounded border border-border hover:bg-surface-hover"
+            data-pipeline-open-editor
+            @click="editPipeline(p.path)"
+          >{{ t('pipeline_editor.edit') }}</button>
+          <button
             v-if="access.canWrite(p.path) && !p.problem"
             type="button"
             class="h-control-sm text-xs px-2 rounded bg-accent text-accent-fg hover:bg-accent-hover inline-flex items-center gap-1"
@@ -350,6 +397,14 @@ onMounted(() => {
           </div>
           <div v-if="openRun === r.id" class="border-t border-border px-4 py-2 space-y-2" data-steps>
             <p class="text-xs text-text-muted font-mono">{{ r.id }} · {{ r.pipeline }}</p>
+            <PipelineView
+              v-if="runSource && detail && detail.run.id === r.id"
+              :source="runSource"
+              :catalog="catalog?.nodes ?? []"
+              :run="runStateOf(detail)"
+              :labels="pipelineLabels"
+              :height="280"
+            />
             <div v-for="s in steps" :key="s.name" class="text-xs">
               <div class="flex items-center gap-2 flex-wrap">
                 <span class="font-mono font-medium">{{ s.name }}</span>

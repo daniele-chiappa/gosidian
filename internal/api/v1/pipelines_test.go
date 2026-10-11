@@ -307,3 +307,71 @@ func TestPluginsREST(t *testing.T) {
 		t.Fatalf("member: %d %s", m.code, m.body)
 	}
 }
+
+// The pipeline editor's routes answer with the pipelines off too: the base
+// node types with their schemas, and the checks of a block (IMP-169, F4).
+func TestPipelineEditorRoutes_PipelinesOff(t *testing.T) {
+	f := newAdminFixture(t)
+	w := f.doAuthRecorder(http.MethodGet, "/api/v1/pipeline-nodes", "", nil)
+	if w.code != http.StatusOK {
+		t.Fatalf("nodes: %d %s", w.code, w.body)
+	}
+	var got struct {
+		Enabled bool `json:"pipelines_enabled"`
+		Nodes   []struct {
+			Type   string          `json:"type"`
+			Group  string          `json:"group"`
+			Input  json.RawMessage `json:"input_schema"`
+			Output json.RawMessage `json:"output_schema"`
+		} `json:"nodes"`
+	}
+	if err := json.Unmarshal([]byte(w.body), &got); err != nil {
+		t.Fatal(err)
+	}
+	types := map[string]bool{}
+	for _, n := range got.Nodes {
+		types[n.Type] = true
+		var in map[string]any
+		if n.Group != "base" || json.Unmarshal(n.Input, &in) != nil || in["type"] != "object" {
+			t.Errorf("%s: group %q, input %s", n.Type, n.Group, n.Input)
+		}
+	}
+	for _, want := range pipeline.NewRegistry().Names() {
+		if !types[want] {
+			t.Errorf("no schema for the base node type %s", want)
+		}
+	}
+	if got.Enabled || len(got.Nodes) != len(pipeline.NewRegistry().Names()) {
+		t.Errorf("enabled=%v, %d nodes", got.Enabled, len(got.Nodes))
+	}
+
+	check := func(src string) map[string]any {
+		t.Helper()
+		w := f.doAuthRecorder(http.MethodPost, "/api/v1/pipeline-check", mustJSON(t, map[string]any{"source": src}), nil)
+		if w.code != http.StatusOK {
+			t.Fatalf("check: %d %s", w.code, w.body)
+		}
+		var out map[string]any
+		_ = json.Unmarshal([]byte(w.body), &out)
+		return out
+	}
+	ok := "nodes:\n  - {id: a, use: starlark, with: {code: \"output = 1\"}}\n  - {id: b, use: note.write, with: {path: x, body: \"{{ a }}\"}}\nlayout:\n  a: {x: 0, y: 0}\n"
+	if out := check(ok); out["ok"] != true {
+		t.Errorf("a good pipeline, with a layout: %v", out)
+	}
+	if out := check("nodes:\n  - {id: a, use: docling.convert}\n"); out["ok"] != false || !strings.Contains(out["problem"].(string), `no node type "docling.convert"`) {
+		t.Errorf("an unknown type: %v", out)
+	}
+	if out := check("nodes:\n  - {id: a, use: starlark}\n  - {id: b, use: starlark, after: [], with: {input: \"{{ a.x }}\"}}\n"); out["ok"] != false || !strings.Contains(out["problem"].(string), "does not run before it") {
+		t.Errorf("a reference to a node that does not run before: %v", out)
+	}
+}
+
+// With the pipelines on, the catalog says so; the check uses the engine's types.
+func TestPipelineEditorRoutes_PipelinesOn(t *testing.T) {
+	f := newPipelineFixture(t)
+	w := f.doAuthRecorder(http.MethodGet, "/api/v1/pipeline-nodes", "", nil)
+	if w.code != http.StatusOK || !strings.Contains(w.body, `"pipelines_enabled":true`) {
+		t.Fatalf("nodes: %d %s", w.code, w.body)
+	}
+}

@@ -987,6 +987,44 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /api/v1/pipeline-nodes:
+    get:
+      tags: [pipelines]
+      summary: The node types of the pipelines, with the JSON Schemas of their settings and output.
+      description: |
+        For the pipeline editor of the web UI (IMP-169). Answers with the
+        pipelines off too: then only the base node types. A plugin's nodes
+        are those of its accepted manifest, with its status; their output
+        schema has the `files` the node gives back. `format` in a text
+        setting tells how to edit it: multiline, code, path, attachment,
+        duration.
+      responses:
+        "200":
+          description: "`{pipelines_enabled, nodes: [{type, group (base or the plugin), description, status, files, input_schema, output_schema}]}`"
+
+  /api/v1/pipeline-check:
+    post:
+      tags: [pipelines]
+      summary: Whether the server would run a ```pipeline block, and why not.
+      description: |
+        The checks of a pipeline note (`pipeline-invalid`) on a block not
+        saved yet: its YAML, trigger, node types, ids, after and references.
+        Answers with the pipelines off too, against the base node types.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source]
+              properties:
+                source: {type: string, description: "The YAML of the block, 256 KiB at most."}
+      responses:
+        "200":
+          description: "`{ok: true}`, or `{ok: false, problem}`"
+        "413":
+          description: The block is larger than 256 KiB.
+
   /api/v1/plugins:
     get:
       tags: [pipelines]

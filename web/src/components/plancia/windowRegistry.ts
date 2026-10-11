@@ -34,5 +34,7 @@ export const windowRegistry: Record<string, Component> = {
   history: lazy(() => import('@/views/NoteHistoryView.vue')),
   // A diagram of a note in the editor (IMP-169): path and block index.
   diagram: lazy(() => import('@/views/DiagramWindow.vue')),
+  // A pipeline note in the editor (IMP-169, F4): its path.
+  pipeline: lazy(() => import('@/views/PipelineWindow.vue')),
   admin: lazy(() => import('@/views/admin/AdminLayout.vue')),
 }

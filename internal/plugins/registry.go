@@ -223,6 +223,62 @@ func (r *Registry) State(name string) (State, bool) {
 	return s, true
 }
 
+// NodeSchema is a node type of an accepted manifest, with the schemas of
+// its settings and output, for the pipeline editor (IMP-169, F4).
+type NodeSchema struct {
+	Type        string          `json:"type"`
+	Plugin      string          `json:"plugin"`
+	Status      string          `json:"status"`
+	Description string          `json:"description,omitempty"`
+	Files       []string        `json:"files,omitempty"`
+	Input       json.RawMessage `json:"input_schema,omitempty"`
+	Output      json.RawMessage `json:"output_schema,omitempty"`
+}
+
+// NodeSchemas lists the node types of the accepted manifests, in the
+// order of the config, with each plugin's status.
+func (r *Registry) NodeSchemas() []NodeSchema {
+	var out []NodeSchema
+	for _, s := range r.States() {
+		if s.Accepted == nil {
+			continue
+		}
+		for _, n := range s.Accepted.Manifest.Nodes {
+			out = append(out, NodeSchema{Type: s.Name + "." + n.Name, Plugin: s.Name, Status: s.Status,
+				Description: n.Description, Files: n.Files, Input: n.Input, Output: withFiles(n.Output)})
+		}
+	}
+	return out
+}
+
+// withFiles adds to an object's output schema the files a plugin node
+// gives back, which gosidian stores as attachments of the project.
+func withFiles(out json.RawMessage) json.RawMessage {
+	var o map[string]any
+	if len(out) == 0 || json.Unmarshal(out, &o) != nil {
+		o = map[string]any{"type": "object", "properties": map[string]any{}}
+	}
+	props, ok := o["properties"].(map[string]any)
+	if !ok {
+		if t, _ := o["type"].(string); t != "object" && t != "" {
+			return out
+		}
+		props = map[string]any{}
+		o["properties"] = props
+	}
+	if _, has := props["files"]; !has {
+		props["files"] = map[string]any{"type": "array", "description": "The files it gave back, stored as attachments",
+			"items": map[string]any{"type": "object", "properties": map[string]any{
+				"name": map[string]any{"type": "string"}, "path": map[string]any{"type": "string"},
+				"mime": map[string]any{"type": "string"}, "markdown": map[string]any{"type": "string"}}}}
+	}
+	b, err := json.Marshal(o)
+	if err != nil {
+		return out
+	}
+	return b
+}
+
 // Fetch asks a plugin for its manifest.
 func (r *Registry) Fetch(ctx context.Context, name string) (*Manifest, error) {
 	c, ok := r.plugins[name]

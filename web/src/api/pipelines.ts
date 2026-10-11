@@ -134,3 +134,59 @@ export async function listPlugins(): Promise<PluginInfo[]> {
   const { data } = await client.get<{ plugins: PluginInfo[] | null }>('/plugins')
   return data.plugins ?? []
 }
+
+/** A JSON Schema, as the pipeline editor reads it (IMP-169, F4). */
+export type JsonSchema = Record<string, unknown>
+
+/** A node type, with the schemas of its settings and output. */
+export interface PipelineNodeType {
+  type: string
+  /** "base", or the plugin it comes from. */
+  group: string
+  description?: string
+  status?: PluginStatus
+  files?: string[]
+  input_schema?: JsonSchema
+  output_schema?: JsonSchema
+}
+
+export interface PipelineCatalog {
+  pipelines_enabled: boolean
+  nodes: PipelineNodeType[]
+}
+
+/** The node types for the pipeline editor; answers with the pipelines off too (base types only). */
+export async function getPipelineNodes(): Promise<PipelineCatalog> {
+  const { data } = await client.get<PipelineCatalog>('/pipeline-nodes')
+  return { pipelines_enabled: !!data.pipelines_enabled, nodes: data.nodes ?? [] }
+}
+
+/** Whether the server would run a ```pipeline block not saved yet, and why not. */
+export async function checkPipeline(source: string): Promise<{ ok: boolean; problem?: string }> {
+  const { data } = await client.post<{ ok: boolean; problem?: string }>('/pipeline-check', { source })
+  return data
+}
+
+/** A run's steps by node id, as plancia-diagrams' drawing reads them. */
+export function runStateOf(d: RunDetail) {
+  return {
+    id: d.run.id,
+    status: d.run.status,
+    error: d.run.error,
+    steps: Object.fromEntries(
+      d.steps.map((s) => [
+        s.name,
+        {
+          status: s.status,
+          attempt: s.attempt,
+          error: s.error,
+          output: s.output,
+          outputTruncated: s.output_truncated,
+          started: s.started,
+          finished: s.finished,
+          waitUntil: s.wait_until,
+        },
+      ]),
+    ),
+  }
+}

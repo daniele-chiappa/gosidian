@@ -19,4 +19,7 @@ export {
   fromMermaid,
   toCanvas,
   fromCanvas,
+  PipelineEditor,
+  PipelineView,
+  readPipeline,
 } from 'plancia-diagrams'

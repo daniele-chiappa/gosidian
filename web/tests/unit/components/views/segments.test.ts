@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hasDiagrams, splitViews } from '@/components/views/segments'
+import { hasDiagrams, hasPipeline, splitViews } from '@/components/views/segments'
 
 describe('splitViews', () => {
   it('cuts the HTML at the top-level view placeholders', () => {
@@ -96,5 +96,25 @@ describe('splitViews: Mermaid blocks and twins (IMP-169, F3)', () => {
   it('shows a twin with no diagram right above it as the Mermaid it is', () => {
     const s = splitViews(`<p>x</p>${diagram}<p>between</p>${twin}`)
     expect(s.map((x) => x.kind)).toEqual(['html', 'diagram', 'html', 'mermaid'])
+  })
+})
+
+describe('splitViews: a pipeline note’s block (IMP-169, F4)', () => {
+  it('cuts a top-level pipeline block out, its YAML as written, and leaves the others', () => {
+    const html =
+      '<p>Copy.</p><pre><code class="language-pipeline">trigger: { on: manual }\nnodes:\n  - id: a\n    use: note.write\n    with: { text: &quot;{{ trigger.input }}&quot; }\n</code></pre>' +
+      '<ul><li><pre><code class="language-pipeline">nodes: []\n</code></pre></li></ul>'
+    expect(hasPipeline(html)).toBe(true)
+    expect(hasPipeline('<pre><code class="language-yaml">x</code></pre>')).toBe(false)
+    const s = splitViews(html)
+    expect(s.map((x) => x.kind)).toEqual(['html', 'pipeline', 'html'])
+    expect(s[1]).toMatchObject({
+      kind: 'pipeline',
+      index: 0,
+      source:
+        'trigger: { on: manual }\nnodes:\n  - id: a\n    use: note.write\n    with: { text: "{{ trigger.input }}" }\n',
+    })
+    expect(s[1]!.kind === 'pipeline' && s[1]!.origin).toBeUndefined()
+    expect((s[2] as { html: string }).html).toContain('language-pipeline')
   })
 })

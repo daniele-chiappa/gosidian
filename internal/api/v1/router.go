@@ -185,6 +185,9 @@ func (r *Router) registerAuthed() {
 	r.mux.Handle("/api/v1/pipelines/", r.pipelineRoutes(authed))
 	r.mux.Handle("/api/v1/runs", authed(r.handleRuns))
 	r.mux.Handle("/api/v1/runs/", r.runRoutes(authed))
+	// The pipeline editor (IMP-169, F4): there with the pipelines off too.
+	r.mux.Handle("/api/v1/pipeline-nodes", authed(r.handlePipelineNodes))
+	r.mux.Handle("/api/v1/pipeline-check", authed(r.handlePipelineCheck))
 }
 
 // handleHealth confirms the v1 mux is wired and reachable.

@@ -293,6 +293,11 @@ func TestRegistry_AcceptRunAndChange(t *testing.T) {
 	if why := reg.Why("docling.convertx"); !strings.Contains(why, "docling.convert") {
 		t.Errorf("why for a missing node = %q", why)
 	}
+	// The editor's catalog: the accepted node, its schemas, the files it gives back.
+	if ns := reg.NodeSchemas(); len(ns) != 1 || ns[0].Type != "docling.convert" || ns[0].Plugin != "docling" ||
+		ns[0].Status != StatusOK || !strings.Contains(string(ns[0].Input), `"object"`) || !strings.Contains(string(ns[0].Output), `"files"`) {
+		t.Errorf("node schemas: %+v", ns)
+	}
 
 	e, host := newEngine(t, reg)
 	host.mu.Lock()

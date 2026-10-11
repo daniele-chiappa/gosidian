@@ -128,6 +128,12 @@ const baseCodec: PlanciaCodec = createArgCodec({
       },
       title: (a) => (a ? tr('diagram.window_title', { name: base(a.slice(0, a.lastIndexOf('#'))) }) : ''),
     },
+    // A pipeline note in the pipeline editor (IMP-169, F4): its path.
+    pipeline: {
+      arg: (p) => str(p.path) || null,
+      props: (a) => (a ? { path: a } : {}),
+      title: (a) => (a ? tr('pipeline_editor.window_title', { name: base(a) }) : ''),
+    },
     graph: {
       arg: graphArgFromProps,
       props: graphPropsFromArg,

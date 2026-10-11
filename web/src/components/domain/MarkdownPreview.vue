@@ -39,6 +39,8 @@
  * block right after it for Obsidian, is not shown. Another top-level
  * ```mermaid block stays its code, with «Convert to a diagram» for who may
  * change its note: the block becomes a ```diagram one, opened in the editor.
+ * A pipeline note's ```pipeline block is drawn (IMP-169, F4), with «Edit»
+ * opening the pipeline window.
  */
 import { computed, inject, ref } from 'vue'
 import { isAxiosError } from 'axios'
@@ -52,15 +54,18 @@ import ViewCount from '@/components/views/ViewCount.vue'
 import {
   hasDiagrams,
   hasMermaid,
+  hasPipeline,
   splitViews,
   type DiagramSegment,
   type MermaidSegment,
+  type PipelineSegment,
 } from '@/components/views/segments'
 import { getNote, updateNote } from '@/api/notes'
 import { errorText } from '@/api/errors'
 import { useAccessStore } from '@/stores/access'
 import { i18n } from '@/locales'
 import DiagramBlock from './DiagramBlock.vue'
+import PipelineBlock from './PipelineBlock.vue'
 import { findHeading } from './headings'
 import { linkTarget } from './noteLinks'
 
@@ -92,6 +97,7 @@ const sanitized = computed(() => sanitizePreviewHtml(props.html))
 const segments = computed(() =>
   props.views?.length ||
   hasDiagrams(sanitized.value) ||
+  hasPipeline(sanitized.value) ||
   (props.diagramsEditable && hasMermaid(sanitized.value))
     ? splitViews(sanitized.value)
     : null,
@@ -160,7 +166,7 @@ function onClick(e: MouseEvent) {
 let access: ReturnType<typeof useAccessStore> | null = null
 
 /** Whether a diagram may be edited: its own note, or an embed's that resolved. */
-function canEditDiagram(s: DiagramSegment | MermaidSegment): boolean {
+function canEditDiagram(s: DiagramSegment | MermaidSegment | PipelineSegment): boolean {
   if (!props.diagramsEditable) return false
   const path = s.origin === undefined ? props.notePath : s.origin
   access ??= useAccessStore()
@@ -187,6 +193,18 @@ async function editDiagram(s: DiagramSegment) {
     key: planciaKey('diagram', `${path}#${hit.i}`),
     title: i18n.global.t('diagram.window_title', { name: base(path) }),
     props: { path, index: hit.i },
+  })
+}
+
+/** Opens a pipeline in the pipeline window: the note it is written in, its one block. */
+function editPipeline(s: PipelineSegment) {
+  const path = s.origin === undefined ? props.notePath : s.origin
+  if (!path) return
+  openWindow({
+    type: 'pipeline',
+    key: planciaKey('pipeline', path),
+    title: i18n.global.t('pipeline_editor.window_title', { name: base(path) }),
+    props: { path },
   })
 }
 
@@ -271,6 +289,12 @@ function openNote(path: string, anchor: string | null) {
         :editable="canEditDiagram(s)"
         @link="openDiagramLink"
         @edit="editDiagram(s)"
+      />
+      <PipelineBlock
+        v-else-if="s.kind === 'pipeline'"
+        :source="s.source"
+        :editable="canEditDiagram(s)"
+        @edit="editPipeline(s)"
       />
       <div v-else-if="s.kind === 'mermaid'" class="gosidian-mermaid" data-mermaid>
         <div class="contents" v-html="s.html" />

@@ -14,6 +14,29 @@ vi.mock('@/api/pipelines', async (orig) => ({
   startRun: vi.fn(),
   resumeRun: vi.fn(),
   cancelRun: vi.fn(),
+  getPipelineNodes: async () => ({ pipelines_enabled: true, nodes: [] }),
+}))
+// The drawing of an open run is plancia-diagrams' (IMP-169, F4): a stand-in
+// that shows what it was given.
+vi.mock('@/components/domain/diagramView', async () => {
+  const { defineComponent, h } = await import('vue')
+  return {
+    findDiagramBlocks: (await import('plancia-diagrams')).findDiagramBlocks,
+    PipelineView: defineComponent({
+      props: { source: String, run: Object },
+      setup: (p) => () => h('div', { class: 'stand-in', 'data-run': JSON.stringify(p.run) }, p.source),
+    }),
+  }
+})
+vi.mock('@/api/notes', () => ({
+  getNote: async (path: string) => ({
+    path,
+    title: 'Copy',
+    content: '# Copy\n\n```pipeline\nnodes:\n  - id: ask\n    use: wait.call\n```\n',
+    etag: 'e1',
+    size: 0,
+    mod_time: '',
+  }),
 }))
 vi.mock('@/composables/useSSE', () => ({ useSSE: () => ({ on: vi.fn(() => () => {}) }) }))
 vi.mock('@/composables/useConfirm', () => ({ askText: vi.fn() }))
@@ -145,5 +168,29 @@ describe('PipelinesView (IMP-166)', () => {
     await resume.trigger('click')
     await flushPromises()
     expect(resumeRun).toHaveBeenCalledWith('r1', { ok: true })
+  })
+
+  it('draws the open run on its pipeline, and opens the pipeline in its editor', async () => {
+    const openWindow = vi.fn()
+    const w = mount(PipelinesView, { global: { plugins: [i18n()], provide: { openWindow } } })
+    await flushPromises()
+    await w.find('[data-runs]').find('button[aria-expanded]').trigger('click')
+    await vi.waitFor(() => expect(w.find('[data-steps] .stand-in').exists()).toBe(true), { timeout: 10000 })
+    expect(w.find('.stand-in').text()).toContain('use: wait.call')
+    expect(JSON.parse(w.find('.stand-in').attributes('data-run')!)).toMatchObject({
+      id: 'r1',
+      status: 'waiting',
+      steps: { ask: { status: 'waiting' } },
+    })
+    const edits = w.findAll('[data-pipeline-open-editor]')
+    // Only where the account writes: the two pipelines of mine/.
+    expect(edits).toHaveLength(2)
+    await edits[0]!.trigger('click')
+    expect(openWindow).toHaveBeenCalledWith({
+      type: 'pipeline',
+      key: 'pipeline:mine/pipelines/copy.md',
+      title: 'Pipeline · copy',
+      props: { path: 'mine/pipelines/copy.md' },
+    })
   })
 })

@@ -9,6 +9,16 @@ const SHAPES = ['box', 'pill', 'decision', 'data', 'doc', 'db', 'circle', 'note'
 const CLASSES = ['user', 'data', 'ext', 'planned', 'off'] as const
 const STYLES = ['solid', 'dashed', 'dotted'] as const
 const STATUSES = ['done', 'active', 'critical', 'milestone'] as const
+const RUN_STATUSES = [
+  'pending',
+  'queued',
+  'running',
+  'waiting',
+  'done',
+  'failed',
+  'skipped',
+  'canceled',
+] as const
 export const DIAGRAM_KINDS = [
   'flow',
   'tree',
@@ -247,5 +257,76 @@ export function useDiagramLabels() {
         string
       >,
   )
-  return { view, editor, template, kinds, ready, readyNames }
+  // The pipeline drawing and editor's words (IMP-169, F4).
+  const pipeline = computed(() => {
+    const k = (key: string) => t(`pipeline_editor.${key}`)
+    const map = (keys: readonly string[], ns: string) =>
+      Object.fromEntries(keys.map((x) => [x, t(`pipeline_editor.${ns}.${x}`)]))
+    return {
+      trigger: k('trigger'),
+      triggers: map(['manual', 'external', 'ingest', 'schedule'], 'triggers') as Record<
+        'manual' | 'external' | 'ingest' | 'schedule',
+        string
+      >,
+      statuses: map(RUN_STATUSES, 'statuses') as Record<(typeof RUN_STATUSES)[number], string>,
+      drawing: k('drawing'),
+      yaml: k('yaml'),
+      undo: k('undo'),
+      redo: k('redo'),
+      addNode: k('add_node'),
+      remove: k('remove'),
+      relayout: k('relayout'),
+      fit: k('fit'),
+      zoomIn: k('zoom_in'),
+      zoomOut: k('zoom_out'),
+      palette: k('palette'),
+      base: k('base'),
+      node: k('node'),
+      id: k('id'),
+      type: k('type'),
+      settings: k('settings'),
+      more: k('more'),
+      when: k('when'),
+      unless: k('unless'),
+      each: k('each'),
+      attempts: k('attempts'),
+      backoff: k('backoff'),
+      timeout: k('timeout'),
+      onError: k('on_error'),
+      onErrorStop: k('on_error_stop'),
+      onErrorContinue: k('on_error_continue'),
+      waitsFor: k('waits_for'),
+      startsAtOnce: k('starts_at_once'),
+      edge: k('edge'),
+      edgeHint: k('edge_hint'),
+      triggerOn: k('trigger_on'),
+      kinds: k('kinds'),
+      folder: k('folder'),
+      every: k('every'),
+      required: k('required'),
+      structured: k('structured'),
+      invalidValue: k('invalid_value'),
+      unknownType: k('unknown_type'),
+      otherSettings: k('other_settings'),
+      problems: k('problems'),
+      serverProblem: k('server_problem'),
+      line: k('line'),
+      noProblems: k('no_problems'),
+      broken: k('broken'),
+      connectHint: k('connect_hint'),
+      run: k('run'),
+      status: k('status'),
+      duration: k('duration'),
+      attempt: k('attempt'),
+      error: k('error'),
+      output: k('output'),
+      outputTruncated: k('output_truncated'),
+      waitingUntil: k('waiting_until'),
+      none: k('none'),
+      yes: k('yes'),
+      no: k('no'),
+      exprHint: k('expr_hint'),
+    }
+  })
+  return { view, editor, template, kinds, ready, readyNames, pipeline }
 }

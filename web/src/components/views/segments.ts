@@ -7,6 +7,20 @@ export type Segment =
   | { kind: 'view'; index: number; html: string }
   | DiagramSegment
   | MermaidSegment
+  | PipelineSegment
+
+/**
+ * The ```pipeline block of a pipeline note, at the top level: drawn, with
+ * «Edit» for who may change the note it is written in (`origin` as a
+ * diagram's). A note has one.
+ */
+export interface PipelineSegment {
+  kind: 'pipeline'
+  index: number
+  source: string
+  html: string
+  origin?: string | null
+}
 
 /**
  * A ```mermaid block at the top level that is no diagram's twin: shown as
@@ -57,6 +71,11 @@ export function hasDiagrams(html: string): boolean {
   return html.includes('language-diagram')
 }
 
+/** Whether preview HTML may hold a pipeline's block. */
+export function hasPipeline(html: string): boolean {
+  return html.includes('language-pipeline')
+}
+
 /** Whether preview HTML may hold a Mermaid block. */
 export function hasMermaid(html: string): boolean {
   return html.includes('language-mermaid')
@@ -78,6 +97,7 @@ export function splitViews(html: string): Segment[] {
   let buf = ''
   let diagrams = 0
   let mermaids = 0
+  let pipelines = 0
   // Whether the last thing kept was a diagram's block: a twin follows it.
   let afterDiagram = false
   const flush = () => {
@@ -123,6 +143,19 @@ export function splitViews(html: string): Segment[] {
         occurrence,
       })
       afterDiagram = true
+      continue
+    }
+    const pipelineSrc = diagramSource(node, 'pipeline')
+    if (pipelineSrc !== null) {
+      flush()
+      out.push({
+        kind: 'pipeline',
+        index: pipelines++,
+        source: pipelineSrc,
+        html: (node as HTMLElement).outerHTML,
+        origin,
+      })
+      afterDiagram = false
       continue
     }
     const mermaid = diagramSource(node, 'mermaid')

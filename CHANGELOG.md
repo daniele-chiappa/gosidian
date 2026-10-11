@@ -8,6 +8,59 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.80.0] — 2026-10-11 — "pipeline editor"
+
+Pipeline notes are drawn in the web UI and edited on their drawing, and
+their runs show on it, live. Pull the image and restart, nothing to
+migrate.
+
+### Added
+- **Pipelines drawn** — a pipeline note's ```` ```pipeline ```` block is drawn
+  where it stands, by
+  [plancia-diagrams](https://github.com/daniele-chiappa/plancia/tree/main/diagrams) 0.4.0:
+  the trigger, the nodes with their types and what each waits for, with
+  **Code** for the YAML as written.
+- **The pipeline window** — **Edit**, on the drawing or beside a pipeline
+  in the Runs window, opens the pipeline in an editor; the window's
+  address keeps the note, so a reload opens it again. It works with the
+  pipelines off too, with the base node types only.
+  - **Add a node** lists the node types, the base ones and those of each
+    accepted plugin; a line dragged from a node's dot onto another makes
+    the second wait for the first, from the trigger the node starts with
+    the run (`after: []`). The first drag fixes the places of the nodes in
+    `layout:`, which the server ignores; **Lay out again** takes it away.
+  - A panel sets the selected node's id (`after`, the `{{ }}` and
+    `layout:` follow a rename), its type and its settings, as a form made
+    from the type's JSON Schema, then `when`, `unless`, `each`, `retry`,
+    `timeout` and `on_error`; the trigger's panel sets its kind and
+    fields. A text offers, as you type `{{`, what the node may read: the
+    trigger's fields, the run's, and the outputs of the nodes before it.
+  - A YAML tab edits the text. Every change is checked by the server as it
+    is typed, and its problem shown.
+  - **Save** (Ctrl+S) writes the block in place: the rest of the note, the
+    comments and the order of the fields stay as written. A note changed
+    meanwhile gets a banner: reload it, or put the pipeline into the new
+    version.
+- **Runs on the drawing** — where the pipelines run, the window lists the
+  pipeline's runs and draws the last one, or one chosen, on its nodes:
+  each with its state and attempts, the selected one with its output,
+  error and times, live while the run goes. **Start** runs the saved
+  pipeline with a JSON input, **Resume** hands its data to a run that
+  waits, **Cancel** stops one. The Runs window draws the run it opens.
+- **`GET /api/v1/pipeline-nodes`** — the node types with the JSON Schemas
+  of their settings and output: the base ones, and with the pipelines on
+  the nodes of the accepted plugins, whose output carries the files the
+  server stores for them.
+- **`POST /api/v1/pipeline-check`** — `{source}` → `{ok, problem}`: the
+  server's reading of a block that is not saved yet. Both routes answer
+  every signed-in account, with the pipelines off too.
+
+### Changed
+- **plancia 0.3.3** — in tabs mode, the events of a window's content
+  (closing it, its title, its unsaved state) now go to the window that
+  sent them, not to the window in front: a form that creates a note,
+  opens it and closes itself no longer closes the new note instead.
+
 ## [2.79.0] — 2026-10-11 — "diagram forms and conversions"
 
 Every kind of diagram is drawn and edited in the web UI, and diagrams
