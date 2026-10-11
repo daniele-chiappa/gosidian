@@ -502,3 +502,30 @@ func TestPreview_ResolvesFullPathLinks(t *testing.T) {
 		t.Errorf("full-path links unresolved:\n%s", decoded.HTML)
 	}
 }
+
+// IMP-169: the [[links]] of a note's diagrams come back resolved, as its
+// other links are; one to no note is left out.
+func TestPreview_DiagramLinks(t *testing.T) {
+	f := newNotesFixture(t)
+	f.seedNote(t, "p/plans/a-plan.md", "---\ntitle: The plan\n---\n")
+	md := "# D\n\n```diagram\nkind: flow\nnodes:\n  - {id: a, link: \"[[p/plans/a-plan#Steps|the plan]]\"}\n  - {id: b, link: \"[[nowhere]]\"}\n  - {id: c, link: \"https://example.com\"}\n```\n"
+	req, _ := json.Marshal(map[string]string{"markdown": md})
+	w := f.doAuthRecorder(http.MethodPost, "/api/v1/preview", string(req), nil)
+	if w.code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.code, w.body)
+	}
+	var decoded previewResponse
+	if err := json.NewDecoder(strings.NewReader(w.body)).Decode(&decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.DiagramLinks) != 1 || decoded.DiagramLinks["p/plans/a-plan#Steps"] != "p/plans/a-plan.md" {
+		t.Errorf("diagram_links = %v", decoded.DiagramLinks)
+	}
+	if !strings.Contains(decoded.HTML, `<code class="language-diagram">`) {
+		t.Errorf("the block is not a code block of its language:\n%s", decoded.HTML)
+	}
+	w = f.doAuthRecorder(http.MethodPost, "/api/v1/preview", `{"markdown":"no diagrams"}`, nil)
+	if strings.Contains(w.body, "diagram_links") {
+		t.Errorf("a note without diagrams has diagram_links: %s", w.body)
+	}
+}

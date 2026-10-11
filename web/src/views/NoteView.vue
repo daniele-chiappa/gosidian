@@ -90,12 +90,15 @@ const draft = ref<string>('')
 const previewHTML = ref<string>('')
 // The note's views as data, for the editors of ViewTable (IMP-127 phase 5).
 const previewViews = ref<ViewData[]>([])
+// The notes the links of its diagrams resolve to (IMP-169).
+const previewDiagramLinks = ref<Record<string, string>>({})
 
 /** Renders md for the preview pane: its HTML and its views as data. */
 async function renderInto(md: string, notePath: string) {
   const r = await renderPreviewData(md, notePath)
   previewHTML.value = r.html
   previewViews.value = r.views
+  previewDiagramLinks.value = r.diagramLinks
   previewError.value = null
 }
 // A preview that failed: the note stays open, with the reason where the
@@ -104,6 +107,7 @@ const previewError = ref<string | null>(null)
 function previewFailed(e: unknown) {
   previewHTML.value = ''
   previewViews.value = []
+  previewDiagramLinks.value = {}
   previewError.value = errorText(e, t, t('note.preview_failed'))
 }
 const loading = ref(false)
@@ -198,6 +202,7 @@ async function load() {
     if (isHtml.value || isCanvas.value || tooLarge.value) {
       previewHTML.value = ''
       previewViews.value = []
+      previewDiagramLinks.value = {}
       if (tooLarge.value) mode.value = 'view'
     } else {
       try {
@@ -804,7 +809,12 @@ watch(path, load)
         <!-- A row of a database: its fields, editable (IMP-127 phase 5) -->
         <PropertiesPanel v-if="note && !isBase" :path="note.path" :etag="note.etag" />
         <ErrorMessage v-if="previewError" :text="previewError" class="mb-4 text-sm" data-preview-error />
-        <MarkdownPreview :html="previewHTML" :views="previewViews" :note-path="note?.path" />
+        <MarkdownPreview
+          :html="previewHTML"
+          :views="previewViews"
+          :diagram-links="previewDiagramLinks"
+          :note-path="note?.path"
+        />
         <!-- A row of a database: the views its schema declares (IMP-139) -->
         <RowViews v-if="note && !isBase" :path="note.path" :etag="note.etag" />
         <!-- An Obsidian base: the YAML its views were translated from -->
@@ -844,6 +854,7 @@ watch(path, load)
           v-else
           :html="previewHTML"
           :views="previewViews"
+          :diagram-links="previewDiagramLinks"
           :note-path="note.path"
           :compact="layout !== 'preview'"
         />

@@ -158,6 +158,20 @@ func (h *memHost) StoreAttachment(project, name string, data []byte, actor strin
 
 func (h *memHost) Changed(jobs.Run) {}
 
+// note and stored read the host under its lock: the run's goroutines
+// still write to it (a run's summary note) after the run has ended.
+func (h *memHost) note(p string) string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.notes[p]
+}
+
+func (h *memHost) stored() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]string(nil), h.actors...)
+}
+
 func newEngine(t *testing.T, reg *Registry) (*pipeline.Engine, *memHost) {
 	t.Helper()
 	st, err := jobs.Open(filepath.Join(t.TempDir(), "jobs.db"))
@@ -281,8 +295,10 @@ func TestRegistry_AcceptRunAndChange(t *testing.T) {
 	}
 
 	e, host := newEngine(t, reg)
+	host.mu.Lock()
 	host.notes["p/pipelines/convert.md"] = convertPipeline
 	host.att["p/attachments/doc.pdf"] = []byte("%PDF-1.4 Report")
+	host.mu.Unlock()
 	run, _, err := e.Start(pipeline.StartRequest{Path: "p/pipelines/convert.md", Trigger: pipeline.TriggerManual, Input: map[string]any{"file": "p/attachments/doc.pdf"}})
 	if err != nil {
 		t.Fatal(err)
@@ -291,7 +307,7 @@ func TestRegistry_AcceptRunAndChange(t *testing.T) {
 		steps, _ := e.Runner().Store().Steps(run.ID)
 		t.Fatalf("run %s: %s %+v", run.Status, run.Error, steps)
 	}
-	if got := host.notes["p/out/doc.md"]; !strings.Contains(got, "# %PDF-1.4 Report") {
+	if got := host.note("p/out/doc.md"); !strings.Contains(got, "# %PDF-1.4 Report") {
 		t.Errorf("the note = %q", got)
 	}
 	steps, _ := e.Runner().Store().Steps(run.ID)
@@ -313,8 +329,8 @@ func TestRegistry_AcceptRunAndChange(t *testing.T) {
 	if files[1].(map[string]any)["name"] != "image-1.png" {
 		t.Errorf("second file = %v", files[1])
 	}
-	if len(host.actors) != 2 || host.actors[0] != "pipeline:p/pipelines/convert.md" {
-		t.Errorf("stored as %v", host.actors)
+	if actors := host.stored(); len(actors) != 2 || actors[0] != "pipeline:p/pipelines/convert.md" {
+		t.Errorf("stored as %v", actors)
 	}
 
 	version.Store("1.1")

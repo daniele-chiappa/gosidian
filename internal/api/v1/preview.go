@@ -7,6 +7,7 @@ import (
 
 	"github.com/gosidian/gosidian/internal/authz"
 	"github.com/gosidian/gosidian/internal/dbschema"
+	"github.com/gosidian/gosidian/internal/diagram"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/gosidian/gosidian/internal/vault"
@@ -52,6 +53,12 @@ type previewResponse struct {
 	// Views holds the note's views in the form the web UI's editors use,
 	// in the order of the data-view index of their placeholder in HTML.
 	Views []views.Data `json:"views,omitempty"`
+	// DiagramLinks resolves the [[links]] of the note's diagrams, embeds
+	// included, as its other links are: the target as written (heading
+	// included, alias left out) → the note's path. The SPA draws the
+	// diagrams and opens these; a target that resolves to no note the
+	// reader may see is not there (IMP-169).
+	DiagramLinks map[string]string `json:"diagram_links,omitempty"`
 }
 
 // handlePreview renders markdown to HTML through the same parser
@@ -90,12 +97,31 @@ func (r *Router) handlePreview(w http.ResponseWriter, req *http.Request) {
 		}
 		md, data = views.RenderNoteData(md, c, r.viewQuery(p))
 	}
-	html, err := r.deps.Renderer.Render(md, previewResolver{r: r, p: p, note: body.Path})
+	resolver := previewResolver{r: r, p: p, note: body.Path}
+	html, err := r.deps.Renderer.Render(md, resolver)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, "render: "+err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, previewResponse{HTML: html, Views: data})
+	WriteJSON(w, http.StatusOK, previewResponse{HTML: html, Views: data, DiagramLinks: diagramLinks(md, resolver)})
+}
+
+// diagramLinks resolves the [[links]] of the diagrams in md; nil without any.
+func diagramLinks(md []byte, resolver previewResolver) map[string]string {
+	var out map[string]string
+	for _, l := range diagram.LinksIn(md) {
+		note, _, _ := strings.Cut(l.Target, "#")
+		if note == "" {
+			continue
+		}
+		if path := resolver.Resolve(note); path != "" {
+			if out == nil {
+				out = map[string]string{}
+			}
+			out[l.Target] = path
+		}
+	}
+	return out
 }
 
 // previewResolver resolves both `[[wiki-links]]` (Resolve) and `![[image]]`

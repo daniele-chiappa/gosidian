@@ -41,6 +41,18 @@ is ready, release plancia (a version tag: its `release` workflow
 attaches `plancia-X.Y.Z.tgz` to the GitHub release), then point
 `package.json` at the new tarball URL and run `npm install`.
 
+The diagrams of the notes (IMP-169) come from **plancia-diagrams**, the
+package in the `diagrams/` folder of the same repository, released with
+`diagrams-vX.Y.Z` tags. `PLANCIA_DIAGRAMS_SRC` does for it what
+`PLANCIA_SRC` does for plancia (`npm install` done in `diagrams/`):
+
+```bash
+PLANCIA_DIAGRAMS_SRC=/path/to/plancia/diagrams/src npm run dev
+```
+
+Only a note with a diagram loads it, with Vue Flow, dagre and, for a mind
+map or a fishbone, Mermaid (`src/components/domain/diagramView.ts`).
+
 ## Layout
 
 - `src/api/`         typed wrappers around `/api/v1/*`

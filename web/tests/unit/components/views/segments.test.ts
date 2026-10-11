@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { splitViews } from '@/components/views/segments'
+import { hasDiagrams, splitViews } from '@/components/views/segments'
 
 describe('splitViews', () => {
   it('cuts the HTML at the top-level view placeholders', () => {
@@ -22,5 +22,30 @@ describe('splitViews', () => {
     )
     expect(s).toHaveLength(1)
     expect(s[0]?.kind).toBe('html')
+  })
+})
+
+describe('splitViews and diagrams (IMP-169)', () => {
+  it('cuts a top-level diagram block out, its YAML as written', () => {
+    const html =
+      '<p>Before</p>\n<pre><code class="language-diagram">kind: flow\nnodes: [a, &quot;b &lt;c&gt;&quot;]\n</code></pre>\n' +
+      '<pre><code class="language-yaml">kind: flow\n</code></pre><pre><code class="language-diagram">kind: tree\nroot: R\n</code></pre>'
+    expect(hasDiagrams(html)).toBe(true)
+    const s = splitViews(html)
+    expect(s.map((x) => x.kind)).toEqual(['html', 'diagram', 'html', 'diagram'])
+    expect(s[1]).toMatchObject({
+      kind: 'diagram',
+      index: 0,
+      source: 'kind: flow\nnodes: [a, "b <c>"]\n',
+    })
+    expect(s[3]).toMatchObject({ kind: 'diagram', index: 1, source: 'kind: tree\nroot: R\n' })
+    expect((s[2] as { html: string }).html).toContain('language-yaml')
+  })
+
+  it('leaves a diagram in a list as its code', () => {
+    const s = splitViews(
+      '<ul><li><pre><code class="language-diagram">kind: tree\n</code></pre></li></ul>',
+    )
+    expect(s.map((x) => x.kind)).toEqual(['html'])
   })
 })

@@ -53,6 +53,8 @@ export interface ViewData {
 export interface PreviewResponse {
   html: string
   views?: ViewData[]
+  /** The [[links]] of the note's diagrams, as written (heading included) → the note's path. */
+  diagram_links?: Record<string, string>
 }
 
 /**
@@ -66,12 +68,13 @@ export async function renderPreview(markdown: string, path?: string): Promise<st
 
 /**
  * As renderPreview, plus the note's views as data, in the order of the
- * data-view index of their placeholder in the HTML.
+ * data-view index of their placeholder in the HTML, and the notes the
+ * links of its diagrams resolve to.
  */
 export async function renderPreviewData(
   markdown: string,
   path?: string,
-): Promise<{ html: string; views: ViewData[] }> {
+): Promise<{ html: string; views: ViewData[]; diagramLinks: Record<string, string> }> {
   const { data } = await client.post<PreviewResponse>('/preview', { markdown, path })
-  return { html: data.html, views: data.views ?? [] }
+  return { html: data.html, views: data.views ?? [], diagramLinks: data.diagram_links ?? {} }
 }

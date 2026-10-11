@@ -46,7 +46,7 @@ working):
 | `/notes/<path>/history` | the note's git history |
 | `/projects` | project listing & admin |
 | `/tags` / `/tags/<tag>` | tag explorer |
-| `/graph` | Cytoscape graph of wiki-link relations |
+| `/graph` | graph of wiki-link relations |
 | `/search` | full-text search |
 | `/query` | notes by their frontmatter (see below) |
 | `/settings` | theme preset, language, git sync |
@@ -112,12 +112,27 @@ context menu, names starting at the folder) and
   custom palette)
 - **CodeMirror 6** for the editor (markdown, wikilink autocomplete),
   lazy-loaded
-- **Cytoscape + fcose layout** for the graph view, lazy-loaded
+- **force-graph** (2D) and **3d-force-graph** for the graph view,
+  lazy-loaded
+- **plancia-diagrams** for the diagrams of the notes (Vue Flow and dagre,
+  Mermaid for mind maps and fishbones), loaded by the first note that
+  shows one ([diagrams](../diagrams.md))
 - **vue-i18n** with catalogues precompiled at build time from
   `internal/i18n/catalogs/` (shared with the Go side); a strict CSP
   (`script-src 'self'`, no eval) is enforced
 - The Go backend serves only the SPA shell, fingerprinted assets, the
   `/api/v1/*` REST API, and the MCP transports at `/mcp` and `/mcp/sse`
+
+## Diagrams
+
+A ```` ```diagram ```` block of a note is drawn where it stands, and so is
+the block of a note `type: diagram` embedded with `![[ ]]`
+([diagrams](../diagrams.md)). A flow or a tree pans by dragging and zooms
+with its `+`, `−` and fit buttons (the wheel scrolls the note). A node
+with a `[[link]]` opens its note, at the heading the link names; an
+address opens in a tab. **Code** shows the YAML as written, **Export
+SVG** saves the drawing in the theme's colours. What is wrong in a block
+is listed above its drawing, line by line.
 
 ## Language switching
 

@@ -526,6 +526,22 @@
     "empty": "The canvas is empty.",
     "help": "Drag to move around; wheel to scroll, Ctrl + wheel to zoom"
   },
+  "diagram": {
+    "problems": "This diagram has problems:",
+    "line": "line",
+    "pending": "This kind of diagram is not drawn yet. It reads:",
+    "loading": "Drawing the diagram…",
+    "failed": "The diagram could not be drawn:",
+    "links": "Links:",
+    "zoom_in": "Zoom in",
+    "zoom_out": "Zoom out",
+    "fit": "Fit",
+    "open": "Open",
+    "show_code": "Code",
+    "show_drawing": "Diagram",
+    "export_svg": "Export SVG",
+    "load_failed": "The diagram drawing did not load: its code is above."
+  },
   "views": {
     "no_rows": "No matching notes.",
     "showing": "Showing {shown} of {total} notes.",

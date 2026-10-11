@@ -526,6 +526,22 @@
     "empty": "Il canvas è vuoto.",
     "help": "Trascina per spostarti; rotella per scorrere, Ctrl + rotella per lo zoom"
   },
+  "diagram": {
+    "problems": "Questo diagramma ha dei problemi:",
+    "line": "riga",
+    "pending": "Questo tipo di diagramma non si disegna ancora. Dice:",
+    "loading": "Disegno il diagramma…",
+    "failed": "Il diagramma non si è potuto disegnare:",
+    "links": "Collegamenti:",
+    "zoom_in": "Ingrandisci",
+    "zoom_out": "Rimpicciolisci",
+    "fit": "Adatta",
+    "open": "Apri",
+    "show_code": "Codice",
+    "show_drawing": "Diagramma",
+    "export_svg": "Esporta SVG",
+    "load_failed": "Il disegno dei diagrammi non si è caricato: qui sopra c'è il suo codice."
+  },
   "views": {
     "no_rows": "Nessuna nota corrispondente.",
     "showing": "{shown} note su {total}.",

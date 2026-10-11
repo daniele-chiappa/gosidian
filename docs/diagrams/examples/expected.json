@@ -1,0 +1,319 @@
+{
+  "invalid/empty.yaml": {
+    "problems": [
+      {
+        "line": 0,
+        "message": "the block is empty: a diagram has kind and its content (docs/diagrams.md)"
+      }
+    ]
+  },
+  "invalid/fishbone-no-categories.yaml": {
+    "problems": [
+      {
+        "line": 3,
+        "message": "a fishbone has categories under its root (the 6M: methods, machines, materials…), and causes under them"
+      }
+    ],
+    "text": "Fishbone of the effect \"Late deliveries\":"
+  },
+  "invalid/flow-bad-id.yaml": {
+    "problems": [
+      {
+        "line": 3,
+        "message": "\"Upload file\" is not an id: a letter, then letters, digits, - and _ (at most 40)"
+      }
+    ],
+    "text": "Flow (TB), 1 node, 0 edges:; unconnected: Upload file"
+  },
+  "invalid/flow-bad-shape.yaml": {
+    "problems": [
+      {
+        "line": 4,
+        "message": "shape \"star\" is one of box, pill, decision, data, doc, db, circle, note"
+      }
+    ],
+    "text": "Flow (TB), 1 node, 0 edges:; unconnected: a"
+  },
+  "invalid/flow-dup-id.yaml": {
+    "problems": [
+      {
+        "line": 5,
+        "message": "id \"a\" is used twice (first at line 4)"
+      }
+    ],
+    "text": "Flow (TB), 2 nodes, 0 edges:; unconnected: One, Two"
+  },
+  "invalid/flow-edge-bad.yaml": {
+    "problems": [
+      {
+        "line": 4,
+        "message": "edge \"a to b\" is \"from -> to\" or \"from -> to: label\""
+      }
+    ],
+    "text": "Flow (TB), 2 nodes, 0 edges:; unconnected: a, b"
+  },
+  "invalid/flow-edge-unknown.yaml": {
+    "problems": [
+      {
+        "line": 4,
+        "message": "the edge a -> c names \"c\", which is no node or group"
+      }
+    ],
+    "text": "Flow (TB), 2 nodes, 1 edge: a → c; unconnected: b"
+  },
+  "invalid/flow-no-nodes.yaml": {
+    "problems": [
+      {
+        "line": 0,
+        "message": "a flow has nodes: [{id, label}, …]"
+      },
+      {
+        "line": 3,
+        "message": "the edge a -> b names \"a\", which is no node or group"
+      },
+      {
+        "line": 3,
+        "message": "the edge a -> b names \"b\", which is no node or group"
+      }
+    ],
+    "text": "Flow (TB), 0 nodes, 1 edge: a → b"
+  },
+  "invalid/flow-node-field.yaml": {
+    "problems": [
+      {
+        "line": 4,
+        "message": "a node has no field \"colour\" (it has id, label, shape, link, class)"
+      }
+    ],
+    "text": "Flow (TB), 1 node, 0 edges:; unconnected: a"
+  },
+  "invalid/flow-other-field.yaml": {
+    "problems": [
+      {
+        "line": 4,
+        "message": "a flow diagram has no field \"sets\" (it has direction, nodes, edges, groups)"
+      }
+    ],
+    "text": "Flow (TB), 1 node, 0 edges:; unconnected: a"
+  },
+  "invalid/flow-two-groups.yaml": {
+    "problems": [
+      {
+        "line": 6,
+        "message": "node a is in groups g1 and g2: a node is in one group"
+      }
+    ],
+    "text": "Flow (TB), 2 nodes, 0 edges, 2 groups:; unconnected: a, b"
+  },
+  "invalid/gantt-after-unknown.yaml": {
+    "problems": [
+      {
+        "line": 4,
+        "message": "task \"A\" comes after \"zz\", which is no task"
+      }
+    ],
+    "text": "Gantt, 1 task; A after zz for 1 day"
+  },
+  "invalid/gantt-bad-date.yaml": {
+    "problems": [
+      {
+        "line": 4,
+        "message": "start \"10/10/2026\" is a date, YYYY-MM-DD"
+      }
+    ],
+    "text": "Gantt, 1 task; A from 10/10/2026 for 1 day"
+  },
+  "invalid/gantt-cycle.yaml": {
+    "problems": [
+      {
+        "line": 4,
+        "message": "task \"A\" waits for itself through after"
+      },
+      {
+        "line": 5,
+        "message": "task \"B\" waits for itself through after"
+      }
+    ],
+    "text": "Gantt, 2 tasks; A after B for 1 day; B after A for 1 day"
+  },
+  "invalid/gantt-end-before.yaml": {
+    "problems": [
+      {
+        "line": 4,
+        "message": "end 2026-10-01 comes before start 2026-10-10"
+      }
+    ],
+    "text": "Gantt, 1 task; A from 2026-10-10 to 2026-10-01"
+  },
+  "invalid/gantt-no-length.yaml": {
+    "problems": [
+      {
+        "line": 4,
+        "message": "a task has end (YYYY-MM-DD) or days, unless it is a milestone"
+      }
+    ],
+    "text": "Gantt, 1 task; A from 2026-10-10"
+  },
+  "invalid/kind-missing.yaml": {
+    "problems": [
+      {
+        "line": 2,
+        "message": "kind is missing: one of flow, tree, mindmap, fishbone, venn, matrix, gantt"
+      }
+    ]
+  },
+  "invalid/kind-unknown.yaml": {
+    "problems": [
+      {
+        "line": 2,
+        "message": "kind \"pie\" is not one of flow, tree, mindmap, fishbone, venn, matrix, gantt"
+      }
+    ]
+  },
+  "invalid/layout-unknown-id.yaml": {
+    "problems": [
+      {
+        "line": 5,
+        "message": "layout places \"b\", which is no id of the diagram"
+      }
+    ],
+    "text": "Flow (TB), 1 node, 0 edges:; unconnected: a"
+  },
+  "invalid/link-bad.yaml": {
+    "problems": [
+      {
+        "line": 4,
+        "message": "link \"team/note\" is a [[note]] or an http(s) address"
+      }
+    ],
+    "text": "Flow (TB), 1 node, 0 edges:; unconnected: a"
+  },
+  "invalid/matrix-both.yaml": {
+    "problems": [
+      {
+        "line": 2,
+        "message": "a matrix is quadrants (x, y, quadrants, items) or a grid (rows, columns, cells), not both"
+      }
+    ],
+    "text": "Quadrant matrix, x across, y up"
+  },
+  "invalid/matrix-grid-wide.yaml": {
+    "problems": [
+      {
+        "line": 6,
+        "message": "the row has 3 cells, the grid 2 columns"
+      }
+    ],
+    "text": "Matrix of 1 row by 2 columns (r × a, b); r — a: 1, b: 2"
+  },
+  "invalid/matrix-item-out.yaml": {
+    "problems": [
+      {
+        "line": 6,
+        "message": "x is from 0 to 1"
+      }
+    ],
+    "text": "Quadrant matrix, Urgency across, Importance up; x at (1.2, 0.5)"
+  },
+  "invalid/matrix-three-quadrants.yaml": {
+    "problems": [
+      {
+        "line": 5,
+        "message": "quadrants has 4 labels (top left, top right, bottom left, bottom right), it has 3"
+      }
+    ],
+    "text": "Quadrant matrix, Urgency across, Importance up"
+  },
+  "invalid/tree-no-root.yaml": {
+    "problems": [
+      {
+        "line": 2,
+        "message": "a tree has a root: its top"
+      }
+    ],
+    "text": "Tree"
+  },
+  "invalid/venn-area-twice.yaml": {
+    "problems": [
+      {
+        "line": 6,
+        "message": "the area of b, a is there twice (first at line 5)"
+      }
+    ],
+    "text": "Venn of 2 sets: a, b; a ∩ b; b ∩ a"
+  },
+  "invalid/venn-area-unknown.yaml": {
+    "problems": [
+      {
+        "line": 5,
+        "message": "the area names \"c\", which is no set"
+      }
+    ],
+    "text": "Venn of 2 sets: a, b; a ∩ c: x"
+  },
+  "invalid/venn-one-set.yaml": {
+    "problems": [
+      {
+        "line": 3,
+        "message": "a Venn has 2 to 5 sets, it has 1"
+      }
+    ],
+    "text": "Venn of 1 set: a"
+  },
+  "invalid/version-2.yaml": {
+    "problems": [
+      {
+        "line": 2,
+        "message": "diagram: 2 is a format this server does not read (it reads 1)"
+      }
+    ]
+  },
+  "invalid/yaml-broken.yaml": {
+    "problems": [
+      {
+        "line": 2,
+        "message": "not valid YAML: line 2: did not find expected ',' or ']'"
+      }
+    ]
+  },
+  "valid/fishbone-6m.yaml": {
+    "problems": [],
+    "text": "Late deliveries — Fishbone of the effect \"Deliveries are late\": Methods (No order checklist, Manual routing); Machines (Old printer); Materials (Packaging out of stock); Manpower (Peak season shifts); Measurement (No tracking of delays); Environment (Strikes, Weather)"
+  },
+  "valid/flow-full.yaml": {
+    "problems": [],
+    "text": "Arrival of a document — Flow (TB), 5 nodes, 5 edges, 1 group: Upload → docling.convert; docling.convert → Pictures? (markdown); Pictures? → llm.describe (yes); Pictures? → The note (no); llm.describe → The note"
+  },
+  "valid/flow-short.yaml": {
+    "problems": [],
+    "text": "Flow (LR), 3 nodes, 3 edges: start → check; check → done (ok); check → start (retry)"
+  },
+  "valid/gantt-sections.yaml": {
+    "problems": [],
+    "text": "Pipelines, phase 1 — Gantt, 4 tasks; R1: Job runner from 2026-10-08 to 2026-10-09 [done]; Base nodes after Job runner for 1 day [done]; R2: Plugins after Base nodes for 2 days [active]; Release after Plugins [milestone]"
+  },
+  "valid/gantt-tasks.yaml": {
+    "problems": [],
+    "text": "Gantt, 3 tasks; Draft from 2026-11-02 for 3 days; Review after Draft for 2 days [critical]; Go live from 2026-11-09 [milestone]"
+  },
+  "valid/matrix-eisenhower.yaml": {
+    "problems": [],
+    "text": "Eisenhower — Quadrant matrix, Urgency across, Importance up; quadrants: top left Plan, top right Do now, bottom left Drop, bottom right Delegate; Release v2.76 at (0.8, 0.9); Tidy the hot file at (0.3, 0.6); Newsletter at (0.7, 0.2)"
+  },
+  "valid/matrix-grid.yaml": {
+    "problems": [],
+    "text": "SWOT — Matrix of 2 rows by 2 columns (Internal, External × Helpful, Harmful); Internal — Helpful: Strengths, Harmful: Weaknesses; External — Helpful: Opportunities, Harmful: Threats"
+  },
+  "valid/mindmap-short.yaml": {
+    "problems": [],
+    "text": "Mind map of \"Archive\": Arrival (PDF, DOCX, Images); Search (Text, Similarity (Embeddings, Questions)); Reports"
+  },
+  "valid/tree-org.yaml": {
+    "problems": [],
+    "text": "Team — Tree of \"Lead\": Backend (Go, SQLite); Frontend (Vue, plancia)"
+  },
+  "valid/venn-3.yaml": {
+    "problems": [],
+    "text": "Venn of 3 sets: Invoices, Contracts, Quotes; Invoices ∩ Contracts: Framework agreements; Contracts ∩ Quotes: Accepted quotes; Invoices ∩ Contracts ∩ Quotes: Full cycle"
+  }
+}

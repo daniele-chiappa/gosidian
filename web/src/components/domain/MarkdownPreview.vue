@@ -30,6 +30,12 @@
  * embed (`![[note#Heading]]`) arrives as the included text between a
  * `.gosidian-embed-start` head, which links to its origin, and a
  * `.gosidian-embed-end` rule.
+ *
+ * Diagrams (IMP-169): a top-level ```diagram block arrives as its code and
+ * is drawn by DiagramBlock (plancia-diagrams, loaded on first use). A link
+ * of a diagram opens like a wikilink: `diagramLinks`, from /api/v1/preview,
+ * says the note each [[link]] resolves to; one that resolves to nothing
+ * stays closed, as a dangling wikilink does.
  */
 import { computed, inject, ref } from 'vue'
 import { sanitizePreviewHtml } from './sanitizePreview'
@@ -39,14 +45,21 @@ import type { ViewData } from '@/api/preview'
 import ViewTable from '@/components/views/ViewTable.vue'
 import ViewBoard from '@/components/views/ViewBoard.vue'
 import ViewCount from '@/components/views/ViewCount.vue'
-import { splitViews } from '@/components/views/segments'
+import { hasDiagrams, splitViews } from '@/components/views/segments'
+import DiagramBlock from './DiagramBlock.vue'
 import { findHeading } from './headings'
 import { linkTarget } from './noteLinks'
 
 // notePath: the note the HTML belongs to, which relative links start from.
 // compact: a pane beside or under the editor, set in the smaller type scale
 // (IMP-156, M6): a page-sized h1 took seven lines in 280 px.
-const props = defineProps<{ html: string; views?: ViewData[]; notePath?: string; compact?: boolean }>()
+const props = defineProps<{
+  html: string
+  views?: ViewData[]
+  notePath?: string
+  compact?: boolean
+  diagramLinks?: Record<string, string>
+}>()
 
 const store = useWindowsStore()
 const openWindow = inject<(spec: OpenSpec) => string>('openWindow', (s) => store.open(s))
@@ -58,8 +71,10 @@ const proseClass = computed(
 
 const sanitized = computed(() => sanitizePreviewHtml(props.html))
 
-// The note cut at its views, when there are views to show as components.
-const segments = computed(() => (props.views?.length ? splitViews(sanitized.value) : null))
+// The note cut at its views and diagrams, when there are some to show as components.
+const segments = computed(() =>
+  props.views?.length || hasDiagrams(sanitized.value) ? splitViews(sanitized.value) : null,
+)
 
 /** The view at a placeholder's index, when a component of kind `as` shows it. */
 function viewAs(index: number, as: 'table' | 'board' | 'count'): ViewData | undefined {
@@ -119,6 +134,18 @@ function onClick(e: MouseEvent) {
   else if (target.kind === 'tab') window.open(target.url, '_blank', 'noopener,noreferrer')
 }
 
+/** Opens a link of a diagram: a note it resolves to as a window, an address in a tab. */
+function openDiagramLink(l: { target: string; kind: 'note' | 'url' }) {
+  if (l.kind === 'url') {
+    window.open(l.target, '_blank', 'noopener,noreferrer')
+    return
+  }
+  const path = props.diagramLinks?.[l.target]
+  if (!path) return
+  const i = l.target.indexOf('#')
+  openNote(path, i >= 0 ? l.target.slice(i + 1) || null : null)
+}
+
 /** Opens a note window; a window already open on the note gets the anchor too, and scrolls. */
 function openNote(path: string, anchor: string | null) {
   const key = planciaKey('note', path)
@@ -136,8 +163,9 @@ function openNote(path: string, anchor: string | null) {
 <template>
   <div v-if="!segments" ref="root" :class="proseClass" v-html="sanitized" @click="onClick" />
   <div v-else ref="root" :class="proseClass" @click="onClick">
-    <template v-for="(s, i) in segments" :key="s.kind === 'view' ? `view-${s.index}` : `html-${i}`">
+    <template v-for="(s, i) in segments" :key="s.kind === 'html' ? `html-${i}` : `${s.kind}-${s.index}`">
       <div v-if="s.kind === 'html'" class="contents" v-html="s.html" />
+      <DiagramBlock v-else-if="s.kind === 'diagram'" :source="s.source" @link="openDiagramLink" />
       <div v-else-if="viewAs(s.index, 'table')" class="gosidian-view" :data-view="s.index">
         <ViewTable :view="viewAs(s.index, 'table')!" />
       </div>

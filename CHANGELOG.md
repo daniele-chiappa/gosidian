@@ -8,6 +8,47 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.77.1] — 2026-10-11 — "diagrams drawn"
+
+The diagrams of the notes are drawn in the web UI. Pull the image and
+restart, nothing to migrate. A ```` ```diagram ```` block, and the block
+of a note `type: diagram` embedded with `![[…]]`, shows as a drawing
+instead of its YAML; the drawing code loads only in a note that has a
+diagram, so the web UI's first load stays the same size. Version 2.77.0
+was not released: a flaky test held its build.
+
+### Added
+- **Diagrams drawn** — by [plancia-diagrams](https://github.com/daniele-chiappa/plancia/tree/main/diagrams)
+  0.1.0, a package of the plancia repository: a flow and a tree with Vue
+  Flow and dagre (shapes, classes, groups, edge styles and labels, the
+  positions of `layout`, x and y being the top left corner in pixels), a
+  mind map and a fishbone with Mermaid. A Venn, a matrix and a Gantt chart
+  show their text until they are drawn too. A block at the top level of a
+  note is drawn; one inside a list or a quote stays its code.
+- **In a diagram** — a node with a `[[link]]` opens its note, at the
+  heading the link names, and a web address opens in a tab; **Code** shows
+  the YAML as written, **Export SVG** saves the drawing in the theme's
+  colours; zoom buttons for a flow or a tree, whose drawing pans by
+  dragging. What is wrong in a block is listed above the drawing, line by
+  line. The colours follow the theme, light or dark.
+- **`diagram_links`** — `POST /api/v1/preview` returns the `[[links]]` of
+  a note's diagrams, embeds included, resolved as the note's other links
+  are.
+- **One format, two readers** — `docs/diagrams/examples/expected.json`
+  holds what the server's reader makes of every example (its problems, on
+  their lines, and its text); the web UI's tests run plancia-diagrams'
+  reader on the same examples against it.
+
+### Changed
+- The build leaves out the kinds of Mermaid that no diagram uses, so the
+  binary, which embeds the web UI, carries only what it draws.
+- KaTeX, which Mermaid brings, is held at 0.18 (Mermaid asks for a 0.16
+  with a published advisory; no diagram label reaches it).
+
+### Fixed
+- A data race in a test of the pipeline plugins (the test's own in-memory
+  host, read without its lock).
+
 ## [2.76.0] — 2026-10-10 — "diagrams"
 
 Diagrams in the notes, first as a format: a block of YAML that describes

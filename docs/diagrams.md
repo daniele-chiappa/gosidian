@@ -26,14 +26,23 @@ edges:
 - in a ```` ```diagram ```` block inside any note;
 - or in a note with `type: diagram` in its frontmatter that holds one such block. Other notes embed it with `![[team/diagrams/arrivals]]`, link it and find it like any note.
 
-**What the server does with them today**:
+**What the server does with them**:
 - it checks every block, both when a note is written and in the lint rule `diagram-invalid`;
 - it counts the `[[links]]` of the nodes as links of the note, so they show as backlinks;
 - it says each diagram in words to the agents (`memory_get`).
 
-The web UI drawing and the editor come in the next releases of the plan
-`20261010-diagrammi`: a flow drawn with Vue Flow and dagre, the other
-kinds drawn by Mermaid. Until then a diagram shows as its YAML.
+**What the web UI does with them**: it draws them, with
+[plancia-diagrams](https://github.com/daniele-chiappa/plancia/tree/main/diagrams),
+a package of the plancia repository.
+- A **flow** and a **tree** are drawn with Vue Flow, laid out by dagre in their `direction`, at the positions of `layout:` where it gives some. They pan by dragging and zoom with their buttons.
+- A **mind map** and a **fishbone** are drawn by Mermaid.
+- A **Venn**, a **matrix** and a **Gantt** show their text until they are drawn too.
+- A node with a `[[link]]` opens its note, at the heading the link names; an address opens in a tab. `POST /api/v1/preview` returns the diagrams' `[[links]]` resolved as the note's other links are, in `diagram_links` (the target as written → the note's path).
+- **Code** shows the YAML as written; **Export SVG** saves the drawing in the colours of the theme, light or dark.
+- What is wrong in a block is listed above the drawing, which leaves those parts out.
+- A block at the top level of a note is drawn; one inside a list or a quote stays its code.
+
+The editor comes in the next release of the plan `20261010-diagrammi`.
 
 ## Common fields
 
@@ -42,7 +51,7 @@ kinds drawn by Mermaid. Until then a diagram shows as its YAML.
 | `diagram` | the format, `1`; it may be left out |
 | `kind` | `flow`, `tree`, `mindmap`, `fishbone`, `venn`, `matrix`, `gantt` |
 | `title`, `description` | text, both optional |
-| `layout` | optional, written by an editor: `id: {x, y, w, h}` for the ids of the diagram. Without it the drawing lays itself out; an agent can leave it alone |
+| `layout` | optional, written by an editor: `id: {x, y, w, h}` for the ids of the diagram, `x` and `y` the top left corner and `w`, `h` the size, in pixels. Without it the drawing lays itself out; an agent can leave it alone |
 
 An **id** is a letter, then letters, digits, `-` and `_`, at most 40, and
 is used once in a diagram. A **link** is a `[[note]]` (or
@@ -148,8 +157,12 @@ A block that does not read gives:
 
 `docs/diagrams/examples/valid/` holds one example of each kind at least.
 `docs/diagrams/examples/invalid/` holds a broken one per problem, its first
-line naming the problem. The server's tests read them all, and so will the
-web UI's: they are the format's contract.
+line naming the problem. `expected.json` says what the server's reader makes
+of each one: its problems, on their lines, and its text
+(`UPDATE_EXPECTED=1 go test ./internal/diagram` writes it again). The
+server's tests read them all, and the web UI's run plancia-diagrams' reader
+on them against `expected.json`: they are the format's contract, and the two
+readers give the same messages on the same lines.
 
 ## In Obsidian
 
