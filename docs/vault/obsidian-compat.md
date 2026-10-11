@@ -64,7 +64,13 @@ backlinks appear — without editing a single file.
 - **`.gosidian/` folder** — hidden, Obsidian doesn't touch it.
 - **```` ```diagram ```` blocks** ([diagrams](../diagrams.md)) — Obsidian
   shows their YAML as code. The links of their nodes are links for
-  gosidian, not for Obsidian.
+  gosidian, not for Obsidian. A diagram may keep a **Mermaid twin**, a
+  ```` ```mermaid ```` block right under it that Obsidian draws: gosidian's
+  diagram editor writes it on request and again at every save, and hides
+  it. A flow exports as an Obsidian canvas too.
+- **Obsidian canvases** (`.canvas`) stay read-only in gosidian; **Convert
+  to a diagram** makes a diagram note of one beside it, and the canvas
+  file is left as it is.
 - **Custom frontmatter fields** (`importance`, `type`, `status`,
   `pinned`, `trigger_phrase`) — Obsidian preserves them but doesn't
   interpret them. You can query them with the **Dataview** plugin,

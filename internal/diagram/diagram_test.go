@@ -158,3 +158,38 @@ func TestText_Kinds(t *testing.T) {
 		}
 	}
 }
+
+func TestHash_AsPlanciaDiagrams(t *testing.T) {
+	// plancia-diagrams' diagramHash gives the same (its test/convert.test.ts).
+	for src, want := range map[string]string{
+		"":                               "811c9dc5",
+		"kind: flow\nnodes: [à]":         "bc7171d9",
+		"kind: flow\r\nnodes: [à]  \n\n": "bc7171d9",
+	} {
+		if got := Hash(src); got != want {
+			t.Errorf("Hash(%q) = %s, want %s", src, got, want)
+		}
+	}
+}
+
+func TestTwins(t *testing.T) {
+	yaml := "kind: tree\nroot: A\n"
+	twin := "```mermaid\n" + TwinMark + " " + Hash(yaml) + " — made from the diagram above\nflowchart TB\n```\n"
+	body := "# N\n\n```diagram\n" + yaml + "```\n\n" + twin + "\n```diagram\nkind: tree\nroot: B\n```\n" + twin
+	got := Twins([]byte(body))
+	want := []Twin{{Line: 8, DiagramLine: 3, State: TwinCurrent}, {Line: 17, DiagramLine: 13, State: TwinStale}}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("Twins = %+v, want %+v", got, want)
+	}
+	s := Summaries([]byte(body))
+	if s[0].Twin != TwinCurrent || s[1].Twin != TwinStale {
+		t.Errorf("summaries: %+v", s)
+	}
+	// A plain ```mermaid block is no twin, and a twin with text between is none either.
+	if tw := Twins([]byte("```diagram\n" + yaml + "```\n\n```mermaid\nflowchart TB\n```\n")); tw != nil {
+		t.Errorf("plain mermaid: %+v", tw)
+	}
+	if tw := Twins([]byte("```diagram\n" + yaml + "```\n\nText.\n\n" + twin)); len(tw) != 1 || tw[0].DiagramLine != 0 {
+		t.Errorf("far twin: %+v", tw)
+	}
+}

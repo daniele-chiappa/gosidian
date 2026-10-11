@@ -241,6 +241,8 @@ type Summary struct {
 	Line     int       `json:"line"`
 	Text     string    `json:"text,omitempty"`
 	Problems []Problem `json:"problems,omitempty"`
+	// Twin is the state of the diagram's Mermaid twin, when it has one.
+	Twin TwinState `json:"twin,omitempty"`
 }
 
 // Summaries says the diagrams of a note's body; nil without any.
@@ -249,10 +251,16 @@ func Summaries(body []byte) []Summary {
 	if len(blocks) == 0 {
 		return nil
 	}
+	twins := map[int]TwinState{}
+	for _, t := range Twins(body) {
+		if t.DiagramLine > 0 {
+			twins[t.DiagramLine] = t.State
+		}
+	}
 	out := make([]Summary, 0, len(blocks))
 	for _, b := range blocks {
 		d, problems := Parse(b.Src)
-		s := Summary{Line: b.Line, Problems: problems}
+		s := Summary{Line: b.Line, Problems: problems, Twin: twins[b.Line]}
 		if d != nil {
 			s.Kind, s.Title, s.Text = d.Kind, d.Title, Text(d)
 		}

@@ -6,8 +6,9 @@
  *   - Markdown: a normal .md note (frontmatter title), opened in edit mode.
  *   - Image:    a media note (ADR-013) — upload an image, then create a .md
  *               with `type: image` + `media:` + the caption as body.
- *   - Diagram:  a note `type: diagram` (IMP-169) holding the template of the
- *               kind chosen, opened in the diagram window.
+ *   - Diagram:  a note `type: diagram` (IMP-169) holding an empty template
+ *               of the kind chosen or a ready one (an Eisenhower, a SWOT, a
+ *               project…), opened in the diagram window.
  *
  * Restores manual note creation, which the v2.0 HTMX→Vue migration never
  * ported (IMP-058); the backend (POST /notes, POST /attach) was already there.
@@ -22,7 +23,7 @@ import { planciaKey } from '@/composables/planciaKey'
 import { noteFrontmatter } from './noteFrontmatter'
 import { errorText } from '@/api/errors'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
-import { DIAGRAM_KINDS, useDiagramLabels } from '@/components/domain/diagramLabels'
+import { DIAGRAM_KINDS, READY_IDS, useDiagramLabels } from '@/components/domain/diagramLabels'
 
 // name: the note's name to start from (a missing note's "create it here").
 const props = defineProps<{ path?: string; name?: string }>()
@@ -35,7 +36,8 @@ const openWindow = inject<(spec: OpenSpec) => string>('openWindow', (s) => store
 
 type Kind = 'markdown' | 'image' | 'diagram'
 const kind = ref<Kind>('markdown')
-const diagramKind = ref<(typeof DIAGRAM_KINDS)[number]>('flow')
+// A kind (its empty template) or `tpl:<id>`, a ready template.
+const diagramKind = ref<(typeof DIAGRAM_KINDS)[number] | `tpl:${(typeof READY_IDS)[number]}`>('flow')
 const diagramWords = useDiagramLabels()
 
 // Target folder (no trailing slash). Empty means the vault root.
@@ -86,8 +88,13 @@ async function submit() {
           ['tags', [project.value, 'type:image']],
         ]) + `${caption.value.trim()}\n`
     } else if (kind.value === 'diagram') {
-      const { diagramTemplate } = await import('@/components/domain/diagramView')
-      const yaml = diagramTemplate(diagramKind.value, diagramWords.template.value)
+      const { diagramTemplate, readyTemplates } = await import('@/components/domain/diagramView')
+      const choice = diagramKind.value
+      const yaml = choice.startsWith('tpl:')
+        ? (readyTemplates(diagramWords.ready.value, diagramWords.template.value).find(
+            (r) => `tpl:${r.id}` === choice,
+          )?.source ?? '')
+        : diagramTemplate(choice as (typeof DIAGRAM_KINDS)[number], diagramWords.template.value)
       content = frontmatter([['type', 'diagram']]) + '```diagram\n' + yaml + '```\n'
     } else {
       content = frontmatter()
@@ -95,6 +102,9 @@ async function submit() {
     }
     const created = await createNote(notePath.value, content)
     treeStore.refresh()
+    // This window closes first, then the new one opens: with one window on
+    // screen, plancia closes the focused window, which would be the new one.
+    emit('close')
     if (kind.value === 'diagram') {
       // Its one block, at index 0, straight into the editor.
       openWindow({
@@ -103,7 +113,6 @@ async function submit() {
         title: t('diagram.window_title', { name: created.title || created.path }),
         props: { path: created.path, index: 0 },
       })
-      emit('close')
       return
     }
     openWindow({
@@ -112,7 +121,6 @@ async function submit() {
       title: created.title || created.path,
       props: { path: created.path, ...(mode ? { mode } : {}) },
     })
-    emit('close')
   } catch (e) {
     error.value = errorText(e, t, t('note_create.err_failed'))
   } finally {
@@ -187,7 +195,14 @@ async function submit() {
           data-diagram-kind
           class="mt-1 h-control py-0 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
         >
-          <option v-for="k in DIAGRAM_KINDS" :key="k" :value="k">{{ diagramWords.kinds.value[k] }}</option>
+          <optgroup :label="t('diagram.template_empty')">
+            <option v-for="k in DIAGRAM_KINDS" :key="k" :value="k">{{ diagramWords.kinds.value[k] }}</option>
+          </optgroup>
+          <optgroup :label="t('diagram.template_ready')">
+            <option v-for="id in READY_IDS" :key="id" :value="`tpl:${id}`">
+              {{ diagramWords.readyNames.value[id] }}
+            </option>
+          </optgroup>
         </select>
       </label>
 

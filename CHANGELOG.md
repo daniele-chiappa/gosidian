@@ -8,6 +8,57 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.79.0] — 2026-10-11 — "diagram forms and conversions"
+
+Every kind of diagram is drawn and edited in the web UI, and diagrams
+convert to and from Mermaid and Obsidian canvases. Pull the image and
+restart, nothing to migrate.
+
+### Added
+- **Venn, matrix and Gantt drawn** — with
+  [plancia-diagrams](https://github.com/daniele-chiappa/plancia/tree/main/diagrams) 0.3.0
+  a Venn and a Gantt chart are drawn by Mermaid in the theme's colours,
+  light or dark, and a matrix by the package itself: the quadrants with
+  their axes and points, or the grid as a table.
+- **Forms for them** — the diagram window edits a Venn's sets and shared
+  parts; a matrix's axes, quadrants and points, a point also dragged on
+  the drawing, and a grid as a table of rows, columns and cells; a Gantt's
+  sections and tasks, a task starting on a date or after another and
+  lasting days or until its last day, with its status and link. Each form
+  sits beside the drawing, or under it in a narrow window.
+- **Export** — in the head of a diagram and in its window: the drawing as
+  SVG, the diagram as Mermaid (`.mmd`), a flow as an Obsidian canvas
+  (`.canvas`).
+- **Import** — in the editor, a pasted Mermaid (a flowchart, a mind map, a
+  Gantt, a quadrant chart, read by Mermaid's own parser) or the JSON of an
+  Obsidian canvas takes the place of the diagram, and what the conversion
+  left out is listed.
+- **Convert to a diagram** — on a top-level ```` ```mermaid ```` block of a
+  note, for who may change it: the block becomes a ```` ```diagram ```` block
+  in its place. On an Obsidian canvas: a note `type: diagram` beside it
+  holds a flow of its cards, at their places; the canvas stays as it is.
+- **A Mermaid twin for Obsidian** — a box in the diagram window keeps a
+  ```` ```mermaid ```` block under the diagram, which Obsidian draws. It is
+  written again at every save, marked with the hash of the YAML it was
+  made from, and the web UI does not show it.
+- **Ready templates** — the **+** of a folder offers ten diagrams to start
+  from: a process with a decision, an architecture, an organisation chart,
+  a brainstorm, the 6M fishbone, three sets, the Eisenhower matrix, impact
+  and effort, SWOT, a project in phases.
+- **`diagram-twin-stale`** — a lint rule and a write notice for a Mermaid
+  twin made from an earlier version of its diagram (as an agent leaves it
+  when it changes the diagram through MCP), or with no diagram above it.
+  `memory_get` says each diagram's `twin` state, and the bootstrap tells
+  agents to change the diagram, not the twin.
+
+### Changed
+- A Gantt task's `end` is its last day, included, as the docs now say.
+
+### Fixed
+- With one window on screen (the tabs layout), **Create** in the new-note
+  window, and **Create it here** of a missing note, could close the new
+  window instead of their own.
+
 ## [2.78.1] — 2026-10-11 — "diagram editor"
 
 The diagrams of the notes are edited in the web UI. Pull the image and

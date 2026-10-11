@@ -4,18 +4,19 @@
  * plancia-diagrams reads its YAML, lists what is wrong in it, and draws it;
  * a link of the drawing comes back as `link`, which MarkdownPreview opens
  * as a note window or a tab. «Edit» (for who may change the note) opens
- * the diagram window, «Code» shows the YAML as written, and «Export SVG»
- * saves the drawing with the page's colours: they sit in the head of the
- * diagram, beside its zoom buttons. The drawing loads on first use;
- * when it cannot load, the block shows its code.
+ * the diagram window, «Code» shows the YAML as written, and «Export»
+ * saves the drawing with the page's colours, the Mermaid, or a flow as an
+ * Obsidian canvas: they sit in the head of the diagram, beside its zoom
+ * buttons. The drawing loads on first use; when it cannot load, the block
+ * shows its code.
  */
-import { computed, defineAsyncComponent, h, ref } from 'vue'
+import { defineAsyncComponent, h, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { saveBlob } from '@/api/download'
 import { useDiagramLabels } from './diagramLabels'
+import DiagramExportMenu from './DiagramExportMenu.vue'
 
 // editable: the reader may change the note the block is written in.
-const props = defineProps<{ source: string; editable?: boolean }>()
+defineProps<{ source: string; editable?: boolean }>()
 const emit = defineEmits<{
   link: [link: { target: string; kind: 'note' | 'url'; label: string }]
   edit: []
@@ -39,23 +40,7 @@ const DiagramView = defineAsyncComponent({
 })
 
 const labels = useDiagramLabels().view
-
-/** The file name of the export: the diagram's title, else «diagram». */
-const fileName = computed(() => {
-  const title = /^title:\s*["']?(.+?)["']?\s*$/m.exec(props.source)?.[1] ?? ''
-  const base = title
-    .normalize('NFKD')
-    .replace(/[^\w\s-]/g, '')
-    .trim()
-    .replace(/\s+/g, '-')
-    .toLowerCase()
-  return `${base || 'diagram'}.svg`
-})
-
-function exportSvg() {
-  const svg = view.value?.exportSVG()
-  if (svg) saveBlob(new Blob([svg], { type: 'image/svg+xml' }), fileName.value)
-}
+const svg = () => view.value?.exportSVG() ?? null
 </script>
 
 <template>
@@ -98,15 +83,7 @@ function exportSvg() {
         >
           {{ t('diagram.show_code') }}
         </button>
-        <button
-          v-if="drawable"
-          type="button"
-          class="gosidian-diagram__button"
-          data-diagram-export
-          @click="exportSvg"
-        >
-          {{ t('diagram.export_svg') }}
-        </button>
+        <DiagramExportMenu v-if="drawable" :source="source" :svg="svg" drawable />
       </template>
     </DiagramView>
   </div>

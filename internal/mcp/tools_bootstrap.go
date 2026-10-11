@@ -170,6 +170,8 @@ type bootstrapDiagrams struct {
 	NoteType string   `json:"note_type"`
 	Kinds    []string `json:"kinds"`
 	Example  string   `json:"example"`
+	// Twin says what a diagram's Mermaid twin is, so an agent leaves it be.
+	Twin string `json:"twin"`
 }
 
 func diagramCapability() bootstrapDiagrams {
@@ -180,6 +182,7 @@ func diagramCapability() bootstrapDiagrams {
 	return bootstrapDiagrams{
 		Format: diagram.Version, Block: "```" + diagram.Lang, NoteType: diagram.NoteType, Kinds: kinds,
 		Example: "kind: flow\nnodes: [{id: a, label: Start, link: \"[[project/note]]\"}, {id: b, label: Done}]\nedges: [\"a -> b: label\"]",
+		Twin:    "a ```mermaid block right after a diagram, first line " + diagram.TwinMark + " <hash>, is its twin for Obsidian, written by the web editor: change the diagram, not the twin",
 	}
 }
 

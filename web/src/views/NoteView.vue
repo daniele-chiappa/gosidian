@@ -57,6 +57,7 @@ import HTMLPreview from '@/components/domain/HTMLPreview.vue'
 import MediaPreview from '@/components/domain/MediaPreview.vue'
 import TablePreview from '@/components/domain/TablePreview.vue'
 import CanvasPreview from '@/components/domain/CanvasPreview.vue'
+import { convertCanvas } from '@/components/domain/canvasConvert'
 import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
 import { planciaKey, base } from '@/composables/planciaKey'
 import { useAccessStore } from '@/stores/access'
@@ -156,6 +157,29 @@ const isCanvas = computed(
 )
 // A base or a canvas: shown, never edited here.
 const isReadOnlyFile = computed(() => isBase.value || isCanvas.value)
+
+// A canvas made a diagram note beside it (IMP-169, F3), for who may write there.
+const canWriteBeside = computed(() => access.canWrite(props.path))
+const convertingCanvas = ref(false)
+const canvasError = ref('')
+async function toDiagram() {
+  if (!note.value?.canvas || convertingCanvas.value) return
+  convertingCanvas.value = true
+  canvasError.value = ''
+  try {
+    const made = await convertCanvas(note.value.path, note.value.canvas)
+    openWindow({
+      type: 'diagram',
+      key: planciaKey('diagram', `${made.path}#0`),
+      title: t('diagram.window_title', { name: base(made.path) }),
+      props: { path: made.path, index: 0, notes: made.warnings },
+    })
+  } catch (e) {
+    canvasError.value = errorText(e, t, t('diagram.convert_failed'))
+  } finally {
+    convertingCanvas.value = false
+  }
+}
 // A note the server would not take back from the web UI (noteSize.ts):
 // its text, read-only, with no preview.
 const tooLarge = computed(() => !!note.value && !isReadOnlyFile.value && tooLargeToSend(note.value.content))
@@ -490,6 +514,9 @@ function createHere() {
   const i = path.value.lastIndexOf('/')
   const folder = i >= 0 ? path.value.slice(0, i) : ''
   const name = (i >= 0 ? path.value.slice(i + 1) : path.value).replace(/\.md$/i, '')
+  // This window closes first: with one window on screen, plancia closes
+  // the focused window, which would be the creation window.
+  emit('close')
   // Keyed by the note, not the folder: an open creation window of the
   // folder would take the focus with a name of its own.
   openWindow({
@@ -498,7 +525,6 @@ function createHere() {
     title: t('note_create.window_title', { name: folder.split('/').pop() || '/' }),
     props: { path: folder, name },
   })
-  emit('close')
 }
 
 function openHistory() {
@@ -783,9 +809,23 @@ watch(path, load)
       />
       <!-- An Obsidian canvas (IMP-144): its cards on a plane, full-bleed -->
       <div v-else-if="isCanvas && note" class="flex h-full flex-col">
-        <p class="px-4 py-1 text-xs text-text-muted font-mono">
-          <span :title="`etag ${note.etag}`">{{ note.path }} · {{ formatSize(note.size) }}</span> ·
-          {{ t('note.canvas_readonly') }}
+        <p class="flex flex-wrap items-center gap-2 px-4 py-1 text-xs text-text-muted">
+          <span class="font-mono">
+            <span :title="`etag ${note.etag}`">{{ note.path }} · {{ formatSize(note.size) }}</span> ·
+            {{ t('note.canvas_readonly') }}
+          </span>
+          <button
+            v-if="note.canvas && canWriteBeside"
+            type="button"
+            class="rounded border border-border px-2 py-0.5 hover:bg-surface-hover disabled:opacity-50"
+            :title="t('diagram.convert_canvas_hint')"
+            :disabled="convertingCanvas"
+            data-canvas-convert
+            @click="toDiagram"
+          >
+            {{ t('diagram.convert_canvas') }}
+          </button>
+          <span v-if="canvasError" class="text-danger" role="alert">{{ canvasError }}</span>
         </p>
         <CanvasPreview v-if="note.canvas" class="flex-1" :canvas="note.canvas" :path="note.path" />
       </div>

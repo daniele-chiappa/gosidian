@@ -392,7 +392,10 @@ from the caller's token identity and cannot be forged, while
   a node that does not run before; [pipelines](../pipelines.md)),
   `diagram-invalid` (a ```` ```diagram ```` block that does not read as a
   diagram of the format, on the line of the problem, or a `type: diagram`
-  note without exactly one block; [diagrams](../diagrams.md)). Zero
+  note without exactly one block; [diagrams](../diagrams.md)),
+  `diagram-twin-stale` (a diagram's ```` ```mermaid ```` twin made from an
+  earlier version of it, as a write that changes the diagram leaves it, or
+  a twin with no diagram right above). Zero
   `severity:error` on a coherent vault.
 - `memory_self_improve(category, title, friction, confidence, …)` —
   *experimental, opt-in, off by default*: record a structured insight

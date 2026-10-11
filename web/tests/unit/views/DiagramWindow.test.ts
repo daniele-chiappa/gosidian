@@ -14,6 +14,11 @@ vi.mock('@/components/domain/diagramView', async () => {
   return {
     findDiagramBlocks: lib.findDiagramBlocks,
     replaceDiagramBlock: lib.replaceDiagramBlock,
+    writeDiagramBlock: lib.writeDiagramBlock,
+    findTwin: lib.findTwin,
+    twinText: lib.twinText,
+    parseDiagram: lib.parseDiagram,
+    toMermaid: lib.toMermaid,
     DiagramView: defineComponent({
       props: { source: String },
       setup: (p) => () => h('div', { class: 'view' }, p.source),
@@ -67,9 +72,9 @@ vi.mock('plancia', async (orig) => ({
 import DiagramWindow from '@/views/DiagramWindow.vue'
 
 const i18n = () => createI18n({ legacy: false, locale: 'en', messages: { en: enUI } })
-const mountAt = async (index: number) => {
+const mountAt = async (index: number, notes?: string[]) => {
   const w = mount(DiagramWindow, {
-    props: { path: 'p/n.md', index },
+    props: { path: 'p/n.md', index, notes },
     global: { plugins: [i18n()], provide: { openWindow: vi.fn() } },
   })
   // Until the note is loaded and the editor (or the note of a missing block) shows.
@@ -131,5 +136,43 @@ describe('DiagramWindow (IMP-169, F2)', () => {
   it('says when the block is no longer there', async () => {
     const w = await mountAt(5)
     expect(w.find('[data-diagram-missing]').exists()).toBe(true)
+  })
+
+  it('writes a Mermaid twin under the block when asked, again at each save, and takes it away', async () => {
+    const w = await mountAt(1)
+    await w.find('[data-diagram-twin]').setValue(true)
+    expect(w.emitted('dirty')?.at(-1)).toEqual([true])
+    await w.find('[data-diagram-save]').trigger('click')
+    await settle()
+    const one = updates.at(-1)!.content
+    expect(one).toContain(
+      '```diagram\nkind: tree\nroot: Second\n```\n\n```mermaid\n%% diagram-twin ',
+    )
+    expect(one).toContain('flowchart TB\n  n0(["Second"])\n```\n')
+    expect(w.emitted('dirty')?.at(-1)).toEqual([false])
+    // A change to the diagram writes the twin again: one twin, the new text.
+    await w.find('.stand-in').trigger('click')
+    await w.find('[data-diagram-save]').trigger('click')
+    await settle()
+    expect(updates.at(-1)!.content.match(/```mermaid/g)).toHaveLength(1)
+    // Turned off, it goes; the first block never had one.
+    await w.find('[data-diagram-twin]').setValue(false)
+    await w.find('[data-diagram-save]').trigger('click')
+    await settle()
+    expect(updates.at(-1)!.content).not.toContain('```mermaid')
+    expect(updates.at(-1)!.content).toContain('root: Second\n# edited\n```\n')
+  })
+
+  it('reads the twin a note has, and says what a conversion left out', async () => {
+    remote = {
+      content: NOTE.replace(
+        'root: Second\n```\n',
+        'root: Second\n```\n\n```mermaid\n%% diagram-twin 00000000 — x\nflowchart TB\n```\n',
+      ),
+      etag: 'e1',
+    }
+    const w = await mountAt(1, ['styles are not kept'])
+    expect((w.find('[data-diagram-twin]').element as HTMLInputElement).checked).toBe(true)
+    expect(w.find('[data-diagram-notes]').text()).toContain('styles are not kept')
   })
 })

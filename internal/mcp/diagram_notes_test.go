@@ -95,3 +95,38 @@ func TestDiagrams_BootstrapExampleReads(t *testing.T) {
 		t.Errorf("the bootstrap's example does not read: %v", problems)
 	}
 }
+
+// A twin left older than its diagram by a write gets a notice, and
+// memory_get says so.
+func TestDiagrams_StaleTwinNotice(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	ctx := context.Background()
+	yaml := "kind: tree\nroot: A\n"
+	twin := "```mermaid\n" + diagram.TwinMark + " " + diagram.Hash(yaml) + " — made from the diagram above\nflowchart TB\n```\n"
+	create := func(path, content string) *mcplib.CallToolResult {
+		t.Helper()
+		req := call(map[string]any{"path": path, "content": content})
+		req.Params.Name = "memory_create"
+		res, err := callNotesMiddleware(s.handleCreate)(ctx, req)
+		if err != nil || res == nil || res.IsError {
+			t.Fatalf("create %s: %v %+v", path, err, res)
+		}
+		return res
+	}
+	if res := create("p/current.md", "# C\n\n```diagram\n"+yaml+"```\n\n"+twin); res.StructuredContent != nil {
+		if obj, ok := structuredObject(res.StructuredContent); ok && obj[noticesField] != nil {
+			t.Errorf("a current twin got a notice: %v", resultNotices(t, res))
+		}
+	}
+	res := create("p/stale.md", "# S\n\n```diagram\nkind: tree\nroot: B\n```\n\n"+twin)
+	n := strings.Join(resultNotices(t, res), " ")
+	for _, want := range []string{"line 8 is the twin of the diagram at line 3", "writes the twin again"} {
+		if !strings.Contains(n, want) {
+			t.Errorf("notice %q lacks %q", n, want)
+		}
+	}
+	got, _ := s.handleGet(ctx, call(map[string]any{"path": "p/stale.md"}))
+	if !strings.Contains(resultText(t, got), `"twin":"stale"`) {
+		t.Errorf("memory_get: %s", resultText(t, got))
+	}
+}

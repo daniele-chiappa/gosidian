@@ -8,10 +8,12 @@ import { fileURLToPath, URL } from 'node:url'
 
 // Mermaid loads each kind of diagram it knows on demand, so a build carries
 // all of them as chunks (38 kinds: 3.7 MB of JS, 9 MB of source maps), and
-// the binary embeds the build. plancia-diagrams draws two with it, the mind
-// map and the fishbone (IMP-169): the others are left out, each replaced by
-// an empty module that no diagram of a note ever reaches. The list is read
-// from mermaid's own core, so a new version needs no change here.
+// the binary embeds the build. plancia-diagrams draws four with it (the mind
+// map, the fishbone, the Venn and the Gantt) and reads two more when it
+// converts Mermaid to a diagram (the flowchart and the quadrant chart),
+// IMP-169: the others are left out, each replaced by an empty module that
+// no diagram of a note ever reaches. The list is read from mermaid's own
+// core, so a new version needs no change here.
 function mermaidKinds(keep: RegExp): Plugin {
   let skipped = new Set<string>()
   return {
@@ -70,7 +72,9 @@ const devApi = process.env.GOSIDIAN_API ?? 'http://127.0.0.1:8084'
 export default defineConfig({
   plugins: [
     vue(),
-    mermaidKinds(/^(mindmap-definition|ishikawaDiagram)-/),
+    mermaidKinds(
+      /^(mindmap-definition|ishikawaDiagram|vennDiagram|ganttDiagram|flowDiagram|quadrantDiagram)-/,
+    ),
     // Pre-compile i18n message catalogs into AOT functions at build
     // time. Without this, vue-i18n's runtime compiler uses
     // `new Function(...)` to compile messages on demand — blocked by

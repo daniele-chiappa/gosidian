@@ -15,7 +15,8 @@ const maxDiagramProblemsNoted = 5
 // ```diagram block of the note just written that does not read (ADR-036),
 // with the problems on the note's own lines. Like the schema notes, it
 // warns and does not refuse: a diagram half written must not stop a note,
-// and the lint rule diagram-invalid lists it until it is fixed.
+// and the lint rule diagram-invalid lists it until it is fixed. A Mermaid
+// twin left older than its diagram gets a note too (diagram-twin-stale).
 func (s *Server) noteDiagramProblems(ctx context.Context, rel string, content []byte) {
 	if !strings.HasSuffix(strings.ToLower(rel), ".md") {
 		return
@@ -40,5 +41,12 @@ func (s *Server) noteDiagramProblems(ctx context.Context, rel string, content []
 		addCallNote(ctx, fmt.Sprintf(
 			"%s: the ```diagram block at line %d does not read as a diagram (%s). The note is saved as written; fix the block with memory_edit (the format and its kinds: flow, tree, mindmap, fishbone, venn, matrix, gantt).",
 			rel, b.Line, strings.Join(msgs, "; ")))
+	}
+	for _, t := range diagram.Twins(content) {
+		if t.State == diagram.TwinStale {
+			addCallNote(ctx, fmt.Sprintf(
+				"%s: the ```mermaid block at line %d is the twin of the diagram at line %d, made from an earlier version of it: Obsidian shows the old drawing. Saving the diagram in the web UI's editor writes the twin again; or delete the twin block.",
+				rel, t.Line, t.DiagramLine))
+		}
 	}
 }

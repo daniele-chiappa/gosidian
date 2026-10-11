@@ -115,8 +115,9 @@ context menu, names starting at the folder) and
 - **force-graph** (2D) and **3d-force-graph** for the graph view,
   lazy-loaded
 - **plancia-diagrams** for the diagrams of the notes (Vue Flow and dagre,
-  Mermaid for mind maps and fishbones), loaded by the first note that
-  shows one ([diagrams](../diagrams.md))
+  Mermaid for mind maps, fishbones, Venns and Gantts, an SVG of its own for
+  matrices), loaded by the first note that shows one
+  ([diagrams](../diagrams.md))
 - **vue-i18n** with catalogues precompiled at build time from
   `internal/i18n/catalogs/` (shared with the Go side); a strict CSP
   (`script-src 'self'`, no eval) is enforced
@@ -130,12 +131,18 @@ the block of a note `type: diagram` embedded with `![[ ]]`
 ([diagrams](../diagrams.md)). A flow or a tree pans by dragging and zooms
 with its `+`, `−` and fit buttons (the wheel scrolls the note). A node
 with a `[[link]]` opens its note, at the heading the link names; an
-address opens in a tab. **Code** shows the YAML as written, **Export
-SVG** saves the drawing in the theme's colours. What is wrong in a block
-is listed above its drawing, line by line. **Edit** opens the diagram
-window, where a flow is edited on its drawing, a tree, a mind map or a
-fishbone as indented lines, and every kind in its YAML; **Save** writes
-the block back in its note. The **+** of a folder makes a diagram note.
+address opens in a tab. **Code** shows the YAML as written, **Export**
+saves the drawing in the theme's colours (SVG), the Mermaid, or a flow's
+Obsidian canvas. What is wrong in a block is listed above its drawing,
+line by line. **Edit** opens the diagram window, where a flow is edited
+on its drawing, a tree, a mind map or a fishbone as indented lines, a
+Venn, a matrix or a Gantt as a form (a matrix's points dragged on the
+drawing), and every kind in its YAML; **Import…** puts a pasted Mermaid
+or canvas in its place; **Mermaid twin for Obsidian** keeps a Mermaid
+block under the diagram for Obsidian; **Save** writes the block back in
+its note. The **+** of a folder makes a diagram note, empty or from a
+ready template. A ```` ```mermaid ```` block of a note and an Obsidian
+canvas have **Convert to a diagram**.
 
 ## Language switching
 

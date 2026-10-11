@@ -35,9 +35,13 @@
  * is drawn by DiagramBlock (plancia-diagrams, loaded on first use). A link
  * of a diagram opens like a wikilink: `diagramLinks`, from /api/v1/preview,
  * says the note each [[link]] resolves to; one that resolves to nothing
- * stays closed, as a dangling wikilink does.
+ * stays closed, as a dangling wikilink does. A diagram's Mermaid twin, the
+ * block right after it for Obsidian, is not shown. Another top-level
+ * ```mermaid block stays its code, with «Convert to a diagram» for who may
+ * change its note: the block becomes a ```diagram one, opened in the editor.
  */
 import { computed, inject, ref } from 'vue'
+import { isAxiosError } from 'axios'
 import { sanitizePreviewHtml } from './sanitizePreview'
 import { useWindowsStore, type OpenSpec } from 'plancia'
 import { planciaKey, base } from '@/composables/planciaKey'
@@ -45,8 +49,15 @@ import type { ViewData } from '@/api/preview'
 import ViewTable from '@/components/views/ViewTable.vue'
 import ViewBoard from '@/components/views/ViewBoard.vue'
 import ViewCount from '@/components/views/ViewCount.vue'
-import { hasDiagrams, splitViews, type DiagramSegment } from '@/components/views/segments'
-import { getNote } from '@/api/notes'
+import {
+  hasDiagrams,
+  hasMermaid,
+  splitViews,
+  type DiagramSegment,
+  type MermaidSegment,
+} from '@/components/views/segments'
+import { getNote, updateNote } from '@/api/notes'
+import { errorText } from '@/api/errors'
 import { useAccessStore } from '@/stores/access'
 import { i18n } from '@/locales'
 import DiagramBlock from './DiagramBlock.vue'
@@ -76,9 +87,14 @@ const proseClass = computed(
 
 const sanitized = computed(() => sanitizePreviewHtml(props.html))
 
-// The note cut at its views and diagrams, when there are some to show as components.
+// The note cut at its views and diagrams, when there are some to show as
+// components, and at its Mermaid blocks where they may be converted.
 const segments = computed(() =>
-  props.views?.length || hasDiagrams(sanitized.value) ? splitViews(sanitized.value) : null,
+  props.views?.length ||
+  hasDiagrams(sanitized.value) ||
+  (props.diagramsEditable && hasMermaid(sanitized.value))
+    ? splitViews(sanitized.value)
+    : null,
 )
 
 /** The view at a placeholder's index, when a component of kind `as` shows it. */
@@ -144,7 +160,7 @@ function onClick(e: MouseEvent) {
 let access: ReturnType<typeof useAccessStore> | null = null
 
 /** Whether a diagram may be edited: its own note, or an embed's that resolved. */
-function canEditDiagram(s: DiagramSegment): boolean {
+function canEditDiagram(s: DiagramSegment | MermaidSegment): boolean {
   if (!props.diagramsEditable) return false
   const path = s.origin === undefined ? props.notePath : s.origin
   access ??= useAccessStore()
@@ -172,6 +188,47 @@ async function editDiagram(s: DiagramSegment) {
     title: i18n.global.t('diagram.window_title', { name: base(path) }),
     props: { path, index: hit.i },
   })
+}
+
+const converting = ref<number | null>(null)
+const convertError = ref<Record<number, string>>({})
+
+/**
+ * Converts a Mermaid block to a diagram: found in its note's text as a
+ * diagram is (its text, and how many of the same come before), read by
+ * Mermaid's parser, and written in place of the block with the note's
+ * etag; then the diagram window opens on it, with what was left out.
+ */
+async function convertMermaid(s: MermaidSegment) {
+  const path = s.origin === undefined ? props.notePath : s.origin
+  if (!path || converting.value !== null) return
+  const t = i18n.global.t
+  converting.value = s.index
+  convertError.value = { ...convertError.value, [s.index]: '' }
+  try {
+    const [lib, note] = await Promise.all([import('./diagramView'), getNote(path)])
+    const same = (a: string) => a === s.source || a.trimEnd() === s.source.trimEnd()
+    const blocks = lib.findDiagramBlocks(note.content, 'mermaid').filter((b) => same(b.source))
+    const hit = blocks[s.occurrence] ?? blocks[0]
+    if (!hit) throw new Error(t('diagram.not_found'))
+    const r = await lib.fromMermaid(hit.source)
+    const content = `${note.content.slice(0, hit.start)}\`\`\`diagram\n${r.source}\`\`\`\n${note.content.slice(hit.end)}`
+    await updateNote(path, { content, ifMatch: note.etag })
+    const index = lib.findDiagramBlocks(content).filter((b) => b.start < hit.start).length
+    openWindow({
+      type: 'diagram',
+      key: planciaKey('diagram', `${path}#${index}`),
+      title: t('diagram.window_title', { name: base(path) }),
+      props: { path, index, notes: r.warnings },
+    })
+  } catch (e) {
+    const why = isAxiosError(e)
+      ? errorText(e, t, t('diagram.convert_failed'))
+      : `${t('diagram.convert_failed')}: ${e instanceof Error ? e.message : String(e)}`
+    convertError.value = { ...convertError.value, [s.index]: why }
+  } finally {
+    converting.value = null
+  }
 }
 
 /** Opens a link of a diagram: a note it resolves to as a window, an address in a tab. */
@@ -203,7 +260,10 @@ function openNote(path: string, anchor: string | null) {
 <template>
   <div v-if="!segments" ref="root" :class="proseClass" v-html="sanitized" @click="onClick" />
   <div v-else ref="root" :class="proseClass" @click="onClick">
-    <template v-for="(s, i) in segments" :key="s.kind === 'html' ? `html-${i}` : `${s.kind}-${s.index}`">
+    <template
+      v-for="(s, i) in segments"
+      :key="s.kind === 'html' ? `html-${i}` : `${s.kind}-${s.index}`"
+    >
       <div v-if="s.kind === 'html'" class="contents" v-html="s.html" />
       <DiagramBlock
         v-else-if="s.kind === 'diagram'"
@@ -212,6 +272,24 @@ function openNote(path: string, anchor: string | null) {
         @link="openDiagramLink"
         @edit="editDiagram(s)"
       />
+      <div v-else-if="s.kind === 'mermaid'" class="gosidian-mermaid" data-mermaid>
+        <div class="contents" v-html="s.html" />
+        <div v-if="canEditDiagram(s)" class="gosidian-mermaid__tools not-prose">
+          <button
+            type="button"
+            class="gosidian-mermaid__button"
+            :title="i18n.global.t('diagram.convert_mermaid_hint')"
+            :disabled="converting !== null"
+            data-mermaid-convert
+            @click="convertMermaid(s)"
+          >
+            {{ i18n.global.t('diagram.convert_mermaid') }}
+          </button>
+          <span v-if="convertError[s.index]" class="gosidian-mermaid__error" role="alert">{{
+            convertError[s.index]
+          }}</span>
+        </div>
+      </div>
       <div v-else-if="viewAs(s.index, 'table')" class="gosidian-view" :data-view="s.index">
         <ViewTable :view="viewAs(s.index, 'table')!" />
       </div>
@@ -261,6 +339,31 @@ function openNote(path: string, anchor: string | null) {
 :deep(.gosidian-embed-end) {
   margin-bottom: 1.25em;
   border-top: 1px dashed rgb(var(--color-text-muted) / 0.5);
+}
+/* A Mermaid block that may become a diagram: its code, the button under it. */
+.gosidian-mermaid__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: -0.75em 0 1.25em;
+  font-size: 0.75rem;
+}
+.gosidian-mermaid__button {
+  height: 26px;
+  padding: 0 0.5rem;
+  border: 1px solid rgb(var(--color-border));
+  border-radius: 0.25rem;
+  background: rgb(var(--color-surface));
+  color: rgb(var(--color-text-muted));
+}
+.gosidian-mermaid__button:hover,
+.gosidian-mermaid__button:focus-visible {
+  color: rgb(var(--color-text));
+  border-color: rgb(var(--color-accent));
+}
+.gosidian-mermaid__error {
+  color: rgb(var(--color-danger));
 }
 /* The note's first and last blocks sit inside the segment wrappers, out of
    reach of the prose rules that drop their outer margins. */

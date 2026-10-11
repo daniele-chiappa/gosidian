@@ -12,6 +12,10 @@ import 'plancia-diagrams'
 const exportSVG = vi.fn(() => '<svg xmlns="http://www.w3.org/2000/svg"/>')
 vi.mock('@/components/domain/diagramView', async () => ({
   findDiagramBlocks: (await import('plancia-diagrams')).findDiagramBlocks,
+  parseDiagram: (await import('plancia-diagrams')).parseDiagram,
+  toMermaid: (await import('plancia-diagrams')).toMermaid,
+  toCanvas: (await import('plancia-diagrams')).toCanvas,
+  fromMermaid: (await import('plancia-diagrams')).fromMermaid,
   DiagramView: defineComponent({
     props: { source: String, labels: Object },
     emits: ['link'],
@@ -42,6 +46,7 @@ vi.mock('@/api/download', () => ({
   saveBlob: (blob: Blob, name: string) => saved.push({ blob, name }),
 }))
 const notes: Record<string, string> = {}
+const writes: { path: string; content: string; ifMatch?: string }[] = []
 vi.mock('@/api/notes', () => ({
   getNote: async (path: string) => ({
     path,
@@ -51,6 +56,11 @@ vi.mock('@/api/notes', () => ({
     size: 0,
     mod_time: '',
   }),
+  updateNote: async (path: string, body: { content: string; ifMatch?: string }) => {
+    writes.push({ path, ...body })
+    notes[path] = body.content
+    return { path, title: path, content: body.content, etag: 'e2', size: 0, mod_time: '' }
+  },
 }))
 vi.mock('@/stores/access', () => ({
   useAccessStore: () => ({ canWrite: (p: string) => !p.startsWith('ro/') }),
@@ -112,8 +122,22 @@ describe('DiagramBlock (IMP-169)', () => {
     })
     await vi.waitFor(() => expect(w.find('.stand-in').exists()).toBe(true), { timeout: 10000 })
     await w.find('[data-diagram-export]').trigger('click')
-    expect(saved.at(-1)?.name).toBe('arrival-docs.svg')
+    expect(w.findAll('[data-diagram-export-as]').map((b) => b.attributes('data-diagram-export-as'))).toEqual([
+      'svg',
+      'mermaid',
+      'canvas',
+    ])
+    await w.find('[data-diagram-export-as="svg"]').trigger('click')
+    await vi.waitFor(() => expect(saved.at(-1)?.name).toBe('arrival-docs.svg'))
     expect(saved.at(-1)?.blob.type).toBe('image/svg+xml')
+    await w.find('[data-diagram-export]').trigger('click')
+    await w.find('[data-diagram-export-as="mermaid"]').trigger('click')
+    await vi.waitFor(() => expect(saved.at(-1)?.name).toBe('arrival-docs.mmd'))
+    expect(await saved.at(-1)!.blob.text()).toBe('flowchart TB\n  accTitle: Arrival#58; docs\n  a["a"]\n')
+    await w.find('[data-diagram-export]').trigger('click')
+    await w.find('[data-diagram-export-as="canvas"]').trigger('click')
+    await vi.waitFor(() => expect(saved.at(-1)?.name).toBe('arrival-docs.canvas'))
+    expect(JSON.parse(await saved.at(-1)!.blob.text()).nodes[0]).toMatchObject({ id: 'a', type: 'text', text: 'a' })
     await w.find('[data-diagram-code]').trigger('click')
     expect(w.find('pre code').text()).toContain('title: "Arrival: docs"')
     expect(w.find('.stand-in').exists()).toBe(false)
@@ -171,5 +195,35 @@ describe('DiagramBlock Edit (IMP-169, F2)', () => {
     })
     await vi.waitFor(() => expect(ro.find('.stand-in').exists()).toBe(true), { timeout: 10000 })
     expect(ro.find('[data-diagram-edit]').exists()).toBe(false)
+  })
+})
+
+describe('A Mermaid block of a note (IMP-169, F3)', () => {
+  it('converts to a diagram in place, for who may write the note, and opens it', async () => {
+    notes['p/m.md'] = '# M\n\n```diagram\nkind: tree\nroot: R\n```\n\n```mermaid\nflowchart LR\n  a --> b\n```\n\nAfter.\n'
+    const openWindow = vi.fn(() => 'w1')
+    const html =
+      '<p>x</p><pre><code class="language-mermaid">flowchart LR\n  a --&gt; b\n</code></pre>'
+    const w = mount(MarkdownPreview, {
+      props: { html, notePath: 'p/m.md', diagramsEditable: true },
+      global: { plugins: [i18n()], provide: { openWindow } },
+    })
+    await w.find('[data-mermaid-convert]').trigger('click')
+    await vi.waitFor(() => expect(openWindow).toHaveBeenCalled(), { timeout: 10000 })
+    expect(writes.at(-1)).toEqual({
+      path: 'p/m.md',
+      content:
+        '# M\n\n```diagram\nkind: tree\nroot: R\n```\n\n```diagram\nkind: flow\ndirection: LR\nnodes: [a, b]\nedges:\n  - a -> b\n```\n\nAfter.\n',
+      ifMatch: 'e1',
+    })
+    expect(openWindow).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'diagram', props: { path: 'p/m.md', index: 1, notes: [] } }),
+    )
+    const ro = mount(MarkdownPreview, {
+      props: { html, notePath: 'ro/m.md', diagramsEditable: true },
+      global: { plugins: [i18n()], provide: { openWindow } },
+    })
+    expect(ro.find('[data-mermaid-convert]').exists()).toBe(false)
+    expect(ro.find('pre code').text()).toContain('a --> b')
   })
 })

@@ -35,10 +35,10 @@ edges:
 [plancia-diagrams](https://github.com/daniele-chiappa/plancia/tree/main/diagrams),
 a package of the plancia repository.
 - A **flow** and a **tree** are drawn with Vue Flow, laid out by dagre in their `direction`, at the positions of `layout:` where it gives some. They pan by dragging and zoom with their buttons.
-- A **mind map** and a **fishbone** are drawn by Mermaid.
-- A **Venn**, a **matrix** and a **Gantt** show their text until they are drawn too.
+- A **mind map**, a **fishbone**, a **Venn** and a **Gantt** are drawn by Mermaid, in the colours of the theme.
+- A **matrix** is drawn by plancia-diagrams itself: the quadrants with their axes and points, or the grid as a table.
 - A node with a `[[link]]` opens its note, at the heading the link names; an address opens in a tab. `POST /api/v1/preview` returns the diagrams' `[[links]]` resolved as the note's other links are, in `diagram_links` (the target as written → the note's path).
-- **Code** shows the YAML as written; **Export SVG** saves the drawing in the colours of the theme, light or dark.
+- **Code** shows the YAML as written. **Export** saves the drawing as SVG, in the colours of the theme (light or dark), the diagram as Mermaid (`.mmd`), or a flow as an Obsidian canvas (`.canvas`).
 - What is wrong in a block is listed above the drawing, which leaves those parts out.
 - A block at the top level of a note is drawn; one inside a list or a quote stays its code.
 
@@ -58,9 +58,19 @@ it again.
   change its level, Alt+↑ and Alt+↓ move it, Backspace on an empty line
   takes it away, a line dragged by its grip goes after the one it is
   dropped on; a branch's link is set below the lines.
-- The **YAML** tab edits the text itself, every kind included (a Venn, a
-  matrix and a Gantt are edited there for now), and the problems are
-  listed under both tabs, line by line.
+- A **Venn**, a **matrix** and a **Gantt** are edited as forms beside their
+  drawing: a Venn's sets (label, link) and shared parts (their sets, label,
+  size); a matrix's axes, quadrants and points (label, x and y from 0 to 1,
+  link), a point also dragged on the drawing, and a grid as a table of rows,
+  columns and cells; a Gantt's sections and tasks, a task starting on a
+  date or after another and lasting days or until its last day, with its
+  status and link, moved up and down. A task taken away hands the ones
+  after it to what it came after.
+- The **YAML** tab edits the text itself, every kind included, and the
+  problems are listed under both tabs, line by line.
+- **Import…** puts a pasted Mermaid (a flowchart, a mind map, a Gantt, a
+  quadrant chart) or the JSON of an Obsidian canvas in place of the
+  diagram, and says what it left out; Ctrl+Z takes it back.
 - Ctrl+Z and Ctrl+Shift+Z undo and redo; **Save** (Ctrl+S) writes the
   block in place of the old one, and nothing else of the note.
 - The editor changes only what it edits: comments, short forms and the
@@ -70,8 +80,25 @@ it again.
   changes stay.
 
 **A new diagram**: the **+** of a folder in the tree has the kind
-**Diagram**, which makes a note `type: diagram` from a small template of
-the kind chosen, opened in the editor.
+**Diagram**, which makes a note `type: diagram` from an empty template of
+the kind chosen or a ready one (a process with a decision, an
+architecture, an organisation chart, a brainstorm, the 6M fishbone, three
+sets, the Eisenhower matrix, impact and effort, SWOT, a project in
+phases), opened in the editor.
+
+**From Mermaid and from a canvas**:
+- A ```` ```mermaid ```` block at the top level of a note has **Convert to a
+  diagram**, for who may change the note: Mermaid's own parser reads it (a
+  flowchart, a mind map, a Gantt or a quadrant chart), the block becomes a
+  ```` ```diagram ```` block in its place, and the editor opens on it with
+  what the conversion left out (styles, nested subgraphs, excluded days).
+- An Obsidian canvas (`.canvas`, read-only) has **Convert to a diagram**: a
+  note `type: diagram` beside it (`<name>.md`, or `<name>-diagram.md` when
+  that is taken) holds a flow of its cards, at their places. A text card
+  is a node with its text, a file card a node linking its note, a link
+  card a node linking its address, a group card a group of the cards
+  inside it; green, cyan and purple cards are data, a person and an
+  outside system. The canvas stays as it is.
 
 ## Common fields
 
@@ -170,7 +197,7 @@ sections:
 ```
 
 - `tasks` without `sections` is one section.
-- A task has a `label`, then `start` (YYYY-MM-DD) or `after` (a task's id, and no chain may come back to itself), then `end` or `days`. A `milestone` needs neither.
+- A task has a `label`, then `start` (YYYY-MM-DD) or `after` (a task's id, and no chain may come back to itself), then `end` (its last day, included) or `days`. A `milestone` needs neither. A task `after` another starts the day after that one's last day.
 - `status` is `done`, `active`, `critical` or `milestone`.
 
 ## Checks
@@ -180,7 +207,12 @@ A block that does not read gives:
 - **in the lint**, an issue `diagram-invalid` (warning) per problem, on its line, and one for a note `type: diagram` without exactly one block;
 - **in `memory_get`**, each diagram's `problems`.
 
-`memory_get` returns `diagrams: [{kind, title, line, text, problems}]` for a note with diagrams. `text` is the diagram in words, for example `Flow (TB), 3 nodes, 2 edges: Upload → docling.convert; docling.convert → The note (markdown)`. It is also the drawing's text alternative. `memory_bootstrap` gives the format in `capabilities.diagrams`.
+A diagram's **Mermaid twin** older than the diagram (see *In Obsidian*)
+gives, when the note is written, a notice with the lines of both, and in
+the lint an issue `diagram-twin-stale` (warning); so does a twin with no
+diagram right above it.
+
+`memory_get` returns `diagrams: [{kind, title, line, text, problems, twin}]` for a note with diagrams, `twin` being `current` or `stale` when the diagram has one. `text` is the diagram in words, for example `Flow (TB), 3 nodes, 2 edges: Upload → docling.convert; docling.convert → The note (markdown)`. It is also the drawing's text alternative. `memory_bootstrap` gives the format in `capabilities.diagrams`.
 
 ## The examples
 
@@ -195,6 +227,34 @@ readers give the same messages on the same lines.
 
 ## In Obsidian
 
-Obsidian shows a ```` ```diagram ```` block as code. The editor will
-optionally save a twin beside it: an SVG attachment, or a ```` ```mermaid ````
-block, which Obsidian draws.
+Obsidian shows a ```` ```diagram ```` block as code. **Mermaid twin for
+Obsidian**, in the diagram window, keeps a twin under it: a
+```` ```mermaid ```` block, which Obsidian draws, right after the diagram's
+block.
+
+````markdown
+```diagram
+kind: tree
+root: Lead
+children: [Backend, Frontend]
+```
+
+```mermaid
+%% diagram-twin 03cc0c52 — made from the diagram above: change that one
+flowchart TB
+  ...
+```
+````
+
+- The editor writes it again at every save while the box is ticked, and
+  takes it away when it is not. gosidian does not show it: the diagram is
+  drawn.
+- Its first line holds the hash of the YAML it was made from (FNV-1a, 32
+  bits, over the YAML with `\n` line ends and no trailing white space). An
+  agent that changes the diagram and not the twin leaves it older: the
+  write's notice and the lint (`diagram-twin-stale`) say so, and the next
+  save in the editor writes it again.
+- The twin uses what any Mermaid 11 draws, Obsidian's included: a fishbone
+  is a mind map there. A Venn's twin is `venn-beta`, which only a recent
+  Mermaid knows.
+- **Export** gives the same Mermaid, and an Obsidian canvas for a flow.

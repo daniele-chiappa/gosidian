@@ -74,3 +74,27 @@ describe('splitViews: where a diagram is written (IMP-169, F2)', () => {
     ])
   })
 })
+
+describe('splitViews: Mermaid blocks and twins (IMP-169, F3)', () => {
+  const diagram = '<pre><code class="language-diagram">kind: tree\nroot: A\n</code></pre>'
+  const twin =
+    '<pre><code class="language-mermaid">%% diagram-twin 1a2b3c4d — made from the diagram above\nflowchart TB\n</code></pre>'
+  // The server escapes the > of an arrow, as here.
+  const mermaid = '<pre><code class="language-mermaid">flowchart LR\n  a --&gt; b\n</code></pre>'
+
+  it('leaves out a diagram’s twin, right after it, and keeps another Mermaid block as a segment', () => {
+    const s = splitViews(`<p>x</p>${diagram}\n${twin}<p>y</p>${mermaid}${mermaid}`)
+    expect(s.map((x) => x.kind)).toEqual(['html', 'diagram', 'html', 'mermaid', 'mermaid'])
+    expect(s.map((x) => ('html' in x ? x.html : '')).join('')).not.toContain('diagram-twin')
+    const m = s.filter((x) => x.kind === 'mermaid')
+    expect(m.map((x) => x.kind === 'mermaid' && [x.index, x.source, x.occurrence])).toEqual([
+      [0, 'flowchart LR\n  a --> b\n', 0],
+      [1, 'flowchart LR\n  a --> b\n', 1],
+    ])
+  })
+
+  it('shows a twin with no diagram right above it as the Mermaid it is', () => {
+    const s = splitViews(`<p>x</p>${diagram}<p>between</p>${twin}`)
+    expect(s.map((x) => x.kind)).toEqual(['html', 'diagram', 'html', 'mermaid'])
+  })
+})

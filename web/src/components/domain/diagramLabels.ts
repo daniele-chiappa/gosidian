@@ -8,6 +8,7 @@ import { useI18n } from 'vue-i18n'
 const SHAPES = ['box', 'pill', 'decision', 'data', 'doc', 'db', 'circle', 'note'] as const
 const CLASSES = ['user', 'data', 'ext', 'planned', 'off'] as const
 const STYLES = ['solid', 'dashed', 'dotted'] as const
+const STATUSES = ['done', 'active', 'critical', 'milestone'] as const
 export const DIAGRAM_KINDS = [
   'flow',
   'tree',
@@ -16,6 +17,20 @@ export const DIAGRAM_KINDS = [
   'venn',
   'matrix',
   'gantt',
+] as const
+
+/** The ready templates of plancia-diagrams, in its order. */
+export const READY_IDS = [
+  'process',
+  'architecture',
+  'org',
+  'brainstorm',
+  'sixm',
+  'three-sets',
+  'eisenhower',
+  'impact-effort',
+  'swot',
+  'project',
 ] as const
 
 export function useDiagramLabels() {
@@ -64,8 +79,60 @@ export function useDiagramLabels() {
     moveDown: t('diagram.move_down'),
     outlineHint: t('diagram.outline_hint'),
     broken: t('diagram.broken'),
-    yamlOnly: t('diagram.yaml_only'),
     noProblems: t('diagram.no_problems'),
+    sets: t('diagram.sets'),
+    areas: t('diagram.areas'),
+    addSet: t('diagram.add_set'),
+    addArea: t('diagram.add_area'),
+    newSet: t('diagram.new_set'),
+    size: t('diagram.size'),
+    sizeHint: t('diagram.size_hint'),
+    axisX: t('diagram.axis_x'),
+    axisY: t('diagram.axis_y'),
+    axisName: t('diagram.axis_name'),
+    low: t('diagram.low'),
+    high: t('diagram.high'),
+    quadrants: t('diagram.quadrants'),
+    quadrantNames: [1, 2, 3, 4].map((i) => t(`diagram.quadrant_${i}`)) as [
+      string,
+      string,
+      string,
+      string,
+    ],
+    items: t('diagram.items'),
+    addItem: t('diagram.add_item'),
+    newItem: t('diagram.new_item'),
+    dragHint: t('diagram.drag_hint'),
+    rows: t('diagram.rows'),
+    columns: t('diagram.columns'),
+    addRow: t('diagram.add_row'),
+    addColumn: t('diagram.add_column'),
+    newRow: t('diagram.new_row'),
+    newColumn: t('diagram.new_column'),
+    removeRow: t('diagram.remove_row'),
+    removeColumn: t('diagram.remove_column'),
+    sections: t('diagram.sections'),
+    addSection: t('diagram.add_section'),
+    newSection: t('diagram.new_section'),
+    addTask: t('diagram.add_task'),
+    newTask: t('diagram.new_task'),
+    task: t('diagram.task'),
+    starts: t('diagram.starts'),
+    onDate: t('diagram.on_date'),
+    afterTask: t('diagram.after_task'),
+    lasts: t('diagram.lasts'),
+    untilDate: t('diagram.until_date'),
+    days: t('diagram.days'),
+    status: t('diagram.status'),
+    statuses: Object.fromEntries(STATUSES.map((s) => [s, t(`diagram.statuses.${s}`)])) as Record<
+      (typeof STATUSES)[number],
+      string
+    >,
+    import: t('diagram.import'),
+    importHint: t('diagram.import_hint'),
+    importApply: t('diagram.import_apply'),
+    importCancel: t('diagram.import_cancel'),
+    importWarnings: t('diagram.import_warnings'),
     shapes: Object.fromEntries(SHAPES.map((s) => [s, t(`diagram.shapes.${s}`)])) as Record<
       (typeof SHAPES)[number],
       string
@@ -110,6 +177,69 @@ export function useDiagramLabels() {
     ],
     task: t('diagram.template.task'),
   }))
+  // The ready templates' words (readyTemplates), and their names.
+  const READY = [
+    'start',
+    'collect',
+    'complete',
+    'yes',
+    'no',
+    'process',
+    'ask',
+    'end',
+    'user',
+    'webUi',
+    'api',
+    'database',
+    'service',
+    'server',
+    'board',
+    'admin',
+    'accounts',
+    'people',
+    'production',
+    'teamA',
+    'teamB',
+    'sales',
+    'idea',
+    'goals',
+    'resources',
+    'risks',
+    'nextSteps',
+    'setA',
+    'setB',
+    'setC',
+    'all',
+    'effort',
+    'impact',
+    'internal',
+    'external',
+    'helpful',
+    'harmful',
+    'analysis',
+    'requirements',
+    'development',
+    'build',
+    'test',
+    'launch',
+    'golive',
+  ] as const
+  const ready = computed(() => ({
+    ...(Object.fromEntries(READY.map((k) => [k, t(`diagram.ready.${k}`)])) as Record<
+      (typeof READY)[number],
+      string
+    >),
+    effortQuadrants: [1, 2, 3, 4].map((i) => t(`diagram.ready.effort_${i}`)) as [
+      string,
+      string,
+      string,
+      string,
+    ],
+    swot: [1, 2, 3, 4].map((i) => t(`diagram.ready.swot_${i}`)) as [string, string, string, string],
+  }))
+  const readyNames = computed(() =>
+    Object.fromEntries(READY_IDS.map((id) => [id, t(`diagram.ready_names.${id}`)])),
+  )
   const kinds = computed(
     () =>
       Object.fromEntries(DIAGRAM_KINDS.map((k) => [k, t(`diagram.kinds.${k}`)])) as Record<
@@ -117,5 +247,5 @@ export function useDiagramLabels() {
         string
       >,
   )
-  return { view, editor, template, kinds }
+  return { view, editor, template, kinds, ready, readyNames }
 }

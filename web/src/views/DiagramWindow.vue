@@ -12,6 +12,12 @@
  * put this diagram in the new version of the note, whose other changes
  * stay. A change from elsewhere reloads a clean window and warns a dirty
  * one. Ctrl+S saves.
+ *
+ * «Mermaid twin for Obsidian» keeps a ```mermaid block under the diagram,
+ * which Obsidian draws (gosidian hides it): written at every save while it
+ * is on, taken away when it is turned off. «Export» saves the drawing, the
+ * Mermaid or a flow's Obsidian canvas. `notes` are what a conversion that
+ * made this diagram left out, said until the first save.
  */
 import {
   computed,
@@ -34,10 +40,11 @@ import { useSSE } from '@/composables/useSSE'
 import { planciaKey, base } from '@/composables/planciaKey'
 import { useDiagramLabels } from '@/components/domain/diagramLabels'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
+import DiagramExportMenu from '@/components/domain/DiagramExportMenu.vue'
 
 type Lib = typeof import('@/components/domain/diagramView')
 
-const props = defineProps<{ path: string; index: number }>()
+const props = defineProps<{ path: string; index: number; notes?: string[] }>()
 const emit = defineEmits<{ title: [string]; dirty: [boolean]; close: [] }>()
 
 const { t } = useI18n()
@@ -65,8 +72,12 @@ const missing = ref(false)
 const conflict = ref(false)
 const remoteChanged = ref(false)
 const savedAt = ref<string | null>(null)
+// The twin: whether the note has one under the block, and whether it should.
+const twinSaved = ref(false)
+const twin = ref(false)
+const notes = ref<string[]>(props.notes ?? [])
 
-const dirty = computed(() => draft.value !== saved.value)
+const dirty = computed(() => draft.value !== saved.value || twin.value !== twinSaved.value)
 watch(dirty, (d) => emit('dirty', d))
 const writable = computed(() => access.canWrite(props.path))
 
@@ -87,8 +98,10 @@ async function load() {
     if (!b) {
       missing.value = true
       saved.value = draft.value = ''
+      twin.value = twinSaved.value = false
     } else {
       saved.value = draft.value = b.source
+      twin.value = twinSaved.value = !!lib.value.findTwin(n.content, b)
     }
     conflict.value = false
     remoteChanged.value = false
@@ -108,17 +121,34 @@ async function write(into: Note, ifMatch: string) {
     return
   }
   const sent = draft.value
+  const wantTwin = twin.value
   const updated = await updateNote(props.path, {
-    content: lib.value.replaceDiagramBlock(into.content, b, sent),
+    content: lib.value.writeDiagramBlock(into.content, b, sent, twinOf(sent, wantTwin)),
     ifMatch,
   })
   note.value = updated
-  saved.value = blockOf(updated.content)?.source ?? sent
-  // What was typed while the save ran stays a draft.
+  const nb = blockOf(updated.content)
+  saved.value = nb?.source ?? sent
+  twinSaved.value = !!nb && !!lib.value.findTwin(updated.content, nb)
+  // What was typed or chosen while the save ran stays a draft.
   if (draft.value === sent) draft.value = saved.value
+  if (twin.value === wantTwin) twin.value = twinSaved.value
+  notes.value = []
   savedAt.value = new Date().toLocaleTimeString()
   conflict.value = false
   remoteChanged.value = false
+}
+
+/**
+ * The twin to write with the YAML: its Mermaid when it is on (for any
+ * Mermaid 11, which Obsidian has), null to take it away; undefined keeps
+ * the one there when the YAML does not read.
+ */
+function twinOf(yaml: string, on: boolean): string | null | undefined {
+  if (!on || !lib.value) return null
+  const d = lib.value.parseDiagram(yaml).diagram
+  const mermaid = d ? lib.value.toMermaid(d, { portable: true }) : ''
+  return mermaid ? lib.value.twinText(yaml, mermaid) : undefined
 }
 
 async function save() {
@@ -148,6 +178,13 @@ async function overwrite() {
   } finally {
     saving.value = false
   }
+}
+
+// The SVG of the drawing: the editor's (or, read only, the view's).
+const viewRef = ref<{ exportSVG: () => string | null } | null>(null)
+const editorRef = ref<{ exportSVG: () => Promise<string | null> } | null>(null)
+async function svgOf(): Promise<string | null> {
+  return (await editorRef.value?.exportSVG()) ?? viewRef.value?.exportSVG() ?? null
 }
 
 async function linkSuggest(q: string) {
@@ -200,6 +237,15 @@ onBeforeUnmount(() => unsubscribe?.())
       <span v-else-if="savedAt" class="text-xs text-text-muted">{{
         t('diagram.saved_at', { time: savedAt })
       }}</span>
+      <label
+        v-if="writable && note && !missing"
+        class="flex items-center gap-1 text-xs text-text-muted"
+        :title="t('diagram.twin_hint')"
+      >
+        <input v-model="twin" type="checkbox" data-diagram-twin />
+        {{ t('diagram.twin') }}
+      </label>
+      <DiagramExportMenu v-if="note && !missing" :source="draft" drawable :svg="svgOf" />
       <button
         type="button"
         class="rounded border border-border px-2 py-1 hover:bg-surface-hover"
@@ -250,6 +296,17 @@ onBeforeUnmount(() => unsubscribe?.())
     </div>
 
     <ErrorMessage v-if="error" :text="error" class="text-sm" />
+    <div
+      v-if="notes.length"
+      class="rounded border border-border p-2 text-xs text-text-muted"
+      role="status"
+      data-diagram-notes
+    >
+      {{ t('diagram.converted_notes') }}
+      <ul class="ml-4 list-disc">
+        <li v-for="(n, i) in notes" :key="i">{{ n }}</li>
+      </ul>
+    </div>
     <p v-if="loading" class="text-sm text-text-muted">{{ t('diagram.loading') }}</p>
     <p v-else-if="missing" class="text-sm text-text-muted" data-diagram-missing>
       {{ t('diagram.not_found') }}
@@ -257,6 +314,7 @@ onBeforeUnmount(() => unsubscribe?.())
     <template v-else-if="note">
       <DiagramEditor
         v-if="writable"
+        ref="editorRef"
         v-model:source="draft"
         :labels="labels.editor.value"
         :link-suggest="linkSuggest"
@@ -264,7 +322,7 @@ onBeforeUnmount(() => unsubscribe?.())
       />
       <template v-else>
         <p class="text-sm text-text-muted">{{ t('diagram.read_only') }}</p>
-        <DiagramView :source="draft" :labels="labels.view.value" />
+        <DiagramView ref="viewRef" :source="draft" :labels="labels.view.value" />
       </template>
     </template>
   </div>
