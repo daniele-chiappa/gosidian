@@ -13,17 +13,34 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"regexp"
+	"strings"
 )
 
 // ManifestTool is the tool a plugin serves its manifest with.
 const ManifestTool = "gosidian_manifest"
 
+// The tools of a plugin's sources (IMP-172 phase 2), each taking the
+// source's name in source.
+const (
+	SourceListTool    = "gosidian_source_list"
+	SourceChangesTool = "gosidian_source_changes"
+	SourceOpenTool    = "gosidian_source_open"
+	SourceMoveTool    = "gosidian_source_move"
+)
+
+// sourceTools are the tools no node may name.
+var sourceTools = map[string]bool{ManifestTool: true, SourceListTool: true, SourceChangesTool: true, SourceOpenTool: true, SourceMoveTool: true}
+
 // Contract is the version of the manifest format this server reads.
 const Contract = 1
 
-// maxNodes caps the nodes of one plugin.
-const maxNodes = 32
+// maxNodes caps the nodes of one plugin, maxSources its sources.
+const (
+	maxNodes   = 32
+	maxSources = 32
+)
 
 var (
 	pluginName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
@@ -38,9 +55,26 @@ type Manifest struct {
 	Version     string `json:"version"`
 	Description string `json:"description,omitempty"`
 	// Gosidian is the manifest format, Contract.
-	Gosidian    int         `json:"gosidian"`
-	Nodes       []NodeSpec  `json:"nodes"`
-	Permissions Permissions `json:"permissions"`
+	Gosidian int        `json:"gosidian"`
+	Nodes    []NodeSpec `json:"nodes"`
+	// Sources are the remote archives it offers, which the owner binds to
+	// a project's IN folder (IMP-172 phase 2).
+	Sources     []SourceSpec `json:"sources,omitempty"`
+	Permissions Permissions  `json:"permissions"`
+}
+
+// SourceSpec is a source a plugin offers: an archive it reads, set up in
+// the plugin with its credentials, which never leave it.
+type SourceSpec struct {
+	Name        string `json:"name"`
+	Kind        string `json:"kind,omitempty"` // webdav, s3, drive…: for the reader
+	Description string `json:"description,omitempty"`
+	// Changes: the plugin gives the source's changes from a cursor
+	// (gosidian_source_changes); without, gosidian lists it in full.
+	Changes bool `json:"changes,omitempty"`
+	// Move: the plugin moves files inside the source
+	// (gosidian_source_move).
+	Move bool `json:"move,omitempty"`
 }
 
 // NodeSpec is a node a plugin offers.
@@ -71,6 +105,9 @@ type Permissions struct {
 	Files bool `json:"files"`
 	// Network lists the hosts the plugin itself calls; empty: none.
 	Network []string `json:"network"`
+	// SourceHosts are the hosts the URLs of its sources' files may point
+	// at, besides the plugin's own: gosidian reads no file from another.
+	SourceHosts []string `json:"source_hosts,omitempty"`
 }
 
 // ParseManifest reads a manifest and checks it is one plugin name may
@@ -96,8 +133,14 @@ func (m *Manifest) check(name string) error {
 	if m.Version == "" {
 		return errors.New("the manifest has no version")
 	}
-	if len(m.Nodes) == 0 || len(m.Nodes) > maxNodes {
-		return fmt.Errorf("the manifest has %d nodes, 1 to %d", len(m.Nodes), maxNodes)
+	if len(m.Nodes) > maxNodes {
+		return fmt.Errorf("the manifest has %d nodes, at most %d", len(m.Nodes), maxNodes)
+	}
+	if len(m.Sources) > maxSources {
+		return fmt.Errorf("the manifest has %d sources, at most %d", len(m.Sources), maxSources)
+	}
+	if len(m.Nodes) == 0 && len(m.Sources) == 0 {
+		return errors.New("the manifest has no nodes and no sources")
 	}
 	seen := map[string]bool{}
 	for _, n := range m.Nodes {
@@ -108,14 +151,49 @@ func (m *Manifest) check(name string) error {
 			return fmt.Errorf("node %q twice", n.Name)
 		}
 		seen[n.Name] = true
-		if n.Tool == "" || n.Tool == ManifestTool {
+		if n.Tool == "" || sourceTools[n.Tool] {
 			return fmt.Errorf("node %q: tool names the MCP tool that runs it", n.Name)
 		}
 		if len(n.Files) > 0 && !m.Permissions.Files {
 			return fmt.Errorf("node %q takes files, and the manifest does not ask for permissions.files", n.Name)
 		}
 	}
+	seen = map[string]bool{}
+	for _, src := range m.Sources {
+		if !nodeName.MatchString(src.Name) {
+			return fmt.Errorf("source %q: a name of lower-case letters, digits and _", src.Name)
+		}
+		if seen[src.Name] {
+			return fmt.Errorf("source %q twice", src.Name)
+		}
+		seen[src.Name] = true
+	}
+	for _, h := range m.Permissions.SourceHosts {
+		if !validHost(h) {
+			return fmt.Errorf("permissions.source_hosts: %q is not a host (a name or an address, with a port or not)", h)
+		}
+	}
 	return nil
+}
+
+// validHost says whether h is a host, with a port or not: no scheme, no
+// path, no credentials.
+func validHost(h string) bool {
+	if h == "" || strings.ContainsAny(h, "/@?# ") {
+		return false
+	}
+	u, err := url.Parse("http://" + h)
+	return err == nil && u.Host == h && u.Hostname() != ""
+}
+
+// Source finds a source by name.
+func (m *Manifest) Source(name string) (SourceSpec, bool) {
+	for _, src := range m.Sources {
+		if src.Name == name {
+			return src, true
+		}
+	}
+	return SourceSpec{}, false
 }
 
 // Node finds a node by name.

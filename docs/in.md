@@ -66,9 +66,52 @@ at once when a file named `.done` appears in it (a marker that a copy
 script writes last; the server removes it when it can, and a marker it
 cannot remove counts once). A closed batch is what the `in` pipelines take.
 
-Loading files from the web UI, with pauses and resumes for large ones, and
-from remote stores (Nextcloud, S3, Google Drive) through a plugin, are the
-next steps of IMP-172 and IMP-173.
+Files also arrive from a remote store through a plugin's source (below).
+Loading files from the web UI, with pauses and resumes for large ones, is
+a next step of IMP-172.
+
+## Sources
+
+A plugin may offer **sources**: remote stores it reads, such as a
+Nextcloud folder, an S3 bucket or a Drive folder, set up in the plugin
+with their credentials ([plugins](plugins.md#sources)). The owner binds
+one to a project, and it shows as a folder at the root of the IN folder:
+
+```bash
+gosidian plugin bind storage fatture archive --as nextcloud
+```
+
+`archive/IN/nextcloud/` then holds the files of the source, with their
+folders, as the local files are held: in `in.db`, in batches, taken by the
+`in` pipelines, handed to the plugins by reference, listed by the IN
+window and `in.list`. The bytes stay in the source: gosidian reads a file
+from there when a node, a plugin or a download asks for it, a range at a
+time, with nothing on its disk.
+
+- **Checks**: every minute (`--every`, at least 20 seconds), and at once
+  from the IN window's **Check now** or `POST /api/v1/in/<project>/scan`.
+  A source that gives its changes is read from the last check's cursor,
+  and listed in full once an hour; another is listed in full each time.
+- **Versions**: a file is new when its content changed, by its SHA-256
+  when the source gives one, else by its etag. A file of a source has no
+  SHA-256 of gosidian's: it is not downloaded to hash it.
+- **Batches**: by the first folder inside the source
+  (`nextcloud/2024/…`), or the source's root; a quiet minute or a `.done`
+  marker closes one, as on the disk. The marker stays in the source
+  (gosidian deletes nothing there) and counts once.
+- **What it allows**: statuses, as any file. A file of a source is never
+  deleted from gosidian, and never moves out of its source; it moves
+  inside it only when the binding has `--write` and the source can move
+  files. A target outside the source is read inside it: `done/` is
+  `nextcloud/done/`, so a pipeline that moves its files to `done/` works on
+  the disk's and on a source's alike. A file of the disk does not move
+  into a source. A folder of a source is not zipped.
+- **Bindings**: a folder of the IN folder that holds local files is not
+  bound over. A source may be bound to several projects. Unbound, its
+  folder is forgotten at the next check; the source keeps its files.
+- **The pipelines off on the server**: the plugins are not there, so the
+  sources are not checked nor read; what a source's folder held stays, and
+  the IN window says why.
 
 ## The status of a file
 
@@ -118,11 +161,12 @@ the files stay on disk, the history keeps what was pushed.
 
 | Route | |
 |---|---|
-| `GET /api/v1/in/<project>?dir=&recursive=&match=&kinds=&status=&limit=&cursor=` | counts, the subfolders of `dir`, a page of its files; with `recursive=true` every file under it that the filters select |
+| `GET /api/v1/in/<project>?dir=&recursive=&match=&kinds=&status=&limit=&cursor=` | counts, the subfolders of `dir`, a page of its files; with `recursive=true` every file under it that the filters select; the sources bound, with their state |
 | `POST /api/v1/in/<project>/move` `{from, to}` | a file or a folder to another place of the IN folder (`to` ending in `/` is a folder to move it into) |
 | `POST /api/v1/in/<project>/status` `{paths, status}` | sets the status of files |
 | `POST /api/v1/in/<project>/delete` `{paths}` | into the trash |
 | `POST /api/v1/in/<project>/run` `{pipeline, paths}` | a pipeline of the project on files, by hand, as its trigger would: `{runs, skipped}` |
+| `POST /api/v1/in/<project>/scan` `{folder}` | a check now: of a source's folder, or of all of them and the disk |
 | `GET /vault-files/<project>/IN/<path>` | a file, with ranges |
 
 Paths are vault paths, or relative to the IN folder. Reading needs read

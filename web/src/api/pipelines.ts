@@ -123,6 +123,9 @@ export interface PluginInfo {
   sha?: string
   /** The node types of the accepted manifest. */
   nodes: { type: string; description?: string }[]
+  /** The sources of the accepted manifest (IMP-172 phase 2), which the
+   *  owner binds to IN folders. */
+  sources?: { name: string; kind?: string; description?: string; changes?: boolean; move?: boolean }[]
   accepted?: { version: string; sha: string; at: string; by?: string }
   checked?: string
   /** The owner's only: they name hosts of the network. */

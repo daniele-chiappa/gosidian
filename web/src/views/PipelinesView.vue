@@ -355,6 +355,10 @@ onMounted(() => {
               {{ t('runs.plugin_nodes') }}:
               <span v-for="(n, i) in p.nodes" :key="n.type" class="font-mono" :title="n.description">{{ i ? ', ' : '' }}{{ n.type }}</span>
             </p>
+            <p v-if="p.sources?.length" class="basis-full text-xs text-text-muted" data-plugin-sources>
+              {{ t('runs.plugin_sources') }}:
+              <span v-for="(s, i) in p.sources" :key="s.name" class="font-mono" :title="s.description">{{ i ? ', ' : '' }}{{ s.name }}<template v-if="s.kind"> ({{ s.kind }})</template></span>
+            </p>
             <p v-if="p.status === 'unaccepted' || p.status === 'changed'" class="basis-full text-xs text-text-muted">
               {{ t('runs.plugin_accept') }} <code class="font-mono">{{ acceptCommand(p) }}</code>
             </p>

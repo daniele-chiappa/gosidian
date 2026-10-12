@@ -1036,7 +1036,7 @@ paths:
         Only the owner gets `url` and `error`, which name hosts of the network.
       responses:
         "200":
-          description: "`{plugins: [{name, status (ok, unaccepted, changed, down, unknown), version, sha, nodes: [{type, description}], accepted: {version, sha, at, by}, checked, error, url}]}`"
+          description: "`{plugins: [{name, status (ok, unaccepted, changed, down, unknown), version, sha, nodes: [{type, description}], sources: [{name, kind, description, changes, move}], accepted: {version, sha, at, by}, checked, error, url}]}`"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -1189,7 +1189,7 @@ paths:
         - {name: cursor, in: query, schema: {type: string}}
       responses:
         "200":
-          description: "`{project, root, dir, counts: {files, bytes, new, working, errors}, folders: [{path, files, bytes, new}], files: [{path, name, stem, ext, dir, size, modified, sha256, status, run, source, batch, first_seen, updated}], next, track_in_git}`"
+          description: "`{project, root, dir, counts: {files, bytes, new, working, errors}, folders: [{path, files, bytes, new}], files: [{path, name, stem, ext, dir, size, modified, sha256, etag, status, run, source, batch, first_seen, updated}], next, sources: [{folder, plugin, source, kind, description, changes, move, write, status (ok, checking, error, off), error, checked, every}], track_in_git}`. A file of a source's folder has the source (`<plugin>/<source>`) in source, its etag, and its SHA-256 only when the source gives it."
         "400":
           description: A bad glob.
         "404":
@@ -1217,7 +1217,7 @@ paths:
         "404":
           description: No such file.
         "409":
-          description: The target is there.
+          description: The target is there; or a file of a source, which moves inside its source only, when it is bound with write and the source can move.
 
   /api/v1/in/{project}/status:
     post:
@@ -1254,6 +1254,8 @@ paths:
       responses:
         "200":
           description: "`{removed, trash}`"
+        "409":
+          description: A file of a source, which is not removed from gosidian.
         "503":
           description: A folder, and the trash is off.
 
@@ -1284,3 +1286,24 @@ paths:
           description: "`{runs: [...], skipped: [{path, reason (folder, kinds, match), value, why}]}`"
         "404":
           description: The pipelines are off, or a path is no file of the IN folder.
+
+  /api/v1/in/{project}/scan:
+    post:
+      tags: [in]
+      summary: Check the IN folder now (write access).
+      description: |
+        The disk, and the sources bound to the project's IN folder: one
+        folder's, or, without folder, all of them. The check runs in the
+        background; the window hears of what changed.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                folder: {type: string, description: "A source's folder, at the root of the IN folder; empty for all."}
+      responses:
+        "202":
+          description: "`{project, folder}`"
+        "400":
+          description: folder names no folder at the root of the IN folder.

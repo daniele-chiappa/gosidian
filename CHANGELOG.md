@@ -8,6 +8,56 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.82.0] — 2026-10-12 — "IN sources"
+
+The IN folder of a project can show a remote store, through a plugin
+that reads it: its files are taken by the pipelines like the files on the
+disk, and their bytes stay in the store. Pull the image and restart,
+nothing to migrate: `in.db` gains a column and a table at start, and
+nothing changes until the owner binds a source.
+
+### Added
+- **Sources in a plugin's manifest** — a plugin may list `sources`, the
+  remote stores it reads (a Nextcloud folder, an S3 bucket, a Drive
+  folder), set up in the plugin with their credentials, which never leave
+  it; `permissions.source_hosts` names the hosts its files' URLs may point
+  at. Four tools serve them: `gosidian_source_list`, `gosidian_source_changes`
+  (optional, from a cursor), `gosidian_source_open` (a URL to read a file
+  from, ranges too) and `gosidian_source_move` (optional). A manifest
+  without sources keeps its sha. See [docs/plugins.md](docs/plugins.md#sources).
+- **Binding a source to an IN folder** — `gosidian plugin bind <plugin>
+  <source> <project> [--as <folder>] [--write] [--every 1m]`, and
+  `gosidian plugin unbind`; `gosidian plugin list` shows the bindings. The
+  source shows as `IN/<folder>/`: its files are in `in.db` with their
+  etag (and their SHA-256 when the source gives one), in batches by their
+  first folder, taken by the `in` pipelines and `in.list`, and handed to
+  the plugins by reference. See [docs/in.md](docs/in.md#sources).
+- **Checks of a source** — every minute (at least 20 seconds): its changes
+  from the cursor of the last check when it gives them, else its list in
+  full, and in full once an hour all the same. `POST
+  /api/v1/in/<project>/scan` and **Check now** in the IN window check at
+  once.
+- **The IN window and the sources** — at the root, the sources bound with
+  their state, the time of their last check and their error; a cloud on
+  their folders; inside one, what its files allow. The Runs window lists
+  the sources of each plugin, and `GET /api/v1/plugins` returns them.
+
+### Changed
+- **A source's bytes are read where they are** — a file of a source is
+  read from the URL its plugin gives, a range at a time, streamed with
+  nothing on the server's disk, for a node, a download from `/vault-files/`
+  or a plugin that fetches it by reference: the plugin still calls the
+  server only. The URL must be http(s), without credentials, on the
+  plugin's host or a declared one; no redirect is followed.
+- **What a source's file allows** — statuses, as any file. It is never
+  deleted from gosidian and never leaves its source; with `--write` it
+  moves inside it, and a target outside the source is read inside it
+  (`done/` is the source's `done/`), so a pipeline moves the disk's files
+  and a source's alike.
+- **Batches close under the project's lock** — the scan of the disk and
+  the check of a source both close batches; neither closes one while a
+  file is joining it.
+
 ## [2.81.0] — 2026-10-11 — "IN folder"
 
 A project can hold files to work on, under their own names and in their

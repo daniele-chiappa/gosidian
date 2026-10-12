@@ -21,6 +21,7 @@ import (
 	"github.com/gosidian/gosidian/internal/pipeline"
 	"github.com/gosidian/gosidian/internal/plugins"
 	"github.com/gosidian/gosidian/internal/server/events"
+	"github.com/gosidian/gosidian/internal/vault"
 )
 
 // The pipelines (IMP-167, ADR-035) act through the server: PipelineHost
@@ -171,19 +172,29 @@ func (h pipelineHost) ReadAttachment(project, rel string) ([]byte, error) {
 		return nil, err
 	}
 	if h.s.vault.InArea(rel) {
+		if h.s.in != nil {
+			return h.s.in.Read(context.Background(), rel, maxAttachmentRead)
+		}
 		return h.s.vault.INRead(rel, maxAttachmentRead)
 	}
 	return h.s.vault.ReadAttachment(rel, maxAttachmentRead)
 }
 
 // OpenFile opens an attachment of the project, or a file of its IN folder
-// (IMP-172), for a plugin that fetches it by reference.
+// (IMP-172), a source's too, for a plugin that fetches it by reference.
 func (h pipelineHost) OpenFile(project, rel string) (io.ReadSeekCloser, pipeline.FileStat, error) {
 	if err := inProject(project, rel); err != nil {
 		return nil, pipeline.FileStat{}, err
 	}
 	if h.s.vault.InArea(rel) {
-		f, e, err := h.s.vault.INOpen(rel)
+		var f io.ReadSeekCloser
+		var e vault.INEntry
+		var err error
+		if h.s.in != nil {
+			f, e, err = h.s.in.Open(context.Background(), rel)
+		} else {
+			f, e, err = h.s.vault.INOpen(rel)
+		}
 		if err != nil {
 			return nil, pipeline.FileStat{}, err
 		}
@@ -197,8 +208,18 @@ func (h pipelineHost) OpenFile(project, rel string) (io.ReadSeekCloser, pipeline
 }
 
 // StatFile describes a file OpenFile opens, with its SHA-256: the one the
-// IN folder's state holds, while the file did not change, else read.
+// IN folder's state holds, while the file did not change, else read. A
+// source's file is described as in.db holds it, its SHA-256 the one its
+// source gave, or none: it is not read for it.
 func (h pipelineHost) StatFile(project, rel string) (pipeline.FileStat, error) {
+	if err := inProject(project, rel); err != nil {
+		return pipeline.FileStat{}, err
+	}
+	if h.s.in != nil && h.s.vault.InArea(rel) {
+		if row, err := h.s.in.Store().File(project, rel); err == nil && row.Remote() {
+			return pipeline.FileStat{Path: row.Path, Name: row.Name, Size: row.Size, ModTime: row.Modified, SHA256: row.SHA256}, nil
+		}
+	}
 	f, st, err := h.OpenFile(project, rel)
 	if err != nil {
 		return pipeline.FileStat{}, err

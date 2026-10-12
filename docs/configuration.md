@@ -222,6 +222,8 @@ gosidian pipeline token list [--pipeline <path.md>] | revoke <id>
 gosidian plugin list | show <name>       # the plugins and the manifest one serves
 gosidian plugin accept <name> <sha>      # let its nodes run (docs/plugins.md)
 gosidian plugin forget <name>
+gosidian plugin bind <plugin> <source> <project> [--as <folder>] [--write] [--every 1m]
+gosidian plugin unbind <project> <folder> # a source of a plugin as a folder of the IN folder (docs/in.md)
 gosidian version                         # print the build version (also --version)
 ```
 

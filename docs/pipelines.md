@@ -105,7 +105,7 @@ why a pipeline cannot run.
 | `external` | as manual, and also a service with a run token | the input given |
 | `ingest` | a file of one of `kinds` is stored as an attachment of the project (with `folder`: a note made with it in that folder) | `file`, `name`, `stem`, `ext`, `folder`, `note`, `project` |
 | `schedule` | `every: "monday 09:00"`, `"day 18:30"` (the automations' syntax), once per slot; a slot missed by more than 10 minutes is not run late | `slot` |
-| `in` | a batch of files of the project's [IN folder](in.md) closes: one run per file it takes, or one per batch with `batch: true`; `folder` (of the IN folder), `kinds` (none: all) and `match` (a glob on the name) choose the files | per file: `file`, `name`, `stem`, `ext`, `dir`, `size`, `sha256`, `source`, `project`; per batch: `batch`, `dir`, `count`, `bytes`, `files` (the files, when they fit in the input; else `files_listed` is false and `in.list` reads them), `project` |
+| `in` | a batch of files of the project's [IN folder](in.md) closes: one run per file it takes, or one per batch with `batch: true`; `folder` (of the IN folder), `kinds` (none: all) and `match` (a glob on the name) choose the files | per file: `file`, `name`, `stem`, `ext`, `dir`, `size`, `sha256`, `etag` (a source's file), `source` (`local`, or `<plugin>/<source>`), `project`; per batch: `batch`, `dir`, `count`, `bytes`, `files` (the files, when they fit in the input; else `files_listed` is false and `in.list` reads them), `project` |
 
 Every file store counts as an arrival: `memory_ingest`,
 `memory_upload_attachment`, `memory_upload_resource`, the media and table
@@ -113,8 +113,9 @@ notes, the MCP `/upload` endpoint and the web UI's uploads. A file starts
 each pipeline once: its path (named by its content) is the run's
 idempotency key. A package import (`as: package`) starts none.
 
-An `in` run per file is keyed by the file's path and content: the same file
-again starts no run, a changed one does. A batch run is keyed by its batch.
+An `in` run per file is keyed by the file's path and content (its SHA-256,
+or, for a file of a [source](in.md#sources) that gives none, its etag): the
+same file again starts no run, a changed one does. A batch run is keyed by its batch.
 Each file a run takes is marked `working` with the run, then `done` or
 `error` as the run ends, unless the pipeline set its status itself.
 
@@ -163,8 +164,8 @@ an expression turns it into text. There are no operators: compute in a
 | `http.request` | `url` (in `http_allowlist`), `method`, `json` or `body`, `headers`, `secret_header: "Authorization=secret_name"`, `accept_errors` | `status`, `headers`, `json` or `body` (4 MiB at most) |
 | `llm.chat` | `prompt`, `system`, `provider` (default `default`), `model`, `max_tokens` (default 1024), `temperature`, `json: true` | `text`, `json`, `model`, `provider`, `usage` |
 | `llm.describe` | `image` (an attachment of the project, png/jpg/gif/webp, 10 MiB at most), `prompt`, and as `llm.chat` | as `llm.chat`, plus `image` |
-| `in.list` | `folder` (of the IN folder; empty: all), `recursive` (default yes), `match` (a glob on the name), `kinds`, `status`, `batch` (`{{ trigger.batch }}`), `limit` (default 500, at most 5000), `cursor` | `files` (`path`, `name`, `stem`, `ext`, `dir`, `size`, `sha256`, `status`, `modified`, `batch`, `source`), `count`, `next` (the cursor of the next page; empty at the last) |
-| `in.move` | `file` (in the IN folder), `to` (a folder, `done/`, or a path, in the IN folder; empty: it stays), `status` (`done`, `error`, `ignored`, `new`) | `path`, `from`, `status` |
+| `in.list` | `folder` (of the IN folder; empty: all), `recursive` (default yes), `match` (a glob on the name), `kinds`, `status`, `batch` (`{{ trigger.batch }}`), `limit` (default 500, at most 5000), `cursor` | `files` (`path`, `name`, `stem`, `ext`, `dir`, `size`, `sha256`, `etag`, `status`, `modified`, `batch`, `source`), `count`, `next` (the cursor of the next page; empty at the last) |
+| `in.move` | `file` (in the IN folder), `to` (a folder, `done/`, or a path, in the IN folder; empty: it stays; for a file of a [source](in.md#sources), inside the source: `done/` is its `done/`), `status` (`done`, `error`, `ignored`, `new`) | `path`, `from`, `status` |
 | `<plugin>.<node>` | what the plugin's manifest says; a setting it lists in `files` names an attachment of the project or a file of its IN folder | the plugin tool's result, plus `files` (`name`, `path`, `mime`, `markdown`): the files it gave back, stored as attachments |
 
 A plugin's nodes exist once the owner accepted its manifest

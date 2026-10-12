@@ -10,8 +10,11 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"net/http"
 	"os"
+	"path"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -54,6 +57,15 @@ type Service struct {
 	markers  map[string]bool // the markers seen, by absolute path
 	locks    map[string]*sync.Mutex
 	wake     chan string
+
+	// The sources (sources.go).
+	src           Sources
+	wakeSrc       chan string
+	infos         map[string]SourceInfo      // by <project>/<folder>, from the last session
+	firstTry      map[string]time.Time       // the last check of a binding not listed yet
+	firstErr      map[string]string          // why that check failed
+	remoteMarkers map[string]map[string]bool // the markers a source holds, by project and batch folder
+	client        *http.Client
 }
 
 // Open opens the service on the database at dbPath, for the IN folders of
@@ -79,7 +91,9 @@ func Open(dbPath string, v *vault.Vault, projects func() []string, opts Options)
 		return nil, err
 	}
 	return &Service{store: st, v: v, projects: projects, opts: opts,
-		markers: map[string]bool{}, locks: map[string]*sync.Mutex{}, wake: make(chan string, 16)}, nil
+		markers: map[string]bool{}, locks: map[string]*sync.Mutex{}, wake: make(chan string, 16),
+		wakeSrc: make(chan string, 16), infos: map[string]SourceInfo{}, firstTry: map[string]time.Time{},
+		firstErr: map[string]string{}, remoteMarkers: map[string]map[string]bool{}, client: remoteClient()}, nil
 }
 
 // Store is the service's database.
@@ -128,8 +142,9 @@ func (s *Service) lock(project string) func() {
 }
 
 // Run scans the IN folders at once, then every Every, and a project when
-// ScanSoon asks, until ctx ends.
+// ScanSoon asks, until ctx ends; the sources, on their own clock.
 func (s *Service) Run(ctx context.Context) {
+	go s.runSources(ctx)
 	t := time.NewTicker(s.opts.Every)
 	defer t.Stop()
 	s.scanAll()
@@ -193,9 +208,22 @@ func (s *Service) reconcile(project string) (bool, error) {
 	unlock := s.lock(project)
 	defer unlock()
 	root := vault.INRoot(project)
+	remote, err := s.remoteFolders(project)
+	if err != nil {
+		return false, err
+	}
+	// A source's folder is the source's: what the disk has there is not
+	// looked at, nor are the rows of the source's files.
+	inRemote := func(p string) bool {
+		first, _, _ := strings.Cut(strings.TrimPrefix(p, root+"/"), "/")
+		_, ok := remote[first]
+		return ok
+	}
 	disk := map[string]vault.INEntry{}
-	err := s.v.INWalk(root, func(e vault.INEntry) error {
-		disk[e.Path] = e
+	err = s.v.INWalk(root, func(e vault.INEntry) error {
+		if !inRemote(e.Path) {
+			disk[e.Path] = e
+		}
 		return nil
 	})
 	if err != nil && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, vault.ErrNotIN) {
@@ -204,6 +232,11 @@ func (s *Service) reconcile(project string) (bool, error) {
 	rows, err := s.store.projectFiles(project)
 	if err != nil {
 		return false, err
+	}
+	for p, r := range rows {
+		if r.Remote() || inRemote(p) {
+			delete(rows, p)
+		}
 	}
 	open, err := s.store.openBatches(project)
 	if err != nil {
@@ -248,7 +281,7 @@ func (s *Service) reconcile(project string) (bool, error) {
 			_, err = tx.Exec(`UPDATE files SET size = ?, mtime = ?, sha256 = '', status = ?, run = '', batch = ?, updated = ? WHERE project = ? AND path = ?`,
 				e.Size, nanos(e.ModTime), StatusNew, id, nanos(now), project, p)
 		} else {
-			_, err = tx.Exec(`INSERT INTO files (`+fileCols+`) VALUES (?, ?, ?, ?, ?, '', ?, '', ?, ?, ?, ?)`,
+			_, err = tx.Exec(`INSERT INTO files (`+fileCols+`) VALUES (?, ?, ?, ?, ?, '', ?, '', ?, ?, ?, ?, '')`,
 				project, p, dir, e.Size, nanos(e.ModTime), StatusNew, SourceLocal, id, nanos(now), nanos(now))
 		}
 		if err != nil {
@@ -274,7 +307,7 @@ func (s *Service) reconcile(project string) (bool, error) {
 // hash computes the SHA-256 of the files of a project that have none. A
 // file that changed while it was read keeps none, for the next scan.
 func (s *Service) hash(project string) error {
-	rows, err := s.store.db.Query(`SELECT path, size, mtime FROM files WHERE project = ? AND sha256 = ''`, project)
+	rows, err := s.store.db.Query(`SELECT path, size, mtime FROM files WHERE project = ? AND sha256 = '' AND source = ?`, project, SourceLocal)
 	if err != nil {
 		return err
 	}
@@ -334,20 +367,37 @@ func (s *Service) sum(p string) (string, vault.INEntry, error) {
 // for Quiet, or whose marker appeared, once all their files have a hash,
 // and tells the sink.
 func (s *Service) closeBatches(project string) (bool, error) {
+	// The disk's scan and a source's check both close batches: under the
+	// project's lock, none closes a batch a file is joining.
+	unlock := s.lock(project)
+	defer unlock()
 	open, err := s.store.openBatches(project)
 	if err != nil {
 		return false, err
 	}
 	now := s.opts.Now()
 	closedAny := false
+	remote, err := s.remoteFolders(project)
+	if err != nil {
+		return false, err
+	}
 	for _, b := range open {
-		marker := filepath.Join(s.v.Root, filepath.FromSlash(vault.INRoot(project)), filepath.FromSlash(b.Dir), s.opts.Marker)
-		fresh := s.markerAppeared(marker)
+		first, _, _ := strings.Cut(b.Dir, "/")
+		_, isRemote := remote[first]
+		var marker string
+		var fresh bool
+		if isRemote {
+			fresh = s.remoteMarkerAppeared(project, b.Dir)
+		} else {
+			marker = filepath.Join(s.v.Root, filepath.FromSlash(vault.INRoot(project)), filepath.FromSlash(b.Dir), s.opts.Marker)
+			fresh = s.markerAppeared(marker)
+		}
 		if !fresh && now.Sub(b.LastChange) < s.opts.Quiet {
 			continue
 		}
+		// A local file waits for its hash; a remote one has its version.
 		var unhashed int
-		if err := s.store.db.QueryRow(`SELECT count(*) FROM files WHERE batch = ? AND sha256 = ''`, b.ID).Scan(&unhashed); err != nil {
+		if err := s.store.db.QueryRow(`SELECT count(*) FROM files WHERE batch = ? AND sha256 = '' AND source = ?`, b.ID, SourceLocal).Scan(&unhashed); err != nil {
 			return closedAny, err
 		}
 		if unhashed > 0 {
@@ -359,12 +409,15 @@ func (s *Service) closeBatches(project string) (bool, error) {
 			return closedAny, err
 		}
 		s.store.mu.Lock()
-		_, err := s.store.db.Exec(`UPDATE batches SET closed = ?, files = ?, bytes = ? WHERE id = ? AND closed = 0`, nanos(now), files, bytes, b.ID)
+		res, err := s.store.db.Exec(`UPDATE batches SET closed = ?, files = ?, bytes = ? WHERE id = ? AND closed = 0`, nanos(now), files, bytes, b.ID)
 		s.store.mu.Unlock()
 		if err != nil {
 			return closedAny, err
 		}
-		if fresh {
+		if n, _ := res.RowsAffected(); n == 0 {
+			continue // closed meanwhile, by the local scan or a source's check
+		}
+		if fresh && marker != "" {
 			_ = os.Remove(marker) // a read-only folder keeps it: it was seen
 		}
 		closedAny = true
@@ -433,8 +486,25 @@ func (s *Service) Batch(id string) (Batch, []File, error) {
 }
 
 // Move moves a file or a folder of a project's IN folder (vault.INMove)
-// and its state with it.
+// and its state with it. In a source's folder it moves inside that
+// source, through its plugin, when the binding lets it write and the
+// source can move; never between the source and the disk. A source's
+// file is moved to a target outside its source inside it: done/ is the
+// source's done/, so a pipeline moves a local file and a source's alike.
 func (s *Service) Move(project, from, to string) (vault.INEntry, error) {
+	ff, frel, fromRemote := s.remoteOf(project, from)
+	tf, trel, toRemote := s.remoteOf(project, to)
+	root := vault.INRoot(project) + "/"
+	if fromRemote && !toRemote && strings.HasPrefix(to, root) {
+		trel = strings.TrimPrefix(to, root)
+		tf, to, toRemote = ff, INPrefix(project, ff)+trel, true
+	}
+	switch {
+	case fromRemote && toRemote && ff == tf:
+		return s.moveRemote(project, ff, from, to, frel, trel)
+	case fromRemote || toRemote:
+		return vault.INEntry{}, fmt.Errorf("%w moves inside its source only: %s to %s", ErrRemote, from, to)
+	}
 	unlock := s.lock(project)
 	defer unlock()
 	e, err := s.v.INMove(from, to)
@@ -449,8 +519,12 @@ func (s *Service) Move(project, from, to string) (vault.INEntry, error) {
 }
 
 // Remove removes a file or a folder of a project's IN folder, with discard
-// when given (the trash), else for good, and forgets its state.
+// when given (the trash), else for good, and forgets its state. A source's
+// files are not removed from here.
 func (s *Service) Remove(project, p string, discard func(rel string, dir bool) error) error {
+	if folder, _, ok := s.remoteOf(project, p); ok {
+		return fmt.Errorf("%w is not removed from gosidian: move it, or set it aside (%s is the source %s)", ErrRemote, p, folder)
+	}
 	unlock := s.lock(project)
 	defer unlock()
 	e, err := s.v.INStat(p)
@@ -495,4 +569,142 @@ func (s *Service) RunEnded(run string, ok bool) error {
 		s.changed(p)
 	}
 	return err
+}
+
+// moveRemote moves a file or a folder inside a source's folder.
+func (s *Service) moveRemote(project, folder, from, to, frel, trel string) (vault.INEntry, error) {
+	b, ok := s.binding(project, folder)
+	if !ok {
+		return vault.INEntry{}, fmt.Errorf("%w: the source of %s is not bound now, or the pipelines are off in the server", ErrRemote, folder)
+	}
+	if !b.Write {
+		return vault.INEntry{}, fmt.Errorf("%w: %s is bound read-only (bind it with --write to move its files)", ErrRemote, b.ID())
+	}
+	if frel == "" || trel == "" {
+		return vault.INEntry{}, fmt.Errorf("%w: the source's folder itself does not move", ErrRemote)
+	}
+	if _, _, ok := s.cleanRemote(trel); !ok {
+		return vault.INEntry{}, fmt.Errorf("%w: %s is no plain path", vault.ErrNotIN, to)
+	}
+	if path.Base(trel) == s.opts.Marker {
+		return vault.INEntry{}, fmt.Errorf("%w: %s is the name of the marker", vault.ErrNotIN, to)
+	}
+	src := s.sourcesOf()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	sess, err := src.Session(ctx, b)
+	if err != nil {
+		return vault.INEntry{}, err
+	}
+	defer sess.Close()
+	if !sess.Info().Move {
+		return vault.INEntry{}, fmt.Errorf("%w: the source %s cannot move its files", ErrRemote, b.ID())
+	}
+	unlock := s.lock(project)
+	defer unlock()
+	if _, err := s.store.File(project, to); err == nil {
+		return vault.INEntry{}, fmt.Errorf("%s is there already", to)
+	}
+	got, err := sess.Move(ctx, frel, trel)
+	if err != nil {
+		return vault.INEntry{}, err
+	}
+	if err := s.store.Moved(project, from, to, s.opts.Now()); err != nil {
+		return vault.INEntry{}, fmt.Errorf("moved, but its state: %w", err)
+	}
+	e := vault.INEntry{Path: to}
+	if row, err := s.store.File(project, to); err == nil {
+		// The source may give the moved file another etag: the same file.
+		if got.ETag != "" && got.ETag != row.ETag {
+			s.store.mu.Lock()
+			_, _ = s.store.db.Exec(`UPDATE files SET etag = ? WHERE project = ? AND path = ?`, got.ETag, project, to)
+			s.store.mu.Unlock()
+		}
+		e.Size, e.ModTime = row.Size, row.Modified
+	} else {
+		e.Dir = true
+	}
+	s.changed(project)
+	return e, nil
+}
+
+// Stat describes a file or a folder of a project's IN folder: on the disk,
+// or, in a source's folder, as in.db holds it.
+func (s *Service) Stat(project, p string) (vault.INEntry, error) {
+	folder, rel, ok := s.remoteOf(project, p)
+	if !ok {
+		return s.v.INStat(p)
+	}
+	if rel == "" {
+		return vault.INEntry{Path: p, Dir: true}, nil
+	}
+	if f, err := s.store.File(project, p); err == nil {
+		return vault.INEntry{Path: p, Size: f.Size, ModTime: f.Modified}, nil
+	}
+	if under, err := s.store.hasUnder(project, p); err == nil && under {
+		return vault.INEntry{Path: p, Dir: true}, nil
+	}
+	return vault.INEntry{}, fmt.Errorf("%s in the source %s: %w", p, folder, fs.ErrNotExist)
+}
+
+// Open opens a file of an IN folder for reading: on the disk, or, in a
+// source's folder, from the source, read in ranges as it is read.
+func (s *Service) Open(ctx context.Context, p string) (io.ReadSeekCloser, vault.INEntry, error) {
+	project, _, _ := strings.Cut(p, "/")
+	folder, rel, ok := s.remoteOf(project, p)
+	if !ok {
+		f, e, err := s.v.INOpen(p)
+		if err != nil {
+			return nil, vault.INEntry{}, err
+		}
+		return f, e, nil
+	}
+	row, err := s.store.File(project, p)
+	if err != nil {
+		return nil, vault.INEntry{}, fmt.Errorf("%s: %w", p, fs.ErrNotExist)
+	}
+	b, bound := s.binding(project, folder)
+	if !bound {
+		return nil, vault.INEntry{}, fmt.Errorf("%w: the source of %s is not bound now, or the pipelines are off in the server", ErrRemote, folder)
+	}
+	src := s.sourcesOf()
+	open := func(ctx context.Context) (RemoteURL, error) {
+		sess, err := src.Session(ctx, b)
+		if err != nil {
+			return RemoteURL{}, err
+		}
+		defer sess.Close()
+		return sess.Open(ctx, rel)
+	}
+	e := vault.INEntry{Path: p, Size: row.Size, ModTime: row.Modified}
+	return newRemoteFile(ctx, s.client, open, p, row.Size), e, nil
+}
+
+// Read reads a file of an IN folder whole, up to max bytes.
+func (s *Service) Read(ctx context.Context, p string, max int64) ([]byte, error) {
+	f, e, err := s.Open(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	if e.Size > max {
+		return nil, fmt.Errorf("%s is %d bytes, more than %d", p, e.Size, max)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, max+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > max {
+		return nil, fmt.Errorf("%s is more than %d bytes", p, max)
+	}
+	return data, nil
+}
+
+// remoteClient reads the files of the sources: no redirect (a URL goes to
+// the hosts the plugin may point at, and no further), and an answer within
+// a minute.
+func remoteClient() *http.Client {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.ResponseHeaderTimeout = time.Minute
+	return &http.Client{Transport: tr, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 }

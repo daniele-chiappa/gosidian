@@ -20,6 +20,7 @@ import (
 	"github.com/gosidian/gosidian/internal/jobs"
 	mcpsrv "github.com/gosidian/gosidian/internal/mcp"
 	"github.com/gosidian/gosidian/internal/pipeline"
+	"github.com/gosidian/gosidian/internal/plugins"
 	"github.com/gosidian/gosidian/internal/secrets"
 )
 
@@ -44,7 +45,7 @@ func openSecrets(sdir string) (*secrets.Store, error) {
 // startPipelines opens jobs.db, builds the engine on the MCP server and
 // starts the runner and the schedules. The returned stop waits for the
 // runner to put down its steps (ctx must be done) and closes jobs.db.
-func startPipelines(ctx context.Context, cfg *config.Config, sdir string, mcpServer *mcpsrv.Server, in *infolder.Service) (stop func(time.Duration)) {
+func startPipelines(ctx context.Context, cfg *config.Config, sdir string, mcpServer *mcpsrv.Server, in *infolder.Service) (stop func(time.Duration), reg *plugins.Registry) {
 	pc := cfg.Pipelines
 	loc := time.Local
 	tz := pc.Timezone
@@ -99,7 +100,7 @@ func startPipelines(ctx context.Context, cfg *config.Config, sdir string, mcpSer
 		Location:       loc,
 		FileTicketTTL:  pc.StepTimeout,
 	}, sec, slog.Default())
-	reg, err := newPlugins(pc, sdir, sec, slog.Default())
+	reg, err = newPlugins(pc, sdir, sec, slog.Default())
 	if err != nil {
 		log.Fatalf("plugins: %v", err)
 	}
@@ -108,6 +109,8 @@ func startPipelines(ctx context.Context, cfg *config.Config, sdir string, mcpSer
 	// in.* nodes read and move through them.
 	engine.SetIN(in)
 	in.SetSink(engine)
+	// The plugins' sources, bound to IN folders (IMP-172 phase 2).
+	in.SetSources(reg)
 	mcpServer.SetPipelines(engine)
 	mcpServer.SetPlugins(reg)
 	if len(reg.Names()) > 0 {
@@ -129,7 +132,7 @@ func startPipelines(ctx context.Context, cfg *config.Config, sdir string, mcpSer
 			log.Printf("pipelines: steps still running at shutdown, the next start takes them back")
 		}
 		_ = store.Close()
-	}
+	}, reg
 }
 
 // --- gosidian secret ---

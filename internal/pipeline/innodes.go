@@ -80,7 +80,7 @@ func (t Trigger) TakesIN(f infolder.File) bool {
 func inFileInput(f infolder.File) map[string]any {
 	return map[string]any{
 		"file": f.Path, "name": f.Name, "stem": f.Stem, "ext": f.Ext, "dir": f.Dir,
-		"size": f.Size, "sha256": f.SHA256, "source": f.Source, "project": f.Project,
+		"size": f.Size, "sha256": f.SHA256, "etag": f.ETag, "source": f.Source, "project": f.Project,
 	}
 }
 
@@ -116,7 +116,7 @@ func (e *Engine) INBatch(b infolder.Batch, files []infolder.File) {
 			continue
 		}
 		for _, f := range taken {
-			e.startIN(p, inFileInput(f), "in:"+f.Path+":"+f.SHA256, []infolder.File{f})
+			e.startIN(p, inFileInput(f), "in:"+f.Path+":"+f.Version(), []infolder.File{f})
 		}
 	}
 }
@@ -241,7 +241,7 @@ func inMove(_ context.Context, env *Env, with map[string]any) (any, error) {
 		// Into a folder: one written with a trailing slash, or one there.
 		if strings.HasSuffix(to, "/") {
 			target += "/" + path.Base(from)
-		} else if st, err := env.Engine.in.Vault().INStat(target); err == nil && st.Dir {
+		} else if st, err := svc.Stat(env.Project, target); err == nil && st.Dir {
 			target += "/" + path.Base(from)
 		}
 		e, err := svc.Move(env.Project, from, target)

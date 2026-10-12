@@ -22,8 +22,11 @@ export interface INFile {
   size: number
   modified: string
   sha256?: string
+  /** A source's file: its version, as the source gives it. */
+  etag?: string
   status: INStatus
   run?: string
+  /** "local", or the source of a source's folder: "<plugin>/<source>". */
   source: string
   batch?: string
   first_seen: string
@@ -46,6 +49,28 @@ export interface INCounts {
   errors: number
 }
 
+/** A plugin's source bound to the IN folder, as a folder at its root
+ *  (IMP-172 phase 2). */
+export interface INSource {
+  folder: string
+  plugin: string
+  source: string
+  kind?: string
+  description?: string
+  /** The source gives its changes from a cursor. */
+  changes: boolean
+  /** The source moves its files: with write, they move inside it. */
+  move: boolean
+  write: boolean
+  /** ok, checking (not checked yet), error, or off (not bound now, or the
+   *  pipelines are off in the server). */
+  status: 'ok' | 'checking' | 'error' | 'off'
+  error?: string
+  checked?: string
+  /** Seconds between two checks. */
+  every: number
+}
+
 export interface INListing {
   project: string
   /** The IN folder's vault path. */
@@ -55,6 +80,7 @@ export interface INListing {
   folders: INFolder[]
   files: INFile[]
   next: string
+  sources: INSource[]
   track_in_git: boolean
 }
 
@@ -93,6 +119,17 @@ export async function setINStatus(project: string, paths: string[], status: INSt
 export async function deleteIN(project: string, paths: string[]): Promise<{ removed: string[]; trash: boolean }> {
   const { data } = await client.post<{ removed: string[]; trash: boolean }>(at(project, 'delete'), { paths })
   return data
+}
+
+/** Asks for a check now: a source's folder, or all of them and the disk. */
+export async function scanIN(project: string, folder = ''): Promise<void> {
+  await client.post(at(project, 'scan'), { folder })
+}
+
+/** The source whose folder holds the path (relative to the IN folder). */
+export function sourceOf(sources: INSource[], rel: string): INSource | undefined {
+  const first = rel.split('/')[0]
+  return sources.find((s) => s.folder === first)
 }
 
 /** A file chosen that the pipeline's trigger does not take. */

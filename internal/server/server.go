@@ -6,6 +6,7 @@
 package server
 
 import (
+	"context"
 	"io"
 	"mime"
 	"net/http"
@@ -41,6 +42,15 @@ type Server struct {
 	// healthDetails says whether a /healthz request may see the vault path,
 	// the note count and git's last error (IMP-160, S2-10). nil: never.
 	healthDetails func(r *http.Request) bool
+	// inOpen opens a file of an IN folder, a source's too (IMP-172); nil
+	// opens the disk's only.
+	inOpen func(ctx context.Context, rel string) (io.ReadSeekCloser, vault.INEntry, error)
+}
+
+// SetINOpener installs how a file of an IN folder is opened: through the
+// IN folders' state, which reads a source's files from their source.
+func (s *Server) SetINOpener(fn func(ctx context.Context, rel string) (io.ReadSeekCloser, vault.INEntry, error)) {
+	s.inOpen = fn
 }
 
 // SetHealthDetailsAuthorizer installs the check of /healthz's details: true
@@ -221,7 +231,14 @@ func (s *Server) handleVaultFile(w http.ResponseWriter, r *http.Request) {
 // serveINFile serves a file of an IN folder (IMP-172): its name is its
 // own, not its content's, so a browser revalidates it.
 func (s *Server) serveINFile(w http.ResponseWriter, r *http.Request, clean string) {
-	f, e, err := s.vault.INOpen(clean)
+	var f io.ReadSeekCloser
+	var e vault.INEntry
+	var err error
+	if s.inOpen != nil {
+		f, e, err = s.inOpen(r.Context(), clean)
+	} else {
+		f, e, err = s.vault.INOpen(clean)
+	}
 	if err != nil {
 		http.NotFound(w, r)
 		return

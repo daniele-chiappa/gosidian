@@ -1314,6 +1314,7 @@
     "plugins": "Plugins",
     "plugins_intro": "MCP servers whose nodes the pipelines use as <plugin>.<node>.",
     "plugin_nodes": "Nodes",
+    "plugin_sources": "Sources, which the owner binds to an IN folder",
     "plugin_accept": "The owner accepts it on the server:",
     "plugin_state": {
       "ok": "running",
@@ -1481,7 +1482,7 @@
     "load_failed": "Could not read the IN folder",
     "action_failed": "The action failed",
     "nothing_found": "No file matches.",
-    "empty": "The folder is empty. Files arrive from disk (rsync, a mounted folder) or, later, from a remote store.",
+    "empty": "The folder is empty. Files arrive from disk (rsync, a mounted folder), or from a remote store a plugin offers, which the owner binds here as a folder.",
     "select_all": "Select all the files shown",
     "name": "Name",
     "size": "Size",
@@ -1495,6 +1496,26 @@
     "no_run": "No run started: the pipeline takes none of the files chosen.",
     "skipped_folder": "{name} skipped: the pipeline takes the folder {value} only.",
     "skipped_kinds": "{name} skipped: the pipeline takes {value} only.",
-    "skipped_match": "{name} skipped: its name does not match {value}."
+    "skipped_match": "{name} skipped: its name does not match {value}.",
+    "source": {
+      "label": "A source's folder",
+      "from": "from {source}",
+      "status": {
+        "ok": "up to date",
+        "checking": "being checked",
+        "error": "error",
+        "off": "not checked"
+      },
+      "checked": "checked {when}",
+      "off": "Not bound now, or the pipelines are off on the server: what it held stays, and is not read.",
+      "banner": "This folder is the source {source}: its files stay there and are read from there.",
+      "read_only": "Read-only: its files are not moved nor deleted from here.",
+      "can_move": "Its files move inside the source; they are not deleted from here.",
+      "refresh": "Check now",
+      "refreshing": "Check started: the window updates when it ends.",
+      "no_delete": "The files of a source are not deleted from here: move them, or set them aside.",
+      "no_move": "The source is read-only, or cannot move its files.",
+      "mixed": "Choose files of one place: the disk, or one source."
+    }
   }
 }

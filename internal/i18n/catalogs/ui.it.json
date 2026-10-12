@@ -1314,6 +1314,7 @@
     "plugins": "Plugin",
     "plugins_intro": "Server MCP i cui nodi le pipeline usano come <plugin>.<nodo>.",
     "plugin_nodes": "Nodi",
+    "plugin_sources": "Sorgenti, che l'owner lega a una cartella IN",
     "plugin_accept": "Lo accetta il proprietario sul server:",
     "plugin_state": {
       "ok": "attivo",
@@ -1481,7 +1482,7 @@
     "load_failed": "Non si riesce a leggere la cartella IN",
     "action_failed": "L'operazione non è riuscita",
     "nothing_found": "Nessun file corrisponde.",
-    "empty": "La cartella è vuota. I file arrivano da disco (rsync, una cartella montata) o, più avanti, da un archivio remoto.",
+    "empty": "La cartella è vuota. I file arrivano da disco (rsync, una cartella montata), oppure da un archivio remoto che un plugin offre e che l'owner lega qui come cartella.",
     "select_all": "Seleziona tutti i file mostrati",
     "name": "Nome",
     "size": "Dimensione",
@@ -1495,6 +1496,26 @@
     "no_run": "Nessuna run avviata: la pipeline non prende nessuno dei file scelti.",
     "skipped_folder": "{name} saltato: la pipeline prende solo la cartella {value}.",
     "skipped_kinds": "{name} saltato: la pipeline prende solo {value}.",
-    "skipped_match": "{name} saltato: il nome non corrisponde a {value}."
+    "skipped_match": "{name} saltato: il nome non corrisponde a {value}.",
+    "source": {
+      "label": "La cartella di una sorgente",
+      "from": "da {source}",
+      "status": {
+        "ok": "aggiornata",
+        "checking": "in controllo",
+        "error": "errore",
+        "off": "non controllata"
+      },
+      "checked": "controllata {when}",
+      "off": "Non è legata adesso, o le pipeline sono spente nel server: quello che conteneva resta, ma non si legge.",
+      "banner": "Questa cartella è la sorgente {source}: i suoi file restano lì e si leggono da lì.",
+      "read_only": "In sola lettura: i suoi file non si spostano né si eliminano da qui.",
+      "can_move": "I suoi file si spostano dentro la sorgente; non si eliminano da qui.",
+      "refresh": "Aggiorna",
+      "refreshing": "Controllo avviato: la finestra si aggiorna quando finisce.",
+      "no_delete": "I file di una sorgente non si eliminano da qui: spostali, o mettili da parte.",
+      "no_move": "La sorgente è in sola lettura, o non sa spostare i suoi file.",
+      "mixed": "Scegli file di un posto solo: il disco, o una sorgente."
+    }
   }
 }

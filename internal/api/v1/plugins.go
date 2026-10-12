@@ -13,15 +13,17 @@ import (
 // hosts of the network.
 
 type pluginView struct {
-	Name     string              `json:"name"`
-	Status   string              `json:"status"`
-	Version  string              `json:"version,omitempty"`
-	SHA      string              `json:"sha,omitempty"`
-	Nodes    []plugins.NodeInfo  `json:"nodes"`
-	Accepted *acceptedPluginView `json:"accepted,omitempty"`
-	Checked  *time.Time          `json:"checked,omitempty"`
-	Error    string              `json:"error,omitempty"`
-	URL      string              `json:"url,omitempty"`
+	Name    string             `json:"name"`
+	Status  string             `json:"status"`
+	Version string             `json:"version,omitempty"`
+	SHA     string             `json:"sha,omitempty"`
+	Nodes   []plugins.NodeInfo `json:"nodes"`
+	// Sources are the accepted manifest's (IMP-172 phase 2).
+	Sources  []plugins.SourceSpec `json:"sources"`
+	Accepted *acceptedPluginView  `json:"accepted,omitempty"`
+	Checked  *time.Time           `json:"checked,omitempty"`
+	Error    string               `json:"error,omitempty"`
+	URL      string               `json:"url,omitempty"`
 }
 
 type acceptedPluginView struct {
@@ -60,6 +62,10 @@ func pluginViewOf(s plugins.State, owner bool) pluginView {
 	v := pluginView{Name: s.Name, Status: s.Status, Version: s.Version, SHA: short(s.SHA), Nodes: s.Nodes}
 	if v.Nodes == nil {
 		v.Nodes = []plugins.NodeInfo{}
+	}
+	v.Sources = []plugins.SourceSpec{}
+	if s.Accepted != nil && len(s.Accepted.Manifest.Sources) > 0 {
+		v.Sources = s.Accepted.Manifest.Sources
 	}
 	if !s.Checked.IsZero() {
 		c := s.Checked

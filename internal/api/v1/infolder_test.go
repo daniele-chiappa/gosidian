@@ -147,6 +147,18 @@ func TestIN_API(t *testing.T) {
 	if w := post("run", `{"pipeline":"Alpha/p.md","paths":["y.txt"]}`); w.code != http.StatusNotFound {
 		t.Errorf("a run with the pipelines off: %d %s", w.code, w.body)
 	}
+	if src, ok := root["sources"].([]any); !ok || len(src) != 0 {
+		t.Errorf("sources %v", root["sources"])
+	}
+	if w := post("scan", `{"folder":"nc"}`); w.code != http.StatusAccepted {
+		t.Errorf("scan: %d %s", w.code, w.body)
+	}
+	if w := post("scan", ""); w.code != http.StatusAccepted {
+		t.Errorf("scan of all: %d %s", w.code, w.body)
+	}
+	if w := post("scan", `{"folder":"a/b"}`); w.code != http.StatusBadRequest {
+		t.Errorf("scan of a subfolder: %d %s", w.code, w.body)
+	}
 	if w := f.doAuthRecorder(http.MethodGet, "/api/v1/in/Beta", "", nil); w.code != http.StatusNotFound {
 		t.Errorf("a project without IN: %d", w.code)
 	}

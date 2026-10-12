@@ -98,6 +98,8 @@ structured content or as JSON text:
 | `nodes[].input_schema`, `output_schema` | JSON Schemas of the settings (as a pipeline writes them) and of the output, for the reader and the editor |
 | `permissions.files` | the plugin reads the files a pipeline hands it (needed by `files`) |
 | `permissions.network` | the hosts the plugin itself calls; empty for none. Declared: whoever runs its container enforces it |
+| `sources` | the archives it reads, which the owner binds to IN folders (below): `name`, `kind`, `description`, `changes`, `move`. A manifest with sources may have no nodes |
+| `permissions.source_hosts` | the hosts the URLs of its sources' files may point at, besides the plugin's own: gosidian reads no file from another (a name or an address, with a port or not) |
 
 The sha that `accept` takes is the SHA-256 of the manifest as gosidian
 reads it: a field it does not know, or the spacing of a schema, changes
@@ -150,12 +152,64 @@ directly, not through a proxy that caps the size of an answer. The
 plugin then calls that address, which its manifest declares in
 `permissions.network`.
 
+### Sources
+
+A plugin may offer **sources**: archives it reads (a Nextcloud folder, an
+S3 bucket, a Drive folder), set up in the plugin with their credentials,
+which never leave it. The owner binds one to a project's
+[IN folder](in.md#sources), where it shows as a folder:
+
+```bash
+gosidian plugin bind storage fatture archive --as nextcloud --write
+gosidian plugin list        # the plugins, then the bound sources
+gosidian plugin unbind archive nextcloud
+```
+
+A source in the manifest:
+
+```json
+"sources": [{"name": "fatture", "kind": "webdav", "description": "Nextcloud, the folder Fatture", "changes": true, "move": true}],
+"permissions": {"files": false, "network": ["nc.lan"], "source_hosts": ["nc.lan"]}
+```
+
+and four tools, each taking the source's name in `source`; paths are
+relative to the source's root, with `/`, plain, no hidden segment (gosidian
+leaves out the others, but for the batch marker `.done`):
+
+| Tool | Arguments | Result |
+|---|---|---|
+| `gosidian_source_list` | `cursor` (`""` at first), `limit` | `files: [{path, size, modified, etag, sha256?}]`, `next` (the cursor of the next page; `""` at the last) |
+| `gosidian_source_changes` | `cursor` | `changes: [{path, size, modified, etag, sha256?, deleted?}]`, `cursor`, `more?`, `reset?`; with `cursor` `""`, the cursor of now. Only with `changes` |
+| `gosidian_source_open` | `path` | `url`, `size`, `etag`: where to `GET` the file, ranges too, for a while |
+| `gosidian_source_move` | `from`, `to` | `path`, `size`, `etag`: the file, or the folder, moved inside the source. Only with `move` |
+
+gosidian checks a bound source every minute (`--every`, at least 20
+seconds): its changes from the cursor of the last check when it gives them,
+else, and once an hour all the same, its list in full, a page at a time.
+`reset: true` asks for the list. A file is new when its content changed:
+another SHA-256 when both have one, else another etag or size. An etag
+should stay the same when a file only moves.
+
+The bytes of a file stay in the source until a node, a download or a
+plugin with `file_refs` reads it: gosidian then asks `gosidian_source_open`
+for a URL and reads it in ranges, streaming what it reads, with nothing on
+its disk. A plugin node fetches a source's file through its run's ticket,
+as any file: it calls gosidian, never the source. The URL must be http(s),
+without credentials, on the plugin's host or a host of `source_hosts`;
+gosidian follows no redirect, and an answer of `401`, `403`, `404` or `410`
+asks for another URL once. For S3, `open` can give the archive's presigned
+URL; for the others, an address of the plugin that streams the file.
+
+gosidian moves a source's files only with a binding's `--write`, only
+inside the source (a target outside it is read inside it), and never
+deletes them.
+
 ### What gosidian does not do for a plugin
 
 - It does not run it: the plugin is a container or a service its owner
   starts, with the network it needs, nothing more.
 - It does not pass secrets: a plugin that calls a paid service keeps its
-  own key.
+  own key, a source its credentials.
 - It does not let it read the vault: the plugin gets the files a node
   names, in the pipeline's project, or a ticket for each, and gives back
   files and data.

@@ -30,6 +30,7 @@ import (
 	"github.com/gosidian/gosidian/internal/metrics"
 	"github.com/gosidian/gosidian/internal/oauth"
 	"github.com/gosidian/gosidian/internal/parser"
+	"github.com/gosidian/gosidian/internal/plugins"
 	"github.com/gosidian/gosidian/internal/projectops"
 	"github.com/gosidian/gosidian/internal/projects"
 	"github.com/gosidian/gosidian/internal/scaffold"
@@ -590,9 +591,17 @@ func main() {
 	inFolders.SetOnChange(func(project string) {
 		eventsHub.Publish(events.TopicTree, map[string]any{"action": "in", "project": project, "path": vault.INRoot(project)})
 	})
+	// The plugins' registry, once the pipelines are on: its bindings of
+	// the sources follow a project's rename too.
+	var pluginReg *plugins.Registry
 	projectops.SetRenameHook(func(from, to string) {
 		if err := inFolders.Store().ProjectRenamed(from, to); err != nil {
 			log.Printf("IN folders: the rename of %s to %s: %v", from, to, err)
+		}
+		if pluginReg != nil {
+			if err := pluginReg.ProjectRenamed(from, to); err != nil {
+				log.Printf("plugins: the sources bound to %s, renamed %s: %v", from, to, err)
+			}
 		}
 	})
 	go inFolders.Run(ctx)
@@ -600,7 +609,7 @@ func main() {
 	// automations; off unless [pipelines] enabled.
 	stopPipelines := func(time.Duration) {}
 	if cfg.Pipelines.Enabled {
-		stopPipelines = startPipelines(ctx, cfg, sdir, mcpServer, inFolders)
+		stopPipelines, pluginReg = startPipelines(ctx, cfg, sdir, mcpServer, inFolders)
 	}
 	// A token owned by a web account is narrowed on every request to what
 	// that account may currently read and write (BUG-055): the resolver maps
@@ -713,6 +722,7 @@ func main() {
 	srv.MountAPIv1(apiRouter)
 	srv.SetVaultFileAuthorizer(apiRouter.VaultFileAuthorizer()) // ADR-022: attachments share the API auth
 	srv.SetHealthDetailsAuthorizer(apiRouter.HealthDetailsAuthorizer())
+	srv.SetINOpener(inFolders.Open)
 	srv.MountMCP(mcpServer.Handler("/mcp"))
 	srv.SetMCPToolCount(mcpServer.ToolCount)
 	if oauthSrv != nil {

@@ -14,6 +14,7 @@ vi.mock('@/api/in', async (orig) => ({
   setINStatus: vi.fn(),
   deleteIN: vi.fn(),
   runIN: vi.fn(),
+  scanIN: vi.fn(),
 }))
 vi.mock('@/api/pipelines', async (orig) => ({
   ...(await orig<typeof import('@/api/pipelines')>()),
@@ -33,7 +34,7 @@ vi.mock('plancia', async (orig) => ({
   useWindowsStore: () => ({ windows: [], open: vi.fn() }),
 }))
 
-import { deleteIN, listIN, moveIN, runIN, setINStatus } from '@/api/in'
+import { deleteIN, listIN, moveIN, runIN, scanIN, setINStatus, type INSource } from '@/api/in'
 import { listPipelines } from '@/api/pipelines'
 import { confirmAction } from '@/composables/useConfirm'
 import { useUIStore } from '@/stores/ui'
@@ -51,7 +52,7 @@ const file = (path: string, over: Partial<INFile> = {}): INFile => {
 }
 
 const listing = (over: Partial<INListing> = {}): INListing => ({
-  project: 'p', root: 'p/IN', dir: '', next: '', track_in_git: false,
+  project: 'p', root: 'p/IN', dir: '', next: '', track_in_git: false, sources: [],
   counts: { files: 3, bytes: 3072, new: 2, working: 1, errors: 0 },
   folders: [{ path: 'fatture', files: 2, bytes: 2048, new: 1 }],
   files: [file('p/IN/a.pdf'), file('p/IN/b.xml', { status: 'working', run: 'abcdef1234' })],
@@ -81,6 +82,7 @@ describe('INWindow (IMP-172)', () => {
       skipped: [{ path: 'p/IN/b.xml', reason: 'kinds', value: 'pdf', why: 'not of the kinds pdf' }],
     })
     vi.mocked(setINStatus).mockReset().mockResolvedValue()
+    vi.mocked(scanIN).mockReset().mockResolvedValue()
   })
 
   it('shows a folder at a time: its subfolders, its files with their status and run', async () => {
@@ -152,5 +154,63 @@ describe('INWindow (IMP-172)', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  describe('a source bound as a folder (IMP-172 phase 2)', () => {
+    const source = (over: Partial<INSource> = {}): INSource => ({
+      folder: 'nc', plugin: 'storage', source: 'docs', kind: 'webdav', changes: true, move: true, write: false,
+      status: 'ok', checked: '2026-10-12T10:00:00Z', every: 60, ...over,
+    })
+    const remote = (path: string) => file(path, { dir: path.split('/').slice(2, -1).join('/'), source: 'storage/docs', etag: 'e1' })
+
+    it('lists the sources at the root, with their state, and checks one on request', async () => {
+      vi.mocked(listIN).mockResolvedValue(listing({
+        folders: [{ path: 'fatture', files: 2, bytes: 2048, new: 1 }, { path: 'nc', files: 1, bytes: 10, new: 1 }],
+        sources: [source(), source({ folder: 'drive', source: 'drive', status: 'error', error: 'the archive is down' })],
+      }))
+      const w = await mountWindow()
+      expect(w.find('[data-in-source="nc"] [data-in-source-status]').text()).toBe('up to date')
+      expect(w.find('[data-in-source="drive"] [data-in-source-error]').text()).toBe('the archive is down')
+      // Its folder row: a cloud, no zip, no delete.
+      expect(w.find('[data-in-folder="nc"] [data-in-cloud]').exists()).toBe(true)
+      expect(w.find('[data-in-delete-folder="nc"]').exists()).toBe(false)
+      expect(w.find('[data-in-delete-folder="fatture"]').exists()).toBe(true)
+      await w.find('[data-in-refresh="nc"]').trigger('click')
+      await flushPromises()
+      expect(scanIN).toHaveBeenCalledWith('p', 'nc')
+      expect(w.find('[data-in-message]').text()).toContain('Check started')
+    })
+
+    it('inside a read-only source: no delete, no move', async () => {
+      vi.mocked(listIN).mockResolvedValue(listing({ folders: [{ path: 'nc', files: 1, bytes: 10, new: 1 }], sources: [source()], files: [] }))
+      const w = await mountWindow()
+      vi.mocked(listIN).mockResolvedValue(listing({ dir: 'nc', folders: [], sources: [source()], files: [remote('p/IN/nc/a.pdf')] }))
+      await w.find('[data-in-folder="nc"] [data-in-open]').trigger('click')
+      await flushPromises()
+      expect(w.find('[data-in-sources]').exists()).toBe(false)
+      expect(w.find('[data-in-source-banner]').text()).toContain('Read-only')
+      await w.find('[data-in-file="p/IN/nc/a.pdf"] [data-in-select]').setValue(true)
+      expect(w.find('[data-in-action="delete"]').exists()).toBe(false)
+      expect(w.find('[data-in-no-delete]').text()).toContain('not deleted from here')
+      await w.find('[data-in-move-target]').setValue('done')
+      expect(w.find('[data-in-action="move"]').attributes('disabled')).toBeDefined()
+      expect(w.find('[data-in-action="move"]').attributes('title')).toContain('read-only')
+    })
+
+    it('inside a source that moves: the files move inside it', async () => {
+      const src = source({ write: true })
+      vi.mocked(listIN).mockResolvedValue(listing({ folders: [{ path: 'nc', files: 1, bytes: 10, new: 1 }], sources: [src], files: [] }))
+      const w = await mountWindow()
+      vi.mocked(listIN).mockResolvedValue(listing({ dir: 'nc', folders: [], sources: [src], files: [remote('p/IN/nc/a.pdf')] }))
+      await w.find('[data-in-source-open="nc"]').trigger('click')
+      await flushPromises()
+      expect(w.find('[data-in-source-banner]').text()).toContain('storage/docs')
+      expect(w.find('[data-in-source-banner]').text()).toContain('move inside the source')
+      await w.find('[data-in-file="p/IN/nc/a.pdf"] [data-in-select]').setValue(true)
+      await w.find('[data-in-move-target]').setValue('done')
+      await w.find('[data-in-action="move"]').trigger('click')
+      await flushPromises()
+      expect(moveIN).toHaveBeenCalledWith('p', 'p/IN/nc/a.pdf', 'done/')
+    })
   })
 })

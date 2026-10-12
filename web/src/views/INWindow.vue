@@ -7,11 +7,15 @@
  * folder. Who writes in the project moves, deletes (into the trash), sets
  * a file aside or back as new, and starts a pipeline on the files chosen.
  * A scan, a move or the end of a run updates it live.
+ *
+ * A folder at its root may be a plugin's source (IMP-172 phase 2): its
+ * files stay in the source, are read from there, and are neither deleted
+ * nor moved out of it; they move inside it when the binding lets them.
  */
 import { computed, inject, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWindowsStore, type OpenSpec } from 'plancia'
-import { ChevronRight, Download, FileText, Folder, Inbox, Play, RotateCcw, Search, Trash2, EyeOff, FolderInput } from 'lucide-vue-next'
+import { ChevronRight, Cloud, Download, FileText, Folder, Inbox, Play, RefreshCw, RotateCcw, Search, Trash2, EyeOff, FolderInput } from 'lucide-vue-next'
 import {
   deleteIN,
   inFileHref,
@@ -19,10 +23,13 @@ import {
   listIN,
   moveIN,
   runIN,
+  scanIN,
   setINStatus,
+  sourceOf,
   type INCounts,
   type INFile,
   type INFolder,
+  type INSource,
   type INStatus,
 } from '@/api/in'
 import { exportFolder } from '@/api/folders'
@@ -65,6 +72,31 @@ const selected = ref<Set<string>>(new Set())
 const moveTo = ref('')
 const pipelines = ref<PipelineInfo[]>([])
 const pipeline = ref('')
+const sources = ref<INSource[]>([])
+
+/** The source of the folder shown, when it is one's. */
+const here = computed(() => sourceOf(sources.value, dir.value))
+/** A folder at the root of the IN folder that is a source's. */
+const sourceFolder = (path: string) => (path.includes('/') ? undefined : sourceOf(sources.value, path))
+
+const chosenFiles = computed(() => files.value.filter((f) => selected.value.has(f.path)))
+/** The source of the files chosen: undefined for files of the disk, null
+ *  for files of more than one place. */
+const chosenSource = computed<INSource | undefined | null>(() => {
+  const places = new Set(chosenFiles.value.map((f) => (f.source === 'local' ? '' : f.dir.split('/')[0])))
+  if (places.size > 1) return null
+  const [place] = [...places]
+  return place ? sourceOf(sources.value, place) ?? null : undefined
+})
+const canMoveChosen = computed(() => {
+  const src = chosenSource.value
+  return src === undefined || (src !== null && src.write && src.move)
+})
+const canDeleteChosen = computed(() => chosenSource.value === undefined)
+const moveBlocked = computed(() => {
+  if (chosenSource.value === null) return t('in.source.mixed')
+  return canMoveChosen.value ? '' : t('in.source.no_move')
+})
 
 /** A search or a status looks under the folder, without its subfolders shown. */
 const filtering = computed(() => search.value.trim() !== '' || status.value !== '')
@@ -101,6 +133,7 @@ async function load() {
     const res = await listIN(props.project, query())
     if (mine !== loadSeq) return
     counts.value = res.counts
+    sources.value = res.sources ?? []
     folders.value = filtering.value ? [] : res.folders
     files.value = res.files
     next.value = res.next
@@ -160,7 +193,8 @@ async function act(fn: () => Promise<string | void>) {
 
 function move() {
   const to = moveTo.value.trim()
-  if (!to || !selected.value.size) return
+  if (!to || !selected.value.size || !canMoveChosen.value) return
+  // A source's files move inside it: the server reads done/ as its done/.
   const target = to.endsWith('/') ? to : to + '/'
   void act(async () => {
     for (const p of chosen()) await moveIN(props.project, p, target)
@@ -187,7 +221,16 @@ async function remove(paths: string[], what: string) {
 }
 
 function removeSelected() {
+  if (!canDeleteChosen.value) return
   void remove(chosen(), t('in.files_count', { count: selected.value.size }, selected.value.size))
+}
+
+/** Asks the server to check a source now; the window hears when it ends. */
+function refresh(folder: string) {
+  void act(async () => {
+    await scanIN(props.project, folder)
+    return t('in.source.refreshing')
+  })
 }
 
 function removeFolder(f: INFolder) {
@@ -218,6 +261,13 @@ function downloadFolder(path: string) {
   void exportFolder(path ? `${root.value}/${path}` : root.value).catch((e) => {
     error.value = errorText(e, t, t('tree.menu.download_failed'))
   })
+}
+
+const sourceClass: Record<INSource['status'], string> = {
+  ok: 'bg-success/15 text-success',
+  checking: 'bg-info/15 text-info',
+  error: 'bg-danger/15 text-danger',
+  off: 'bg-surface-hover text-text-muted',
 }
 
 const statusClass: Record<INStatus, string> = {
@@ -283,11 +333,59 @@ onMounted(() => {
       </span>
       <span class="flex-1" />
       <button
+        v-if="!here"
         type="button"
         class="h-control-sm text-xs px-2 rounded border border-border hover:bg-surface-hover inline-flex items-center gap-1"
         :title="t('in.download_folder')"
         @click="downloadFolder(dir)"
       ><Download class="w-3 h-3" /> {{ t('tree.menu.download_zip') }}</button>
+    </div>
+
+    <ul v-if="!dir && sources.length && !filtering" class="mb-4 space-y-1" data-in-sources>
+      <li
+        v-for="src in sources"
+        :key="src.folder"
+        class="flex items-start gap-2 rounded border border-border px-3 py-2 text-xs"
+        :data-in-source="src.folder"
+      >
+        <Cloud class="w-3.5 h-3.5 mt-0.5 shrink-0 text-text-muted" aria-hidden="true" />
+        <div class="flex-1 min-w-0 space-y-1">
+          <p class="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <button type="button" class="font-mono hover:underline" :data-in-source-open="src.folder" @click="go(src.folder)">IN/{{ src.folder }}</button>
+            <span class="text-text-muted">{{ t('in.source.from', { source: `${src.plugin}/${src.source}` }) }}<template v-if="src.kind"> · {{ src.kind }}</template></span>
+            <span class="rounded px-1.5 py-0.5" :class="sourceClass[src.status]" data-in-source-status>{{ t(`in.source.status.${src.status}`) }}</span>
+          </p>
+          <p v-if="src.checked" class="text-text-muted">{{ t('in.source.checked', { when: formatDateTime(src.checked) }) }}</p>
+          <p v-if="src.status === 'error' && src.error" class="text-danger break-words" data-in-source-error>{{ src.error }}</p>
+          <p v-else-if="src.status === 'off'" class="text-text-muted">{{ t('in.source.off') }}</p>
+        </div>
+        <button
+          v-if="canWrite && src.status !== 'off'"
+          type="button"
+          class="h-control-sm shrink-0 px-2 rounded border border-border hover:bg-surface-hover inline-flex items-center gap-1"
+          :data-in-refresh="src.folder"
+          @click="refresh(src.folder)"
+        ><RefreshCw class="w-3 h-3" /> {{ t('in.source.refresh') }}</button>
+      </li>
+    </ul>
+
+    <div v-if="here" class="mb-4 flex items-start gap-2 rounded border border-border px-3 py-2 text-xs" data-in-source-banner>
+      <Cloud class="w-3.5 h-3.5 mt-0.5 shrink-0 text-text-muted" aria-hidden="true" />
+      <div class="flex-1 min-w-0 space-y-1">
+        <p>
+          {{ t('in.source.banner', { source: `${here.plugin}/${here.source}` }) }}
+          <span class="ml-1 rounded px-1.5 py-0.5 whitespace-nowrap" :class="sourceClass[here.status]">{{ t(`in.source.status.${here.status}`) }}</span>
+        </p>
+        <p class="text-text-muted">{{ here.write && here.move ? t('in.source.can_move') : t('in.source.read_only') }}</p>
+        <p v-if="here.status === 'error' && here.error" class="text-danger break-words">{{ here.error }}</p>
+      </div>
+      <button
+        v-if="canWrite && here.status !== 'off'"
+        type="button"
+        class="h-control-sm shrink-0 px-2 rounded border border-border hover:bg-surface-hover inline-flex items-center gap-1"
+        :data-in-refresh="here.folder"
+        @click="refresh(here.folder)"
+      ><RefreshCw class="w-3 h-3" /> {{ t('in.source.refresh') }}</button>
     </div>
 
     <div class="flex flex-wrap items-center gap-2 mb-3">
@@ -331,7 +429,8 @@ onMounted(() => {
         <button
           type="button"
           class="h-control-sm text-xs px-2 rounded border border-border hover:bg-surface-hover inline-flex items-center gap-1"
-          :disabled="!moveTo.trim()"
+          :disabled="!moveTo.trim() || !canMoveChosen"
+          :title="moveBlocked || undefined"
           data-in-action="move"
           @click="move"
         ><FolderInput class="w-3 h-3" /> {{ t('in.move') }}</button>
@@ -362,11 +461,13 @@ onMounted(() => {
         ><Play class="w-3 h-3" /> {{ t('in.run') }}</button>
       </template>
       <button
+        v-if="canDeleteChosen"
         type="button"
         class="h-control-sm text-xs px-2 rounded text-danger hover:bg-surface-hover inline-flex items-center gap-1"
         data-in-action="delete"
         @click="removeSelected"
       ><Trash2 class="w-3 h-3" /> {{ t('common.delete') }}</button>
+      <span v-else class="text-xs text-text-muted" data-in-no-delete>{{ chosenSource === null ? t('in.source.mixed') : t('in.source.no_delete') }}</span>
     </div>
 
     <p v-if="loading && !files.length && !folders.length" class="text-text-muted">{{ t('common.loading') }}</p>
@@ -403,7 +504,8 @@ onMounted(() => {
           <td />
           <td class="py-1">
             <button type="button" class="inline-flex items-center gap-1.5 hover:underline" data-in-open @click="go(f.path)">
-              <Folder class="w-3.5 h-3.5 text-text-muted" aria-hidden="true" />
+              <Cloud v-if="sourceFolder(f.path)" class="w-3.5 h-3.5 text-text-muted" :aria-label="t('in.source.label')" data-in-cloud />
+              <Folder v-else class="w-3.5 h-3.5 text-text-muted" aria-hidden="true" />
               <span class="font-mono">{{ f.path.split('/').pop() }}</span>
             </button>
           </td>
@@ -414,6 +516,7 @@ onMounted(() => {
           </td>
           <td class="py-1 text-right whitespace-nowrap">
             <button
+              v-if="!here && !sourceFolder(f.path)"
               type="button"
               class="rounded p-0.5 text-text-muted hover:text-text"
               :title="t('tree.menu.download_zip')"
@@ -421,7 +524,7 @@ onMounted(() => {
               @click="downloadFolder(f.path)"
             ><Download class="w-3.5 h-3.5" /></button>
             <button
-              v-if="canWrite"
+              v-if="canWrite && !here && !sourceFolder(f.path)"
               type="button"
               class="rounded p-0.5 text-text-muted hover:text-danger"
               :title="t('common.delete')"

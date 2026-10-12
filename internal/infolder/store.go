@@ -46,21 +46,36 @@ const SourceLocal = "local"
 
 // File is a file of an IN folder.
 type File struct {
-	Project   string    `json:"project"`
-	Path      string    `json:"path"` // vault-relative: <project>/IN/…
-	Name      string    `json:"name"`
-	Stem      string    `json:"stem"`
-	Ext       string    `json:"ext"`
-	Dir       string    `json:"dir"` // the folder, relative to IN ("" at its root)
-	Size      int64     `json:"size"`
-	Modified  time.Time `json:"modified"`
-	SHA256    string    `json:"sha256,omitempty"`
-	Status    string    `json:"status"`
-	Run       string    `json:"run,omitempty"`
-	Source    string    `json:"source"`
+	Project  string    `json:"project"`
+	Path     string    `json:"path"` // vault-relative: <project>/IN/…
+	Name     string    `json:"name"`
+	Stem     string    `json:"stem"`
+	Ext      string    `json:"ext"`
+	Dir      string    `json:"dir"` // the folder, relative to IN ("" at its root)
+	Size     int64     `json:"size"`
+	Modified time.Time `json:"modified"`
+	SHA256   string    `json:"sha256,omitempty"`
+	Status   string    `json:"status"`
+	Run      string    `json:"run,omitempty"`
+	Source   string    `json:"source"`
+	// ETag is a remote file's version, as its source gives it (IMP-172
+	// phase 2); "" for a local file.
+	ETag      string    `json:"etag,omitempty"`
 	Batch     string    `json:"batch,omitempty"`
 	FirstSeen time.Time `json:"first_seen"`
 	Updated   time.Time `json:"updated"`
+}
+
+// Remote reports whether the file is in a bound source's folder.
+func (f File) Remote() bool { return f.Source != "" && f.Source != SourceLocal }
+
+// Version is what tells the file's content apart: its SHA-256, or, for a
+// remote file whose source gives none, its etag.
+func (f File) Version() string {
+	if f.SHA256 != "" {
+		return f.SHA256
+	}
+	return f.ETag
 }
 
 // Batch is the files that arrived, or changed, together in a folder of an
@@ -107,7 +122,38 @@ CREATE TABLE IF NOT EXISTS batches (
 	bytes       INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS batches_open ON batches(project, dir) WHERE closed = 0;
+CREATE TABLE IF NOT EXISTS sources (
+	project TEXT NOT NULL,
+	folder  TEXT NOT NULL,
+	source  TEXT NOT NULL,
+	cursor  TEXT NOT NULL DEFAULT '',
+	checked INTEGER NOT NULL DEFAULT 0,
+	listed  INTEGER NOT NULL DEFAULT 0,
+	error   TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY (project, folder)
+);
 `
+
+// migrations bring a database of an earlier version in line: the columns
+// added since, each with what makes it.
+var migrations = []struct{ table, column, ddl string }{
+	{"files", "etag", `ALTER TABLE files ADD COLUMN etag TEXT NOT NULL DEFAULT ''`},
+}
+
+func migrate(db *sql.DB) error {
+	for _, m := range migrations {
+		var n int
+		if err := db.QueryRow(`SELECT count(*) FROM pragma_table_info(?) WHERE name = ?`, m.table, m.column).Scan(&n); err != nil {
+			return err
+		}
+		if n == 0 {
+			if _, err := db.Exec(m.ddl); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
 
 // Store is in.db. Writes are serialized: SQLite has one writer.
 type Store struct {
@@ -126,6 +172,10 @@ func OpenStore(p string) (*Store, error) {
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("in.db: schema: %w", err)
+	}
+	if err := migrate(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("in.db: migration: %w", err)
 	}
 	return &Store{db: db}, nil
 }
@@ -158,14 +208,14 @@ func fileOf(f File) File {
 	return f
 }
 
-const fileCols = `project, path, dir, size, mtime, sha256, status, run, source, batch, first_seen, updated`
+const fileCols = `project, path, dir, size, mtime, sha256, status, run, source, batch, first_seen, updated, etag`
 
 type scanner interface{ Scan(dest ...any) error }
 
 func scanFile(r scanner) (File, error) {
 	var f File
 	var mtime, first, updated int64
-	if err := r.Scan(&f.Project, &f.Path, &f.Dir, &f.Size, &mtime, &f.SHA256, &f.Status, &f.Run, &f.Source, &f.Batch, &first, &updated); err != nil {
+	if err := r.Scan(&f.Project, &f.Path, &f.Dir, &f.Size, &mtime, &f.SHA256, &f.Status, &f.Run, &f.Source, &f.Batch, &first, &updated, &f.ETag); err != nil {
 		return File{}, err
 	}
 	f.Modified, f.FirstSeen, f.Updated = fromNanos(mtime), fromNanos(first), fromNanos(updated)
@@ -526,6 +576,9 @@ func (s *Store) ProjectRenamed(from, to string) error {
 	if _, err := tx.Exec(`DELETE FROM batches WHERE project = ?`, to); err != nil {
 		return err
 	}
+	if _, err := tx.Exec(`DELETE FROM sources WHERE project = ?`, to); err != nil {
+		return err
+	}
 	rows, err := tx.Query(`SELECT path FROM files WHERE project = ?`, from)
 	if err != nil {
 		return err
@@ -549,18 +602,22 @@ func (s *Store) ProjectRenamed(from, to string) error {
 	if _, err := tx.Exec(`UPDATE batches SET project = ? WHERE project = ?`, to, from); err != nil {
 		return err
 	}
+	if _, err := tx.Exec(`UPDATE sources SET project = ? WHERE project = ?`, to, from); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
-// ProjectRemoved forgets a project's files and batches.
+// ProjectRemoved forgets a project's files, batches and sources.
 func (s *Store) ProjectRemoved(project string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := s.db.Exec(`DELETE FROM files WHERE project = ?`, project); err != nil {
-		return err
+	for _, t := range []string{"files", "batches", "sources"} {
+		if _, err := s.db.Exec(`DELETE FROM `+t+` WHERE project = ?`, project); err != nil {
+			return err
+		}
 	}
-	_, err := s.db.Exec(`DELETE FROM batches WHERE project = ?`, project)
-	return err
+	return nil
 }
 
 // Batch returns a batch.
@@ -604,4 +661,112 @@ func dirOf(root, p string) string {
 func groupOf(dir string) string {
 	g, _, _ := strings.Cut(dir, "/")
 	return g
+}
+
+// SourceRow is what in.db keeps of a bound source's folder: where its
+// changes were last read from, and how its last check went.
+type SourceRow struct {
+	Project string
+	Folder  string
+	Source  string // <plugin>/<source>
+	Cursor  string
+	Checked time.Time
+	Listed  time.Time
+	Error   string
+}
+
+// sourceRows returns the source folders of a project ("" for all), by
+// project and folder.
+func (s *Store) sourceRows(project string) (map[string]SourceRow, error) {
+	stmt := `SELECT project, folder, source, cursor, checked, listed, error FROM sources`
+	var args []any
+	if project != "" {
+		stmt += ` WHERE project = ?`
+		args = append(args, project)
+	}
+	rows, err := s.db.Query(stmt, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]SourceRow{}
+	for rows.Next() {
+		var r SourceRow
+		var checked, listed int64
+		if err := rows.Scan(&r.Project, &r.Folder, &r.Source, &r.Cursor, &checked, &listed, &r.Error); err != nil {
+			return nil, err
+		}
+		r.Checked, r.Listed = fromNanos(checked), fromNanos(listed)
+		out[r.Project+"/"+r.Folder] = r
+	}
+	return out, rows.Err()
+}
+
+// setSourceRow records a source folder's state.
+func (s *Store) setSourceRow(r SourceRow) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, err := s.db.Exec(`INSERT INTO sources (project, folder, source, cursor, checked, listed, error) VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (project, folder) DO UPDATE SET source = excluded.source, cursor = excluded.cursor,
+		checked = excluded.checked, listed = excluded.listed, error = excluded.error`,
+		r.Project, r.Folder, r.Source, r.Cursor, nanos(r.Checked), nanos(r.Listed), r.Error)
+	return err
+}
+
+// dropSource forgets a source folder: its row, its files, its open
+// batches.
+func (s *Store) dropSource(project, folder string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	prefix := escapeLike(INPrefix(project, folder))
+	if _, err := tx.Exec(`DELETE FROM files WHERE project = ? AND path LIKE ? ESCAPE '\'`, project, prefix+"%"); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM batches WHERE project = ? AND closed = 0 AND (dir = ? OR dir LIKE ? ESCAPE '\')`,
+		project, folder, escapeLike(folder)+"/%"); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM sources WHERE project = ? AND folder = ?`, project, folder); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// folderFiles returns the files under a folder of a project's IN folder,
+// by path.
+func (s *Store) folderFiles(project, folder string) (map[string]File, error) {
+	rows, err := s.db.Query(`SELECT `+fileCols+` FROM files WHERE project = ? AND path LIKE ? ESCAPE '\'`,
+		project, escapeLike(INPrefix(project, folder))+"%")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]File{}
+	for rows.Next() {
+		f, err := scanFile(rows)
+		if err != nil {
+			return nil, err
+		}
+		out[f.Path] = f
+	}
+	return out, rows.Err()
+}
+
+// hasUnder reports whether the store holds a file under the folder p.
+func (s *Store) hasUnder(project, p string) (bool, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT count(*) FROM (SELECT 1 FROM files WHERE project = ? AND path LIKE ? ESCAPE '\' LIMIT 1)`,
+		project, escapeLike(p)+"/%").Scan(&n)
+	return n > 0, err
+}
+
+// INPrefix is the vault path, with a trailing slash, of a folder at the
+// root of a project's IN folder.
+func INPrefix(project, folder string) string {
+	return project + "/IN/" + folder + "/"
 }

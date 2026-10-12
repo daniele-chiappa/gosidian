@@ -71,6 +71,7 @@ func (r *Router) inChanged(project string, closed bool) {
 //	POST /api/v1/in/{project}/status  {paths, status}
 //	POST /api/v1/in/{project}/delete  {paths}: into the trash (a folder needs it)
 //	POST /api/v1/in/{project}/run     {pipeline, paths}: a run on the files
+//	POST /api/v1/in/{project}/scan    {folder}: check the folder's source now ("" all)
 //
 // Paths are relative to the IN folder, or vault paths. Reading needs read
 // access to the project, the rest write access.
@@ -111,8 +112,10 @@ func (r *Router) handleIN(w http.ResponseWriter, req *http.Request) {
 		r.deleteIN(w, req, user, project)
 	case "run":
 		r.runIN(w, req, user, project)
+	case "scan":
+		r.scanIN(w, req, project)
 	default:
-		WriteError(w, http.StatusNotFound, CodeNotFound, "use /api/v1/in/<project>, /move, /status, /delete or /run")
+		WriteError(w, http.StatusNotFound, CodeNotFound, "use /api/v1/in/<project>, /move, /status, /delete, /run or /scan")
 	}
 }
 
@@ -165,11 +168,38 @@ func (r *Router) listIN(w http.ResponseWriter, req *http.Request, project string
 	if page.Files == nil {
 		page.Files = []infolder.File{}
 	}
+	sources, err := r.deps.IN.SourceStates(project)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
+		return
+	}
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"project": project, "root": vault.INRoot(project), "dir": dir, "counts": counts,
-		"folders": folders, "files": page.Files, "next": page.Next,
+		"folders": folders, "files": page.Files, "next": page.Next, "sources": sources,
 		"track_in_git": r.deps.Projects.Get(project).TrackINInGit,
 	})
+}
+
+// scanIN asks for a check of the project's IN folder now: its sources'
+// folders (one, or all), and the disk.
+func (r *Router) scanIN(w http.ResponseWriter, req *http.Request, project string) {
+	var body struct {
+		Folder string `json:"folder"`
+	}
+	if req.ContentLength != 0 {
+		if err := DecodeJSON(req, &body); err != nil {
+			WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
+			return
+		}
+	}
+	folder := strings.Trim(strings.TrimPrefix(strings.TrimSpace(body.Folder), vault.INFolder+"/"), "/")
+	if folder != "" && !infolder.ValidFolder(folder) {
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "folder names a folder at the root of the IN folder")
+		return
+	}
+	r.deps.IN.ScanSoon(project)
+	r.deps.IN.ScanSourceSoon(project, folder)
+	WriteJSON(w, http.StatusAccepted, map[string]any{"project": project, "folder": folder})
 }
 
 // inError answers an error of the IN folder: a path it refuses is a bad

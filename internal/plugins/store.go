@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/gosidian/gosidian/internal/infolder"
 )
 
 // FileName is the file of the accepted manifests, in the state dir.
@@ -22,21 +24,31 @@ type Accepted struct {
 	By       string    `json:"accepted_by,omitempty"`
 }
 
-type acceptedFile struct {
-	Plugins map[string]Accepted `json:"plugins"`
+// Bound is a source bound to a project's IN folder (IMP-172 phase 2), and
+// when, by whom.
+type Bound struct {
+	infolder.Binding
+	At time.Time `json:"bound_at"`
+	By string    `json:"bound_by,omitempty"`
 }
 
-// store keeps the accepted manifests in <state-dir>/plugins.json. The CLI
-// writes it while the server runs, so the server reads it again whenever
-// the file changed.
+type acceptedFile struct {
+	Plugins  map[string]Accepted `json:"plugins"`
+	Bindings []Bound             `json:"bindings,omitempty"`
+}
+
+// store keeps the accepted manifests and the bound sources in
+// <state-dir>/plugins.json. The CLI writes it while the server runs, so
+// the server reads it again whenever the file changed.
 type store struct {
 	path string
 
-	mu   sync.Mutex
-	mod  time.Time
-	size int64
-	cur  map[string]Accepted
-	err  error
+	mu    sync.Mutex
+	mod   time.Time
+	size  int64
+	cur   map[string]Accepted
+	bound []Bound
+	err   error
 }
 
 func newStore(path string) *store { return &store{path: path} }
@@ -48,7 +60,7 @@ func (s *store) all() (map[string]Accepted, error) {
 	defer s.mu.Unlock()
 	fi, err := os.Stat(s.path)
 	if errors.Is(err, fs.ErrNotExist) {
-		s.cur, s.err, s.mod, s.size = nil, nil, time.Time{}, 0
+		s.cur, s.bound, s.err, s.mod, s.size = nil, nil, nil, time.Time{}, 0
 		return nil, nil
 	}
 	if err != nil {
@@ -58,42 +70,61 @@ func (s *store) all() (map[string]Accepted, error) {
 		return s.cur, s.err
 	}
 	s.mod, s.size = fi.ModTime(), fi.Size()
-	s.cur, s.err = readAccepted(s.path)
+	f, err := readAccepted(s.path)
+	s.cur, s.bound, s.err = f.Plugins, f.Bindings, err
 	if s.cur == nil {
 		s.cur = map[string]Accepted{}
 	}
 	return s.cur, s.err
 }
 
-func readAccepted(path string) (map[string]Accepted, error) {
+// bindings is the bound sources.
+func (s *store) bindings() ([]Bound, error) {
+	_, err := s.all()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]Bound(nil), s.bound...), err
+}
+
+func readAccepted(path string) (acceptedFile, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return acceptedFile{}, err
 	}
 	var f acceptedFile
 	if err := json.Unmarshal(b, &f); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
+		return acceptedFile{}, fmt.Errorf("%s: %w", path, err)
 	}
-	return f.Plugins, nil
+	return f, nil
 }
 
 // set records a for the plugin name, or forgets it for nil.
 func (s *store) set(name string, a *Accepted) error {
+	return s.update(func(f *acceptedFile) error {
+		if a == nil {
+			delete(f.Plugins, name)
+		} else {
+			f.Plugins[name] = *a
+		}
+		return nil
+	})
+}
+
+// update changes the file with change, which may refuse.
+func (s *store) update(change func(*acceptedFile) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cur, err := readAccepted(s.path)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	if cur == nil {
-		cur = map[string]Accepted{}
+	if cur.Plugins == nil {
+		cur.Plugins = map[string]Accepted{}
 	}
-	if a == nil {
-		delete(cur, name)
-	} else {
-		cur[name] = *a
+	if err := change(&cur); err != nil {
+		return err
 	}
-	b, err := json.MarshalIndent(acceptedFile{Plugins: cur}, "", "  ")
+	b, err := json.MarshalIndent(cur, "", "  ")
 	if err != nil {
 		return err
 	}
