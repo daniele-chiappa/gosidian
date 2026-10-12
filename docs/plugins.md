@@ -127,7 +127,13 @@ When a pipeline runs `docling.convert`, gosidian:
    gains `files`: `[{name, path, mime, markdown}]`, and `skipped` for the
    files it refused (an extension attachments do not take, more than 200
    files, more than 100 MiB together). These files start no ingest
-   pipeline.
+   pipeline;
+5. writes, in every string of the output, a markdown link to one of those
+   files by its name (`![caption](fig-1.png)`, also with a title or in
+   `<…>`) as gosidian links an attachment
+   (`![caption](/vault-files/p/attachments/1f3c….png)`): a note made of
+   the output, `{{ convert.markdown }}`, shows its pictures as they are,
+   with no step of the pipeline to rewrite them.
 
 A tool result with `isError` fails the node with its text: a retry
 policy on the node (`retry`) applies, as to any node. A call lasts at

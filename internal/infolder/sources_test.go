@@ -473,6 +473,10 @@ func TestSource_MoveAndRemove(t *testing.T) {
 	if r := f.files(t)["p/IN/nc/done/a.pdf"]; r.Status != StatusNew || r.Run != "" {
 		t.Errorf("after the next check: %+v", r)
 	}
+	// Where it is already: no move, and no error (BUG-120).
+	if e, err := f.s.Move("p", "p/IN/nc/done/a.pdf", "p/IN/done/a.pdf"); err != nil || e.Path != "p/IN/nc/done/a.pdf" {
+		t.Errorf("a move where it is: %+v %v", e, err)
+	}
 	// A target outside the source is read inside it.
 	e, err = f.s.Move("p", "p/IN/nc/done/a.pdf", "p/IN/fatti/a.pdf")
 	if err != nil || e.Path != "p/IN/nc/fatti/a.pdf" {

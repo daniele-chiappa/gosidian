@@ -8,6 +8,33 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.83.0] — 2026-10-12 — "linked pictures"
+
+A converted document's pictures come linked, a pipeline that only reads
+the IN folder leaves its files alone, and two fixes of the IN folder.
+Pull the image and restart, nothing to migrate.
+
+### Added
+- **Links to a plugin's files, ready** — in the output of a plugin's node,
+  a markdown link to one of the files the plugin gave back by name
+  (`![](fig-1.png)`, also with a title or in `<…>`) is written as gosidian
+  links an attachment (`![](/vault-files/<path>)`). A note made of a
+  converted document shows its pictures with no step of the pipeline to
+  rewrite the links. See [docs/plugins.md](docs/plugins.md).
+- **`take: false` on the `in` trigger** — a pipeline that reads the files
+  of the IN folder only (a summary of each batch, a count, a notice) does
+  not take them: it marks them neither working nor done, from its trigger
+  or by hand, and leaves their status to the pipeline that works on them.
+  See [docs/in.md](docs/in.md).
+
+### Fixed
+- **A move where the file is** — `in.move` to the folder a file is in
+  (`done/` for a file of `done/`, of a source too) leaves it there; it
+  failed with «is there already».
+- **A project deleted forgets its IN folder** — its state in `in.db` and
+  the sources bound to it go with the project; a later project of the name
+  found the old state and the old bindings.
+
 ## [2.82.0] — 2026-10-12 — "IN sources"
 
 The IN folder of a project can show a remote store, through a plugin

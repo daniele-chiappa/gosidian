@@ -95,6 +95,21 @@ func (r *Registry) ProjectRenamed(from, to string) error {
 	})
 }
 
+// ProjectRemoved drops the bindings of a project deleted (BUG-119): a
+// later project of the name binds its own.
+func (r *Registry) ProjectRemoved(project string) error {
+	return r.store.update(func(f *acceptedFile) error {
+		kept := f.Bindings[:0]
+		for _, b := range f.Bindings {
+			if b.Project != project {
+				kept = append(kept, b)
+			}
+		}
+		f.Bindings = kept
+		return nil
+	})
+}
+
 // Bound lists the bindings, by project and folder.
 func (r *Registry) Bound() ([]Bound, error) {
 	list, err := r.store.bindings()

@@ -91,6 +91,7 @@ func TestParse_Refusals(t *testing.T) {
 		"bad on_error":        "nodes: [{id: a, use: note.read, on_error: ignore}]",
 		"bad timeout":         "nodes: [{id: a, use: note.read, timeout: soon}]",
 		"too many retries":    "nodes: [{id: a, use: note.read, retry: {attempts: 99}}]",
+		"take not in":         "trigger: {on: manual, take: false}\nnodes: [{id: a, use: note.read}]",
 	}
 	for name, src := range cases {
 		if _, err := Parse(src, testTypes); err == nil {

@@ -48,6 +48,22 @@ func tellRenamed(from, to string) {
 	}
 }
 
+// deleted, when set, is told of each project deleted, once its folder
+// went (SetDeleteHook).
+var deleted func(name string)
+
+// SetDeleteHook sets who is told of each project deleted, once its folder
+// went: the state of the IN folders and the sources bound to them
+// (IMP-172, BUG-119), which a later project of the name must not find.
+// Call it at start, before any delete.
+func SetDeleteHook(f func(name string)) { deleted = f }
+
+func tellDeleted(name string) {
+	if deleted != nil {
+		deleted(name)
+	}
+}
+
 // Rename renames project from to to everywhere it is known: its flags and
 // member and team grants (projects.Store), its folder and index entries
 // (vault.RenameProject), and the scope of the MCP tokens naming it, which

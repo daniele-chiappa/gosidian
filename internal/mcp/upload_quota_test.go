@@ -77,7 +77,10 @@ func TestUploadQuota_SourcePathOutsideRoots(t *testing.T) {
 	}
 	res, _ := s.handleUploadAttachment(ctx, call(map[string]any{"project": "p", "source_path": outside}))
 	msg := expectError(t, res)
-	if strings.Contains(msg, "quota") || strings.Contains(msg, "500") {
+	// Not the quota's refusal, which names the bytes: the path's. The
+	// path is a temporary folder whose random number may hold any digits
+	// ("…1843350092/…" held 500), so the size is not looked for in it.
+	if strings.Contains(msg, "quota") || strings.Contains(msg, "bytes") || !strings.Contains(msg, "not inside the vault") {
 		t.Errorf("the refusal tells about a file outside the roots: %q", msg)
 	}
 }

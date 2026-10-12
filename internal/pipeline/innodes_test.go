@@ -274,3 +274,43 @@ nodes: [{id: a, use: starlark, with: {input: "{{ trigger }}", code: "output = le
 		}
 	}
 }
+
+// A pipeline with take: false reads the files and leaves their status to
+// the pipeline that works on them (IMP-174).
+func TestIN_TakeFalse(t *testing.T) {
+	f := newINFixture(t)
+	f.host.notes["p/pipelines/sum.md"] = pipelineNote(`
+trigger: {on: in, batch: true, take: false}
+nodes: [{id: n, use: starlark, with: {input: "{{ trigger.count }}", code: "output = input"}}]
+`)
+	f.host.notes["p/pipelines/each.md"] = pipelineNote(`
+trigger: {on: in, kinds: [pdf]}
+nodes: [{id: a, use: starlark, with: {input: "{{ trigger.name }}", code: "output = input"}}]
+`)
+	f.write(t, "p/IN/lotto/a.pdf", "a")
+	f.write(t, "p/IN/lotto/b.doc", "b")
+	f.arrive(t)
+	sums, each := f.runs(t, "p/pipelines/sum.md"), f.runs(t, "p/pipelines/each.md")
+	if len(sums) != 1 || len(each) != 1 {
+		t.Fatalf("%d summary runs, %d per file", len(sums), len(each))
+	}
+	waitStatus(t, f.e, sums[0].ID, jobs.Done)
+	waitStatus(t, f.e, each[0].ID, jobs.Done)
+	eventually(t, func() bool { return f.status(t, "p/IN/lotto/a.pdf").Status == infolder.StatusDone }, "a.pdf done")
+	if got := f.status(t, "p/IN/lotto/a.pdf"); got.Run != each[0].ID {
+		t.Errorf("a.pdf's run is %s, not the per-file one", got.Run)
+	}
+	if got := f.status(t, "p/IN/lotto/b.doc"); got.Status != infolder.StatusNew || got.Run != "" {
+		t.Errorf("b.doc, which only the summary read: %+v", got)
+	}
+	// By hand too.
+	files := []infolder.File{f.status(t, "p/IN/lotto/b.doc")}
+	runs, _, err := f.e.StartINFiles("p/pipelines/sum.md", files, "admin")
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("by hand: %v %v", runs, err)
+	}
+	waitStatus(t, f.e, runs[0].ID, jobs.Done)
+	if got := f.status(t, "p/IN/lotto/b.doc"); got.Status != infolder.StatusNew || got.Run != "" {
+		t.Errorf("b.doc after a run by hand: %+v", got)
+	}
+}

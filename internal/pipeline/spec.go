@@ -59,6 +59,10 @@ type Trigger struct {
 	Match string `json:"match,omitempty"`
 	// Batch, for in, starts one run per batch instead of one per file.
 	Batch bool `json:"batch,omitempty"`
+	// Leave, for in (take: false), leaves the status of the files alone:
+	// a run that reads them (counts, summaries, notices) does not take
+	// them, nor mark them working, then done (IMP-174).
+	Leave bool `json:"leave,omitempty"`
 	// Every, for schedule: "monday 09:00", "day 18:30".
 	Every    string               `json:"every,omitempty"`
 	Schedule *automation.Schedule `json:"-"`
@@ -148,6 +152,7 @@ type rawSpec struct {
 		Every  string   `yaml:"every"`
 		Match  string   `yaml:"match"`
 		Batch  bool     `yaml:"batch"`
+		Take   *bool    `yaml:"take"`
 	} `yaml:"trigger"`
 	Nodes yaml.Node `yaml:"nodes"`
 }
@@ -170,6 +175,7 @@ func Parse(src string, types Types) (*Spec, error) {
 		Every:  strings.TrimSpace(r.Trigger.Every),
 		Match:  strings.TrimSpace(r.Trigger.Match),
 		Batch:  r.Trigger.Batch,
+		Leave:  r.Trigger.Take != nil && !*r.Trigger.Take,
 	}}
 	for _, k := range r.Trigger.Kinds {
 		k = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(k), "."))
@@ -201,6 +207,9 @@ func Parse(src string, types Types) (*Spec, error) {
 		}
 	default:
 		return nil, fmt.Errorf("trigger on %q: it is manual, external, ingest, schedule or in", s.Trigger.On)
+	}
+	if r.Trigger.Take != nil && s.Trigger.On != TriggerIN {
+		return nil, fmt.Errorf("trigger %s: take is for the in trigger (take: false leaves the files' status alone)", s.Trigger.On)
 	}
 
 	raws, err := rawNodes(&r.Nodes)

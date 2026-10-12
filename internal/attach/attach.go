@@ -197,10 +197,14 @@ func RelPath(project, filename string) string {
 	return "attachments/" + filename
 }
 
+// FileURL is where the web UI serves a file of the vault: the target of a
+// note's link to an attachment.
+func FileURL(vaultRelPath string) string { return "/vault-files/" + vaultRelPath }
+
 // MarkdownRef returns the markdown syntax to embed or link the attachment.
 // Images get ![](/vault-files/...), non-images get [origName](/vault-files/...).
 func MarkdownRef(vaultRelPath, origFilename string, isImage bool) string {
-	url := "/vault-files/" + vaultRelPath
+	url := FileURL(vaultRelPath)
 	if isImage {
 		return "![](" + url + ")"
 	}

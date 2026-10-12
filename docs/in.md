@@ -127,6 +127,17 @@ A file that changes is new again. The state of the files, with their hash
 and the run that took them, lives in `<state-dir>/in.db` (SQLite, outside
 the vault and its git history), not in the vault.
 
+A file has one status, and one run: when two `in` pipelines take it, the
+one that ends last sets it. A pipeline that reads the files only (a
+summary of each batch, a count, a notice) says `take: false` in its
+trigger: it does not take them, and leaves their status to the pipeline
+that works on them.
+
+A project deleted forgets the state of its IN folder and the sources bound
+to it, so a later project of the name starts afresh. Restored from the
+trash, its files are new again; a pipeline per file does not run twice on
+the same content, as a run is keyed by the file and its content.
+
 ## The IN window
 
 A click on the IN row of the tree opens the **IN window** of the project:

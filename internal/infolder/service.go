@@ -491,6 +491,7 @@ func (s *Service) Batch(id string) (Batch, []File, error) {
 // source can move; never between the source and the disk. A source's
 // file is moved to a target outside its source inside it: done/ is the
 // source's done/, so a pipeline moves a local file and a source's alike.
+// A file moved where it is stays, and that is no error.
 func (s *Service) Move(project, from, to string) (vault.INEntry, error) {
 	ff, frel, fromRemote := s.remoteOf(project, from)
 	tf, trel, toRemote := s.remoteOf(project, to)
@@ -498,6 +499,10 @@ func (s *Service) Move(project, from, to string) (vault.INEntry, error) {
 	if fromRemote && !toRemote && strings.HasPrefix(to, root) {
 		trel = strings.TrimPrefix(to, root)
 		tf, to, toRemote = ff, INPrefix(project, ff)+trel, true
+	}
+	if from == to {
+		// Already there (done/ of a file in done/): nothing to move (BUG-120).
+		return s.Stat(project, from)
 	}
 	switch {
 	case fromRemote && toRemote && ff == tf:

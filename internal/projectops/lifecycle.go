@@ -119,6 +119,7 @@ func Delete(v *vault.Vault, idx *index.Index, ps *projects.Store, tokens *auth.S
 	if err != nil {
 		return DeleteResult{}, err
 	}
+	tellDeleted(clean)
 	var failed []string
 	if idx != nil {
 		// Every note, even after a failure: an indexed note of a project

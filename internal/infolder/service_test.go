@@ -181,6 +181,10 @@ func TestService_MoveRemoveRunEnded(t *testing.T) {
 	if err != nil || x.Status != StatusWorking || x.Run != "r1" || x.Dir != "fatti" || x.SHA256 == "" {
 		t.Fatalf("moved = %+v, %v", x, err)
 	}
+	// Where it is already: no move, no error (BUG-120).
+	if e, err := f.s.Move("p", "p/IN/fatti/x.pdf", "p/IN/fatti/x.pdf"); err != nil || e.Path != "p/IN/fatti/x.pdf" || e.Size != 1 {
+		t.Errorf("a move where it is: %+v %v", e, err)
+	}
 	f.now = f.now.Add(2 * time.Minute)
 	f.scan(t)
 	f.sink.take()

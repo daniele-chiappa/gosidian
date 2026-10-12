@@ -25,7 +25,10 @@ const (
 // node runs a plugin's node: the settings that name files carry their
 // content, the tool's result is the output, and the files it gives back
 // (embedded resources, images) become attachments of the project, listed
-// in the output's files.
+// in the output's files. A markdown link of the output to one of those
+// files by its name (![](fig-1.png)) is written as gosidian links an
+// attachment (![](/vault-files/<path>)), so a note made of the output
+// shows them (IMP-175).
 type node struct {
 	r   *Registry
 	use string
@@ -100,6 +103,7 @@ func (n node) Run(ctx context.Context, env *pipeline.Env, with map[string]any) (
 	if len(files) == 0 && len(skipped) == 0 {
 		return out, nil
 	}
+	out = linkFiles(out, files)
 	m, isMap := out.(map[string]any)
 	if !isMap {
 		m = map[string]any{}
@@ -155,6 +159,52 @@ func storeFiles(env *pipeline.Env, content []mcp.Content) ([]any, []any) {
 		files = append(files, map[string]any{"name": name, "path": rel, "mime": mime, "markdown": attach.MarkdownRef(rel, name, isImage)})
 	}
 	return files, skipped
+}
+
+// linkFiles writes, in every string of a node's output, the markdown links
+// to the files a plugin gave back by their names (](fig-1.png), also with
+// a title, ](fig-1.png "caption")) as links to the attachments they were
+// stored as.
+func linkFiles(v any, files []any) any {
+	links := map[string]string{}
+	for _, f := range files {
+		m, _ := f.(map[string]any)
+		name, _ := m["name"].(string)
+		p, _ := m["path"].(string)
+		if name != "" && p != "" {
+			links[name] = attach.FileURL(p)
+		}
+	}
+	if len(links) == 0 {
+		return v
+	}
+	var walk func(any) any
+	walk = func(v any) any {
+		switch t := v.(type) {
+		case string:
+			if !strings.Contains(t, "](") {
+				return t
+			}
+			for name, url := range links {
+				t = strings.ReplaceAll(t, "]("+name+")", "]("+url+")")
+				t = strings.ReplaceAll(t, "]("+name+" ", "]("+url+" ")
+				t = strings.ReplaceAll(t, "](<"+name+">)", "]("+url+")")
+			}
+			return t
+		case map[string]any:
+			for k, x := range t {
+				t[k] = walk(x)
+			}
+			return t
+		case []any:
+			for i, x := range t {
+				t[i] = walk(x)
+			}
+			return t
+		}
+		return v
+	}
+	return walk(v)
 }
 
 // resourceName is the file name of a resource's URI (file:///fig-1.png).

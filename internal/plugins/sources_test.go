@@ -134,6 +134,17 @@ func TestBind(t *testing.T) {
 	if len(list) != 2 || list[1].Project != "r" || !list[1].Write || list[1].Folder != "nc" {
 		t.Errorf("bindings %+v", list)
 	}
+	if _, err := reg.Bind(infolder.Binding{Project: "gone", Plugin: "store", Source: "docs"}, "cli"); err != nil {
+		t.Fatal(err)
+	}
+	if err := reg.ProjectRemoved("gone"); err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range reg.Bindings() {
+		if b.Project == "gone" {
+			t.Errorf("a binding of a project deleted stays: %+v", b)
+		}
+	}
 	if _, err := reg.Unbind("p", "docs"); err != nil {
 		t.Fatal(err)
 	}

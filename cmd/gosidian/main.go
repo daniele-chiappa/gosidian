@@ -604,6 +604,18 @@ func main() {
 			}
 		}
 	})
+	// A project deleted forgets the state of its IN folder and its bound
+	// sources: a later project of the name starts afresh (BUG-119).
+	projectops.SetDeleteHook(func(name string) {
+		if err := inFolders.Store().ProjectRemoved(name); err != nil {
+			log.Printf("IN folders: the state of %s, deleted: %v", name, err)
+		}
+		if pluginReg != nil {
+			if err := pluginReg.ProjectRemoved(name); err != nil {
+				log.Printf("plugins: the sources bound to %s, deleted: %v", name, err)
+			}
+		}
+	})
 	go inFolders.Run(ctx)
 	// The pipelines (IMP-166, ADR-035): after the scan, like the
 	// automations; off unless [pipelines] enabled.

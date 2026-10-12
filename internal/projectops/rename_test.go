@@ -185,3 +185,22 @@ func TestRename_TellsTheHook(t *testing.T) {
 		t.Errorf("heard %v", heard)
 	}
 }
+
+// The delete hook hears of a project deleted, not of a refused delete
+// (BUG-119: the state of the IN folders and the bound sources go).
+func TestDelete_TellsTheHook(t *testing.T) {
+	f := newFixture(t)
+	f.note(t, "alpha/a.md")
+	var heard []string
+	SetDeleteHook(func(name string) { heard = append(heard, name) })
+	t.Cleanup(func() { SetDeleteHook(nil) })
+	if _, err := Delete(f.v, f.idx, f.ps, f.tokens, nil, "nope"); err == nil {
+		t.Fatal("deleted a project that is not there")
+	}
+	if _, err := Delete(f.v, f.idx, f.ps, f.tokens, nil, "alpha"); err != nil {
+		t.Fatal(err)
+	}
+	if len(heard) != 1 || heard[0] != "alpha" {
+		t.Errorf("heard %v", heard)
+	}
+}

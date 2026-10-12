@@ -357,6 +357,15 @@ func TestRegistry_AcceptRunAndChange(t *testing.T) {
 	if files[1].(map[string]any)["name"] != "image-1.png" {
 		t.Errorf("second file = %v", files[1])
 	}
+	// The markdown links the image as gosidian links an attachment
+	// (IMP-175), and so does the note made of it.
+	want := "![](/vault-files/" + fmt.Sprint(f0["path"]) + ")"
+	if md, _ := out["markdown"].(string); !strings.Contains(md, want) || strings.Contains(md, "](fig-1.png)") {
+		t.Errorf("the markdown = %q, want %s", md, want)
+	}
+	if got := host.note("p/out/doc.md"); !strings.Contains(got, want) {
+		t.Errorf("the note = %q", got)
+	}
 	if actors := host.stored(); len(actors) != 2 || actors[0] != "pipeline:p/pipelines/convert.md" {
 		t.Errorf("stored as %v", actors)
 	}
@@ -511,5 +520,27 @@ func TestNode_FileRefs(t *testing.T) {
 			t.Fatalf("the ticket still works after the run: %d", res.StatusCode)
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestLinkFiles(t *testing.T) {
+	files := []any{
+		map[string]any{"name": "fig-1.png", "path": "p/attachments/aa.png"},
+		map[string]any{"name": "fig-10.png", "path": "p/attachments/bb.png"},
+	}
+	out := linkFiles(map[string]any{
+		"markdown": "![a](fig-1.png) ![b](fig-10.png) ![c](fig-1.png \"cap\") ![d](<fig-1.png>) [no](fig-1.pngx) fig-1.png",
+		"list":     []any{"x ![](fig-10.png)", 3},
+		"n":        2,
+	}, files).(map[string]any)
+	want := "![a](/vault-files/p/attachments/aa.png) ![b](/vault-files/p/attachments/bb.png) ![c](/vault-files/p/attachments/aa.png \"cap\") ![d](/vault-files/p/attachments/aa.png) [no](fig-1.pngx) fig-1.png"
+	if out["markdown"] != want {
+		t.Errorf("markdown\n got %q\nwant %q", out["markdown"], want)
+	}
+	if l := out["list"].([]any); l[0] != "x ![](/vault-files/p/attachments/bb.png)" || l[1] != 3 {
+		t.Errorf("list %v", l)
+	}
+	if out["n"] != 2 {
+		t.Errorf("n %v", out["n"])
 	}
 }

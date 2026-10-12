@@ -87,8 +87,9 @@ func inFileInput(f infolder.File) map[string]any {
 // INBatch starts the runs of the in pipelines of a batch's project
 // (infolder.Sink): one for the batch, with the files it takes, for a
 // pipeline with batch: true; one per file it takes otherwise. Each file a
-// run takes is marked working with it. A run already started (the same
-// batch, the same file with the same content) is not started again.
+// run takes is marked working with it, but by a pipeline with take: false,
+// which reads them only. A run already started (the same batch, the same
+// file with the same content) is not started again.
 func (e *Engine) INBatch(b infolder.Batch, files []infolder.File) {
 	if !e.host.Enabled(b.Project) {
 		return
@@ -145,7 +146,7 @@ func (e *Engine) startIN(p Pipeline, input map[string]any, key string, files []i
 		e.log.Warn("pipeline: an IN run", "pipeline", p.Path, "key", key, "err", err)
 		return
 	}
-	if existing || e.in == nil {
+	if existing || e.in == nil || p.Spec.Trigger.Leave {
 		return
 	}
 	paths := make([]string, len(files))
@@ -276,7 +277,8 @@ type INSkipped struct {
 // (folder, kinds, match): the others are skipped, and said. Any other
 // pipeline gets one run with all the files, shaped as a batch's. Started
 // by hand, a run is a new one even for files a run took before. The files
-// are marked working with their run.
+// are marked working with their run, but by an in pipeline with take:
+// false.
 func (e *Engine) StartINFiles(pipelinePath string, files []infolder.File, actor string) ([]jobs.Run, []INSkipped, error) {
 	p, err := e.host.Pipeline(pipelinePath)
 	if err != nil {
@@ -311,7 +313,7 @@ func (e *Engine) StartINFiles(pipelinePath string, files []infolder.File, actor 
 		if err != nil {
 			return run, err
 		}
-		if e.in != nil {
+		if e.in != nil && !tr.Leave {
 			paths := make([]string, len(of))
 			for i, f := range of {
 				paths[i] = f.Path
