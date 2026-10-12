@@ -405,7 +405,7 @@ func (s *Service) closeBatches(project string) (bool, error) {
 		}
 		var files int
 		var bytes int64
-		if err := s.store.db.QueryRow(`SELECT count(*), coalesce(sum(size), 0) FROM files WHERE batch = ?`, b.ID).Scan(&files, &bytes); err != nil {
+		if err := s.store.db.QueryRow(`SELECT count(*), coalesce(sum(max(size, 0)), 0) FROM files WHERE batch = ?`, b.ID).Scan(&files, &bytes); err != nil {
 			return closedAny, err
 		}
 		s.store.mu.Lock()
@@ -692,6 +692,7 @@ func (s *Service) Read(ctx context.Context, p string, max int64) ([]byte, error)
 		return nil, err
 	}
 	defer f.Close()
+	// A size not known yet (-1) is checked as the file is read.
 	if e.Size > max {
 		return nil, fmt.Errorf("%s is %d bytes, more than %d", p, e.Size, max)
 	}

@@ -8,6 +8,22 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.84.0] — 2026-10-12 — "unsized files"
+
+A source of the IN folder may list a file whose size it knows only once
+the file is read, as a native Google document a plugin exports. Pull the
+image and restart, nothing to migrate.
+
+### Added
+- **Files of a source without a size** — a plugin's source may list a file
+  with `size: -1` when it knows the size only once the file is read (a
+  native Google Docs, Sheets or Slides file, which has no bytes until it
+  is exported). gosidian asks the file's URL, and the size it comes with,
+  at the first read, and reads it whole and in ranges as any other file.
+  Such a file counts no bytes in the IN folder, and the IN window shows no
+  size (—). See [docs/in.md](docs/in.md) and
+  [docs/plugins.md](docs/plugins.md).
+
 ## [2.83.0] — 2026-10-12 — "linked pictures"
 
 A converted document's pictures come linked, a pipeline that only reads

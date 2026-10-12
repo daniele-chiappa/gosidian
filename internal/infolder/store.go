@@ -46,12 +46,14 @@ const SourceLocal = "local"
 
 // File is a file of an IN folder.
 type File struct {
-	Project  string    `json:"project"`
-	Path     string    `json:"path"` // vault-relative: <project>/IN/…
-	Name     string    `json:"name"`
-	Stem     string    `json:"stem"`
-	Ext      string    `json:"ext"`
-	Dir      string    `json:"dir"` // the folder, relative to IN ("" at its root)
+	Project string `json:"project"`
+	Path    string `json:"path"` // vault-relative: <project>/IN/…
+	Name    string `json:"name"`
+	Stem    string `json:"stem"`
+	Ext     string `json:"ext"`
+	Dir     string `json:"dir"` // the folder, relative to IN ("" at its root)
+	// Size is -1 for a file of a source whose size is known only when it
+	// is read (a native Google document, exported).
 	Size     int64     `json:"size"`
 	Modified time.Time `json:"modified"`
 	SHA256   string    `json:"sha256,omitempty"`
@@ -394,7 +396,7 @@ type Folder struct {
 // new files under it, by name.
 func (s *Store) Folders(project, folder string) ([]Folder, error) {
 	folder = strings.Trim(folder, "/")
-	stmt := `SELECT dir, count(*), coalesce(sum(size), 0), coalesce(sum(status = 'new'), 0) FROM files WHERE project = ? AND dir != ''`
+	stmt := `SELECT dir, count(*), coalesce(sum(max(size, 0)), 0), coalesce(sum(status = 'new'), 0) FROM files WHERE project = ? AND dir != ''`
 	args := []any{project}
 	if folder != "" {
 		stmt += ` AND dir LIKE ? ESCAPE '\'`
@@ -456,7 +458,7 @@ type Counts struct {
 // Counts returns what a project's IN folder holds.
 func (s *Store) Counts(project string) (Counts, error) {
 	var c Counts
-	err := s.db.QueryRow(`SELECT count(*), coalesce(sum(size), 0), coalesce(sum(status = 'new'), 0),
+	err := s.db.QueryRow(`SELECT count(*), coalesce(sum(max(size, 0)), 0), coalesce(sum(status = 'new'), 0),
 		coalesce(sum(status = 'working'), 0), coalesce(sum(status = 'error'), 0) FROM files WHERE project = ?`, project).
 		Scan(&c.Files, &c.Bytes, &c.New, &c.Working, &c.Errors)
 	return c, err

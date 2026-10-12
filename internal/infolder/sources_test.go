@@ -35,6 +35,8 @@ type memFile struct {
 	data []byte
 	etag string
 	mod  time.Time
+	// unsized: the list does not know its size (a native Google document).
+	unsized bool
 }
 
 func newMemSource(t *testing.T) *memSource {
@@ -132,7 +134,11 @@ func (s memSession) List(_ context.Context, cursor string, limit int) (RemotePag
 			break
 		}
 		f := m.files[p]
-		page.Files = append(page.Files, RemoteFile{Path: p, Size: int64(len(f.data)), Modified: f.mod, ETag: f.etag})
+		size := int64(len(f.data))
+		if f.unsized {
+			size = -1
+		}
+		page.Files = append(page.Files, RemoteFile{Path: p, Size: size, Modified: f.mod, ETag: f.etag})
 	}
 	return page, nil
 }
@@ -562,6 +568,57 @@ func TestSource_FailedCheckAndPipelinesOff(t *testing.T) {
 	st, _ = f.s.SourceStates("p")
 	if len(st) != 1 || st[0].Status != "off" || len(f.files(t)) != 1 {
 		t.Errorf("off: %+v %v", st, keys(f.files(t)))
+	}
+}
+
+// A file whose size the list does not know takes the one of its URL: read
+// whole, and served in ranges (a native Google document, exported).
+func TestSource_UnknownSize(t *testing.T) {
+	f := newFixture(t)
+	m := newMemSource(t)
+	m.put("doc.pdf", "%PDF exported")
+	m.files["doc.pdf"] = memFile{data: m.files["doc.pdf"].data, etag: "rev-7", mod: m.files["doc.pdf"].mod, unsized: true}
+	m.put("a.txt", "abc")
+	f.bind(t, m, Binding{Project: "p", Folder: "nc", Plugin: "mem", Source: "docs"})
+	f.check(t)
+	row := f.files(t)["p/IN/nc/doc.pdf"]
+	if row.Size != -1 || row.ETag != "rev-7" {
+		t.Fatalf("row %+v", row)
+	}
+	if c, _ := f.s.Store().Counts("p"); c.Bytes != 3 || c.Files != 2 {
+		t.Errorf("counts %+v: an unknown size counts no bytes", c)
+	}
+	ctx := context.Background()
+	data, err := f.s.Read(ctx, "p/IN/nc/doc.pdf", 100)
+	if err != nil || string(data) != "%PDF exported" {
+		t.Fatalf("read %q %v", data, err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rf, e, err := f.s.Open(r.Context(), "p/IN/nc/doc.pdf")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		defer rf.Close()
+		http.ServeContent(w, r, "doc.pdf", e.ModTime, rf)
+	}))
+	defer srv.Close()
+	req, _ := http.NewRequest(http.MethodGet, srv.URL, nil)
+	req.Header.Set("Range", "bytes=5-")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusPartialContent || string(body) != "exported" {
+		t.Errorf("range: %d %q", resp.StatusCode, body)
+	}
+	// Listed again with the same revision: not new.
+	before := f.files(t)["p/IN/nc/doc.pdf"]
+	f.s.checkSources(ctx, "p/nc")
+	if r := f.files(t)["p/IN/nc/doc.pdf"]; r.Updated != before.Updated {
+		t.Errorf("an unchanged document of unknown size changed: %+v", r)
 	}
 }
 

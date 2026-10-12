@@ -14,7 +14,10 @@ import (
 // the URL its source gives, from the offset reached (Range), started at
 // the first read after a seek. Seeking costs nothing until then, so
 // http.ServeContent learns the size and serves ranges without a request
-// it does not need. A URL that expired is asked again, once per read.
+// it does not need. A URL that expired is asked again, once per read. A
+// file whose size the source's list did not know (-1: a native Google
+// document) takes the one its URL comes with, asked for at the first
+// seek to the end or read.
 type remoteFile struct {
 	ctx    context.Context
 	client *http.Client
@@ -37,7 +40,26 @@ func newRemoteFile(ctx context.Context, client *http.Client, open func(context.C
 // errChanged is returned when the source holds another file than in.db.
 var errChanged = errors.New("the file changed in its source since it was last checked: try again after the next check")
 
+// sized learns the size of a file the list did not know, from its URL.
+func (r *remoteFile) sized() error {
+	if r.size >= 0 {
+		return nil
+	}
+	u, err := r.open(r.ctx)
+	if err != nil {
+		return err
+	}
+	if u.Size < 0 {
+		return fmt.Errorf("%s: its source gives no size", r.name)
+	}
+	r.url, r.size = u.URL, u.Size
+	return nil
+}
+
 func (r *remoteFile) Read(p []byte) (int, error) {
+	if err := r.sized(); err != nil {
+		return 0, err
+	}
 	if r.off >= r.size {
 		return 0, io.EOF
 	}
@@ -169,6 +191,9 @@ func (r *remoteFile) Seek(offset int64, whence int) (int64, error) {
 	case io.SeekCurrent:
 		to = r.off + offset
 	case io.SeekEnd:
+		if err := r.sized(); err != nil {
+			return 0, err
+		}
 		to = r.size + offset
 	default:
 		return 0, errors.New("seek: bad whence")

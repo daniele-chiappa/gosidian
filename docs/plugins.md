@@ -184,7 +184,7 @@ leaves out the others, but for the batch marker `.done`):
 
 | Tool | Arguments | Result |
 |---|---|---|
-| `gosidian_source_list` | `cursor` (`""` at first), `limit` | `files: [{path, size, modified, etag, sha256?}]`, `next` (the cursor of the next page; `""` at the last) |
+| `gosidian_source_list` | `cursor` (`""` at first), `limit` | `files: [{path, size, modified, etag, sha256?}]`, `next` (the cursor of the next page; `""` at the last). `size` is `-1` for a file whose size is known only when it is read (a native Google document, exported): `open` then gives it |
 | `gosidian_source_changes` | `cursor` | `changes: [{path, size, modified, etag, sha256?, deleted?}]`, `cursor`, `more?`, `reset?`; with `cursor` `""`, the cursor of now. Only with `changes` |
 | `gosidian_source_open` | `path` | `url`, `size`, `etag`: where to `GET` the file, ranges too, for a while |
 | `gosidian_source_move` | `from`, `to` | `path`, `size`, `etag`: the file, or the folder, moved inside the source. Only with `move` |

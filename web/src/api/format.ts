@@ -32,6 +32,8 @@ export function formatDateTime(value?: string | number | Date | null): string {
 
 /** "512 B", "12 KB", "1,4 MB". */
 export function formatSize(bytes: number): string {
+  // -1: a file of a source whose size is known only when it is read.
+  if (bytes < 0) return '—'
   const units = ['B', 'KB', 'MB', 'GB']
   let n = bytes
   let i = 0

@@ -95,6 +95,10 @@ time, with nothing on its disk.
 - **Versions**: a file is new when its content changed, by its SHA-256
   when the source gives one, else by its etag. A file of a source has no
   SHA-256 of gosidian's: it is not downloaded to hash it.
+- **Sizes**: a file whose size the source knows only when it is read (a
+  native Google document, exported) shows no size (—, `size: -1` in the
+  API and in `trigger.size`) and counts no bytes; read, it is read whole,
+  ranges too.
 - **Batches**: by the first folder inside the source
   (`nextcloud/2024/…`), or the source's root; a quiet minute or a `.done`
   marker closes one, as on the disk. The marker stays in the source
