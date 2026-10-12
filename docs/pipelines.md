@@ -166,7 +166,7 @@ an expression turns it into text. There are no operators: compute in a
 | `llm.describe` | `image` (an attachment of the project, png/jpg/gif/webp, 10 MiB at most), `prompt`, and as `llm.chat` | as `llm.chat`, plus `image` |
 | `in.list` | `folder` (of the IN folder; empty: all), `recursive` (default yes), `match` (a glob on the name), `kinds`, `status`, `batch` (`{{ trigger.batch }}`), `limit` (default 500, at most 5000), `cursor` | `files` (`path`, `name`, `stem`, `ext`, `dir`, `size`, `sha256`, `etag`, `status`, `modified`, `batch`, `source`), `count`, `next` (the cursor of the next page; empty at the last) |
 | `in.move` | `file` (in the IN folder), `to` (a folder, `done/`, or a path, in the IN folder; empty, or where it is already: it stays; for a file of a [source](in.md#sources), inside the source: `done/` is its `done/`), `status` (`done`, `error`, `ignored`, `new`) | `path`, `from`, `status` |
-| `<plugin>.<node>` | what the plugin's manifest says; a setting it lists in `files` names an attachment of the project or a file of its IN folder | the plugin tool's result, plus `files` (`name`, `path`, `mime`, `markdown`): the files it gave back, stored as attachments |
+| `<plugin>.<node>` | what the plugin's manifest says; a setting it lists in `files` names an attachment of the project or a file of its IN folder (or a list of them, for a plugin that takes files by reference: `{{ trigger.files }}`) | the plugin tool's result, plus `files` (`name`, `path`, `mime`, `markdown`): the files it gave back, stored as attachments |
 
 A plugin's nodes exist once the owner accepted its manifest
 (`gosidian plugin accept`, [plugins](plugins.md)); `memory_pipelines`
@@ -348,7 +348,7 @@ REST reference: `internal/api/v1/spec/openapi.yaml`, tag `pipelines`.
   nothing else of the vault; the files it gives back become attachments
   of the project and start no ingest pipeline.
 - Run Starlark without file, network or module access, with a step cap.
-- Spend at most `max_llm_tokens` per run.
+- Spend at most `max_llm_tokens` per run, the tokens a plugin reports in its output's `usage` included ([plugins](plugins.md#a-nodes-call)).
 
 ## CLI
 

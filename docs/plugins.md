@@ -93,7 +93,7 @@ structured content or as JSON text:
 | `gosidian` | the manifest format: `1` |
 | `nodes[].name` | the node's name: lower-case letters, digits and `_` (at most 32 nodes) |
 | `nodes[].tool` | the MCP tool that runs it |
-| `nodes[].files` | the settings that name a vault file: the tool gets the file's content in their place |
+| `nodes[].files` | the settings that name a vault file: the tool gets the file's content in their place. With `file_refs`, a setting may name a list of files instead (1 to 100: vault paths, or entries with a `path`, as `in.list` gives them), and the tool gets a list of references |
 | `nodes[].file_refs` | `true`: the tool gets where to fetch each file instead of its content (below) |
 | `nodes[].input_schema`, `output_schema` | JSON Schemas of the settings (as a pipeline writes them) and of the output, for the reader and the editor |
 | `permissions.files` | the plugin reads the files a pipeline hands it (needed by `files`) |
@@ -135,6 +135,14 @@ When a pipeline runs `docling.convert`, gosidian:
    the output, `{{ convert.markdown }}`, shows its pictures as they are,
    with no step of the pipeline to rewrite them.
 
+**Language-model tokens.** When `[pipelines] max_llm_tokens` caps a
+run, the call carries the tokens the run may still use in its `_meta`:
+`{"gosidian/llm_tokens_left": 12000}`. A plugin that calls language models
+(an agent) should stay within them, and report what it used in its output
+as `usage: {"total_tokens": …}`, as `llm.chat` does: gosidian adds it to the
+run's count, so the nodes after it see it, and an `llm.chat` past the cap
+fails. A plugin that calls no model ignores both.
+
 A tool result with `isError` fails the node with its text: a retry
 policy on the node (`retry`) applies, as to any node. A call lasts at
 most the node's `timeout` (5 minutes unless the pipeline sets one) and
@@ -162,8 +170,12 @@ plugin then calls that address, which its manifest declares in
 
 A plugin may offer **sources**: archives it reads (a Nextcloud folder, an
 S3 bucket, a Drive folder), set up in the plugin with their credentials,
-which never leave it. The owner binds one to a project's
-[IN folder](in.md#sources), where it shows as a folder:
+which never leave it. `gosidian-storage`, in
+[gosidian-plugins](https://github.com/daniele-chiappa/gosidian-plugins)
+(folder `storage/`, image `ghcr.io/daniele-chiappa/gosidian-storage`),
+offers WebDAV (Nextcloud), S3, Google Drive and local folders. The owner
+binds a source to a project's [IN folder](in.md#sources), where it shows
+as a folder:
 
 ```bash
 gosidian plugin bind storage fatture archive --as nextcloud --write
@@ -222,7 +234,8 @@ deletes them.
 
 ## The docling plugin
 
-`gosidian-docling` (repo `gosidian-plugins`, folder `docling/`) converts
+`gosidian-docling` ([gosidian-plugins](https://github.com/daniele-chiappa/gosidian-plugins),
+folder `docling/`, image `ghcr.io/daniele-chiappa/gosidian-docling`) converts
 PDF, DOCX, XLSX, PPTX, HTML and images to markdown with
 [docling](https://github.com/docling-project/docling), on the CPU, its
 models inside the image. Since 0.2.0 it takes its file by reference, any

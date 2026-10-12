@@ -20,6 +20,13 @@ const (
 	maxFiles = 200
 	// maxFilesBytes caps their size together.
 	maxFilesBytes = 100 << 20
+	// maxListFiles caps the files one setting may name as a list.
+	maxListFiles = 100
+
+	// MetaLLMTokensLeft is the _meta field of a node's call with the LLM
+	// tokens the run may still use, when [pipelines] max_llm_tokens caps
+	// them.
+	MetaLLMTokensLeft = "gosidian/llm_tokens_left"
 )
 
 // node runs a plugin's node: the settings that name files carry their
@@ -48,16 +55,24 @@ func (n node) Run(ctx context.Context, env *pipeline.Env, with map[string]any) (
 	for k, v := range with {
 		args[k] = v
 	}
+	base := c.FilesURL
+	if base == "" && spec.FileRefs {
+		base = env.Engine.Config().PublicURL
+	}
 	for _, f := range spec.Files {
+		if list, ok := args[f].([]any); ok {
+			refs, err := n.fileList(env, spec, f, list, base)
+			if err != nil {
+				return nil, err
+			}
+			args[f] = refs
+			continue
+		}
 		p, _ := args[f].(string)
 		if strings.TrimSpace(p) == "" {
 			return nil, fmt.Errorf("with.%s names the file for %s", f, n.use)
 		}
 		if spec.FileRefs {
-			base := c.FilesURL
-			if base == "" {
-				base = env.Engine.Config().PublicURL
-			}
 			ref, err := env.FileRef(p, base)
 			if err != nil {
 				return nil, err
@@ -70,6 +85,13 @@ func (n node) Run(ctx context.Context, env *pipeline.Env, with map[string]any) (
 			return nil, err
 		}
 		args[f] = map[string]any{"name": path.Base(rel), "mime": mimeOf(rel), "data": base64.StdEncoding.EncodeToString(data)}
+	}
+	// What the run may still spend on language models, for a plugin that
+	// calls them (an agent): the plugin decides, gosidian counts the usage
+	// its output reports.
+	var meta map[string]any
+	if left, capped := env.LLMTokensLeft(); capped {
+		meta = map[string]any{MetaLLMTokensLeft: left}
 	}
 	sess, err := n.r.connect(ctx, c)
 	if err != nil {
@@ -86,7 +108,7 @@ func (n node) Run(ctx context.Context, env *pipeline.Env, with map[string]any) (
 		return nil, fmt.Errorf("plugin %s serves another manifest (version %s, %s) than the accepted one (version %s, %s): gosidian plugin show %s, then gosidian plugin accept %s <sha>",
 			c.Name, live.Version, sha[:12], acc.Manifest.Version, acc.SHA[:12], c.Name, c.Name)
 	}
-	res, err := callTool(ctx, sess, spec.Tool, args)
+	res, err := callToolMeta(ctx, sess, spec.Tool, args, meta)
 	if err != nil {
 		return nil, fmt.Errorf("plugin %s, %s: %w", c.Name, spec.Tool, err)
 	}
@@ -116,6 +138,34 @@ func (n node) Run(ctx context.Context, env *pipeline.Env, with map[string]any) (
 		m["skipped"] = skipped
 	}
 	return m, nil
+}
+
+// fileList hands a plugin that takes files by reference the files a
+// setting names as a list: vault paths, or entries with a path, as in.list
+// and an in trigger give them ({{ trigger.files }}).
+func (n node) fileList(env *pipeline.Env, spec NodeSpec, f string, list []any, base string) ([]any, error) {
+	if !spec.FileRefs {
+		return nil, fmt.Errorf("with.%s is a list of files: %s takes one file (only a plugin that takes files by reference gets several)", f, n.use)
+	}
+	if len(list) == 0 || len(list) > maxListFiles {
+		return nil, fmt.Errorf("with.%s names %d files: from 1 to %d", f, len(list), maxListFiles)
+	}
+	refs := make([]any, 0, len(list))
+	for i, item := range list {
+		p, _ := item.(string)
+		if m, ok := item.(map[string]any); ok {
+			p, _ = m["path"].(string)
+		}
+		if strings.TrimSpace(p) == "" {
+			return nil, fmt.Errorf("with.%s[%d] names no file", f, i)
+		}
+		ref, err := env.FileRef(p, base)
+		if err != nil {
+			return nil, err
+		}
+		refs = append(refs, ref)
+	}
+	return refs, nil
 }
 
 // storeFiles stores the files of a tool result as attachments.

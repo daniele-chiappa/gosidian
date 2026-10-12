@@ -197,13 +197,18 @@ func (h *memHost) stored() []string {
 
 func newEngine(t *testing.T, reg *Registry) (*pipeline.Engine, *memHost) {
 	t.Helper()
+	return newEngineConfig(t, reg, pipeline.Config{})
+}
+
+func newEngineConfig(t *testing.T, reg *Registry, cfg pipeline.Config) (*pipeline.Engine, *memHost) {
+	t.Helper()
 	st, err := jobs.Open(filepath.Join(t.TempDir(), "jobs.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	runner := jobs.NewRunner(st, jobs.Options{Workers: 2, Poll: 10 * time.Millisecond, Lease: time.Minute})
 	host := &memHost{notes: map[string]string{}, att: map[string][]byte{}}
-	e := pipeline.New(host, runner, pipeline.Config{}, nil, nil)
+	e := pipeline.New(host, runner, cfg, nil, nil)
 	e.Types().Extend(reg)
 	host.types = e.Types()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -520,6 +525,136 @@ func TestNode_FileRefs(t *testing.T) {
 			t.Fatalf("the ticket still works after the run: %d", res.StatusCode)
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// listPlugin's node look takes a list of files by reference and says what
+// it got: their names, the LLM tokens left in its call's _meta; it reports
+// 500 tokens used.
+func listPlugin(t *testing.T) *httptest.Server {
+	t.Helper()
+	s := server.NewMCPServer("agent", "1.0.0", server.WithToolCapabilities(false))
+	s.AddTool(mcp.NewTool(ManifestTool), func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		b, _ := json.Marshal(map[string]any{
+			"name": "agent", "version": "1.0", "gosidian": 1,
+			"nodes":       []any{map[string]any{"name": "look", "tool": "look", "files": []string{"docs"}, "file_refs": true}},
+			"permissions": map[string]any{"files": true, "network": []string{"gosidian"}},
+		})
+		return mcp.NewToolResultText(string(b)), nil
+	})
+	s.AddTool(mcp.NewTool("look", mcp.WithArray("docs")), func(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		docs, _ := req.GetArguments()["docs"].([]any)
+		names := []any{}
+		for _, d := range docs {
+			m, _ := d.(map[string]any)
+			names = append(names, m["name"])
+		}
+		var left any
+		if req.Params.Meta != nil {
+			left = req.Params.Meta.AdditionalFields[MetaLLMTokensLeft]
+		}
+		return mcp.NewToolResultStructured(map[string]any{
+			"names": names, "left": left, "usage": map[string]any{"total_tokens": 500},
+		}, "looked"), nil
+	})
+	ts := httptest.NewServer(server.NewStreamableHTTPServer(s))
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+func TestNode_FileListAndTokensLeft(t *testing.T) {
+	ts := listPlugin(t)
+	reg, err := New([]Config{{Name: "agent", URL: ts.URL + "/mcp", FilesURL: "http://files.test"}}, t.TempDir(), nil, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	reg.Check(ctx)
+	st, _ := reg.State("agent")
+	if _, err := reg.Accept(ctx, "agent", st.SHA, "test"); err != nil {
+		t.Fatal(err)
+	}
+	e, host := newEngineConfig(t, reg, pipeline.Config{MaxLLMTokens: 2000})
+	host.mu.Lock()
+	host.notes["p/pipelines/look.md"] = "---\ntype: pipeline\n---\n\n```pipeline\nnodes:\n" +
+		"  - {id: a, use: agent.look, with: {docs: [attachments/a.pdf, {path: attachments/b.pdf}]}}\n" +
+		"  - {id: b, use: agent.look, with: {docs: [attachments/b.pdf]}}\n```\n"
+	host.att["p/attachments/a.pdf"] = []byte("%PDF a")
+	host.att["p/attachments/b.pdf"] = []byte("%PDF b")
+	host.mu.Unlock()
+	run, _, err := e.Start(pipeline.StartRequest{Path: "p/pipelines/look.md", Trigger: pipeline.TriggerManual})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run = waitEnd(t, e, run.ID); run.Status != jobs.Done {
+		steps, _ := e.Runner().Store().Steps(run.ID)
+		t.Fatalf("run %s: %s %+v", run.Status, run.Error, steps)
+	}
+	steps, _ := e.Runner().Store().Steps(run.ID)
+	outs := map[string]map[string]any{}
+	for _, s := range steps {
+		var out map[string]any
+		_ = json.Unmarshal(s.Output, &out)
+		outs[s.Name] = out
+	}
+	if fmt.Sprint(outs["a"]["names"]) != "[a.pdf b.pdf]" || outs["a"]["left"] != float64(2000) {
+		t.Errorf("a = %v", outs["a"])
+	}
+	// b sees the 500 tokens a reported.
+	if fmt.Sprint(outs["b"]["names"]) != "[b.pdf]" || outs["b"]["left"] != float64(1500) {
+		t.Errorf("b = %v", outs["b"])
+	}
+}
+
+func TestNode_FileListRefused(t *testing.T) {
+	var version atomic.Value
+	version.Store("1.0.0")
+	ts := fakePlugin(t, &version)
+	reg, err := New([]Config{{Name: "docling", URL: ts.URL + "/mcp", TokenSecret: "docling"}}, t.TempDir(), secretsMap{"docling": "t0k"}, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	reg.Check(ctx)
+	st, _ := reg.State("docling")
+	if _, err := reg.Accept(ctx, "docling", st.SHA, "test"); err != nil {
+		t.Fatal(err)
+	}
+	ls := listPlugin(t)
+	reg2, err := New([]Config{{Name: "agent", URL: ls.URL + "/mcp", FilesURL: "http://files.test"}}, t.TempDir(), nil, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg2.Check(ctx)
+	st2, _ := reg2.State("agent")
+	if _, err := reg2.Accept(ctx, "agent", st2.SHA, "test"); err != nil {
+		t.Fatal(err)
+	}
+	for name, c := range map[string]struct {
+		reg  *Registry
+		body string
+		want string
+	}{
+		"one file only": {reg, "{id: c, use: docling.convert, with: {file: [attachments/a.pdf]}}", "takes one file"},
+		"empty list":    {reg2, "{id: c, use: agent.look, with: {docs: []}}", "from 1 to 100"},
+		"no path":       {reg2, "{id: c, use: agent.look, with: {docs: [{name: x}]}}", "with.docs[0] names no file"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e, host := newEngine(t, c.reg)
+			host.mu.Lock()
+			host.notes["p/pipelines/x.md"] = "---\ntype: pipeline\n---\n\n```pipeline\nnodes:\n  - " + c.body + "\n```\n"
+			host.att["p/attachments/a.pdf"] = []byte("%PDF a")
+			host.mu.Unlock()
+			run, _, err := e.Start(pipeline.StartRequest{Path: "p/pipelines/x.md", Trigger: pipeline.TriggerManual})
+			if err != nil {
+				t.Fatal(err)
+			}
+			run = waitEnd(t, e, run.ID)
+			steps, _ := e.Runner().Store().Steps(run.ID)
+			if run.Status != jobs.Failed || len(steps) == 0 || !strings.Contains(steps[0].Error, c.want) {
+				t.Fatalf("run %s %q, steps %+v; want %q", run.Status, run.Error, steps, c.want)
+			}
+		})
 	}
 }
 

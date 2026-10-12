@@ -8,6 +8,32 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.85.0] — 2026-10-12 — "plugin file lists"
+
+A plugin node may get a whole batch of files at once, and a plugin that
+calls language models learns the run's token budget. Pull the image and
+restart, nothing to migrate.
+
+### Added
+- **A list of files for a plugin node** — a setting a plugin lists in
+  `files` may name several files when the plugin takes them by reference
+  (`file_refs`): vault paths, or entries with a `path`, as `in.list` and an
+  `in` trigger give them (`files: "{{ trigger.files }}"`), from 1 to 100.
+  The plugin gets a list of references. A plugin that takes its files in
+  base64 still gets one. See [docs/plugins.md](docs/plugins.md).
+- **The run's token budget for plugins** — when `[pipelines]
+  max_llm_tokens` caps a run, a plugin node's call carries the tokens the
+  run may still use in its `_meta` (`gosidian/llm_tokens_left`). A plugin
+  that calls language models, an agent say, can stay within it; the
+  `usage.total_tokens` it reports counts in the run, as `llm.chat`'s does.
+
+### Changed
+- **The plugins are public** — `docs/plugins.md` links the
+  [gosidian-plugins](https://github.com/daniele-chiappa/gosidian-plugins)
+  repository and the images of its plugins on GHCR: `gosidian-docling`,
+  `gosidian-storage`, and `gosidian-pi`, an agent of
+  [pi](https://pi.dev) as a node of the pipelines.
+
 ## [2.84.0] — 2026-10-12 — "unsized files"
 
 A source of the IN folder may list a file whose size it knows only once

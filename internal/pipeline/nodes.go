@@ -29,6 +29,15 @@ type Env struct {
 	tokens int
 }
 
+// LLMTokensLeft is what the run may still spend on language models under
+// [pipelines] max_llm_tokens; capped is false when there is no cap.
+func (env *Env) LLMTokensLeft() (left int, capped bool) {
+	if env.Engine == nil || env.Engine.cfg.MaxLLMTokens <= 0 {
+		return 0, false
+	}
+	return max(env.Engine.cfg.MaxLLMTokens-env.tokens, 0), true
+}
+
 // Type is a kind of node: it gets its settings with the expressions
 // resolved, and returns its output, a JSON value.
 type Type interface {

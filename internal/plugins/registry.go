@@ -425,10 +425,18 @@ func (r *Registry) connect(ctx context.Context, c Config) (*client.Client, error
 }
 
 func callTool(ctx context.Context, sess *client.Client, tool string, args map[string]any) (*mcp.CallToolResult, error) {
+	return callToolMeta(ctx, sess, tool, args, nil)
+}
+
+// callToolMeta calls a tool with _meta fields too.
+func callToolMeta(ctx context.Context, sess *client.Client, tool string, args, meta map[string]any) (*mcp.CallToolResult, error) {
 	var req mcp.CallToolRequest
 	req.Params.Name = tool
 	if args != nil {
 		req.Params.Arguments = args
+	}
+	if len(meta) > 0 {
+		req.Params.Meta = mcp.NewMetaFromMap(meta)
 	}
 	return sess.CallTool(ctx, req)
 }
