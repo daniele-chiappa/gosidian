@@ -55,6 +55,7 @@ import {
   hasDiagrams,
   hasMermaid,
   hasPipeline,
+  hasGraph,
   splitViews,
   type DiagramSegment,
   type MermaidSegment,
@@ -66,6 +67,7 @@ import { useAccessStore } from '@/stores/access'
 import { i18n } from '@/locales'
 import DiagramBlock from './DiagramBlock.vue'
 import PipelineBlock from './PipelineBlock.vue'
+import GraphBlock from './GraphBlock.vue'
 import { findHeading } from './headings'
 import { linkTarget } from './noteLinks'
 
@@ -98,6 +100,7 @@ const segments = computed(() =>
   props.views?.length ||
   hasDiagrams(sanitized.value) ||
   hasPipeline(sanitized.value) ||
+  hasGraph(sanitized.value) ||
   (props.diagramsEditable && hasMermaid(sanitized.value))
     ? splitViews(sanitized.value)
     : null,
@@ -296,6 +299,7 @@ function openNote(path: string, anchor: string | null) {
         :editable="canEditDiagram(s)"
         @edit="editPipeline(s)"
       />
+      <GraphBlock v-else-if="s.kind === 'graph'" :source="s.source" :note-path="notePath" />
       <div v-else-if="s.kind === 'mermaid'" class="gosidian-mermaid" data-mermaid>
         <div class="contents" v-html="s.html" />
         <div v-if="canEditDiagram(s)" class="gosidian-mermaid__tools not-prose">

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gosidian/gosidian/internal/graphspec"
 	"github.com/gosidian/gosidian/internal/index"
 )
 
@@ -74,6 +75,11 @@ func (r *Router) handleGraph(w http.ResponseWriter, req *http.Request) {
 	}
 
 	q := req.URL.Query()
+	// A plugin's graph (IMP-183): the links are the default source.
+	if source := strings.TrimSpace(q.Get("source")); source != "" && source != graphspec.SourceLinks {
+		r.handlePluginGraph(w, req, source)
+		return
+	}
 	project := strings.TrimSpace(q.Get("project"))
 	tag := strings.TrimSpace(q.Get("tag"))
 	focus := strings.TrimSpace(q.Get("focus"))

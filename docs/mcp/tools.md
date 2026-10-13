@@ -395,8 +395,10 @@ from the caller's token identity and cannot be forged, while
   note without exactly one block; [diagrams](../diagrams.md)),
   `diagram-twin-stale` (a diagram's ```` ```mermaid ```` twin made from an
   earlier version of it, as a write that changes the diagram leaves it, or
-  a twin with no diagram right above). Zero
-  `severity:error` on a coherent vault.
+  a twin with no diagram right above), `graph-invalid` (a ```` ```graph ````
+  block that does not read as a saved view of the graph, or a
+  `type: graph` note without exactly one block;
+  [graphs](../vault/graphs.md)). Zero `severity:error` on a coherent vault.
 - `memory_self_improve(category, title, friction, confidence, …)` —
   *experimental, opt-in, off by default*: record a structured insight
   about gosidian's own ergonomics (see

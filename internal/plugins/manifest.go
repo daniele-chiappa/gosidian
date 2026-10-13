@@ -30,8 +30,12 @@ const (
 	SourceMoveTool    = "gosidian_source_move"
 )
 
+// GraphTool reads a plugin's graph (IMP-183): the graph's name in graph,
+// its arguments in with.
+const GraphTool = "gosidian_graph"
+
 // sourceTools are the tools no node may name.
-var sourceTools = map[string]bool{ManifestTool: true, SourceListTool: true, SourceChangesTool: true, SourceOpenTool: true, SourceMoveTool: true}
+var sourceTools = map[string]bool{ManifestTool: true, SourceListTool: true, SourceChangesTool: true, SourceOpenTool: true, SourceMoveTool: true, GraphTool: true}
 
 // Contract is the version of the manifest format this server reads.
 const Contract = 1
@@ -42,6 +46,7 @@ const (
 	maxNodes   = 32
 	maxSources = 32
 	maxTools   = 32
+	maxGraphs  = 16
 )
 
 // MaxToolName caps the name an agent sees a plugin's tool by,
@@ -78,8 +83,21 @@ type Manifest struct {
 	// Tools are the plugin's tools gosidian offers the agents, as
 	// <plugin>_<tool>, in the projects the owner exposes the plugin in
 	// (IMP-182).
-	Tools       []ToolSpec  `json:"tools,omitempty"`
+	Tools []ToolSpec `json:"tools,omitempty"`
+	// Graphs are the graphs it offers the Graph window and the ```graph
+	// blocks, as <plugin>/<graph>, in the projects the owner exposes it in
+	// (IMP-183).
+	Graphs      []GraphSpec `json:"graphs,omitempty"`
 	Permissions Permissions `json:"permissions"`
+}
+
+// GraphSpec is a graph a plugin offers: nodes and edges it makes of its
+// data (the chunks of an archive and their neighbours, say), read with
+// GraphTool.
+type GraphSpec struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Input       json.RawMessage `json:"input_schema,omitempty"`
 }
 
 // ToolSpec is a tool of the plugin an agent may call through gosidian: the
@@ -173,8 +191,11 @@ func (m *Manifest) check(name string) error {
 	if len(m.Tools) > maxTools {
 		return fmt.Errorf("the manifest has %d tools, at most %d", len(m.Tools), maxTools)
 	}
-	if len(m.Nodes) == 0 && len(m.Sources) == 0 && len(m.Tools) == 0 {
-		return errors.New("the manifest has no nodes, no sources and no tools")
+	if len(m.Graphs) > maxGraphs {
+		return fmt.Errorf("the manifest has %d graphs, at most %d", len(m.Graphs), maxGraphs)
+	}
+	if len(m.Nodes) == 0 && len(m.Sources) == 0 && len(m.Tools) == 0 && len(m.Graphs) == 0 {
+		return errors.New("the manifest has no nodes, no sources, no tools and no graphs")
 	}
 	seen := map[string]bool{}
 	for _, n := range m.Nodes {
@@ -204,6 +225,19 @@ func (m *Manifest) check(name string) error {
 	}
 	if err := m.checkTools(); err != nil {
 		return err
+	}
+	seen = map[string]bool{}
+	for _, g := range m.Graphs {
+		switch {
+		case !nodeName.MatchString(g.Name):
+			return fmt.Errorf("graph %q: a name of lower-case letters, digits and _", g.Name)
+		case seen[g.Name]:
+			return fmt.Errorf("graph %q twice", g.Name)
+		}
+		seen[g.Name] = true
+		if err := checkObjectSchema(g.Input); err != nil {
+			return fmt.Errorf("graph %q: %w", g.Name, err)
+		}
 	}
 	for _, h := range m.Permissions.SourceHosts {
 		if !validHost(h) {
@@ -240,19 +274,28 @@ func (m *Manifest) checkTools() error {
 			return fmt.Errorf("tool %q: access is read or write", t.Name)
 		}
 		seen[t.Name] = true
-		if len(t.Input) == 0 {
-			continue
+		if err := checkObjectSchema(t.Input); err != nil {
+			return fmt.Errorf("tool %q: %w", t.Name, err)
 		}
-		var schema struct {
-			Type       string                     `json:"type"`
-			Properties map[string]json.RawMessage `json:"properties"`
-		}
-		if err := json.Unmarshal(t.Input, &schema); err != nil || schema.Type != "object" {
-			return fmt.Errorf("tool %q: input_schema is a JSON Schema of type object", t.Name)
-		}
-		if _, ok := schema.Properties["project"]; ok {
-			return fmt.Errorf("tool %q: project is gosidian's argument, the plugin reads it in _meta (%s)", t.Name, MetaProject)
-		}
+	}
+	return nil
+}
+
+// checkObjectSchema checks the input schema of a tool or a graph: an
+// object, without project, which gosidian hands the plugin in _meta.
+func checkObjectSchema(raw json.RawMessage) error {
+	if len(raw) == 0 {
+		return nil
+	}
+	var schema struct {
+		Type       string                     `json:"type"`
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil || schema.Type != "object" {
+		return errors.New("input_schema is a JSON Schema of type object")
+	}
+	if _, ok := schema.Properties["project"]; ok {
+		return fmt.Errorf("project is gosidian's argument, the plugin reads it in _meta (%s)", MetaProject)
 	}
 	return nil
 }
@@ -275,6 +318,16 @@ func (m *Manifest) Source(name string) (SourceSpec, bool) {
 		}
 	}
 	return SourceSpec{}, false
+}
+
+// Graph finds a graph by name.
+func (m *Manifest) Graph(name string) (GraphSpec, bool) {
+	for _, g := range m.Graphs {
+		if g.Name == name {
+			return g, true
+		}
+	}
+	return GraphSpec{}, false
 }
 
 // Tool finds a tool by name.
@@ -305,6 +358,13 @@ func (m *Manifest) SHA() string {
 	for i, n := range m.Nodes {
 		n.Input, n.Output = compact(n.Input), compact(n.Output)
 		c.Nodes[i] = n
+	}
+	if len(m.Graphs) > 0 {
+		c.Graphs = make([]GraphSpec, len(m.Graphs))
+		for i, g := range m.Graphs {
+			g.Input = compact(g.Input)
+			c.Graphs[i] = g
+		}
 	}
 	if len(m.Tools) > 0 {
 		c.Tools = make([]ToolSpec, len(m.Tools))

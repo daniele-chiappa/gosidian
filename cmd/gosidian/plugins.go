@@ -167,6 +167,13 @@ func runPluginCmd(args []string) {
 			}
 			fmt.Printf("Tools: %s (the agents of a project see them once you run gosidian plugin expose %s <project>).\n", strings.Join(names, ", "), a.Manifest.Name)
 		}
+		if len(a.Manifest.Graphs) > 0 {
+			names := make([]string, 0, len(a.Manifest.Graphs))
+			for _, g := range a.Manifest.Graphs {
+				names = append(names, a.Manifest.Name+"/"+g.Name)
+			}
+			fmt.Printf("Graphs: %s (for the graph views of the projects it is exposed in).\n", strings.Join(names, ", "))
+		}
 	case "bind":
 		need(3, "bind <plugin> <source> <project> [--as <folder>] [--write] [--every 1m]")
 		project := pos[2]
@@ -297,6 +304,18 @@ func printManifest(m *plugins.Manifest) {
 			}
 		}
 	}
+	if len(m.Graphs) > 0 {
+		fmt.Println("\nGraphs (for the graph views of the projects it is exposed in):")
+		for _, g := range m.Graphs {
+			fmt.Printf("  %s/%s\n", m.Name, g.Name)
+			if g.Description != "" {
+				fmt.Printf("    %s\n", g.Description)
+			}
+			if len(g.Input) > 0 {
+				fmt.Printf("    arguments: %s\n", g.Input)
+			}
+		}
+	}
 	if len(m.Nodes) == 0 {
 		return
 	}
@@ -339,7 +358,8 @@ Actions:
                        Drop that: the source keeps its files
   expose <plugin> <project>
                        Offer the plugin's tools to the agents of the
-                       project, as <plugin>_<tool>
+                       project, as <plugin>_<tool>, and its graphs to the
+                       project's graph views
   unexpose <plugin> <project>
                        Stop offering them there
 

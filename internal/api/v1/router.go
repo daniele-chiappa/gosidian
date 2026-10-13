@@ -62,6 +62,8 @@ type Router struct {
 	loginLimiter  *loginLimiter
 	exportLimiter *ratelimit.Window // per account, see export.go
 	runLimiter    *ratelimit.Window // per run token and resume key, see pipelines.go
+	// graphCache keeps the plugins' graphs a while (graph_plugins.go).
+	graphCache graphCache
 }
 
 // NewRouter wires the v1 routes against the given dependencies. The
@@ -156,6 +158,7 @@ func (r *Router) registerAuthed() {
 	r.mux.Handle("/api/v1/search", authed(r.handleSearch))
 	r.mux.Handle("/api/v1/query", authed(r.handleQuery))
 	r.mux.Handle("/api/v1/graph", authed(r.handleGraph))
+	r.mux.Handle("/api/v1/graph/sources", authed(r.handleGraphSources))
 	r.mux.Handle("/api/v1/tree", authed(r.handleTree))
 	r.mux.Handle("/api/v1/folders/", authed(r.handleFolderByPath))
 	r.mux.Handle("/api/v1/command-palette", authed(r.handleCommandPalette))

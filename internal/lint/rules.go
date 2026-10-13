@@ -35,6 +35,7 @@ var allRules = []ruleSpec{
 	{name: "pipeline-invalid", defaultSeverity: SeverityWarning, fn: checkPipelines},
 	{name: "diagram-invalid", defaultSeverity: SeverityWarning, fn: checkDiagrams},
 	{name: "diagram-twin-stale", defaultSeverity: SeverityWarning, fn: checkDiagramTwins},
+	{name: "graph-invalid", defaultSeverity: SeverityWarning, fn: checkGraphs},
 }
 
 // checkDatabaseFields checks the rows of each database note of the project

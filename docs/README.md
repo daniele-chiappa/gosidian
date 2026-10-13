@@ -57,6 +57,7 @@ trial, read the [root README](../README.md) first.
 - [Database notes](vault/databases.md) — one note per entry with a
   schema: backlogs and lists that `memory_query` can filter
 - [Views](vault/views.md) — `view` blocks: notes that list other notes
+- [Graph views](vault/graphs.md) — `graph` blocks: saved views of the graph, the plugins' graphs among them
   by folder and frontmatter, computed when the note is read
 - [Pipelines](pipelines.md) — notes `type: pipeline` the server runs
   when a document arrives, a service calls or the clock strikes (opt-in)

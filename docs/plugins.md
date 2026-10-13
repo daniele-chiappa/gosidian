@@ -104,6 +104,7 @@ structured content or as JSON text:
 | `permissions.network` | the hosts the plugin itself calls; empty for none. Declared: whoever runs its container enforces it |
 | `sources` | the archives it reads, which the owner binds to IN folders (below): `name`, `kind`, `description`, `changes`, `move`. A manifest with sources may have no nodes |
 | `tools` | the tools it offers the agents ([below](#tools)): `name`, `description`, `access` (`read` or `write`), `input_schema`, `output_schema`. A manifest with tools may have no nodes |
+| `graphs` | the graphs it offers the views of the graph ([below](#graphs)): `name`, `description`, `input_schema` |
 | `permissions.source_hosts` | the hosts the URLs of its sources' files may point at, besides the plugin's own: gosidian reads no file from another (a name or an address, with a port or not) |
 
 The sha that `accept` takes is the SHA-256 of the manifest as gosidian
@@ -287,6 +288,43 @@ When an agent calls `vec-pg_search`, gosidian:
 
 `memory_pipelines` lists each plugin's tools and the projects they are
 exposed in.
+
+### Graphs
+
+A plugin may offer **graphs**: nodes and edges it makes of its data, for
+the Graph window and the [```graph blocks](vault/graphs.md) of the
+projects the owner exposes it in (`gosidian plugin expose`, as for its
+tools). The manifest lists them:
+
+```json
+"graphs": [
+  {"name": "chunks", "description": "The chunks of a collection, each linked to its nearest neighbours",
+   "input_schema": {"type": "object", "required": ["collection"], "properties": {"collection": {"type": "string"}, "k": {"type": "integer"}}}}
+]
+```
+
+gosidian reads a graph with the tool `gosidian_graph`, the graph's name in
+`graph` and the view's arguments in `with`, and the project in the call's
+`_meta` (`gosidian/project`). The answer is JSON:
+
+```json
+{
+  "nodes": [{"id": "c1", "label": "Carburation, idle", "group": "carburation.md", "link": "rag/carburation.md", "text": "Turn the idle screw…"}],
+  "edges": [{"source": "c1", "target": "c2", "weight": 0.83}],
+  "stats": {"truncated": false}
+}
+```
+
+- `group` colours the node; `link`, a note of the vault the viewer reads,
+  opens it on a click; `text` is what the node shows; `x`, `y` (and `z`),
+  about -1 to 1, fix its place, for a layout of the plugin's.
+- At most 5000 nodes, 50,000 edges, 8 MiB. gosidian drops an edge twice or
+  to a node the graph does not have, and a link to a note the viewer may
+  not read.
+- `GET /api/v1/graph?source=<plugin>/<graph>&project=<p>&with=<JSON>`
+  serves it to the web UI, kept for 15 minutes (`refresh=1` asks again);
+  `GET /api/v1/graph/sources?project=<p>` lists a project's sources. Each
+  call is in the audit log as `plugin_call`.
 
 ### What gosidian does not do for a plugin
 

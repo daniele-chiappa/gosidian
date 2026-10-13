@@ -66,6 +66,9 @@ function groupKey(node: GraphNode, multiProject: boolean): string {
 // renderers draw radius `NODE_REL_SIZE * sqrt(val)` — the formula the
 // libraries also use for pointer hit-testing.
 export const NODE_REL_SIZE = 4
+
+/** How far a plugin's fixed places (about -1 to 1) spread on the canvas. */
+export const FIXED_SCALE = 300
 export const nodeVal = (n: FGNode): number => 1 + Math.min(n.degree, 24)
 export const nodeRadius = (n: FGNode): number => NODE_REL_SIZE * Math.sqrt(nodeVal(n))
 
@@ -86,17 +89,25 @@ export function toForceGraph(
   return {
     nodes: nodes.map((n) => {
       const prev = prevPositions?.get(n.id)
-      return {
+      const node: FGNode = {
         id: n.id,
         label: n.label,
         project: n.project ?? '',
         degree: n.degree,
-        group: groupKey(n, multiProject),
+        // A plugin's graph names its groups (IMP-183).
+        group: n.group ?? groupKey(n, multiProject),
         mtime: n.mtime ?? 0,
         x: prev?.x,
         y: prev?.y,
         z: prev?.z,
       }
+      // A place the plugin fixed (a projection) holds the node there.
+      if (n.x !== undefined && n.y !== undefined) {
+        node.fx = n.x * FIXED_SCALE
+        node.fy = n.y * FIXED_SCALE
+        if (n.z !== undefined) node.fz = n.z * FIXED_SCALE
+      }
+      return node
     }),
     links: edges.map((e) => ({
       source: e.source,

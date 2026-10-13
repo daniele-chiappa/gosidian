@@ -196,3 +196,45 @@ func TestRegistry_ExposeNeedsTools(t *testing.T) {
 		t.Errorf("expose without tools: %v", err)
 	}
 }
+
+func TestManifest_Graphs(t *testing.T) {
+	m := func(graphs ...map[string]any) []byte {
+		list := []any{}
+		for _, g := range graphs {
+			list = append(list, g)
+		}
+		b, _ := json.Marshal(map[string]any{"name": "vec", "version": "1", "gosidian": 1, "graphs": list,
+			"permissions": map[string]any{"files": false, "network": []string{}}})
+		return b
+	}
+	ok := map[string]any{"name": "chunks", "input_schema": map[string]any{"type": "object"}}
+	man, err := ParseManifest(m(ok), "vec")
+	if err != nil {
+		t.Fatalf("a manifest with a graph only: %v", err)
+	}
+	if _, found := man.Graph("chunks"); !found {
+		t.Error("Graph does not find chunks")
+	}
+	for why, g := range map[string]map[string]any{
+		"name":    {"name": "Chunks"},
+		"project": {"name": "chunks", "input_schema": map[string]any{"type": "object", "properties": map[string]any{"project": map[string]any{}}}},
+		"type":    {"name": "chunks", "input_schema": map[string]any{"type": "array"}},
+	} {
+		if _, err := ParseManifest(m(g), "vec"); err == nil {
+			t.Errorf("%s: accepted", why)
+		}
+	}
+	if _, err := ParseManifest(m(ok, ok), "vec"); err == nil {
+		t.Error("a graph twice")
+	}
+	node, _ := json.Marshal(map[string]any{"name": "vec", "version": "1", "gosidian": 1,
+		"nodes": []any{map[string]any{"name": "g", "tool": GraphTool}}, "permissions": map[string]any{"files": false, "network": []string{}}})
+	if _, err := ParseManifest(node, "vec"); err == nil {
+		t.Error("a node runs gosidian_graph")
+	}
+	a, _ := ParseManifest(m(ok), "vec")
+	b, _ := ParseManifest(m(map[string]any{"name": "chunks", "input_schema": map[string]any{"type": "object", "properties": map[string]any{"k": map[string]any{}}}}), "vec")
+	if a.SHA() == b.SHA() {
+		t.Error("a graph's schema is not in the sha")
+	}
+}

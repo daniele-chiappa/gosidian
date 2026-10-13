@@ -199,6 +199,7 @@ func (s *Server) writeNote(ctx context.Context, tok *auth.Token, w noteWrite) (n
 	if w.schemaCheck {
 		s.noteSchemaProblems(ctx, w.rel, content)
 		s.noteDiagramProblems(ctx, w.rel, content)
+		s.noteGraphProblems(ctx, w.rel, content)
 	}
 	out := noteWritten{Path: w.rel, Created: created, Size: len(content)}
 	if fresh, err := s.vault.Load(w.rel); err == nil {

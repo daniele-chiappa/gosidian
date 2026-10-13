@@ -8,6 +8,15 @@ export type Segment =
   | DiagramSegment
   | MermaidSegment
   | PipelineSegment
+  | GraphSegment
+
+/** A ```graph block at the top level (IMP-183): a saved view of the graph. */
+export interface GraphSegment {
+  kind: 'graph'
+  index: number
+  source: string
+  html: string
+}
 
 /**
  * The ```pipeline block of a pipeline note, at the top level: drawn, with
@@ -76,6 +85,11 @@ export function hasPipeline(html: string): boolean {
   return html.includes('language-pipeline')
 }
 
+/** Whether preview HTML may hold a graph's block. */
+export function hasGraph(html: string): boolean {
+  return html.includes('language-graph')
+}
+
 /** Whether preview HTML may hold a Mermaid block. */
 export function hasMermaid(html: string): boolean {
   return html.includes('language-mermaid')
@@ -98,6 +112,7 @@ export function splitViews(html: string): Segment[] {
   let diagrams = 0
   let mermaids = 0
   let pipelines = 0
+  let graphs = 0
   // Whether the last thing kept was a diagram's block: a twin follows it.
   let afterDiagram = false
   const flush = () => {
@@ -155,6 +170,13 @@ export function splitViews(html: string): Segment[] {
         html: (node as HTMLElement).outerHTML,
         origin,
       })
+      afterDiagram = false
+      continue
+    }
+    const graphSrc = diagramSource(node, 'graph')
+    if (graphSrc !== null) {
+      flush()
+      out.push({ kind: 'graph', index: graphs++, source: graphSrc, html: (node as HTMLElement).outerHTML })
       afterDiagram = false
       continue
     }

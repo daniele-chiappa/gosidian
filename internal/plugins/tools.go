@@ -2,8 +2,10 @@ package plugins
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -46,8 +48,9 @@ func (r *Registry) Tools() []PluginTool {
 	return out
 }
 
-// Expose shows a plugin's tools to the agents of a project. The plugin's
-// accepted manifest must offer tools: the owner read them when accepting.
+// Expose shows a plugin's tools to the agents of a project, and its graphs
+// to its views. The plugin's accepted manifest must offer some: the owner
+// read them when accepting.
 func (r *Registry) Expose(plugin, project, by string) (Exposed, error) {
 	if _, ok := r.plugins[plugin]; !ok {
 		return Exposed{}, fmt.Errorf("no plugin %q in [[pipelines.plugins]]", plugin)
@@ -60,8 +63,8 @@ func (r *Registry) Expose(plugin, project, by string) (Exposed, error) {
 	if !ok {
 		return Exposed{}, fmt.Errorf("the manifest of plugin %s is not accepted yet (gosidian plugin show %s, then accept)", plugin, plugin)
 	}
-	if len(a.Manifest.Tools) == 0 {
-		return Exposed{}, fmt.Errorf("plugin %s offers no tools", plugin)
+	if len(a.Manifest.Tools) == 0 && len(a.Manifest.Graphs) == 0 {
+		return Exposed{}, fmt.Errorf("plugin %s offers no tools and no graphs", plugin)
 	}
 	e := Exposed{Plugin: plugin, Project: project, At: time.Now().UTC(), By: by}
 	err = r.store.update(func(f *acceptedFile) error {
@@ -152,4 +155,77 @@ func (r *Registry) CallTool(ctx context.Context, plugin, tool string, args, meta
 		return nil, fmt.Errorf("plugin %s, %s: %w", plugin, tool, err)
 	}
 	return res, nil
+}
+
+// maxGraphResult caps the JSON of a plugin's graph.
+const maxGraphResult = 8 << 20
+
+// PluginGraph is a graph of an accepted manifest.
+type PluginGraph struct {
+	// Source is how a view names it: <plugin>/<graph>.
+	Source string
+	Plugin string
+	Spec   GraphSpec
+}
+
+// Graphs lists the graphs of the accepted manifests, in the order of the
+// config.
+func (r *Registry) Graphs() []PluginGraph {
+	acc, _ := r.store.all()
+	var out []PluginGraph
+	for _, name := range r.order {
+		a, ok := acc[name]
+		if !ok {
+			continue
+		}
+		for _, g := range a.Manifest.Graphs {
+			out = append(out, PluginGraph{Source: name + "/" + g.Name, Plugin: name, Spec: g})
+		}
+	}
+	return out
+}
+
+// Graph reads a plugin's graph: GraphTool with the graph's name and its
+// arguments, meta as the call's _meta. The result is the plugin's JSON.
+func (r *Registry) Graph(ctx context.Context, plugin, graph string, args, meta map[string]any) (json.RawMessage, error) {
+	c, ok := r.plugins[plugin]
+	if !ok {
+		return nil, fmt.Errorf("no plugin %q in [[pipelines.plugins]]", plugin)
+	}
+	acc, err := r.store.all()
+	if err != nil {
+		return nil, err
+	}
+	a, ok := acc[plugin]
+	if !ok {
+		return nil, fmt.Errorf("the manifest of plugin %s is not accepted", plugin)
+	}
+	if _, ok := a.Manifest.Graph(graph); !ok {
+		return nil, fmt.Errorf("plugin %s offers no graph %q", plugin, graph)
+	}
+	if c.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.Timeout)
+		defer cancel()
+	}
+	sess, err := r.session(ctx, c, a)
+	if err != nil {
+		return nil, err
+	}
+	defer sess.Close()
+	if args == nil {
+		args = map[string]any{}
+	}
+	res, err := callToolMeta(ctx, sess, GraphTool, map[string]any{"graph": graph, "with": args}, meta)
+	if err != nil {
+		return nil, fmt.Errorf("plugin %s, graph %s: %w", plugin, graph, err)
+	}
+	if res.IsError {
+		return nil, fmt.Errorf("plugin %s, graph %s: %s", plugin, graph, strings.TrimSpace(resultText(res)))
+	}
+	raw := resultJSON(res)
+	if len(raw) > maxGraphResult {
+		return nil, fmt.Errorf("plugin %s gave the graph %s in %d bytes, more than %d", plugin, graph, len(raw), maxGraphResult)
+	}
+	return raw, nil
 }

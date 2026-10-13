@@ -8,6 +8,40 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.87.0] — 2026-10-13 — "graph views"
+
+Views of the graph saved in notes, and graphs that plugins offer, such as
+the map of an archive of vectors. Pull the image and restart, nothing to
+migrate.
+
+### Added
+- **Saved views of the graph** — a ```` ```graph ```` block saves a view:
+  its `source` (`links`, the vault's wikilinks, or `<plugin>/<graph>`),
+  the links' filters (`project`, `tag`, `focus`, `depth`, `min_degree`,
+  `limit`) or a plugin graph's arguments (`with`), `color` and `mode`
+  (`2d` or `3d`). The web UI draws it in the note, with «Open in the
+  Graph» and «Code»; a note `type: graph` is a saved view. A write says
+  what does not read in a block, and the lint lists it (`graph-invalid`).
+  See [docs/vault/graphs.md](docs/vault/graphs.md).
+- **Graphs of the plugins** — a plugin's manifest may list `graphs`, which
+  gosidian reads with the tool `gosidian_graph`, with the project in the
+  call's `_meta`, in the projects where the plugin is exposed
+  (`gosidian plugin expose`). `GET /api/v1/graph?source=<plugin>/<graph>`
+  serves them, checked (at most 5000 nodes and 50,000 edges, links only to
+  notes the viewer reads) and kept for 15 minutes; `GET
+  /api/v1/graph/sources` lists a project's sources. See
+  [docs/plugins.md](docs/plugins.md#graphs).
+  [gosidian-database](https://github.com/daniele-chiappa/gosidian-plugins/tree/main/database)
+  0.2.0 offers two: a sample of an archive's chunks, each linked to its
+  nearest neighbours, and its documents.
+- **The Graph window** chooses the source among the links and the graphs
+  of the plugins exposed in the project, shows a graph's arguments from its
+  schema, «Compute again», the text of the node clicked, and «Save as a
+  note», which writes the view on screen as a note.
+
+### Changed
+- `gosidian plugin show` and `accept` list a manifest's graphs.
+
 ## [2.86.0] — 2026-10-13 — "plugin tools"
 
 A plugin may offer tools to the agents: gosidian's MCP server lists them
