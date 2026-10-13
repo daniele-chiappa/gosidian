@@ -32,23 +32,35 @@ type Bound struct {
 	By string    `json:"bound_by,omitempty"`
 }
 
+// Exposed is a plugin whose tools the agents of a project see (IMP-182),
+// and when, by whom.
+type Exposed struct {
+	Plugin  string    `json:"plugin"`
+	Project string    `json:"project"`
+	At      time.Time `json:"exposed_at"`
+	By      string    `json:"exposed_by,omitempty"`
+}
+
 type acceptedFile struct {
 	Plugins  map[string]Accepted `json:"plugins"`
 	Bindings []Bound             `json:"bindings,omitempty"`
+	Exposed  []Exposed           `json:"exposed,omitempty"`
 }
 
-// store keeps the accepted manifests and the bound sources in
+// store keeps the accepted manifests, the bound sources and the exposed
+// plugins in
 // <state-dir>/plugins.json. The CLI writes it while the server runs, so
 // the server reads it again whenever the file changed.
 type store struct {
 	path string
 
-	mu    sync.Mutex
-	mod   time.Time
-	size  int64
-	cur   map[string]Accepted
-	bound []Bound
-	err   error
+	mu      sync.Mutex
+	mod     time.Time
+	size    int64
+	cur     map[string]Accepted
+	bound   []Bound
+	exposed []Exposed
+	err     error
 }
 
 func newStore(path string) *store { return &store{path: path} }
@@ -60,7 +72,7 @@ func (s *store) all() (map[string]Accepted, error) {
 	defer s.mu.Unlock()
 	fi, err := os.Stat(s.path)
 	if errors.Is(err, fs.ErrNotExist) {
-		s.cur, s.bound, s.err, s.mod, s.size = nil, nil, nil, time.Time{}, 0
+		s.cur, s.bound, s.exposed, s.err, s.mod, s.size = nil, nil, nil, nil, time.Time{}, 0
 		return nil, nil
 	}
 	if err != nil {
@@ -71,7 +83,7 @@ func (s *store) all() (map[string]Accepted, error) {
 	}
 	s.mod, s.size = fi.ModTime(), fi.Size()
 	f, err := readAccepted(s.path)
-	s.cur, s.bound, s.err = f.Plugins, f.Bindings, err
+	s.cur, s.bound, s.exposed, s.err = f.Plugins, f.Bindings, f.Exposed, err
 	if s.cur == nil {
 		s.cur = map[string]Accepted{}
 	}
@@ -84,6 +96,14 @@ func (s *store) bindings() ([]Bound, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]Bound(nil), s.bound...), err
+}
+
+// exposures is the exposed plugins.
+func (s *store) exposures() ([]Exposed, error) {
+	_, err := s.all()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]Exposed(nil), s.exposed...), err
 }
 
 func readAccepted(path string) (acceptedFile, error) {

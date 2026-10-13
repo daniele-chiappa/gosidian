@@ -8,6 +8,36 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.86.0] — 2026-10-13 — "plugin tools"
+
+A plugin may offer tools to the agents: gosidian's MCP server lists them
+as its own, in the projects where you expose the plugin, and forwards
+each call to it. Pull the image and restart, nothing to migrate.
+
+### Added
+- **Tools of the plugins** — a plugin's manifest may list `tools`, each
+  with an `access` (`read` or `write`) and its input schema. Once you have
+  accepted the manifest and exposed the plugin in a project
+  (`gosidian plugin expose <plugin> <project>`, and `unexpose`), the MCP
+  server lists them as `<plugin>_<tool>` to the tokens of that project. A
+  `write` tool shows only to tokens that may write there, and the `core`
+  tool profile sees them too. A call goes to the plugin with the agent's
+  arguments and, in its `_meta`, `gosidian/project`, `gosidian/caller` and
+  `gosidian/access`. The result comes back as the plugin gave it, up to
+  1 MiB, and the call is in the audit log as `plugin_call`.
+  `memory_pipelines` and `gosidian plugin list` show each plugin's tools
+  and where they are exposed. See [docs/plugins.md](docs/plugins.md#tools).
+  The first plugin to use them is
+  [gosidian-database](https://github.com/daniele-chiappa/gosidian-plugins/tree/main/database),
+  an archive of vectors on PostgreSQL with pgvector, Qdrant or SQLite.
+- **The project in a plugin node's call** — the `_meta` of every node's
+  call carries `gosidian/project` and `gosidian/run`, so a plugin that
+  keeps data for several projects keeps them apart.
+
+### Changed
+- **A plugin may not be named `memory`**: its tools would be `memory_*`,
+  gosidian's own.
+
 ## [2.85.0] — 2026-10-12 — "plugin file lists"
 
 A plugin node may get a whole batch of files at once, and a plugin that

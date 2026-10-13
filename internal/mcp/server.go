@@ -210,6 +210,12 @@ type Server struct {
 	in *infolder.Service
 	// plugins are the MCP servers whose nodes the pipelines use (IMP-168).
 	plugins *plugins.Registry
+	// pluginTools are the plugins' tools registered as tools of this server
+	// (IMP-182), by name; pluginToolsKey is the set they were registered
+	// from (syncPluginTools).
+	pluginToolsMu  sync.Mutex
+	pluginTools    map[string]pluginTool
+	pluginToolsKey string
 	// accessResolver maps an OAuth access token (internal/oauth) to the grant
 	// it was issued for; nil when OAuth is off. Consulted only for bearers the
 	// static token store does not know.
@@ -599,9 +605,16 @@ func New(v *vault.Vault, idx *index.Index, tokens *auth.Store) *Server {
 	// The self-improve nudge middleware is bound to s, so s must exist
 	// before NewMCPServer captures it. s.impl is assigned right after and
 	// is only dereferenced at tool-call time, by which point it is set.
+	// The plugins' tools (IMP-182) follow plugins.json, which the CLI writes
+	// from another process: they are registered again, when it changed,
+	// before the server lists or calls its tools.
+	hooks := &server.Hooks{}
+	hooks.AddBeforeListTools(func(context.Context, any, *mcp.ListToolsRequest) { s.syncPluginTools() })
+	hooks.AddBeforeCallTool(func(context.Context, any, *mcp.CallToolRequest) { s.syncPluginTools() })
 	s.impl = server.NewMCPServer(
 		"gosidian",
 		Version,
+		server.WithHooks(hooks),
 		server.WithToolCapabilities(true),
 		server.WithToolHandlerMiddleware(instrumentMiddleware),
 		server.WithToolHandlerMiddleware(recoverMiddleware),

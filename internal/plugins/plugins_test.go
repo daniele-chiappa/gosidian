@@ -549,12 +549,13 @@ func listPlugin(t *testing.T) *httptest.Server {
 			m, _ := d.(map[string]any)
 			names = append(names, m["name"])
 		}
-		var left any
+		var left, project, run any
 		if req.Params.Meta != nil {
 			left = req.Params.Meta.AdditionalFields[MetaLLMTokensLeft]
+			project, run = req.Params.Meta.AdditionalFields[MetaProject], req.Params.Meta.AdditionalFields[MetaRun]
 		}
 		return mcp.NewToolResultStructured(map[string]any{
-			"names": names, "left": left, "usage": map[string]any{"total_tokens": 500},
+			"names": names, "left": left, "project": project, "run": run, "usage": map[string]any{"total_tokens": 500},
 		}, "looked"), nil
 	})
 	ts := httptest.NewServer(server.NewStreamableHTTPServer(s))
@@ -599,6 +600,10 @@ func TestNode_FileListAndTokensLeft(t *testing.T) {
 	}
 	if fmt.Sprint(outs["a"]["names"]) != "[a.pdf b.pdf]" || outs["a"]["left"] != float64(2000) {
 		t.Errorf("a = %v", outs["a"])
+	}
+	// The plugin knows the project and the run it works for (IMP-182).
+	if outs["a"]["project"] != "p" || outs["a"]["run"] != run.ID {
+		t.Errorf("a's _meta: project %v, run %v (want p, %s)", outs["a"]["project"], outs["a"]["run"], run.ID)
 	}
 	// b sees the 500 tokens a reported.
 	if fmt.Sprint(outs["b"]["names"]) != "[b.pdf]" || outs["b"]["left"] != float64(1500) {

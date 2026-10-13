@@ -124,6 +124,7 @@ func runPluginCmd(args []string) {
 		}
 		fmt.Println()
 		printBindings(reg)
+		printExposures(reg)
 	case "show":
 		need(1, "show <name>")
 		m, err := reg.Fetch(ctx, pos[0])
@@ -134,7 +135,7 @@ func runPluginCmd(args []string) {
 		st, _ := reg.State(pos[0])
 		switch sha := m.SHA(); {
 		case st.Accepted == nil:
-			fmt.Printf("\nNot accepted yet. Its nodes run, and its sources may be bound, once accepted:\n  gosidian plugin accept %s %s\n", m.Name, sha[:12])
+			fmt.Printf("\nNot accepted yet. Its nodes run, its sources may be bound and its tools exposed, once accepted:\n  gosidian plugin accept %s %s\n", m.Name, sha[:12])
 		case st.Accepted.SHA == sha:
 			fmt.Printf("\nAccepted %s by %s.\n", st.Accepted.At.Format("2006-01-02 15:04"), orDash(st.Accepted.By))
 		default:
@@ -158,6 +159,13 @@ func runPluginCmd(args []string) {
 				names = append(names, src.Name)
 			}
 			fmt.Printf("Sources: %s (gosidian plugin bind %s <source> <project>).\n", strings.Join(names, ", "), a.Manifest.Name)
+		}
+		if len(a.Manifest.Tools) > 0 {
+			names := make([]string, 0, len(a.Manifest.Tools))
+			for _, t := range a.Manifest.Tools {
+				names = append(names, plugins.ToolName(a.Manifest.Name, t.Name))
+			}
+			fmt.Printf("Tools: %s (the agents of a project see them once you run gosidian plugin expose %s <project>).\n", strings.Join(names, ", "), a.Manifest.Name)
 		}
 	case "bind":
 		need(3, "bind <plugin> <source> <project> [--as <folder>] [--write] [--every 1m]")
@@ -199,6 +207,22 @@ func runPluginCmd(args []string) {
 			log.Fatal(err)
 		}
 		fmt.Printf("Unbound %s from %s/IN/%s/: the server forgets its files at its next check; the source keeps them.\n", b.ID(), b.Project, b.Folder)
+	case "expose":
+		need(2, "expose <plugin> <project>")
+		if fi, err := os.Stat(filepath.Join(cliVaultDir(*vaultDir), pos[1])); err != nil || !fi.IsDir() {
+			log.Fatalf("no project %q in the vault", pos[1])
+		}
+		e, err := reg.Expose(pos[0], pos[1], "cli")
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Printf("Exposed %s in %s: its tools show to the tokens of the project (a client lists them again at its next session).\n", e.Plugin, e.Project)
+	case "unexpose":
+		need(2, "unexpose <plugin> <project>")
+		if err := reg.Unexpose(pos[0], pos[1]); err != nil {
+			log.Fatal(err)
+		}
+		fmt.Printf("The tools of %s no longer show in %s.\n", pos[0], pos[1])
 	case "forget":
 		need(1, "forget <name>")
 		if err := reg.Forget(pos[0]); err != nil {
@@ -261,6 +285,18 @@ func printManifest(m *plugins.Manifest) {
 			}
 		}
 	}
+	if len(m.Tools) > 0 {
+		fmt.Println("\nTools (for the agents of the projects it is exposed in):")
+		for _, t := range m.Tools {
+			fmt.Printf("  %s (%s)\n", plugins.ToolName(m.Name, t.Name), t.Access)
+			if t.Description != "" {
+				fmt.Printf("    %s\n", t.Description)
+			}
+			if len(t.Input) > 0 {
+				fmt.Printf("    arguments: %s\n", t.Input)
+			}
+		}
+	}
 	if len(m.Nodes) == 0 {
 		return
 	}
@@ -301,6 +337,11 @@ Actions:
                        folder, as IN/<source>/ (--as another name)
   unbind <project> <folder>
                        Drop that: the source keeps its files
+  expose <plugin> <project>
+                       Offer the plugin's tools to the agents of the
+                       project, as <plugin>_<tool>
+  unexpose <plugin> <project>
+                       Stop offering them there
 
 Options:
   --vault <dir>      Vault directory (default: $GOSIDIAN_VAULT)
@@ -329,6 +370,25 @@ func printBindings(reg *plugins.Registry) {
 			mode = "yes"
 		}
 		fmt.Fprintf(w, "%s\tIN/%s\t%s\t%s\t%s\t%s %s\n", b.Project, b.Folder, b.ID(), mode, b.Interval(), b.At.Format("2006-01-02 15:04"), orDash(b.By))
+	}
+	w.Flush()
+}
+
+// printExposures lists the plugins whose tools the agents of a project see.
+func printExposures(reg *plugins.Registry) {
+	list, err := reg.Exposures()
+	if err != nil {
+		fmt.Printf("\nThe exposed plugins: %v\n", err)
+		return
+	}
+	if len(list) == 0 {
+		return
+	}
+	fmt.Println("\nExposed plugins:")
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "PLUGIN\tPROJECT\tEXPOSED")
+	for _, e := range list {
+		fmt.Fprintf(w, "%s\t%s\t%s %s\n", e.Plugin, e.Project, e.At.Format("2006-01-02 15:04"), orDash(e.By))
 	}
 	w.Flush()
 }

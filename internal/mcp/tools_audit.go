@@ -23,7 +23,7 @@ func (s *Server) registerAuditTools() {
 		mcp.WithString("since", mcp.Description("Lower bound on timestamp. Relative duration ('1h', '24h', '7d') or RFC3339. Empty = no lower bound.")),
 		mcp.WithString("until", mcp.Description("Upper bound on timestamp. Relative duration (ago) or RFC3339. Empty = no upper bound.")),
 		mcp.WithString("actor", mcp.Description("Exact match on actor (token name, possibly suffixed with @<correlation_id> for MCP sessions).")),
-		mcp.WithString("action", mcp.Description("Exact match on action. One of: create, update, append, delete, rename, create_project, delete_project, rename_project, upload_attachment, delete_attachment, ingest_package.")),
+		mcp.WithString("action", mcp.Description("Exact match on action. One of: create, update, append, delete, rename, create_project, delete_project, rename_project, upload_attachment, delete_attachment, ingest_package, pipeline_run, pipeline_resume, pipeline_cancel, plugin_call.")),
 		mcp.WithString("path_prefix", mcp.Description("Prefix match on the vault-relative path. Scoped tokens always prepend their project.")),
 		mcp.WithString("source", mcp.Description("Filter by source: 'http' (web UI), 'mcp' (agent), 'automation' (the automations of a database note) or 'pipeline' (a pipeline run). Empty = all.")),
 		mcp.WithNumber("limit", mcp.Description("Max entries to return (default 50, max 500).")),
@@ -141,7 +141,8 @@ func knownAction(a audit.Action) bool {
 		audit.ActionCreateProject, audit.ActionDeleteProject, audit.ActionRenameProject,
 		audit.ActionUploadAttachment, audit.ActionDeleteAttachment,
 		audit.ActionIngestPackage,
-		audit.ActionPipelineRun, audit.ActionPipelineResume, audit.ActionPipelineCancel:
+		audit.ActionPipelineRun, audit.ActionPipelineResume, audit.ActionPipelineCancel,
+		audit.ActionPluginCall:
 		return true
 	}
 	return false

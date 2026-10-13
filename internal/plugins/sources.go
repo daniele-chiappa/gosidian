@@ -83,7 +83,8 @@ func (r *Registry) Unbind(project, folder string) (Bound, error) {
 	return gone, err
 }
 
-// ProjectRenamed follows a project's rename in the bindings.
+// ProjectRenamed follows a project's rename in the bindings and the
+// exposed plugins.
 func (r *Registry) ProjectRenamed(from, to string) error {
 	return r.store.update(func(f *acceptedFile) error {
 		for i := range f.Bindings {
@@ -91,12 +92,17 @@ func (r *Registry) ProjectRenamed(from, to string) error {
 				f.Bindings[i].Project = to
 			}
 		}
+		for i := range f.Exposed {
+			if f.Exposed[i].Project == from {
+				f.Exposed[i].Project = to
+			}
+		}
 		return nil
 	})
 }
 
-// ProjectRemoved drops the bindings of a project deleted (BUG-119): a
-// later project of the name binds its own.
+// ProjectRemoved drops the bindings and the exposed plugins of a project
+// deleted (BUG-119): a later project of the name binds its own.
 func (r *Registry) ProjectRemoved(project string) error {
 	return r.store.update(func(f *acceptedFile) error {
 		kept := f.Bindings[:0]
@@ -106,6 +112,13 @@ func (r *Registry) ProjectRemoved(project string) error {
 			}
 		}
 		f.Bindings = kept
+		exposed := f.Exposed[:0]
+		for _, e := range f.Exposed {
+			if e.Project != project {
+				exposed = append(exposed, e)
+			}
+		}
+		f.Exposed = exposed
 		return nil
 	})
 }

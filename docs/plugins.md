@@ -12,6 +12,10 @@ only once the owner has **accepted the manifest** the plugin serves. A
 plugin that later serves another manifest (a new version, other
 permissions) stops running until its new manifest is accepted too.
 
+A plugin may also offer **tools** to the agents: gosidian's MCP server
+lists them as its own, `<plugin>_<tool>`, in the projects the owner
+exposes the plugin in, and forwards each call to the plugin ([Tools](#tools)).
+
 ## Registering a plugin
 
 ```toml
@@ -58,8 +62,8 @@ The server checks every plugin once a minute: the Runs window and
 
 ## Writing a plugin
 
-A plugin serves two kinds of tool: `gosidian_manifest`, and the tools
-behind its nodes.
+A plugin serves `gosidian_manifest`, the tools behind its nodes, and the
+tools it offers the agents, if any (a node's tool may be one of these too).
 
 ### The manifest
 
@@ -99,6 +103,7 @@ structured content or as JSON text:
 | `permissions.files` | the plugin reads the files a pipeline hands it (needed by `files`) |
 | `permissions.network` | the hosts the plugin itself calls; empty for none. Declared: whoever runs its container enforces it |
 | `sources` | the archives it reads, which the owner binds to IN folders (below): `name`, `kind`, `description`, `changes`, `move`. A manifest with sources may have no nodes |
+| `tools` | the tools it offers the agents ([below](#tools)): `name`, `description`, `access` (`read` or `write`), `input_schema`, `output_schema`. A manifest with tools may have no nodes |
 | `permissions.source_hosts` | the hosts the URLs of its sources' files may point at, besides the plugin's own: gosidian reads no file from another (a name or an address, with a port or not) |
 
 The sha that `accept` takes is the SHA-256 of the manifest as gosidian
@@ -134,6 +139,12 @@ When a pipeline runs `docling.convert`, gosidian:
    (`![caption](/vault-files/p/attachments/1f3c….png)`): a note made of
    the output, `{{ convert.markdown }}`, shows its pictures as they are,
    with no step of the pipeline to rewrite them.
+
+**The call's `_meta`.** Every call of a node carries
+`gosidian/project`, the pipeline's project, and `gosidian/run`, the
+run's id. Only gosidian holds the plugin's token, so a plugin that keeps
+data for several projects (an archive of vectors) may trust the project
+to keep them apart.
 
 **Language-model tokens.** When `[pipelines] max_llm_tokens` caps a
 run, the call carries the tokens the run may still use in its `_meta`:
@@ -222,6 +233,61 @@ gosidian moves a source's files only with a binding's `--write`, only
 inside the source (a target outside it is read inside it), and never
 deletes them.
 
+### Tools
+
+A plugin's tools are for the agents that use gosidian's MCP server: a
+search over the archive the plugin keeps, say. The manifest lists them:
+
+```json
+"tools": [
+  {"name": "search", "access": "read", "description": "Chunks similar to a text",
+   "input_schema": {"type": "object", "required": ["query"], "properties": {"query": {"type": "string"}, "k": {"type": "integer"}}}},
+  {"name": "upsert", "access": "write", "description": "Store chunks and their embeddings"}
+]
+```
+
+- `name` is the plugin's MCP tool: lower-case letters, digits and `_`,
+  not `gosidian_…`, and not a node's tool that takes files (an agent has
+  none to hand it). The agents see it as `<plugin>_<tool>`, which stays
+  within 48 characters (a client prefixes it: Claude Code with
+  `mcp__gosidian__`). A plugin may not be named `memory`.
+- `access` is the scope a token needs: `read`, or `write` for a tool that
+  changes the plugin's data.
+- `input_schema` is a JSON Schema of type object. It must not declare
+  `project`: gosidian adds that argument itself.
+
+The owner accepts the tools with the manifest, then **exposes** the plugin
+in the projects whose agents may use them:
+
+```bash
+docker exec gosidian gosidian plugin expose vec-pg rag-prove
+docker exec gosidian gosidian plugin list        # … Exposed plugins: PLUGIN PROJECT
+docker exec gosidian gosidian plugin unexpose vec-pg rag-prove
+```
+
+A token sees a plugin's tool only when the plugin is exposed in a project
+the token reaches, and a `write` tool only when it may write there; the
+`core` tool profile sees them too. The tools appear at a client's next
+session (or at once, for a client that listens to `tools/list_changed`).
+
+When an agent calls `vec-pg_search`, gosidian:
+
+1. checks the token: its scope, the project (the argument `project`,
+   which a token of one project may leave out) and that the plugin is
+   exposed there;
+2. opens a session with the plugin and reads its manifest again, as for a
+   node;
+3. calls the plugin's tool `search` with the other arguments as they
+   came, and in the call's `_meta` `gosidian/project`, `gosidian/caller`
+   (the token's id) and `gosidian/access`;
+4. gives the agent the plugin's result as it is, up to 1 MiB, within two
+   minutes or the plugin's `timeout`;
+5. writes the call in the audit log (`plugin_call`, the project and the
+   tool), and counts a `write` call against the token's write limits.
+
+`memory_pipelines` lists each plugin's tools and the projects they are
+exposed in.
+
 ### What gosidian does not do for a plugin
 
 - It does not run it: the plugin is a container or a service its owner
@@ -230,7 +296,7 @@ deletes them.
   own key, a source its credentials.
 - It does not let it read the vault: the plugin gets the files a node
   names, in the pipeline's project, or a ticket for each, and gives back
-  files and data.
+  files and data. A tool gets the arguments of the agent's call, no file.
 
 ## The docling plugin
 

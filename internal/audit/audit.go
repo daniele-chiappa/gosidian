@@ -61,9 +61,13 @@ const (
 	// ActionPipelineRun, ActionPipelineResume, ActionPipelineCancel: a
 	// pipeline run started, resumed from outside, canceled (IMP-167). Path
 	// is the pipeline note, To the run's id.
-	ActionPipelineRun      Action = "pipeline_run"
-	ActionPipelineResume   Action = "pipeline_resume"
-	ActionPipelineCancel   Action = "pipeline_cancel"
+	ActionPipelineRun    Action = "pipeline_run"
+	ActionPipelineResume Action = "pipeline_resume"
+	ActionPipelineCancel Action = "pipeline_cancel"
+	// ActionPluginCall: an agent called a plugin's tool through gosidian
+	// (IMP-182). Path is the project, To the tool (<plugin>_<tool>), Size
+	// the bytes of its arguments.
+	ActionPluginCall       Action = "plugin_call"
 	ActionDeleteAttachment Action = "delete_attachment"
 	ActionTokenCreate      Action = "token_create"
 	ActionTokenRevoke      Action = "token_revoke"

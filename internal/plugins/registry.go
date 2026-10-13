@@ -51,8 +51,9 @@ const (
 // checkTimeout caps a health check.
 const checkTimeout = 20 * time.Second
 
-// reserved are the base node types' prefixes, no plugin's name.
-var reserved = map[string]bool{"note": true, "wait": true, "starlark": true, "http": true, "llm": true, "pipeline": true, "in": true}
+// reserved are no plugin's name: the base node types' prefixes, and memory,
+// whose tools (memory_*) a plugin's would collide with (<plugin>_<tool>).
+var reserved = map[string]bool{"note": true, "wait": true, "starlark": true, "http": true, "llm": true, "pipeline": true, "in": true, "memory": true}
 
 // State is what the server knows of a plugin.
 type State struct {
@@ -112,7 +113,7 @@ func New(cfgs []Config, stateDir string, sec Secrets, version string, logger *sl
 		case !ValidName(c.Name):
 			return nil, fmt.Errorf("plugin %q: a name of lower-case letters, digits and -, starting with a letter", c.Name)
 		case reserved[c.Name]:
-			return nil, fmt.Errorf("plugin %q: the name of base node types", c.Name)
+			return nil, fmt.Errorf("plugin %q: a name gosidian keeps (the base node types, memory)", c.Name)
 		case r.plugins[c.Name].Name != "":
 			return nil, fmt.Errorf("plugin %q registered twice", c.Name)
 		}
@@ -420,6 +421,27 @@ func (r *Registry) connect(ctx context.Context, c Config) (*client.Client, error
 	if _, err := sess.Initialize(ctx, init); err != nil {
 		sess.Close()
 		return nil, fmt.Errorf("plugin %s: %w", c.Name, err)
+	}
+	return sess, nil
+}
+
+// session opens a session with a plugin serving its accepted manifest. The
+// manifest is read again at every call: a plugin that changed it waits for
+// the owner's new accept.
+func (r *Registry) session(ctx context.Context, c Config, acc Accepted) (*client.Client, error) {
+	sess, err := r.connect(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	live, err := fetchManifest(ctx, sess, c.Name)
+	if err != nil {
+		sess.Close()
+		return nil, err
+	}
+	if sha := live.SHA(); sha != acc.SHA {
+		sess.Close()
+		return nil, fmt.Errorf("plugin %s serves another manifest (version %s, %s) than the accepted one (version %s, %s): gosidian plugin show %s, then gosidian plugin accept %s <sha>",
+			c.Name, live.Version, sha[:12], acc.Manifest.Version, acc.SHA[:12], c.Name, c.Name)
 	}
 	return sess, nil
 }

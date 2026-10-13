@@ -36,10 +36,25 @@ var sourceTools = map[string]bool{ManifestTool: true, SourceListTool: true, Sour
 // Contract is the version of the manifest format this server reads.
 const Contract = 1
 
-// maxNodes caps the nodes of one plugin, maxSources its sources.
+// maxNodes caps the nodes of one plugin, maxSources its sources, maxTools
+// the tools it offers the agents.
 const (
 	maxNodes   = 32
 	maxSources = 32
+	maxTools   = 32
+)
+
+// MaxToolName caps the name an agent sees a plugin's tool by,
+// <plugin>_<tool>: a client prefixes it (Claude Code with
+// mcp__gosidian__), and tool names stop at 64 characters.
+const MaxToolName = 48
+
+// The access a plugin's tool needs (IMP-182): read tools are open to every
+// token of a project the plugin is exposed in, write tools to those that may
+// write there.
+const (
+	AccessRead  = "read"
+	AccessWrite = "write"
 )
 
 var (
@@ -59,8 +74,24 @@ type Manifest struct {
 	Nodes    []NodeSpec `json:"nodes"`
 	// Sources are the remote archives it offers, which the owner binds to
 	// a project's IN folder (IMP-172 phase 2).
-	Sources     []SourceSpec `json:"sources,omitempty"`
-	Permissions Permissions  `json:"permissions"`
+	Sources []SourceSpec `json:"sources,omitempty"`
+	// Tools are the plugin's tools gosidian offers the agents, as
+	// <plugin>_<tool>, in the projects the owner exposes the plugin in
+	// (IMP-182).
+	Tools       []ToolSpec  `json:"tools,omitempty"`
+	Permissions Permissions `json:"permissions"`
+}
+
+// ToolSpec is a tool of the plugin an agent may call through gosidian: the
+// arguments go to the plugin's MCP tool Name as they come, but for project,
+// which gosidian adds to the schema and hands the plugin in the call's _meta.
+type ToolSpec struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	// Access is read or write: the scope a token needs to call it.
+	Access string          `json:"access"`
+	Input  json.RawMessage `json:"input_schema,omitempty"`
+	Output json.RawMessage `json:"output_schema,omitempty"`
 }
 
 // SourceSpec is a source a plugin offers: an archive it reads, set up in
@@ -139,8 +170,11 @@ func (m *Manifest) check(name string) error {
 	if len(m.Sources) > maxSources {
 		return fmt.Errorf("the manifest has %d sources, at most %d", len(m.Sources), maxSources)
 	}
-	if len(m.Nodes) == 0 && len(m.Sources) == 0 {
-		return errors.New("the manifest has no nodes and no sources")
+	if len(m.Tools) > maxTools {
+		return fmt.Errorf("the manifest has %d tools, at most %d", len(m.Tools), maxTools)
+	}
+	if len(m.Nodes) == 0 && len(m.Sources) == 0 && len(m.Tools) == 0 {
+		return errors.New("the manifest has no nodes, no sources and no tools")
 	}
 	seen := map[string]bool{}
 	for _, n := range m.Nodes {
@@ -168,9 +202,56 @@ func (m *Manifest) check(name string) error {
 		}
 		seen[src.Name] = true
 	}
+	if err := m.checkTools(); err != nil {
+		return err
+	}
 	for _, h := range m.Permissions.SourceHosts {
 		if !validHost(h) {
 			return fmt.Errorf("permissions.source_hosts: %q is not a host (a name or an address, with a port or not)", h)
+		}
+	}
+	return nil
+}
+
+// checkTools checks the tools a manifest offers the agents.
+func (m *Manifest) checkTools() error {
+	// A node's tool that takes files gets their content or a ticket in place
+	// of a path: an agent has neither.
+	withFiles := map[string]bool{}
+	for _, n := range m.Nodes {
+		if len(n.Files) > 0 {
+			withFiles[n.Tool] = true
+		}
+	}
+	seen := map[string]bool{}
+	for _, t := range m.Tools {
+		switch {
+		case !nodeName.MatchString(t.Name):
+			return fmt.Errorf("tool %q: a name of lower-case letters, digits and _", t.Name)
+		case seen[t.Name]:
+			return fmt.Errorf("tool %q twice", t.Name)
+		case strings.HasPrefix(t.Name, "gosidian_"):
+			return fmt.Errorf("tool %q: the gosidian_ names are gosidian's", t.Name)
+		case withFiles[t.Name]:
+			return fmt.Errorf("tool %q runs a node that takes files, which an agent cannot hand it", t.Name)
+		case len(m.Name)+1+len(t.Name) > MaxToolName:
+			return fmt.Errorf("tool %q: %s_%s is longer than %d characters", t.Name, m.Name, t.Name, MaxToolName)
+		case t.Access != AccessRead && t.Access != AccessWrite:
+			return fmt.Errorf("tool %q: access is read or write", t.Name)
+		}
+		seen[t.Name] = true
+		if len(t.Input) == 0 {
+			continue
+		}
+		var schema struct {
+			Type       string                     `json:"type"`
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if err := json.Unmarshal(t.Input, &schema); err != nil || schema.Type != "object" {
+			return fmt.Errorf("tool %q: input_schema is a JSON Schema of type object", t.Name)
+		}
+		if _, ok := schema.Properties["project"]; ok {
+			return fmt.Errorf("tool %q: project is gosidian's argument, the plugin reads it in _meta (%s)", t.Name, MetaProject)
 		}
 	}
 	return nil
@@ -196,6 +277,16 @@ func (m *Manifest) Source(name string) (SourceSpec, bool) {
 	return SourceSpec{}, false
 }
 
+// Tool finds a tool by name.
+func (m *Manifest) Tool(name string) (ToolSpec, bool) {
+	for _, t := range m.Tools {
+		if t.Name == name {
+			return t, true
+		}
+	}
+	return ToolSpec{}, false
+}
+
 // Node finds a node by name.
 func (m *Manifest) Node(name string) (NodeSpec, bool) {
 	for _, n := range m.Nodes {
@@ -214,6 +305,13 @@ func (m *Manifest) SHA() string {
 	for i, n := range m.Nodes {
 		n.Input, n.Output = compact(n.Input), compact(n.Output)
 		c.Nodes[i] = n
+	}
+	if len(m.Tools) > 0 {
+		c.Tools = make([]ToolSpec, len(m.Tools))
+		for i, t := range m.Tools {
+			t.Input, t.Output = compact(t.Input), compact(t.Output)
+			c.Tools[i] = t
+		}
 	}
 	b, _ := json.Marshal(c)
 	sum := sha256.Sum256(b)

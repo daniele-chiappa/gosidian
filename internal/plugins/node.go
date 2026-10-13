@@ -27,6 +27,17 @@ const (
 	// tokens the run may still use, when [pipelines] max_llm_tokens caps
 	// them.
 	MetaLLMTokensLeft = "gosidian/llm_tokens_left"
+	// MetaProject is the _meta field with the project a call acts for: a
+	// node's pipeline's, or the one an agent named calling a tool. Only
+	// gosidian holds the plugin's token, so a plugin may trust it to keep
+	// the data of its projects apart (IMP-182).
+	MetaProject = "gosidian/project"
+	// MetaRun is the run a node's call belongs to.
+	MetaRun = "gosidian/run"
+	// MetaCaller is the id of the token that called a tool, MetaAccess the
+	// tool's access (read or write).
+	MetaCaller = "gosidian/caller"
+	MetaAccess = "gosidian/access"
 )
 
 // node runs a plugin's node: the settings that name files carry their
@@ -89,25 +100,15 @@ func (n node) Run(ctx context.Context, env *pipeline.Env, with map[string]any) (
 	// What the run may still spend on language models, for a plugin that
 	// calls them (an agent): the plugin decides, gosidian counts the usage
 	// its output reports.
-	var meta map[string]any
+	meta := map[string]any{MetaProject: env.Project, MetaRun: env.Run.ID}
 	if left, capped := env.LLMTokensLeft(); capped {
-		meta = map[string]any{MetaLLMTokensLeft: left}
+		meta[MetaLLMTokensLeft] = left
 	}
-	sess, err := n.r.connect(ctx, c)
+	sess, err := n.r.session(ctx, c, acc)
 	if err != nil {
 		return nil, err
 	}
 	defer sess.Close()
-	// The manifest is read again at every call: a plugin that changed it
-	// waits for the owner's new accept.
-	live, err := fetchManifest(ctx, sess, c.Name)
-	if err != nil {
-		return nil, err
-	}
-	if sha := live.SHA(); sha != acc.SHA {
-		return nil, fmt.Errorf("plugin %s serves another manifest (version %s, %s) than the accepted one (version %s, %s): gosidian plugin show %s, then gosidian plugin accept %s <sha>",
-			c.Name, live.Version, sha[:12], acc.Manifest.Version, acc.SHA[:12], c.Name, c.Name)
-	}
 	res, err := callToolMeta(ctx, sess, spec.Tool, args, meta)
 	if err != nil {
 		return nil, fmt.Errorf("plugin %s, %s: %w", c.Name, spec.Tool, err)

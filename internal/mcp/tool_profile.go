@@ -55,13 +55,24 @@ var coreToolSet = map[string]struct{}{
 // opted into that loop. The media/table creators no longer have a dynamic
 // admission: memory_ingest routes to them internally, so a core worker gets
 // table/media notes without ever seeing their schemas (ADR-018).
+//
+// The plugins' tools (IMP-182) pass for every profile, core included, but
+// only to a token of a project the owner exposed their plugin in.
 func (s *Server) filterToolsByProfile(ctx context.Context, tools []mcp.Tool) []mcp.Tool {
 	tok := s.tokenFromContext(ctx)
-	if tok == nil || !tok.IsCoreProfile() {
-		return tools
-	}
-	out := make([]mcp.Tool, 0, len(coreToolSet)+1)
+	core := tok != nil && tok.IsCoreProfile()
+	out := make([]mcp.Tool, 0, len(tools))
 	for _, t := range tools {
+		if pt, ok := s.pluginToolOf(t.Name); ok {
+			if s.pluginToolVisible(tok, pt) {
+				out = append(out, t)
+			}
+			continue
+		}
+		if !core {
+			out = append(out, t)
+			continue
+		}
 		if _, ok := coreToolSet[t.Name]; ok {
 			out = append(out, t)
 			continue
