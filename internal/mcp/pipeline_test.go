@@ -310,6 +310,57 @@ nodes:
 	}
 }
 
+// The image notes of in.import (IMP-179): the host lists the notes of a
+// folder, not those below it, reads a note as stored, and deletes one as
+// the pipeline.
+func TestPipelineHost_NotesInAndDeleteNote(t *testing.T) {
+	s, _ := pipelineServer(t)
+	al, err := audit.Open(filepath.Join(t.TempDir(), "audit.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.SetAuditLog(al)
+	ctx := context.Background()
+	for _, p := range []string{"p/docs/a_img/1.md", "p/docs/a_img/sub/2.md", "p/docs/a_img2/3.md"} {
+		if res, err := s.handleCreate(ctx, call(map[string]any{"path": p, "content": "---\ntitle: X\ntype: image\n---\n\nText.\n"})); err != nil || res.IsError {
+			t.Fatalf("create %s: %v %+v", p, err, res)
+		}
+	}
+	h := s.PipelineHost().(pipeline.Folders)
+	got, err := h.NotesIn("p", "p/docs/a_img")
+	if err != nil || len(got) != 1 || got[0] != "p/docs/a_img/1.md" {
+		t.Fatalf("NotesIn: %v %v", got, err)
+	}
+	if _, err := h.NotesIn("p", "q/docs"); err == nil {
+		t.Error("a folder of another project is listed")
+	}
+	n, err := s.PipelineHost().ReadNote("p", "p/docs/a_img/1.md")
+	if err != nil || string(n.Raw) != "---\ntitle: X\ntype: image\n---\n\nText.\n" || n.Frontmatter["type"] != "image" {
+		t.Fatalf("ReadNote: %+v %v", n, err)
+	}
+	if err := h.DeleteNote("p", "p/docs/a_img/1.md", "pipeline:p/pipelines/wiki.md"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.vault.Load("p/docs/a_img/1.md"); err == nil {
+		t.Error("the note is still there")
+	}
+	if got, _ := h.NotesIn("p", "p/docs/a_img"); len(got) != 0 {
+		t.Errorf("the index still lists %v", got)
+	}
+	found := false
+	for _, en := range auditEntries(t, al) {
+		if en.Path == "p/docs/a_img/1.md" && en.Action == audit.ActionDelete {
+			found = en.Source == audit.SourcePipeline && en.Actor == "pipeline:p/pipelines/wiki.md"
+		}
+	}
+	if !found {
+		t.Errorf("no pipeline audit entry: %+v", auditEntries(t, al))
+	}
+	if err := h.DeleteNote("q", "p/docs/a_img2/3.md", "pipeline:x"); err == nil {
+		t.Error("a note of another project is deleted")
+	}
+}
+
 // memory_pipelines lists the plugins with their node types, without their
 // addresses (IMP-168).
 func TestPipelineTools_ListPlugins(t *testing.T) {

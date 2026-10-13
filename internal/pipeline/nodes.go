@@ -79,8 +79,10 @@ func NewRegistry() *Registry {
 	r.Register("http.request", TypeFunc(httpRequest))
 	r.Register("llm.chat", TypeFunc(llmChat))
 	r.Register("llm.describe", TypeFunc(llmDescribe))
+	r.Register("llm.describe_media", TypeFunc(llmDescribeMedia))
 	r.Register("in.list", TypeFunc(inList))
 	r.Register("in.move", TypeFunc(inMove))
+	r.Register("in.import", TypeFunc(inImport))
 	return r
 }
 
@@ -211,6 +213,9 @@ type NoteData struct {
 	Frontmatter map[string]any `json:"frontmatter,omitempty"`
 	Body        string         `json:"body"`
 	ETag        string         `json:"etag"`
+	// Raw is the note as stored, for the nodes that change a few of its
+	// keys and leave the rest as written.
+	Raw []byte `json:"-"`
 }
 
 func noteRead(_ context.Context, env *Env, with map[string]any) (any, error) {

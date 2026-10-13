@@ -164,8 +164,10 @@ an expression turns it into text. There are no operators: compute in a
 | `http.request` | `url` (in `http_allowlist`), `method`, `json` or `body`, `headers`, `secret_header: "Authorization=secret_name"`, `accept_errors` | `status`, `headers`, `json` or `body` (4 MiB at most) |
 | `llm.chat` | `prompt`, `system`, `provider` (default `default`), `model`, `max_tokens` (default 1024), `temperature`, `json: true` | `text`, `json`, `model`, `provider`, `usage` |
 | `llm.describe` | `image` (an attachment of the project, png/jpg/gif/webp, 10 MiB at most), `prompt`, and as `llm.chat` | as `llm.chat`, plus `image` |
+| `llm.describe_media` | `note` (whose image notes, in `<note>_img/`, get a description), `prompt` and `inline_prompt` (with `{title}`, `{section}`, `{context}`), `context_chars` (default 1200), `max_pixels` (default 2000000; 0 sends an image whole), `concurrency` (default 1, at most 8), `prompt_version` (default 1), `redo`, and as `llm.chat` (`max_tokens` default 600) | `described`, `skipped`, `unreadable`, `failed`, `downscaled`, `errors`, `usage`, `seconds` — see [below](#documents-from-the-in-folder) |
 | `in.list` | `folder` (of the IN folder; empty: all), `recursive` (default yes), `match` (a glob on the name), `kinds`, `status`, `batch` (`{{ trigger.batch }}`), `limit` (default 500, at most 5000), `cursor` | `files` (`path`, `name`, `stem`, `ext`, `dir`, `size`, `sha256`, `etag`, `status`, `modified`, `batch`, `source`), `count`, `next` (the cursor of the next page; empty at the last) |
 | `in.move` | `file` (in the IN folder), `to` (a folder, `done/`, or a path, in the IN folder; empty, or where it is already: it stays; for a file of a [source](in.md#sources), inside the source: `done/` is its `done/`), `status` (`done`, `error`, `ignored`, `new`) | `path`, `from`, `status` |
+| `in.import` | `file` (a `.md` in the IN folder), `dest` (a folder of the project), `base` (the folder of the IN folder whose tree is kept under `dest`; empty: all of it), `media_notes` (default yes), `list_images` (default yes; no keeps only their count, for an `each` over many files) | `path`, `created`, `attachments`, `image_count`, `images` (`note`, `attachment`, `src`, `position`, `inline`), `removed`, `unresolved`, `skipped` (`src`, `reason`) — see [below](#documents-from-the-in-folder) |
 | `<plugin>.<node>` | what the plugin's manifest says; a setting it lists in `files` names an attachment of the project or a file of its IN folder (or a list of them, for a plugin that takes files by reference: `{{ trigger.files }}`) | the plugin tool's result, plus `files` (`name`, `path`, `mime`, `markdown`): the files it gave back, stored as attachments |
 
 A plugin's nodes exist once the owner accepted its manifest
@@ -227,6 +229,73 @@ nodes:
 A run per batch reads its files with `in.list`, a page at a time
 (`cursor: "{{ files.next }}"`), and spends the LLM tokens of one run
 (`max_llm_tokens`): for heavy work on each file, a run per file is better.
+
+## Documents from the IN folder
+
+Markdown already written, with its images beside it (a wiki exported
+with its pictures, a documentation folder), comes into the project with
+`in.import`, and a vision model describes its images with
+`llm.describe_media` (IMP-179):
+
+```pipeline
+trigger: {on: in, folder: wiki, kinds: [md]}
+nodes:
+  - id: import
+    use: in.import
+    with: {file: "{{ trigger.file }}", base: wiki, dest: documents/wiki}
+  - id: describe
+    use: llm.describe_media
+    with: {note: "{{ import.path }}", concurrency: 4}
+    timeout: 2h
+    retry: {attempts: 3, backoff: 1m}
+  - id: done
+    use: in.move
+    with: {file: "{{ trigger.file }}", status: done}
+```
+
+**`in.import`** makes `IN/wiki/a/b/page.md` the note
+`documents/wiki/a/b/page.md`:
+
+- the files it links (relative links, inside `base`) are stored as
+  attachments, named by their content, so a file linked twice is stored
+  once, and the links point at them (`/vault-files/…`), as a package import
+  does; a link to another `.md` becomes a wikilink to the note it becomes;
+  a link it cannot follow stays as written and is listed in `unresolved`;
+- the rest of the text and the document's frontmatter stay as written; it
+  adds `pipeline`, `pipeline_run`, the project's tag when there are no
+  tags, and `in_file`, the file's path in the IN folder, as text: a file of
+  the IN folder is no note, and a wikilink to it would never resolve;
+- each image gets an [image note](vault/format.md#image-media-notes) in
+  `page_img/`, named after the image's file, with no title until it is
+  described (so that a document's image notes do not outrank it in a
+  search): `type: image`, `media` (the
+  attachment), `article` (the note), `position` and `occurrences` in the
+  note, `inline` (inside a sentence), `section`, `alt_original`, `width`,
+  `height`, `sha256`, `in_file`. The document points at the image, the
+  image note at the document: it lists its images among its backlinks;
+- imported again, an image note keeps its description and any key added
+  to it; an image that changed loses its description; the image note of
+  an image no longer there goes (into the trash). A note of the folder that
+  is not an image note of the document is left alone;
+- the files it read are `done`, with its run.
+
+**`llm.describe_media`** describes the image notes of a note that have
+no description yet: the model gets the image, the note's title, the
+headings the image is under and the text around it (`context_chars`, two
+thirds before it and a third after, within its section; for an image
+inside a sentence, the sentence), and answers in JSON with a `label` and a
+`description`. The description is the image note's body, the text the
+search finds; the label is its `title` and `label`, and `model`,
+`prompt_version` and `described` go into its frontmatter too. Each note is written as soon as it is described: a step
+cut short, or run again, goes on from those still without one (`redo`
+describes them all again). An image that fails three tries gets
+`describe_error` and is counted in `failed`; the step fails when more than
+half fail, or when the run's `max_llm_tokens` would be passed. svg images
+are left out (`unreadable`). An image of more than `max_pixels` goes to the
+model scaled down, as a PNG, its pixels averaged so that text stays
+readable; the attachment stays whole. A model reads an image at about one
+token per 32×32 pixels (Qwen-VL): a 4K screenshot passes the 4096 tokens of
+context Ollama gives a model by default.
 
 ## Editing in the web UI
 

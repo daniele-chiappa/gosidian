@@ -4,7 +4,9 @@ A project's **IN folder**, `<project>/IN/`, holds files to work on, under
 their own names and in their own tree: a quarter of invoices, a folder of
 scans, the documents of a RAG project. They are files, not notes: the
 [pipelines](pipelines.md#the-in-folder) take them in, one run per file or
-per batch, and write their results as notes (IMP-172, ADR-037).
+per batch, and write their results as notes (IMP-172, ADR-037). A markdown
+file becomes a note through a pipeline too, with `in.import`
+([documents from the IN folder](pipelines.md#documents-from-the-in-folder)).
 
 ## Turning it on
 

@@ -8,6 +8,43 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.88.0] — 2026-10-13 — "documents from IN"
+
+Two node types for the pipelines: a markdown document of a project's IN
+folder becomes a note with its images, and a vision model describes those
+images in image notes, the document left as it was. Pull the image and
+restart; nothing to migrate. Where the pipelines are off, nothing changes.
+
+### Added
+- **`in.import`** — a `.md` of the IN folder becomes a note of the
+  project, its tree under `base` kept under `dest`. The files it links are
+  stored as attachments (named by their content, so a file linked twice is
+  stored once) and its links point at them, as a package import does; a
+  link to another `.md` becomes a wikilink to the note it becomes. The rest
+  of the text and the frontmatter stay as written, with `pipeline`,
+  `pipeline_run` and `in_file` (the file's path in the IN folder) added.
+  Each image gets an **image note** (`type: image`) in `<note>_img/`, with
+  `media`, `article` (the document, which lists its images among its
+  backlinks), `position`, `occurrences`, `inline`, `section`,
+  `alt_original`, `width` and `height`. Imported again, an image note keeps
+  its description and any key added to it; the note of an image no longer
+  there goes to the trash. `list_images: false` keeps only their count in
+  the output, for an `each` over many files.
+- **`llm.describe_media`** — asks a vision model about each image note of
+  a note still without a description, with the document's title, the
+  headings the image is under and the text around it (or the sentence of
+  an image inside one), and writes the answer's label as the note's title
+  and its description as the body, the text the search finds. Each note is
+  written as soon as it is described, so a step cut short, or run again,
+  goes on where it stopped; `concurrency` makes up to 8 calls at once; an
+  image over `max_pixels` (2 megapixels by default) goes to the model
+  scaled down, the attachment kept whole, so that a 4K screenshot fits the
+  4096 tokens of context Ollama gives a model by default. An image that
+  fails three tries gets `describe_error`; the step fails when most fail
+  or the run's `max_llm_tokens` would be passed.
+- An image note has no title until it is described: thousands of them do
+  not outrank their document in a search.
+
 ## [2.87.0] — 2026-10-13 — "graph views"
 
 Views of the graph saved in notes, and graphs that plugins offer, such as

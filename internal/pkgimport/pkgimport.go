@@ -264,7 +264,7 @@ type Plan struct {
 // Build plans the import of entries under o.Dest: notes keep their path
 // inside the package, attachments go where the vault stores them, and the
 // links between files of the package are rewritten for the vault (see
-// rewriteMarkdown and rewriteHTML). Two files whose paths differ only by
+// RewriteMarkdown and rewriteHTML). Two files whose paths differ only by
 // case are an error, since they would collide on some file systems.
 func Build(entries []Entry, skipped []Skipped, o Options) (*Plan, error) {
 	p := &Plan{Skipped: append([]Skipped(nil), skipped...)}
@@ -301,7 +301,7 @@ func Build(entries []Entry, skipped []Skipped, o Options) (*Plan, error) {
 			text, n.Unresolved = rewriteHTML(string(e.Data), e.Path, notes, attach)
 			text, n.FrontmatterAdded = withHTMLFrontmatter(text, e.Path, o.Project)
 		} else {
-			text, n.Unresolved = rewriteMarkdown(string(e.Data), e.Path, notes, attach)
+			text, n.Unresolved = RewriteMarkdown(string(e.Data), e.Path, notes, attach)
 			text, n.FrontmatterAdded = withMarkdownFrontmatter(text, e.Path, o.Project)
 		}
 		n.Data = []byte(text)
@@ -344,14 +344,10 @@ func target(src, link string) (p, frag string, ok bool) {
 // ![alt](target), the target optionally in <> and followed by a "title".
 var mdLinkRe = regexp.MustCompile(`(!?)\[([^\]\n]*)\]\(\s*<?([^)\s>]+)>?(\s+"[^"\n]*")?\s*\)`)
 
-// rewriteMarkdown rewrites the links of a markdown note of the package: a
-// link to a note of the package becomes a wikilink to its vault path, with
-// the fragment and the link text ([[dest/sub/x#part|text]]); a link to an
-// attachment points at the vault file (/vault-files/…). Links in code are
-// left alone. A relative link to a file that is not in the package stays
-// as written and is listed as unresolved.
-func rewriteMarkdown(text, src string, notes, attach map[string]string) (string, []string) {
-	var unresolved []string
+// mapLinks replaces each inline link or image of a markdown text, outside
+// code, with what fn returns for it: bang is "!" for an image, label its
+// text, link its target as written, m the whole match.
+func mapLinks(text string, fn func(bang, label, link, m string) string) string {
 	lines := strings.SplitAfter(text, "\n")
 	var fences parser.Fences
 	for i, line := range lines {
@@ -361,31 +357,68 @@ func rewriteMarkdown(text, src string, notes, attach map[string]string) (string,
 		lines[i] = outsideCode(line, func(s string) string {
 			return mdLinkRe.ReplaceAllStringFunc(s, func(m string) string {
 				g := mdLinkRe.FindStringSubmatch(m)
-				bang, label, link := g[1], g[2], g[3]
-				if external(link) {
-					return m
-				}
-				p, frag, ok := target(src, link)
-				if !ok {
-					unresolved = append(unresolved, link)
-					return m
-				}
-				if vp, isNote := notes[p]; isNote && bang == "" {
-					w := "[[" + strings.TrimSuffix(vp, ".md") + frag
-					if label = strings.TrimSpace(strings.NewReplacer("|", "-", "[", "(", "]", ")").Replace(label)); label != "" {
-						w += "|" + label
-					}
-					return w + "]]"
-				}
-				if vp, isAttach := attach[p]; isAttach {
-					return bang + "[" + label + "](/vault-files/" + vp + ")"
-				}
-				unresolved = append(unresolved, link)
-				return m
+				return fn(g[1], g[2], g[3], m)
 			})
 		})
 	}
-	return strings.Join(lines, ""), unresolved
+	return strings.Join(lines, "")
+}
+
+// RewriteMarkdown rewrites the links of the markdown file src, a path inside
+// its package: a link to a note of the package (notes maps package paths to
+// vault paths) becomes a wikilink to its vault path, with the fragment and
+// the link text ([[dest/sub/x#part|text]]); a link to an attachment (attach)
+// points at the vault file (/vault-files/…). Links in code are left alone.
+// A relative link to a file that is not in the package stays as written and
+// is listed as unresolved. Build uses it, and so do importers that store the
+// files themselves (the pipelines' in.import, IMP-179).
+func RewriteMarkdown(text, src string, notes, attach map[string]string) (string, []string) {
+	var unresolved []string
+	out := mapLinks(text, func(bang, label, link, m string) string {
+		if external(link) {
+			return m
+		}
+		p, frag, ok := target(src, link)
+		if !ok {
+			unresolved = append(unresolved, link)
+			return m
+		}
+		if vp, isNote := notes[p]; isNote && bang == "" {
+			w := "[[" + strings.TrimSuffix(vp, ".md") + frag
+			if label = strings.TrimSpace(strings.NewReplacer("|", "-", "[", "(", "]", ")").Replace(label)); label != "" {
+				w += "|" + label
+			}
+			return w + "]]"
+		}
+		if vp, isAttach := attach[p]; isAttach {
+			return bang + "[" + label + "](/vault-files/" + vp + ")"
+		}
+		unresolved = append(unresolved, link)
+		return m
+	})
+	return out, unresolved
+}
+
+// Link is a relative link of a markdown file to another file of its package.
+type Link struct {
+	Image  bool   // written ![alt](…)
+	Target string // the package path it names, without its fragment
+}
+
+// Links lists the relative links of the markdown file src (a path inside its
+// package) in the order they appear, outside code. A link that climbs out of
+// the package is left out: RewriteMarkdown lists it as unresolved.
+func Links(text, src string) []Link {
+	var out []Link
+	mapLinks(text, func(bang, _, link, m string) string {
+		if !external(link) {
+			if p, _, ok := target(src, link); ok {
+				out = append(out, Link{Image: bang == "!", Target: p})
+			}
+		}
+		return m
+	})
+	return out
 }
 
 // outsideCode applies fn to the parts of line that are not inline code.

@@ -143,7 +143,58 @@ func (h pipelineHost) ReadNote(project, rel string) (pipeline.NoteData, error) {
 	if title == "" {
 		title = note.Title
 	}
-	return pipeline.NoteData{Path: note.Path, Title: title, Frontmatter: fm, Body: parser.BodyAfterFrontmatter(note.Content), ETag: note.ETag()}, nil
+	return pipeline.NoteData{Path: note.Path, Title: title, Frontmatter: fm, Body: parser.BodyAfterFrontmatter(note.Content), ETag: note.ETag(), Raw: note.Content}, nil
+}
+
+// NotesIn lists the notes directly in a folder of the project, from the
+// index (pipeline.Folders).
+func (h pipelineHost) NotesIn(project, folder string) ([]string, error) {
+	folder = strings.TrimSuffix(folder, "/")
+	if err := inProject(project, folder+"/"); err != nil {
+		return nil, err
+	}
+	rows, err := h.s.index.NotesByPrefix(folder)
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, r := range rows {
+		if path.Dir(r.Path) == folder {
+			out = append(out, r.Path)
+		}
+	}
+	return out, nil
+}
+
+// DeleteNote deletes a note of the project as the pipeline: into the trash
+// when the server keeps one, as memory_delete does (pipeline.Folders).
+func (h pipelineHost) DeleteNote(project, rel, actor string) error {
+	if err := inProject(project, rel); err != nil {
+		return err
+	}
+	if !h.s.vault.IsNoteFile(rel) {
+		return fmt.Errorf("%s is not a note", rel)
+	}
+	unlock := h.s.vault.LockPath(rel)
+	defer unlock()
+	if h.s.trash != nil {
+		if _, err := h.s.vault.Load(rel); err != nil {
+			return err
+		}
+		if _, err := h.s.trash.DiscardNote(rel); err != nil {
+			return err
+		}
+	} else if err := h.s.vault.Delete(rel); err != nil {
+		return err
+	}
+	if err := h.s.index.Delete(rel); err != nil {
+		return err
+	}
+	if h.s.audit != nil {
+		_ = h.s.audit.Write(audit.Entry{Source: audit.SourcePipeline, Actor: actor, Action: audit.ActionDelete, Path: rel})
+	}
+	h.s.publishNoteChange("delete", rel, "", true)
+	return nil
 }
 
 func (h pipelineHost) WriteNote(project, rel string, content []byte, mode pipeline.WriteMode, actor string) (pipeline.WriteResult, error) {

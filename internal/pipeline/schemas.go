@@ -85,6 +85,28 @@ var baseSchemas = []NodeSchema{
 	"system": {"type": "string", "format": "multiline"},` + llmSettings + `}}`),
 		Output: json.RawMessage(`{"type": "object", "properties": {` + llmOutput + `,
 	"image": {"type": "string"}}}`)},
+	{Type: "llm.describe_media", Description: "Describes the images of a note in their image notes, with the text around each",
+		Input: json.RawMessage(`{"type": "object", "required": ["note"], "properties": {
+	"note": {"type": "string", "format": "path", "description": "The note whose image notes (in <note>_img/) get a description: {{ import.path }}"},
+	"prompt": {"type": "string", "format": "multiline", "description": "{title}, {section} and {context} stand for the note's title, the image's section and the text around it; ask for JSON with label and description"},
+	"inline_prompt": {"type": "string", "format": "multiline", "description": "The prompt for an image inside a sentence (an icon)"},
+	"system": {"type": "string", "format": "multiline"},
+	"context_chars": {"type": "integer", "default": 1200, "description": "The text around an image given to the model, in characters"},
+	"max_pixels": {"type": "integer", "default": 2000000, "description": "A larger image is scaled down for the model (the attachment stays as it is); 0 sends it whole"},
+	"concurrency": {"type": "integer", "default": 1, "description": "Calls at once, at most 8"},
+	"prompt_version": {"type": "integer", "default": 1, "description": "Written in each image note with the model"},
+	"redo": {"type": "boolean", "description": "Describe again the images that have a description"},
+	"provider": {"type": "string", "description": "The LLM provider of the server's config", "default": "default"},
+	"model": {"type": "string", "description": "A model other than the provider's"},
+	"max_tokens": {"type": "integer", "description": "The longest answer, in tokens", "default": 600},
+	"temperature": {"type": "number", "description": "From 0 (always the same answer) up"}}}`),
+		Output: json.RawMessage(`{"type": "object", "properties": {
+	"described": {"type": "integer"}, "skipped": {"type": "integer", "description": "Described already, or no longer in the note"},
+	"unreadable": {"type": "integer", "description": "Images no model reads (svg)"}, "failed": {"type": "integer"},
+	"downscaled": {"type": "integer", "description": "Images scaled down for the model (max_pixels)"},
+	"errors": {"type": "array", "items": {"type": "string"}},
+	"usage": {"type": "object", "properties": {"prompt_tokens": {"type": "integer"}, "completion_tokens": {"type": "integer"}, "total_tokens": {"type": "integer"}}},
+	"seconds": {"type": "number"}}}`)},
 	{Type: "in.list", Description: "Lists files of the project's IN folder",
 		Input: json.RawMessage(`{"type": "object", "properties": {
 	"folder": {"type": "string", "description": "A folder of the IN folder; empty for all of it"},
@@ -105,6 +127,22 @@ var baseSchemas = []NodeSchema{
 	"status": {"type": "string", "enum": ["done", "error", "ignored", "new"], "description": "Its status from now on"}}}`),
 		Output: json.RawMessage(`{"type": "object", "properties": {
 	"path": {"type": "string"}, "from": {"type": "string"}, "status": {"type": "string"}}}`)},
+	{Type: "in.import", Description: "Brings a markdown file of the IN folder into the project as a note, its files as attachments, an image note for each image",
+		Input: json.RawMessage(`{"type": "object", "required": ["file", "dest"], "properties": {
+	"file": {"type": "string", "description": "The .md file, in the IN folder: {{ trigger.file }}"},
+	"base": {"type": "string", "description": "The folder of the IN folder whose tree is kept under dest; empty for all of it"},
+	"dest": {"type": "string", "format": "path", "description": "The folder of the project the note goes into, with the tree under base"},
+	"media_notes": {"type": "boolean", "default": true, "description": "An image note for each image, in <note>_img/"},
+	"list_images": {"type": "boolean", "default": true, "description": "List the image notes in the output; no: their count only (an each over many files)"}}}`),
+		Output: json.RawMessage(`{"type": "object", "properties": {
+	"path": {"type": "string"}, "created": {"type": "boolean"}, "attachments": {"type": "integer"},
+	"image_count": {"type": "integer"},
+	"images": {"type": "array", "description": "With list_images", "items": {"type": "object", "properties": {
+	  "note": {"type": "string"}, "attachment": {"type": "string"}, "src": {"type": "string"},
+	  "position": {"type": "integer"}, "inline": {"type": "boolean"}}}},
+	"removed": {"type": "array", "items": {"type": "string"}, "description": "Image notes of images no longer in the file, into the trash"},
+	"unresolved": {"type": "array", "items": {"type": "string"}, "description": "Links left as written"},
+	"skipped": {"type": "array", "items": {"type": "object", "properties": {"src": {"type": "string"}, "reason": {"type": "string"}}}}}}`)},
 }
 
 // inFilesOutput is the files an in.list gives.

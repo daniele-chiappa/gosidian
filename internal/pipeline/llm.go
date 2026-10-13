@@ -151,6 +151,14 @@ var imageMIME = map[string]string{".png": "image/png", ".jpg": "image/jpeg", ".j
 // maxImageBytes caps an image sent to a model.
 const maxImageBytes = 10 << 20
 
+// imageMessage is a user message with a prompt and an image.
+func imageMessage(prompt, mime string, data []byte) chatMessage {
+	return chatMessage{Role: "user", Content: []map[string]any{
+		{"type": "text", "text": prompt},
+		{"type": "image_url", "image_url": map[string]any{"url": "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)}},
+	}}
+}
+
 func llmDescribe(ctx context.Context, env *Env, with map[string]any) (any, error) {
 	img, err := required(with, "image")
 	if err != nil {
@@ -179,10 +187,7 @@ func llmDescribe(ctx context.Context, env *Env, with map[string]any) (any, error
 	if s := str(with, "system"); s != "" {
 		msgs = append(msgs, chatMessage{Role: "system", Content: s})
 	}
-	msgs = append(msgs, chatMessage{Role: "user", Content: []map[string]any{
-		{"type": "text", "text": prompt},
-		{"type": "image_url", "image_url": map[string]any{"url": "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)}},
-	}})
+	msgs = append(msgs, imageMessage(prompt, mime, data))
 	out, err := env.Engine.chat(ctx, env, with, msgs)
 	if err != nil {
 		return nil, err

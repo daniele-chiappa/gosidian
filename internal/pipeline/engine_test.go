@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/gosidian/gosidian/internal/jobs"
+	"github.com/gosidian/gosidian/internal/parser"
 )
 
 // fakeHost is a vault in memory: notes, attachments, pipeline notes found
@@ -31,6 +32,7 @@ type fakeHost struct {
 	types   Types
 	changed int
 	stored  []string // "actor path" of each StoreAttachment
+	deleted []string // the notes DeleteNote deleted
 }
 
 func newFakeHost() *fakeHost {
@@ -83,15 +85,16 @@ func (h *fakeHost) ReadNote(project, path string) (NoteData, error) {
 			body = c[4+i+4:]
 		}
 	}
-	return NoteData{Path: path, Title: path, Body: body, ETag: fmt.Sprint(len(c))}, nil
+	fm := parser.ParseFrontmatterFields(parser.ExtractFrontmatterRaw([]byte(c)))
+	return NoteData{Path: path, Title: path, Frontmatter: fm, Body: body, ETag: fmt.Sprint(len(c)), Raw: []byte(c)}, nil
 }
 
 func (h *fakeHost) WriteNote(project, path string, content []byte, mode WriteMode, actor string) (WriteResult, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	if actor != "pipeline:"+h.runRef(path) && !strings.HasSuffix(path, "-runs.md") {
 		return WriteResult{}, fmt.Errorf("written as %q", actor)
 	}
-	h.mu.Lock()
-	defer h.mu.Unlock()
 	if !strings.HasPrefix(path, project+"/") {
 		return WriteResult{}, errors.New("outside the project")
 	}
@@ -158,14 +161,42 @@ func (h *fakeHost) Changed(jobs.Run) {
 }
 
 // runRef is the pipeline the tests' notes are written by: they have one
-// pipeline each, at the paths below.
+// pipeline that writes each, at the paths below. Call it with h.mu held.
 func (h *fakeHost) runRef(string) string {
 	for p, c := range h.notes {
-		if strings.Contains(c, "note.write") {
+		if strings.Contains(c, "```pipeline") && (strings.Contains(c, "note.write") ||
+			strings.Contains(c, "in.import") || strings.Contains(c, "llm.describe_media")) {
 			return p
 		}
 	}
 	return ""
+}
+
+// NotesIn and DeleteNote make the fake a Folders.
+func (h *fakeHost) NotesIn(project, folder string) ([]string, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var out []string
+	for p := range h.notes {
+		if path.Dir(p) == folder && strings.HasPrefix(p, project+"/") {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
+func (h *fakeHost) DeleteNote(project, p, actor string) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if actor != "pipeline:"+h.runRef(p) {
+		return fmt.Errorf("deleted as %q", actor)
+	}
+	if _, ok := h.notes[p]; !ok || !strings.HasPrefix(p, project+"/") {
+		return ErrNoNote
+	}
+	delete(h.notes, p)
+	h.deleted = append(h.deleted, p)
+	return nil
 }
 
 func (h *fakeHost) note(path string) string {
