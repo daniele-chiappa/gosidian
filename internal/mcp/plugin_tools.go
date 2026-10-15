@@ -2,8 +2,12 @@ package mcp
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"slices"
 	"sort"
@@ -13,6 +17,7 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
+	"github.com/gosidian/gosidian/internal/attach"
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/gosidian/gosidian/internal/plugins"
@@ -29,9 +34,9 @@ const (
 	// pluginToolTimeout caps a call of a plugin's tool, within the
 	// plugin's own timeout when it has a shorter one.
 	pluginToolTimeout = 2 * time.Minute
-	// maxPluginToolResult caps the text and the structured content of a
-	// plugin tool's result.
-	maxPluginToolResult = 1 << 20
+	// defaultMaxPluginResult caps the text and the structured content of
+	// a plugin tool's result, unless [mcp] max_plugin_result says more.
+	defaultMaxPluginResult = 1 << 20
 )
 
 // pluginTool is a plugin's tool registered on this server.
@@ -39,6 +44,9 @@ type pluginTool struct {
 	plugin string
 	tool   string
 	access string
+	// files are the arguments that name files of the project, handed to
+	// the plugin by reference (IMP-184).
+	files []string
 }
 
 // syncPluginTools registers the tools of the accepted manifests, and drops
@@ -68,7 +76,7 @@ func (s *Server) syncPluginTools() {
 			slog.Warn("plugins: a tool of the plugin has the name of one of the server's", "plugin", t.Plugin, "tool", t.Name)
 			continue
 		}
-		want[t.Name] = pluginTool{plugin: t.Plugin, tool: t.Spec.Name, access: t.Spec.Access}
+		want[t.Name] = pluginTool{plugin: t.Plugin, tool: t.Spec.Name, access: t.Spec.Access, files: t.Spec.Files}
 		add = append(add, server.ServerTool{Tool: pluginToolDef(t), Handler: s.handlePluginTool(t.Name)})
 	}
 	var gone []string
@@ -196,6 +204,13 @@ func (s *Server) handlePluginTool(name string) server.ToolHandlerFunc {
 				return res, nil
 			}
 		}
+		if len(t.files) > 0 {
+			call, err := s.handFiles(t, project, args)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			defer s.pipelines.DropCall(call)
+		}
 		meta := map[string]any{plugins.MetaProject: project, plugins.MetaCaller: tok.ID, plugins.MetaAccess: t.access}
 		cctx, cancel := context.WithTimeout(ctx, pluginToolTimeout)
 		defer cancel()
@@ -204,11 +219,122 @@ func (s *Server) handlePluginTool(name string) server.ToolHandlerFunc {
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
-		if n := resultSize(res); n > maxPluginToolResult {
-			return mcp.NewToolResultErrorf("plugin %s gave %s a result of %d bytes, more than %d: ask for less", t.plugin, name, n, maxPluginToolResult), nil
+		if len(t.files) > 0 && t.access == plugins.AccessWrite && !res.IsError {
+			res = s.storeToolFiles(ctx, project, res)
+		}
+		if n := resultSize(res); int64(n) > s.maxPluginResult {
+			return mcp.NewToolResultErrorf("plugin %s gave %s a result of %d bytes, more than %d ([mcp] max_plugin_result): ask for less", t.plugin, name, n, s.maxPluginResult), nil
 		}
 		return res, nil
 	}
+}
+
+// maxToolFiles caps the files one argument of an agent's call names.
+const maxToolFiles = 100
+
+// handFiles puts, in place of each argument of t that names files of the
+// project (a vault path, a list of them, or entries with a path), where the
+// plugin fetches each one: tickets bound to the call, which the caller
+// ends with DropCall. The files are read with the access the call was
+// checked for.
+func (s *Server) handFiles(t pluginTool, project string, args map[string]any) (string, error) {
+	if s.pipelines == nil {
+		return "", fmt.Errorf("%s takes files, which gosidian hands a plugin by reference: the pipelines are off on this server", plugins.ToolName(t.plugin, t.tool))
+	}
+	var b [12]byte
+	_, _ = rand.Read(b[:])
+	call := "call:" + hex.EncodeToString(b[:])
+	base := s.plugins.FilesURL(t.plugin)
+	if base == "" {
+		base = s.pipelines.Config().PublicURL
+	}
+	ref := func(v any) (map[string]any, error) {
+		p, _ := v.(string)
+		if m, ok := v.(map[string]any); ok {
+			p, _ = m["path"].(string)
+		}
+		if strings.TrimSpace(p) == "" {
+			return nil, fmt.Errorf("a file is named by its vault path")
+		}
+		r, err := s.pipelines.CallFileRef(project, call, p, base)
+		if errors.Is(err, fs.ErrNotExist) {
+			// The agent learns the file is not there, not where the
+			// server keeps its vault.
+			return nil, fmt.Errorf("no file %q in project %q (an attachment or a file of its IN folder)", p, project)
+		}
+		return r, err
+	}
+	for _, f := range t.files {
+		v, ok := args[f]
+		if !ok || v == nil {
+			continue // the plugin's schema says whether it is required
+		}
+		list, isList := v.([]any)
+		if !isList {
+			r, err := ref(v)
+			if err != nil {
+				s.pipelines.DropCall(call)
+				return "", fmt.Errorf("%s: %w", f, err)
+			}
+			args[f] = r
+			continue
+		}
+		if len(list) == 0 || len(list) > maxToolFiles {
+			s.pipelines.DropCall(call)
+			return "", fmt.Errorf("%s names %d files: from 1 to %d", f, len(list), maxToolFiles)
+		}
+		refs := make([]any, len(list))
+		for i, item := range list {
+			r, err := ref(item)
+			if err != nil {
+				s.pipelines.DropCall(call)
+				return "", fmt.Errorf("%s[%d]: %w", f, i, err)
+			}
+			refs[i] = r
+		}
+		args[f] = refs
+	}
+	return call, nil
+}
+
+// storeToolFiles stores the files a write tool gave back as attachments of
+// the project, written as the caller, and gives the agent its result with
+// them as files ({name, path, mime, markdown}) in place of their bytes.
+func (s *Server) storeToolFiles(ctx context.Context, project string, res *mcp.CallToolResult) *mcp.CallToolResult {
+	files, skipped := plugins.StoreFiles(res.Content, func(name string, data []byte) (string, error) {
+		r, err := attach.Store(s.vault, data, name, project)
+		if err != nil {
+			return "", err
+		}
+		s.auditWrite(ctx, audit.ActionUploadAttachment, r.Path, "", int64(len(data)))
+		return r.Path, nil
+	})
+	if len(files) == 0 && len(skipped) == 0 {
+		return res
+	}
+	var out any
+	if raw := plugins.ResultJSON(res); len(raw) > 0 {
+		if err := json.Unmarshal(raw, &out); err != nil {
+			out = map[string]any{"text": string(raw)}
+		}
+	}
+	out = plugins.LinkFiles(out, files)
+	m, isMap := out.(map[string]any)
+	if !isMap {
+		m = map[string]any{}
+		if out != nil {
+			m["result"] = out
+		}
+	}
+	m["files"] = files
+	if len(skipped) > 0 {
+		m["skipped"] = skipped
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return mcp.NewToolResultErrorf("the result of the plugin: %v", err)
+	}
+	return mcp.NewToolResultStructured(json.RawMessage(b), string(b))
 }
 
 // resultSize is the bytes of a result's content and structured content.

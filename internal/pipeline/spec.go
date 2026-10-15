@@ -35,6 +35,13 @@ const (
 	// TriggerIN: files arrive in the project's IN folder (IMP-172), one
 	// run per file or per batch.
 	TriggerIN = "in"
+	// TriggerCommit: a commit of the vault's git sync changed files of a
+	// folder of the project (IMP-170): one run per commit.
+	TriggerCommit = "commit"
+	// TriggerPipeline: another run started it with pipeline.run
+	// (IMP-186). Not a trigger a pipeline declares: any pipeline starts
+	// this way, as any starts by hand.
+	TriggerPipeline = "pipeline"
 )
 
 // Limits of a spec.
@@ -205,8 +212,17 @@ func Parse(src string, types Types) (*Spec, error) {
 				return nil, fmt.Errorf("trigger in: match %q is not a glob (*.pdf, fattura_??.xml)", s.Trigger.Match)
 			}
 		}
+	case TriggerCommit:
+		if strings.Contains(s.Trigger.Folder, "..") {
+			return nil, fmt.Errorf("trigger commit: folder %q is a folder of the project", s.Trigger.Folder)
+		}
+		if s.Trigger.Match != "" {
+			if _, err := path.Match(s.Trigger.Match, ""); err != nil {
+				return nil, fmt.Errorf("trigger commit: match %q is not a glob (*.md)", s.Trigger.Match)
+			}
+		}
 	default:
-		return nil, fmt.Errorf("trigger on %q: it is manual, external, ingest, schedule or in", s.Trigger.On)
+		return nil, fmt.Errorf("trigger on %q: it is manual, external, ingest, schedule, in or commit", s.Trigger.On)
 	}
 	if r.Trigger.Take != nil && s.Trigger.On != TriggerIN {
 		return nil, fmt.Errorf("trigger %s: take is for the in trigger (take: false leaves the files' status alone)", s.Trigger.On)

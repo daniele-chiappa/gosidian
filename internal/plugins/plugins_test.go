@@ -668,7 +668,7 @@ func TestLinkFiles(t *testing.T) {
 		map[string]any{"name": "fig-1.png", "path": "p/attachments/aa.png"},
 		map[string]any{"name": "fig-10.png", "path": "p/attachments/bb.png"},
 	}
-	out := linkFiles(map[string]any{
+	out := LinkFiles(map[string]any{
 		"markdown": "![a](fig-1.png) ![b](fig-10.png) ![c](fig-1.png \"cap\") ![d](<fig-1.png>) [no](fig-1.pngx) fig-1.png",
 		"list":     []any{"x ![](fig-10.png)", 3},
 		"n":        2,

@@ -110,6 +110,12 @@ type ToolSpec struct {
 	Access string          `json:"access"`
 	Input  json.RawMessage `json:"input_schema,omitempty"`
 	Output json.RawMessage `json:"output_schema,omitempty"`
+	// Files are the arguments that name a file of the call's project (a
+	// vault path, or a list of them): gosidian hands the plugin, in their
+	// place, where to fetch each file (FileRefs, required), and stores the
+	// files a write tool gives back as attachments (IMP-184).
+	Files    []string `json:"files,omitempty"`
+	FileRefs bool     `json:"file_refs,omitempty"`
 }
 
 // SourceSpec is a source a plugin offers: an archive it reads, set up in
@@ -250,7 +256,8 @@ func (m *Manifest) check(name string) error {
 // checkTools checks the tools a manifest offers the agents.
 func (m *Manifest) checkTools() error {
 	// A node's tool that takes files gets their content or a ticket in place
-	// of a path: an agent has neither.
+	// of a path: an agent has neither, unless the tool says which of its
+	// arguments name files, which gosidian then hands by reference.
 	withFiles := map[string]bool{}
 	for _, n := range m.Nodes {
 		if len(n.Files) > 0 {
@@ -266,8 +273,12 @@ func (m *Manifest) checkTools() error {
 			return fmt.Errorf("tool %q twice", t.Name)
 		case strings.HasPrefix(t.Name, "gosidian_"):
 			return fmt.Errorf("tool %q: the gosidian_ names are gosidian's", t.Name)
-		case withFiles[t.Name]:
-			return fmt.Errorf("tool %q runs a node that takes files, which an agent cannot hand it", t.Name)
+		case withFiles[t.Name] && len(t.Files) == 0:
+			return fmt.Errorf("tool %q runs a node that takes files, which an agent cannot hand it: list them in the tool's files", t.Name)
+		case len(t.Files) > 0 && !t.FileRefs:
+			return fmt.Errorf("tool %q takes files: an agent's files go by reference (file_refs: true)", t.Name)
+		case len(t.Files) > 0 && !m.Permissions.Files:
+			return fmt.Errorf("tool %q takes files, and the manifest does not ask for permissions.files", t.Name)
 		case len(m.Name)+1+len(t.Name) > MaxToolName:
 			return fmt.Errorf("tool %q: %s_%s is longer than %d characters", t.Name, m.Name, t.Name, MaxToolName)
 		case t.Access != AccessRead && t.Access != AccessWrite:

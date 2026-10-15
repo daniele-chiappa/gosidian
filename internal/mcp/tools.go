@@ -19,6 +19,7 @@ import (
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/metrics"
 	"github.com/gosidian/gosidian/internal/parser"
+	"github.com/gosidian/gosidian/internal/pipeline"
 	"github.com/gosidian/gosidian/internal/projectops"
 	"github.com/gosidian/gosidian/internal/vault"
 	"github.com/gosidian/gosidian/internal/views"
@@ -151,6 +152,7 @@ func (s *Server) registerTools() {
 		mcp.WithNumber("max_bytes", mcp.Description("Explicit body cap in bytes — truncates even below the default threshold. Ignored when raw:true.")),
 		mcp.WithBoolean("render_views", mcp.Description("Also compute the note's ```view blocks: each block stays and its result follows it between gosidian:view-result markers. Off by default, so a note read to be edited comes back as it is on disk (the response's hint then says how many blocks were left uncomputed); never write the computed result back.")),
 		mcp.WithString("transfer", mcp.Description("\"http\": instead of the body, a single-use URL (5 min) to GET the note's raw bytes with no Authorization header, plus its etag and size. For a body you want on your own disk without spending context tokens when you cannot read your bearer for /download (a cautious client blocks reading it from its config).")),
+		mcp.WithString("media", mcp.Description("\"inline\": the note's images as text, from their image notes (in <note>_img/, described by a pipeline): [icon: label] inside a sentence, [image: label] description on a line of their own; media_inline counts them. For reading a document whole, as a model would; never write it back.")),
 	), s.handleGet)
 
 	s.impl.AddTool(mcp.NewTool("memory_get_section",
@@ -606,6 +608,9 @@ type noteContent struct {
 	// Diagrams says the note's ```diagram blocks in words, with their
 	// problems (ADR-036), from the whole note even when the body is cut.
 	Diagrams []diagram.Summary `json:"diagrams,omitempty"`
+	// MediaInline counts the images put as text (media: inline, IMP-170):
+	// Content is then not the file as stored.
+	MediaInline *pipeline.MediaStats `json:"media_inline,omitempty"`
 }
 
 // getBodySoftCap is the memory_get oversize threshold: a larger body comes
@@ -664,6 +669,10 @@ func (s *Server) handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	if strings.HasSuffix(strings.ToLower(note.Path), ".md") {
 		nc.Diagrams = diagram.Summaries(note.Content)
 	}
+	media := req.GetString("media", "")
+	if media != "" && media != "keep" && media != "inline" {
+		return mcp.NewToolResultErrorf("media %q: inline or keep", media), nil
+	}
 	viewsNote := ""
 	if req.GetBool("render_views", false) {
 		if out, hash := s.renderViews(tok, note.Path, note.Content); hash != "" {
@@ -676,6 +685,17 @@ func (s *Server) handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	} else {
 		viewsNote = joinHints(joinHints(viewsHint(note.Content, "pass render_views:true"), s.embedsHint(tok, note.Path, note.Content, "pass render_views:true")),
 			s.rowViewsHint(tok, note.Path, note.Content, "pass render_views:true"))
+	}
+	// The images as text, from their image notes (IMP-170), in what is
+	// served: the body, with its views when computed.
+	if media == "inline" && strings.HasSuffix(strings.ToLower(note.Path), ".md") {
+		project, _, _ := strings.Cut(note.Path, "/")
+		body := parser.BodyAfterFrontmatter([]byte(nc.Content))
+		text, st, err := pipeline.InlineNoteMedia(pipelineHost{s: s}, project, note.Path, body, pipeline.DefaultMediaWords, pipeline.DefaultInlineMaxSide)
+		if err != nil {
+			return mcp.NewToolResultErrorf("media inline: %v", err), nil
+		}
+		nc.Content, nc.MediaInline = nc.Content[:len(nc.Content)-len(body)]+text, &st
 	}
 
 	// Oversize guard: truncate the body (default threshold, or the caller's

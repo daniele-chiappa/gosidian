@@ -72,7 +72,10 @@ const tag = ref<string>(props.tag ?? '')
 const focus = ref<string>(props.focus ?? '')
 const depth = ref<number>(props.depth ?? 2)
 const minDegree = ref<number>(props.minDegree ?? 0)
-const limit = ref<number>(props.limit ?? 0)
+// Empty is the server's cap, which the field shows as its placeholder: a 0
+// in it hid the placeholder and read as "no nodes".
+const limit = ref<number | ''>(props.limit || '')
+const limitSet = computed(() => (typeof limit.value === 'number' && limit.value > 0 ? limit.value : undefined))
 
 // The source (IMP-183): the vault's links, or a graph of a plugin exposed
 // in the project, with its arguments, read from its schema.
@@ -87,7 +90,16 @@ const argFields = computed(() =>
     type: p.type ?? 'string',
     description: p.description ?? '',
     options: Array.isArray(p.enum) ? p.enum.map(String) : null,
+    required: currentSource.value?.input_schema?.required?.includes(name) ?? false,
   })),
+)
+// The arguments a plugin's graph requires that the view does not give yet:
+// until they are given the graph is not asked for, since the plugin would
+// refuse it (BUG-128).
+const missingArgs = computed(() =>
+  plugin.value
+    ? (currentSource.value?.input_schema?.required ?? []).filter((n) => args.value[n] === undefined || args.value[n] === '')
+    : [],
 )
 const selected = ref<GraphNode | null>(null)
 const notice = ref<string | null>(null)
@@ -106,6 +118,7 @@ async function loadSources() {
     notice.value = errorText(e, t, t('graph.sources_failed'))
   }
   if (plugin.value && !sources.value.some((s) => s.source === source.value)) source.value = 'links'
+  else if (plugin.value) void load()
 }
 
 function setArg(name: string, type: string, raw: string | boolean) {
@@ -132,7 +145,7 @@ function viewSpec(): GraphSpec {
     focus: focus.value || undefined,
     depth: focus.value ? depth.value : undefined,
     min_degree: minDegree.value || undefined,
-    limit: limit.value || undefined,
+    limit: limitSet.value,
     mode: mode.value,
   }
 }
@@ -190,7 +203,7 @@ function syncWindow() {
     ...(tag.value ? { tag: tag.value } : {}),
     ...(focus.value ? { focus: focus.value, depth: depth.value } : {}),
     ...(minDegree.value > 0 ? { minDegree: minDegree.value } : {}),
-    ...(limit.value > 0 ? { limit: limit.value } : {}),
+    ...(limitSet.value ? { limit: limitSet.value } : {}),
     global: true,
   })
   store.setTitle(w.id, project.value ? `${t('nav.graph')} · ${project.value}` : t('nav.graph'))
@@ -204,7 +217,7 @@ const params = computed(() => plugin.value
   focus: focus.value || undefined,
   depth: focus.value ? depth.value : undefined,
   min_degree: minDegree.value > 0 ? minDegree.value : undefined,
-  limit: limit.value > 0 ? limit.value : undefined,
+  limit: limitSet.value,
 })
 
 // Only the last request draws the graph: a slow answer to older filters
@@ -214,6 +227,14 @@ let gen = 0
 async function load() {
   syncWindow()
   const mine = ++gen
+  // A plugin's graph waits for the project's sources, which say what it
+  // requires, then for those arguments.
+  if (plugin.value && (!currentSource.value || missingArgs.value.length)) {
+    data.value = null
+    error.value = null
+    loading.value = false
+    return
+  }
   loading.value = true
   error.value = null
   try {
@@ -245,7 +266,7 @@ function reset() {
   focus.value = ''
   depth.value = 2
   minDegree.value = 0
-  limit.value = 0
+  limit.value = ''
 }
 
 function onNode(id: string) {
@@ -358,11 +379,14 @@ onMounted(async () => {
           class="block text-sm"
           :title="f.description"
         >
-          <span class="text-text-muted text-xs">{{ f.name }}</span>
+          <!-- The * is for the eye; the field itself says it is required -->
+          <span class="text-text-muted text-xs">{{ f.name }}<span v-if="f.required" aria-hidden="true"> *</span></span>
           <select
             v-if="f.options"
             :value="String(args[f.name] ?? '')"
             class="h-control py-0 mt-1 w-full rounded bg-bg border border-border px-2 text-sm"
+            :required="f.required"
+            :aria-required="f.required ? 'true' : undefined"
             @change="setArg(f.name, f.type, ($event.target as HTMLSelectElement).value)"
           >
             <option value="" />
@@ -386,6 +410,8 @@ onMounted(async () => {
             :type="f.type === 'integer' || f.type === 'number' ? 'number' : 'text'"
             :value="args[f.name] ?? ''"
             class="h-control py-0 mt-1 w-full rounded bg-bg border border-border px-2 text-sm"
+            :required="f.required"
+            :aria-required="f.required ? 'true' : undefined"
             @change="setArg(f.name, f.type, ($event.target as HTMLInputElement).value)"
           >
         </label>
@@ -452,7 +478,8 @@ onMounted(async () => {
             v-model.number="limit"
             type="number"
             min="0"
-            max="2000"
+            max="5000"
+            placeholder="2000"
             class="h-control py-0 mt-1 w-full rounded bg-bg border border-border px-2 text-sm"
           >
         </label>
@@ -522,8 +549,9 @@ onMounted(async () => {
         <p
           v-if="data.stats.truncated"
           class="text-warning"
+          data-graph-truncated
         >
-          {{ t('graph.truncated') }}
+          {{ t('graph.truncated', { shown: data.stats.node_count, total: data.stats.total ?? data.stats.node_count }) }}
         </p>
         <p v-if="data.cached">
           {{ t('graph.cached') }}
@@ -600,6 +628,13 @@ onMounted(async () => {
         :z-mode="zMode"
         @select="onNode"
       />
+      <p
+        v-else-if="missingArgs.length"
+        class="p-8 text-text-muted text-sm"
+        data-graph-args-needed
+      >
+        {{ t('graph.args_needed', { names: missingArgs.join(', ') }) }}
+      </p>
       <p
         v-else-if="!loading"
         class="p-8 text-text-muted text-sm"

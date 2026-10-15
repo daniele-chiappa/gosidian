@@ -334,6 +334,7 @@ onMounted(() => {
           <p v-else-if="p.nodes?.length" class="basis-full text-xs text-text-muted font-mono truncate">
             {{ p.nodes.join(' → ') }}
           </p>
+          <p v-if="!p.problem && p.notice" class="basis-full text-xs text-warning">{{ t('runs.commit_off') }}</p>
         </li>
       </ul>
 

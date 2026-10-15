@@ -43,7 +43,12 @@ type chatResponse struct {
 	Choices []struct {
 		Message struct {
 			Content string `json:"content"`
+			// The reasoning of a model that thinks first, as the servers
+			// name it (Ollama, vLLM, others).
+			Reasoning        string `json:"reasoning"`
+			ReasoningContent string `json:"reasoning_content"`
 		} `json:"message"`
+		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage struct {
 		PromptTokens     int `json:"prompt_tokens"`
@@ -78,6 +83,12 @@ func (e *Engine) chat(ctx context.Context, env *Env, with map[string]any, msgs [
 	}
 	if truthy(with["json"]) {
 		body["response_format"] = map[string]any{"type": "json_object"}
+	}
+	// How much a model that reasons first may think: none (Ollama turns it
+	// off), low, medium, high. A thinking model can spend all max_tokens
+	// before it answers.
+	if r := str(with, "reasoning_effort"); r != "" {
+		body["reasoning_effort"] = r
 	}
 	b, _ := json.Marshal(body)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(p.BaseURL, "/")+"/chat/completions", bytes.NewReader(b))
@@ -119,10 +130,14 @@ func (e *Engine) chat(ctx context.Context, env *Env, with map[string]any, msgs [
 	if len(cr.Choices) == 0 {
 		return nil, fmt.Errorf("provider %q answered no choice", p.Name)
 	}
-	text := strings.TrimSpace(cr.Choices[0].Message.Content)
+	choice := cr.Choices[0]
+	text := strings.TrimSpace(choice.Message.Content)
 	out := map[string]any{
-		"text": text, "model": cr.Model, "provider": p.Name,
+		"text": text, "model": cr.Model, "provider": p.Name, "finish_reason": choice.FinishReason,
 		"usage": map[string]any{"prompt_tokens": float64(cr.Usage.PromptTokens), "completion_tokens": float64(cr.Usage.CompletionTokens), "total_tokens": float64(cr.Usage.TotalTokens)},
+	}
+	if r := strings.TrimSpace(choice.Message.Reasoning + choice.Message.ReasoningContent); r != "" {
+		out["reasoning"] = r
 	}
 	if truthy(with["json"]) {
 		var j any

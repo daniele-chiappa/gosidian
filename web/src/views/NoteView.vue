@@ -36,6 +36,7 @@ import {
   Columns2,
   Rows2,
   Eye,
+  Scissors,
 } from 'lucide-vue-next'
 import OverflowMenu, { type OverflowItem } from '@/components/primitives/OverflowMenu.vue'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
@@ -43,13 +44,23 @@ import { getNote, updateNote, deleteNote, createSnapshot, type Note } from '@/ap
 import { downloadNote } from '@/api/noteDownload'
 import { draftAfterSave } from '@/views/noteDraft'
 import { tooLargeToSend } from '@/views/noteSize'
-import { renderPreviewData, type ViewData } from '@/api/preview'
+import {
+  renderPreviewData,
+  renderCut,
+  listCutCollections,
+  type ViewData,
+  type CutView,
+  type CutCollection,
+  type CutRequest,
+} from '@/api/preview'
 import axios from 'axios'
 import { isConcurrencyConflict, onApiEvent, type ConcurrencyConflictDetail } from '@/api/client'
 import { errorText } from '@/api/errors'
 import { formatSize } from '@/api/format'
 import { useSSE } from '@/composables/useSSE'
 import MarkdownPreview from '@/components/domain/MarkdownPreview.vue'
+import CutPreview from '@/components/domain/CutPreview.vue'
+import { listMarks, type MarkSet } from '@/api/marks'
 import { findHeading } from '@/components/domain/headings'
 import PropertiesPanel from '@/components/views/PropertiesPanel.vue'
 import RowViews from '@/components/views/RowViews.vue'
@@ -62,8 +73,10 @@ import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
 import { planciaKey, base } from '@/composables/planciaKey'
 import { useAccessStore } from '@/stores/access'
 import { useTreeStore } from '@/stores/tree'
+import { useUIStore } from '@/stores/ui'
 import { useWindowsStore, type OpenSpec } from 'plancia'
 import { confirmAction } from '@/composables/useConfirm'
+import { CUT_STORAGE_PREFIX } from '@/composables/useSessionReset'
 
 const CodeMirrorEditor = defineAsyncComponent(
   () => import('@/components/editor/CodeMirrorEditor.vue'),
@@ -208,6 +221,234 @@ watch(layout, (m) => {
   }
 })
 
+// The cut view (IMP-170): the note as note.sections cuts it for an archive
+// of vectors, compared with a collection. Its rules must be the pipeline's,
+// or no block matches: they are kept per project, in the browser.
+interface CutSettings {
+  collection: string
+  icon: string
+  image: string
+  context: 'heading' | 'path' | 'none'
+  max_chars: number
+  inline_max_side: number
+}
+// The number fields: their default (the node's) and the range the server
+// takes, which an emptied or out-of-range field falls back into.
+type CutNumber = 'max_chars' | 'inline_max_side'
+const CUT_NUMBERS: Record<CutNumber, { def: number; min: number; max: number }> = {
+  max_chars: { def: 6000, min: 200, max: 1 << 20 },
+  inline_max_side: { def: 128, min: 0, max: 10000 },
+}
+const ui = useUIStore()
+const cutOn = ref(false)
+const cutView = ref<CutView | null>(null)
+const cutError = ref<string | null>(null)
+const cutLoading = ref(false)
+const cutCollections = ref<CutCollection[]>([])
+// Why an archive lists no collection, or the list itself failed: without
+// it the select shows only "None" and the reader cannot tell why.
+const cutProblems = ref<string[]>([])
+const cutCollectionsError = ref<string | null>(null)
+const cutCollectionsLoading = ref(false)
+const cutSettings = ref<CutSettings>(defaultCutSettings())
+const canCut = computed(
+  () =>
+    ui.pipelinesEnabled &&
+    !!note.value &&
+    path.value.toLowerCase().endsWith('.md') &&
+    !isMedia.value &&
+    !isTable.value &&
+    !isBase.value &&
+    !tooLarge.value,
+)
+function defaultCutSettings(): CutSettings {
+  return {
+    collection: '',
+    icon: '',
+    image: '',
+    context: 'heading',
+    max_chars: CUT_NUMBERS.max_chars.def,
+    inline_max_side: CUT_NUMBERS.inline_max_side.def,
+  }
+}
+/** A whole number in the field's range; an empty or broken one is the default. */
+function cutNumber(key: CutNumber, v: unknown): number {
+  const r = CUT_NUMBERS[key]
+  const n = typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN
+  return Number.isFinite(n) ? Math.min(r.max, Math.max(r.min, Math.round(n))) : r.def
+}
+// On change, not on input: clamped while typing, 1500 could never be typed.
+function setCutNumber(key: CutNumber, e: Event) {
+  const input = e.target as HTMLInputElement
+  const n = cutNumber(key, input.value)
+  cutSettings.value[key] = n
+  // An emptied field back to the value it had leaves the model as it was,
+  // and so the field empty: it shows the number used all the same.
+  input.value = String(n)
+}
+const cutStorageKey = () => `${CUT_STORAGE_PREFIX}${project.value ?? ''}`
+// The saved rules as written by an older version or by hand are checked
+// field by field: a '' sent as max_chars is a 400 on every cut.
+function loadCutSettings(): CutSettings {
+  const d = defaultCutSettings()
+  let saved: Record<string, unknown> = {}
+  try {
+    const v: unknown = JSON.parse(localStorage.getItem(cutStorageKey()) ?? '{}')
+    if (v && typeof v === 'object') saved = v as Record<string, unknown>
+  } catch {
+    /* ignore */
+  }
+  const str = (v: unknown, def: string) => (typeof v === 'string' ? v : def)
+  return {
+    collection: str(saved.collection, d.collection),
+    icon: str(saved.icon, d.icon),
+    image: str(saved.image, d.image),
+    context: saved.context === 'path' || saved.context === 'none' ? saved.context : d.context,
+    max_chars: cutNumber('max_chars', saved.max_chars),
+    inline_max_side: cutNumber('inline_max_side', saved.inline_max_side),
+  }
+}
+// The rules as last loaded or saved: the watcher below acts on a change of
+// them, not on their reload, which would cut the note a second time.
+let cutSettingsSaved = ''
+function applyCutSettings(s: CutSettings) {
+  cutSettingsSaved = JSON.stringify(s)
+  cutSettings.value = s
+}
+function cutRequest(): CutRequest {
+  const s = cutSettings.value
+  const req: CutRequest = { context: s.context, max_chars: s.max_chars, inline_max_side: s.inline_max_side }
+  if (s.collection) req.collection = s.collection
+  if (s.icon.trim() || s.image.trim())
+    req.media_words = { icon: s.icon.trim() || 'icon', image: s.image.trim() || 'image' }
+  return req
+}
+// Only the last request of each kind draws: a slow answer (an archive's
+// plugin takes up to 30 s) to older rules, an older text or another note
+// replaced the one asked after (as GraphView's, BUG-116).
+let cutGen = 0
+let marksGen = 0
+let collectionsGen = 0
+// The text the shown cut was made from: after an edit it is not the note's.
+let cutContent: string | null = null
+async function refreshCut() {
+  if (!cutOn.value || !note.value) return
+  const mine = ++cutGen
+  const content = note.value.content
+  cutLoading.value = true
+  try {
+    const v = await renderCut(content, note.value.path, cutRequest())
+    if (mine !== cutGen) return
+    cutView.value = v
+    cutContent = content
+    cutError.value = null
+  } catch (e) {
+    if (mine !== cutGen) return
+    cutView.value = null
+    cutError.value = errorText(e, t, t('cut.failed'))
+  } finally {
+    if (mine === cutGen) cutLoading.value = false
+  }
+}
+const refreshCutSoon = useDebounceFn(refreshCut, 400)
+watch(
+  cutSettings,
+  (s) => {
+    const json = JSON.stringify(s)
+    if (json === cutSettingsSaved) return
+    cutSettingsSaved = json
+    try {
+      localStorage.setItem(cutStorageKey(), json)
+    } catch {
+      /* ignore */
+    }
+    void refreshCutSoon()
+  },
+  { deep: true },
+)
+async function loadCollections() {
+  const mine = ++collectionsGen
+  const p = project.value
+  cutCollectionsError.value = null
+  if (!p) {
+    cutCollections.value = []
+    cutProblems.value = []
+    cutCollectionsLoading.value = false
+    return
+  }
+  cutCollectionsLoading.value = true
+  try {
+    const r = await listCutCollections(p)
+    if (mine !== collectionsGen) return
+    cutCollections.value = r.collections
+    cutProblems.value = r.problems
+  } catch (e) {
+    if (mine !== collectionsGen) return
+    cutCollections.value = []
+    cutProblems.value = []
+    cutCollectionsError.value = errorText(e, t, t('cut.collections_failed'))
+  } finally {
+    if (mine === collectionsGen) cutCollectionsLoading.value = false
+  }
+}
+// The saved collection though the archive does not list it now (its
+// plugin down): the select shows what the cut is compared with.
+const cutCollectionUnlisted = computed(
+  () => !!cutSettings.value.collection && !cutCollections.value.some((c) => c.source === cutSettings.value.collection),
+)
+// The marks the pipelines put on the note (IMP-188), shown in the cut view.
+const markSets = ref<MarkSet[]>([])
+async function loadMarks() {
+  const mine = ++marksGen
+  if (!ui.pipelinesEnabled || !path.value.toLowerCase().endsWith('.md')) {
+    markSets.value = []
+    return
+  }
+  try {
+    const sets = await listMarks(path.value)
+    if (mine === marksGen) markSets.value = sets
+  } catch {
+    if (mine === marksGen) markSets.value = []
+  }
+}
+
+// One cut request per toggle: the settings are applied without firing the
+// watcher, and the cut does not wait for the archive's list.
+function toggleCut() {
+  cutOn.value = !cutOn.value
+  if (!cutOn.value) {
+    // What is still on its way is no longer wanted, and the next toggle
+    // must not show this cut as the note's while it asks again.
+    cutGen++
+    collectionsGen++
+    cutLoading.value = false
+    cutCollectionsLoading.value = false
+    cutView.value = null
+    cutError.value = null
+    return
+  }
+  applyCutSettings(loadCutSettings())
+  void loadCollections()
+  void loadMarks()
+  void refreshCut()
+}
+
+// Another note in this window: the answers on their way are for the
+// previous one, and another project has rules of its own.
+watch(path, () => {
+  cutGen++
+  marksGen++
+  cutView.value = null
+  cutContent = null
+  markSets.value = []
+  void load()
+})
+watch(project, () => {
+  if (!cutOn.value) return
+  applyCutSettings(loadCutSettings())
+  void loadCollections()
+})
+
 async function load() {
   if (!path.value) return
   loading.value = true
@@ -235,6 +476,8 @@ async function load() {
       } catch (e) {
         previewFailed(e)
       }
+      if (cutOn.value) void refreshCut()
+      void loadMarks()
     }
     dirty.value = false
   } catch (e) {
@@ -347,6 +590,13 @@ async function enterView() {
   mode.value = 'view'
   // View shows the saved content; the draft stays in memory for re-editing.
   if (!note.value || isHtml.value || tooLarge.value) return
+  // The cut and the marks were read before the edit, and a save since
+  // changed the text: a cut of the old text is not shown as this one's.
+  if (cutOn.value) {
+    if (cutContent !== note.value.content) cutView.value = null
+    void refreshCut()
+  }
+  void loadMarks()
   try {
     await renderInto(note.value.content, note.value.path)
   } catch (e) {
@@ -592,7 +842,6 @@ onBeforeUnmount(() => {
   unsub?.()
   if (copiedTimer) clearTimeout(copiedTimer)
 })
-watch(path, load)
 </script>
 
 <template>
@@ -642,6 +891,32 @@ watch(path, load)
           {{ t('note.edit') }}
         </button>
       </div>
+
+      <!-- The cut view (IMP-170): the note as an archive of vectors gets it -->
+      <button
+        v-if="canCut && mode === 'view'"
+        type="button"
+        class="inline-flex h-control-sm shrink-0 items-center gap-1 rounded border border-border px-2 text-xs"
+        :class="cutOn ? 'bg-accent text-accent-fg' : 'hover:bg-surface-hover'"
+        :aria-pressed="cutOn"
+        :title="t('cut.toggle_hint')"
+        data-cut-toggle
+        @click="toggleCut"
+      >
+        <Scissors class="h-3.5 w-3.5" aria-hidden="true" />
+        <!-- Narrow, the label stays for screen readers: the button's name -->
+        <span :class="{ 'sr-only': compact }">{{ t('cut.toggle') }}</span>
+        <!-- The dot is a colour only: its words are read with the button -->
+        <template v-if="markSets.length">
+          <span
+            class="h-1.5 w-1.5 rounded-full bg-warning"
+            :title="t('marks.has', { n: markSets.length }, markSets.length)"
+            aria-hidden="true"
+            data-cut-marks-dot
+          />
+          <span class="sr-only" data-cut-marks-text>{{ t('marks.has', { n: markSets.length }, markSets.length) }}</span>
+        </template>
+      </button>
 
       <!-- Edit-only controls: the layouts as icons (IMP-156, M5) -->
       <template v-if="mode === 'edit' && note">
@@ -846,18 +1121,94 @@ watch(path, load)
           <span :title="`etag ${note.etag}`">{{ note.path }} · {{ formatSize(note.size) }}</span>
           <template v-if="isBase"> · {{ t('note.base_readonly') }}</template>
         </p>
-        <!-- A row of a database: its fields, editable (IMP-127 phase 5) -->
-        <PropertiesPanel v-if="note && !isBase" :path="note.path" :etag="note.etag" />
-        <ErrorMessage v-if="previewError" :text="previewError" class="mb-4 text-sm" data-preview-error />
-        <MarkdownPreview
-          :html="previewHTML"
-          :views="previewViews"
-          :diagram-links="previewDiagramLinks"
-          :diagrams-editable="canEdit"
-          :note-path="note?.path"
-        />
-        <!-- A row of a database: the views its schema declares (IMP-139) -->
-        <RowViews v-if="note && !isBase" :path="note.path" :etag="note.etag" />
+        <template v-if="cutOn && canCut">
+          <details class="mb-4 rounded border border-border p-2 text-xs" data-cut-settings>
+            <summary class="cursor-pointer text-text-muted">{{ t('cut.settings') }}</summary>
+            <div class="mt-2 grid gap-2 sm:grid-cols-2">
+              <div class="flex flex-col gap-1">
+                <label class="flex flex-col gap-1">
+                  {{ t('cut.collection') }}
+                  <select v-model="cutSettings.collection" class="h-control-sm rounded border border-border bg-bg px-1" data-cut-collection>
+                    <option value="">{{ t('cut.no_collection') }}</option>
+                    <option v-if="cutCollectionUnlisted" :value="cutSettings.collection">
+                      {{ cutSettings.collection }}
+                    </option>
+                    <option v-for="c in cutCollections" :key="c.source" :value="c.source">
+                      {{ c.source }} · {{ c.count }}
+                    </option>
+                  </select>
+                </label>
+                <span v-if="cutCollectionsLoading" class="text-text-muted" data-cut-collections-loading>
+                  {{ t('cut.collections_loading') }}
+                </span>
+                <ErrorMessage v-if="cutCollectionsError" :text="cutCollectionsError" data-cut-collections-failed />
+                <p v-if="cutProblems.length" class="text-warning" data-cut-collections-problems>
+                  {{ t('cut.collections_problems', { problems: cutProblems.join('; ') }) }}
+                </p>
+              </div>
+              <label class="flex flex-col gap-1">
+                {{ t('cut.context') }}
+                <select v-model="cutSettings.context" class="h-control-sm rounded border border-border bg-bg px-1">
+                  <option value="heading">{{ t('cut.context_heading') }}</option>
+                  <option value="path">{{ t('cut.context_path') }}</option>
+                  <option value="none">{{ t('cut.context_none') }}</option>
+                </select>
+              </label>
+              <label class="flex flex-col gap-1">
+                {{ t('cut.word_icon') }}
+                <input v-model="cutSettings.icon" class="h-control-sm rounded border border-border bg-bg px-1" placeholder="icon" />
+              </label>
+              <label class="flex flex-col gap-1">
+                {{ t('cut.word_image') }}
+                <input v-model="cutSettings.image" class="h-control-sm rounded border border-border bg-bg px-1" placeholder="image" />
+              </label>
+              <label class="flex flex-col gap-1">
+                {{ t('cut.max_chars') }}
+                <input
+                  :value="cutSettings.max_chars"
+                  type="number"
+                  :min="CUT_NUMBERS.max_chars.min"
+                  :max="CUT_NUMBERS.max_chars.max"
+                  step="100"
+                  class="h-control-sm rounded border border-border bg-bg px-1"
+                  data-cut-max-chars
+                  @change="setCutNumber('max_chars', $event)"
+                />
+              </label>
+              <label class="flex flex-col gap-1" :title="t('cut.inline_max_side_hint')">
+                {{ t('cut.inline_max_side') }}
+                <input
+                  :value="cutSettings.inline_max_side"
+                  type="number"
+                  :min="CUT_NUMBERS.inline_max_side.min"
+                  :max="CUT_NUMBERS.inline_max_side.max"
+                  step="16"
+                  class="h-control-sm rounded border border-border bg-bg px-1"
+                  data-cut-inline-max-side
+                  @change="setCutNumber('inline_max_side', $event)"
+                />
+              </label>
+            </div>
+            <p class="mt-2 text-text-muted">{{ t('cut.settings_note') }}</p>
+          </details>
+          <ErrorMessage v-if="cutError" :text="cutError" class="mb-4 text-sm" data-cut-failed />
+          <p v-else-if="cutLoading && !cutView" class="text-xs text-text-muted">{{ t('cut.loading') }}</p>
+          <CutPreview v-if="cutView && !cutError" :view="cutView" :marks="markSets" :note-path="note?.path" compact />
+        </template>
+        <template v-else>
+          <!-- A row of a database: its fields, editable (IMP-127 phase 5) -->
+          <PropertiesPanel v-if="note && !isBase" :path="note.path" :etag="note.etag" />
+          <ErrorMessage v-if="previewError" :text="previewError" class="mb-4 text-sm" data-preview-error />
+          <MarkdownPreview
+            :html="previewHTML"
+            :views="previewViews"
+            :diagram-links="previewDiagramLinks"
+            :diagrams-editable="canEdit"
+            :note-path="note?.path"
+          />
+          <!-- A row of a database: the views its schema declares (IMP-139) -->
+          <RowViews v-if="note && !isBase" :path="note.path" :etag="note.etag" />
+        </template>
         <!-- An Obsidian base: the YAML its views were translated from -->
         <details v-if="isBase && note?.source" class="mt-8 text-xs" data-base-source>
           <summary class="cursor-pointer text-text-muted">{{ t('note.base_source') }}</summary>

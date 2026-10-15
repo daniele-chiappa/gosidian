@@ -2,8 +2,10 @@ package vault
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -150,6 +152,57 @@ func TestWatcher_SkippedFoldersAndRemovedFolders(t *testing.T) {
 	}
 	if n, _ := idx.Note("p/keep.md"); n == nil {
 		t.Error("an untouched note left the index")
+	}
+}
+
+// A burst of removals is handled in full by at most watchWorkers goroutines
+// at once: handled on the timers' goroutines, 14,792 attachments moved to
+// the trash together ran as many index queries at the same time (BUG-123).
+func TestWatcher_BurstHandledByBoundedWorkers(t *testing.T) {
+	v := newTestVault(t)
+	const notes = 300
+	for n := range notes {
+		write(t, v.Root, fmt.Sprintf("p/n%03d.md", n), "# n")
+	}
+	idx := openIndex(t)
+	if err := v.ScanInto(idx); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var running, peak atomic.Int64
+	onChange := func(string) {
+		if r := running.Add(1); r > peak.Load() {
+			peak.Store(r)
+		}
+		time.Sleep(2 * time.Millisecond) // long enough for handlers to overlap
+		running.Add(-1)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- v.Watch(ctx, idx, onChange)
+	}()
+	time.Sleep(150 * time.Millisecond) // readiness, as above
+
+	for n := range notes {
+		if err := os.Remove(filepath.Join(v.Root, "p", fmt.Sprintf("n%03d.md", n))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if all, _ := idx.AllNotes(); len(all) == 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	if all, _ := idx.AllNotes(); len(all) != 0 {
+		t.Errorf("%d removed notes still indexed", len(all))
+	}
+	if p := peak.Load(); p > watchWorkers {
+		t.Errorf("%d paths handled at once, want at most %d", p, watchWorkers)
 	}
 }
 

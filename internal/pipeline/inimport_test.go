@@ -2,12 +2,19 @@ package pipeline
 
 import (
 	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
+	"path"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/gosidian/gosidian/internal/infolder"
@@ -142,7 +149,7 @@ func TestINImport_NoteAttachmentsImageNotes(t *testing.T) {
 	mustContain(t, "the first image note", img1,
 		"type: image", "media: "+att1,
 		"article: \"[[p/documents/wiki/A/B/Doc one]]\"",
-		"position: 1", "occurrences: 2", "inline: false", "section: Setup > Window",
+		"position: 1", "occurrences: 2", "inline: false", "section: Setup > Window", "in_sha256: ",
 		"alt_original: Alt text", "width: 40", "height: 30",
 		"in_file: p/IN/wiki/A/B/Doc one_img/001.png", "tags: [p, type:image]")
 	img2 := host.note("p/documents/wiki/A/B/Doc one_img/002.md")
@@ -302,4 +309,154 @@ nodes:
 	}
 	eventually(t, func() bool { return f.status(t, doc).Status == infolder.StatusDone }, "the document done")
 	mustContain(t, "the image note", f.host.note("p/docs/a_img/1.md"), "type: image")
+}
+
+// fakeConvert is a convert node as images.convert answers: it keeps the
+// files named keep.png, fails on bad.png, and gives back the others as
+// <stem>.webp, their bytes prefixed by version. It counts its calls.
+type fakeConvert struct {
+	mu      sync.Mutex
+	calls   int
+	version string
+}
+
+func (f *fakeConvert) Run(_ context.Context, env *Env, with map[string]any) (any, error) {
+	f.mu.Lock()
+	f.calls++
+	version := f.version
+	f.mu.Unlock()
+	list, _ := with["files"].([]any)
+	results, files := []any{}, []any{}
+	for _, it := range list {
+		p := it.(string)
+		name := path.Base(p)
+		switch name {
+		case "keep.png":
+			results = append(results, map[string]any{"name": name, "kept": true, "reason": "would weigh more"})
+			continue
+		case "bad.png":
+			results = append(results, map[string]any{"name": name, "error": "not an image"})
+			continue
+		}
+		_, data, err := env.ReadAttachment(p)
+		if err != nil {
+			return nil, err
+		}
+		out := strings.TrimSuffix(name, path.Ext(name)) + ".webp"
+		rel, err := env.StoreAttachment(out, append([]byte(version), data...))
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, map[string]any{"name": name, "output": out, "width": 7.0, "height": 5.0})
+		files = append(files, map[string]any{"name": out, "path": rel})
+	}
+	return map[string]any{"results": results, "files": files}, nil
+}
+
+// convert: the images go to the convert node in batches, the converted ones
+// are linked and get image notes; one kept or failed is stored as it is.
+// A new conversion of the same originals keeps the descriptions.
+func TestINImport_Convert(t *testing.T) {
+	e, host := newEngine(t, Config{})
+	fc := &fakeConvert{version: "v1"}
+	e.Types().Register("fake.convert", fc)
+	host.notes["p/pipelines/wiki-md.md"] = pipelineNote(strings.Replace(importPipeline, "dest: documents/wiki}",
+		"dest: documents/wiki, convert: fake.convert, convert_with: {format: webp}}", 1))
+	var doc strings.Builder
+	doc.WriteString("# Doc one\n\n")
+	for i := range 30 {
+		name := fmt.Sprintf("%03d.png", i)
+		doc.WriteString("![](Doc%20one_img/" + name + ")\n\n")
+		host.att["p/IN/wiki/A/B/Doc one_img/"+name] = pngOf(t, 3+i, 2, color.White) // before any run
+	}
+	doc.WriteString("![](Doc%20one_img/keep.png)\n\n![](Doc%20one_img/bad.png)\n")
+	host.att["p/IN/wiki/A/B/Doc one.md"] = []byte(doc.String())
+	host.att["p/IN/wiki/A/B/Doc one_img/keep.png"] = pngOf(t, 4, 4, color.Black)
+	host.att["p/IN/wiki/A/B/Doc one_img/bad.png"] = pngOf(t, 5, 5, color.Black)
+	_, out := startImport(t, e)
+
+	fc.mu.Lock()
+	calls := fc.calls
+	fc.mu.Unlock()
+	if calls != 2 || out["converted"] != 30.0 {
+		t.Fatalf("%d calls, output %v", calls, out)
+	}
+	if errs, _ := out["convert_errors"].([]any); len(errs) != 1 || errs[0].(map[string]any)["src"] != "A/B/Doc one_img/bad.png" {
+		t.Errorf("convert_errors %v", out["convert_errors"])
+	}
+	note := host.note("p/documents/wiki/A/B/Doc one.md")
+	if strings.Count(note, ".webp)") != 30 || strings.Count(note, ".png)") != 2 {
+		t.Errorf("links:\n%s", note)
+	}
+	img := host.note("p/documents/wiki/A/B/Doc one_img/003.md")
+	mustContain(t, "a converted image's note", img, ".webp\n", "width: 7", "height: 5", "in_sha256: ")
+	mustContain(t, "a kept image's note", host.note("p/documents/wiki/A/B/Doc one_img/keep.md"), ".png\n", "width: 4")
+
+	// Described, then converted again with other bytes: the description
+	// stays, the media is the new attachment.
+	host.mu.Lock()
+	host.notes["p/documents/wiki/A/B/Doc one_img/003.md"] = strings.Replace(img, "type: image\n", "type: image\nlabel: A box\n", 1) + "\nA white box.\n"
+	host.mu.Unlock()
+	fc.mu.Lock()
+	fc.version = "v2"
+	fc.mu.Unlock()
+	startImport(t, e)
+	again := host.note("p/documents/wiki/A/B/Doc one_img/003.md")
+	mustContain(t, "the note converted again", again, "label: A box", "A white box.")
+	if again == img || !strings.Contains(again, "media: p/attachments/") {
+		t.Errorf("the media did not change:\n%s", again)
+	}
+}
+
+// A note of before in_sha256 keeps its description while its sha256 is the
+// original's, and gets in_sha256 in its place.
+func TestINImport_LegacySHA256(t *testing.T) {
+	e, host := newEngine(t, Config{})
+	host.notes["p/pipelines/wiki-md.md"] = pipelineNote(importPipeline)
+	data := pngOf(t, 4, 4, color.White)
+	host.att["p/IN/wiki/A/B/Doc one.md"] = []byte("# Doc one\n\n![](Doc%20one_img/001.png)\n")
+	host.att["p/IN/wiki/A/B/Doc one_img/001.png"] = data
+	startImport(t, e)
+	p := "p/documents/wiki/A/B/Doc one_img/001.md"
+	sum := sha256.Sum256(data)
+	host.mu.Lock()
+	c := host.notes[p]
+	c = strings.Replace(c, "in_sha256: "+hex.EncodeToString(sum[:]), "sha256: "+hex.EncodeToString(sum[:]), 1)
+	host.notes[p] = strings.Replace(c, "type: image\n", "type: image\nlabel: Old\n", 1) + "\nDescribed before.\n"
+	host.mu.Unlock()
+	startImport(t, e)
+	c = host.note(p)
+	mustContain(t, "the legacy note", c, "label: Old", "Described before.", "in_sha256: "+hex.EncodeToString(sum[:]))
+	if strings.Contains(c, "\nsha256:") {
+		t.Errorf("sha256 is still there:\n%s", c)
+	}
+}
+
+// failConvert is a convert node that fails whole, as a plugin down or one
+// that converted nothing in a batch answers.
+type failConvert struct{}
+
+func (failConvert) Run(context.Context, *Env, map[string]any) (any, error) {
+	return nil, errors.New("the plugin is down")
+}
+
+// A batch the convert node fails whole: its images are stored as they are,
+// each with the reason, and the document is imported.
+func TestINImport_ConvertFailingWhole(t *testing.T) {
+	e, host := newEngine(t, Config{})
+	e.Types().Register("fake.convert", failConvert{})
+	host.notes["p/pipelines/wiki-md.md"] = pipelineNote(strings.Replace(importPipeline, "dest: documents/wiki}",
+		"dest: documents/wiki, convert: fake.convert}", 1))
+	host.att["p/IN/wiki/A/B/Doc one.md"] = []byte("# Doc one\n\n![](Doc%20one_img/a.png)\n\n![](Doc%20one_img/b.png)\n")
+	host.att["p/IN/wiki/A/B/Doc one_img/a.png"] = pngOf(t, 4, 4, color.Black)
+	host.att["p/IN/wiki/A/B/Doc one_img/b.png"] = pngOf(t, 5, 5, color.White)
+	_, out := startImport(t, e)
+
+	if errs, _ := out["convert_errors"].([]any); len(errs) != 2 || !strings.Contains(fmt.Sprint(errs[0]), "the plugin is down") {
+		t.Errorf("convert_errors %v", out["convert_errors"])
+	}
+	if strings.Count(host.note("p/documents/wiki/A/B/Doc one.md"), ".png)") != 2 {
+		t.Errorf("links:\n%s", host.note("p/documents/wiki/A/B/Doc one.md"))
+	}
+	mustContain(t, "an image stored as it is", host.note("p/documents/wiki/A/B/Doc one_img/a.md"), ".png\n", "width: 4")
 }

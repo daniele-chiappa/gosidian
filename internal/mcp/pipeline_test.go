@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -375,5 +376,50 @@ func TestPipelineTools_ListPlugins(t *testing.T) {
 	text := resultText(t, res)
 	if !strings.Contains(text, `"plugins":[{"name":"docling","status":"down","nodes":[]}]`) || strings.Contains(text, "127.0.0.1") {
 		t.Errorf("listing: %s", text)
+	}
+}
+
+// ListNotes gives note.list the notes of a folder from the index, with
+// memory_query's conditions, sort and pages, inside the project only
+// (IMP-186).
+func TestPipelineHost_ListNotes(t *testing.T) {
+	s, _ := pipelineServer(t)
+	ctx := context.Background()
+	for p, typ := range map[string]string{"p/docs/a.md": "doc", "p/docs/a_img/1.md": "image", "p/docs/sub/b.md": "doc", "p/docs2/c.md": "doc"} {
+		if res, err := s.handleCreate(ctx, call(map[string]any{"path": p, "content": "---\ntitle: T\ntype: " + typ + "\n---\n\nText.\n"})); err != nil || res.IsError {
+			t.Fatalf("create %s: %v %+v", p, err, res)
+		}
+	}
+	h := s.PipelineHost().(pipeline.NoteLister)
+	notImage := []any{map[string]any{"field": "type", "op": "ne", "value": "image"}}
+	list := func(q pipeline.NoteQuery) ([]string, int) {
+		t.Helper()
+		rows, total, err := h.ListNotes("p", q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, r := range rows {
+			out = append(out, r.Path+"="+fmt.Sprint(r.Fields["type"]))
+		}
+		return out, total
+	}
+	if got, total := list(pipeline.NoteQuery{Folder: "p/docs", Recursive: true, Where: notImage, Sort: "path", Fields: []string{"type"}, Limit: 1}); strings.Join(got, " ") != "p/docs/a.md=doc" || total != 2 {
+		t.Errorf("first page %v of %d", got, total)
+	}
+	if got, _ := list(pipeline.NoteQuery{Folder: "p/docs", Recursive: true, Where: notImage, Sort: "path", Fields: []string{"type"}, Limit: 1, Offset: 1}); strings.Join(got, " ") != "p/docs/sub/b.md=doc" {
+		t.Errorf("second page %v", got)
+	}
+	if got, total := list(pipeline.NoteQuery{Folder: "p/docs", Sort: "path", Limit: 10}); total != 1 || !strings.HasPrefix(got[0], "p/docs/a.md") {
+		t.Errorf("not recursive %v of %d", got, total)
+	}
+	if _, total := list(pipeline.NoteQuery{Folder: "p", Recursive: true, Where: notImage, Sort: "path", Limit: 10}); total < 3 {
+		t.Errorf("the whole project: %d", total)
+	}
+	if _, _, err := h.ListNotes("p", pipeline.NoteQuery{Folder: "q/docs", Recursive: true, Sort: "path", Limit: 10}); err == nil {
+		t.Error("a folder of another project is listed")
+	}
+	if _, _, err := h.ListNotes("p", pipeline.NoteQuery{Folder: "p/docs", Where: "type = doc", Sort: "path", Limit: 10}); err == nil {
+		t.Error("a where that is no list passed")
 	}
 }

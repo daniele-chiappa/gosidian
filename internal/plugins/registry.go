@@ -333,6 +333,12 @@ func split(use string) (string, string, bool) {
 	return p, n, ok && p != "" && n != ""
 }
 
+// FilesURL is the address a plugin fetches the files it gets by reference
+// from, when its config sets one; "" for the server's.
+func (r *Registry) FilesURL(plugin string) string {
+	return r.plugins[plugin].FilesURL
+}
+
 // accepted is the accepted manifest's node for use.
 func (r *Registry) accepted(use string) (Config, Accepted, NodeSpec, bool) {
 	p, n, ok := split(use)
@@ -471,15 +477,15 @@ func fetchManifest(ctx context.Context, sess *client.Client, name string) (*Mani
 	if res.IsError {
 		return nil, fmt.Errorf("plugin %s: %s: %s", name, ManifestTool, resultText(res))
 	}
-	m, err := ParseManifest(resultJSON(res), name)
+	m, err := ParseManifest(ResultJSON(res), name)
 	if err != nil {
 		return nil, fmt.Errorf("plugin %s: %w", name, err)
 	}
 	return m, nil
 }
 
-// resultJSON is a tool result's structured content, else its text.
-func resultJSON(res *mcp.CallToolResult) []byte {
+// ResultJSON is a tool result's structured content, else its text.
+func ResultJSON(res *mcp.CallToolResult) []byte {
 	if len(res.RawStructuredContent) > 0 {
 		return res.RawStructuredContent
 	}

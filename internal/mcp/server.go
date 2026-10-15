@@ -21,6 +21,7 @@ import (
 	"github.com/gosidian/gosidian/internal/automation"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/infolder"
+	"github.com/gosidian/gosidian/internal/marks"
 	"github.com/gosidian/gosidian/internal/pipeline"
 	"github.com/gosidian/gosidian/internal/plugins"
 	"github.com/gosidian/gosidian/internal/projects"
@@ -130,6 +131,8 @@ type Server struct {
 	impl         *server.MCPServer
 	limiter      *writeLimiter
 	maxNoteBytes int64
+	// maxPluginResult caps a plugin tool's result ([mcp] max_plugin_result).
+	maxPluginResult int64
 	// packageMaxFiles and packageMaxBytes cap a memory_ingest package
 	// (IMP-116); SetPackageLimits overrides the defaults.
 	packageMaxFiles int
@@ -210,6 +213,9 @@ type Server struct {
 	in *infolder.Service
 	// plugins are the MCP servers whose nodes the pipelines use (IMP-168).
 	plugins *plugins.Registry
+	// marks keeps the marks the pipelines put on notes (IMP-188); nil
+	// keeps none.
+	marks *marks.Store
 	// pluginTools are the plugins' tools registered as tools of this server
 	// (IMP-182), by name; pluginToolsKey is the set they were registered
 	// from (syncPluginTools).
@@ -460,6 +466,14 @@ func (s *Server) SetWriteLimits(perMinute int, maxNoteBytes int64) {
 	}
 }
 
+// SetPluginResultLimit configures the bytes of a plugin tool's result an
+// agent may get. Zero keeps the default, 1 MiB.
+func (s *Server) SetPluginResultLimit(n int64) {
+	if n > 0 {
+		s.maxPluginResult = n
+	}
+}
+
 // SetPackageLimits configures the caps of a memory_ingest package: its
 // files, and its size unpacked. Zero keeps the defaults.
 func (s *Server) SetPackageLimits(maxFiles int, maxBytes int64) {
@@ -595,6 +609,7 @@ func New(v *vault.Vault, idx *index.Index, tokens *auth.Store) *Server {
 		tokens:          tokens,
 		limiter:         newWriteLimiter(60),
 		maxNoteBytes:    1 << 20,
+		maxPluginResult: defaultMaxPluginResult,
 		packageMaxFiles: 500,
 		packageMaxBytes: 20 << 20,
 		shrinkPercent:   10,

@@ -2,10 +2,13 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -42,6 +45,10 @@ Say what it is (an icon, a button, a symbol) and what it stands for in the sente
 	// 1920×1040: some 2000 tokens for Qwen-VL, inside Ollama's default
 	// context of 4096 with the prompt and the answer.
 	defaultMediaMaxPixels = 2_000_000
+	// defaultInlineMaxSide is the longest side, in pixels, of an image in
+	// a sentence that gets the inline prompt: a larger one is a screenshot
+	// put in the line, and gets the full prompt (BUG-124).
+	defaultInlineMaxSide = 128
 )
 
 // mediaRetryWait is the wait after a failed try, times the try's number.
@@ -82,6 +89,16 @@ func llmDescribeMedia(ctx context.Context, env *Env, with map[string]any) (any, 
 	version := int(number(with, "prompt_version", 1))
 	chars := int(number(with, "context_chars", 1200))
 	workers := min(max(int(number(with, "concurrency", 1)), 1), mediaMaxConcurrency)
+	inlineMax := int(number(with, "inline_max_side", defaultInlineMaxSide))
+	// Which images this pass takes: an icon (an image in a sentence up to
+	// inline_max_side) may want another model than a screenshot, and on
+	// one GPU that is another pass (IMP-179).
+	only := strings.TrimSpace(str(with, "images"))
+	switch only {
+	case "", "all", "icons", "others":
+	default:
+		return nil, fmt.Errorf("with.images %q: all, icons or others", only)
+	}
 	prompt, inlinePrompt := str(with, "prompt"), str(with, "inline_prompt")
 	if prompt == "" {
 		prompt = defaultMediaPrompt
@@ -112,7 +129,7 @@ func llmDescribeMedia(ctx context.Context, env *Env, with map[string]any) (any, 
 	sort.Strings(paths)
 
 	var jobs []mediaJob
-	skipped, unreadable := 0, 0
+	skipped, unreadable, excluded := 0, 0, 0
 	for _, mp := range paths {
 		note, err := host.ReadNote(env.Project, mp)
 		if err != nil || !isMediaOf(note.Frontmatter, article) {
@@ -132,8 +149,13 @@ func llmDescribeMedia(ctx context.Context, env *Env, with map[string]any) (any, 
 			unreadable++ // svg: no model reads it
 			continue
 		}
+		icon := ref.Inline && (inlineMax <= 0 || longestSide(note.Frontmatter) <= inlineMax)
+		if (only == "icons" && !icon) || (only == "others" && icon) {
+			excluded++ // left to another pass
+			continue
+		}
 		tmpl := prompt
-		if ref.Inline {
+		if icon {
 			tmpl = inlinePrompt
 		}
 		text := strings.NewReplacer("{title}", title, "{section}", sectionAt(lines, ref.Line),
@@ -212,7 +234,7 @@ func llmDescribeMedia(ctx context.Context, env *Env, with map[string]any) (any, 
 		errs = []string{}
 	}
 	return map[string]any{
-		"described": described, "skipped": skipped, "unreadable": unreadable, "failed": failed, "errors": errs, "downscaled": downscaled,
+		"described": described, "skipped": skipped, "unreadable": unreadable, "excluded": excluded, "failed": failed, "errors": errs, "downscaled": downscaled,
 		"usage":   map[string]any{"prompt_tokens": used["prompt_tokens"], "completion_tokens": used["completion_tokens"], "total_tokens": used["total_tokens"]},
 		"seconds": time.Since(started).Round(time.Second).Seconds(),
 	}, nil
@@ -262,6 +284,7 @@ func (env *Env) describeMediaNote(ctx context.Context, call *Env, with map[strin
 	}
 	msgs = append(msgs, imageMessage(j.prompt, mime, data))
 	var label, description string
+	var broken bool
 	for attempt := 1; err == nil; attempt++ {
 		if cap := env.Engine.cfg.MaxLLMTokens; cap > 0 {
 			spent, _ := usage["total_tokens"].(float64)
@@ -273,10 +296,16 @@ func (env *Env) describeMediaNote(ctx context.Context, call *Env, with map[strin
 		out, err = env.Engine.chat(ctx, call, callWith, msgs)
 		add(out)
 		if err == nil {
-			if label, description = mediaAnswer(out); description != "" {
+			// A JSON that does not read is tried again; the last try keeps
+			// what can be read of it (BUG-125).
+			label, description, broken = mediaAnswer(out)
+			if description != "" && (!broken || attempt >= mediaAttempts) {
 				break
 			}
 			err = errors.New("the model gave no description")
+			if broken {
+				err = errors.New("the model's JSON does not read")
+			}
 		}
 		if ctx.Err() != nil || attempt >= mediaAttempts {
 			break
@@ -324,14 +353,74 @@ func (env *Env) describeMediaNote(ctx context.Context, call *Env, with map[strin
 }
 
 // mediaAnswer reads a model's answer: label and description from its JSON,
-// or the whole text as the description when it is no JSON.
-func mediaAnswer(out map[string]any) (label, description string) {
+// else its text as the description. An answer that looks like JSON (it
+// starts with { or a fence) but does not read is broken: what can be read
+// of its label and description, which the caller takes only at the last
+// try (BUG-125). Prose stays the description, as written.
+func mediaAnswer(out map[string]any) (label, description string, broken bool) {
 	if j, ok := out["json"].(map[string]any); ok {
 		label, _ = j["label"].(string)
 		description, _ = j["description"].(string)
 	}
 	if strings.TrimSpace(description) == "" {
-		description, _ = out["text"].(string)
+		text, _ := out["text"].(string)
+		description = text
+		if t := strings.TrimSpace(text); strings.HasPrefix(t, "{") || strings.HasPrefix(t, "```") {
+			broken = true
+			label, description = salvageAnswer(t)
+		}
 	}
-	return oneLine(label, 120), strings.TrimSpace(description)
+	return oneLine(label, 120), strings.TrimSpace(description), broken
+}
+
+var (
+	answerLabelRe = regexp.MustCompile(`"label"\s*:\s*"((?:[^"\\]|\\.)*)"`)
+	answerDescRe  = regexp.MustCompile(`(?s)"description"\s*:\s*"(.*)`)
+	// answerBreakRe is a string closed and another opened in the middle of
+	// the description: «…\"  ,  "contiene…».
+	answerBreakRe = regexp.MustCompile(`"\s*,\s*"`)
+)
+
+// salvageAnswer reads what it can of a JSON answer that does not parse:
+// the label's string, and the description's text to the end, its stray
+// quotes and the JSON's closing taken out.
+func salvageAnswer(t string) (label, description string) {
+	if m := answerLabelRe.FindStringSubmatch(t); m != nil {
+		label = unescapeJSON(m[1])
+	}
+	if m := answerDescRe.FindStringSubmatch(t); m != nil {
+		d := strings.TrimRight(strings.TrimSpace(m[1]), "`} \n")
+		d = strings.TrimSuffix(strings.TrimSpace(d), "\"")
+		description = unescapeJSON(answerBreakRe.ReplaceAllString(d, " "))
+	}
+	return label, description
+}
+
+// unescapeJSON is the text of a JSON string's content; what does not read
+// keeps its characters, its common escapes taken out.
+func unescapeJSON(s string) string {
+	var out string
+	if json.Unmarshal([]byte(`"`+s+`"`), &out) == nil {
+		return out
+	}
+	return strings.NewReplacer(`\\`, `\`, `\"`, `"`, `\n`, " ", `\t`, " ").Replace(s)
+}
+
+func longestSide(fm map[string]any) int {
+	side := 0
+	for _, k := range []string{"width", "height"} {
+		n := 0
+		switch v := fm[k].(type) {
+		case int:
+			n = v
+		case int64:
+			n = int(v)
+		case float64:
+			n = int(v)
+		case string:
+			n, _ = strconv.Atoi(strings.TrimSpace(v))
+		}
+		side = max(side, n)
+	}
+	return side
 }

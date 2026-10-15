@@ -14,6 +14,9 @@ import (
 	"github.com/gosidian/gosidian/internal/index"
 )
 
+// watchWorkers is how many changed paths the watcher handles at once.
+const watchWorkers = 4
+
 // Watch starts a recursive fsnotify watcher on the vault and reindexes files
 // as they change. If onChange is non-nil it is invoked after every successful
 // reindex (create/update/delete) with the vault-relative path that changed,
@@ -73,10 +76,22 @@ func (v *Vault) Watch(ctx context.Context, idx *index.Index, onChange func(rel s
 	}
 
 	// One pending timer per path, dropped when it fires, so the map holds
-	// only the paths about to be handled. The timers fire on their own
-	// goroutines: mu guards the map.
+	// only the paths about to be handled. A timer that fires only queues its
+	// path, once, and watchWorkers goroutines handle the queue: handled on
+	// the timers' own goroutines, 14,792 attachments moved to the trash at
+	// once ran 14,792 index queries together, each on its own SQLite
+	// connection, and took 27 GB (BUG-123). mu guards the map and the queue.
 	var mu sync.Mutex
 	debounce := make(map[string]*time.Timer)
+	var queue []string
+	queued := make(map[string]bool)
+	wake := make(chan struct{}, 1)
+	signal := func() {
+		select {
+		case wake <- struct{}{}:
+		default:
+		}
+	}
 	schedule := func(name string, wait time.Duration) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -89,10 +104,46 @@ func (v *Vault) Watch(ctx context.Context, idx *index.Index, onChange func(rel s
 			if debounce[name] == t {
 				delete(debounce, name)
 			}
+			if !queued[name] {
+				queued[name] = true
+				queue = append(queue, name)
+			}
 			mu.Unlock()
-			handle(name)
+			signal()
 		})
 		debounce[name] = t
+	}
+	// next pops the oldest queued path, and wakes another worker while
+	// paths are left, so a burst is shared among the workers.
+	next := func() (string, bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		if len(queue) == 0 {
+			return "", false
+		}
+		name := queue[0]
+		queue = queue[1:]
+		if len(queue) == 0 {
+			queue = nil
+		} else {
+			signal()
+		}
+		delete(queued, name)
+		return name, true
+	}
+	for range watchWorkers {
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-wake:
+				}
+				for name, ok := next(); ok; name, ok = next() {
+					handle(name)
+				}
+			}
+		}()
 	}
 
 	for {

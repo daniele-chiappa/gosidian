@@ -13,6 +13,7 @@ import (
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/gosidian/gosidian/internal/index"
+	"github.com/gosidian/gosidian/internal/marks"
 	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/gosidian/gosidian/internal/projects"
 	"github.com/gosidian/gosidian/internal/server/events"
@@ -29,6 +30,7 @@ type notesFixture struct {
 	idx       *index.Index
 	projects  *projects.Store
 	bearer    string
+	marks     *marks.Store
 }
 
 func newNotesFixture(t *testing.T) *notesFixture {
@@ -63,6 +65,11 @@ func newNotesFixture(t *testing.T) *notesFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	ms, err := marks.Open(filepath.Join(dir, "marks.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ms.Close() })
 	router := NewRouter(&Deps{
 		Auth:     &AuthDeps{WebAuth: wa, SpaAuth: spa, Logger: slog.Default()},
 		Audit:    al,
@@ -71,6 +78,7 @@ func newNotesFixture(t *testing.T) *notesFixture {
 		Index:    idx,
 		Renderer: parser.NewRenderer(),
 		Projects: pstore,
+		Marks:    ms,
 	})
 
 	// Mint a token so tests don't repeat the login dance for every
@@ -91,7 +99,7 @@ func newNotesFixture(t *testing.T) *notesFixture {
 		password:  "supersecret",
 		owner:     owner,
 	}
-	return &notesFixture{authFixture: af, vaultRoot: vaultRoot, idx: idx, projects: pstore, bearer: bearer}
+	return &notesFixture{authFixture: af, vaultRoot: vaultRoot, idx: idx, projects: pstore, bearer: bearer, marks: ms}
 }
 
 func (f *notesFixture) doAuthRecorder(method, path, body string, extra map[string]string) *recorder {

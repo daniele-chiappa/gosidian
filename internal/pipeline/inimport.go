@@ -35,11 +35,11 @@ import (
 // its image note says about it.
 type importedImage struct {
 	src, inFile   string // its path under base, and in the IN folder
-	sha           string
+	sha           string // the original's, in the IN folder
 	width, height int
 }
 
-func inImport(_ context.Context, env *Env, with map[string]any) (any, error) {
+func inImport(ctx context.Context, env *Env, with map[string]any) (any, error) {
 	f, err := required(with, "file")
 	if err != nil {
 		return nil, err
@@ -78,6 +78,15 @@ func inImport(_ context.Context, env *Env, with map[string]any) (any, error) {
 	if b, ok := with["list_images"].(bool); ok {
 		listImages = b
 	}
+	var conv Type
+	if use := strings.TrimSpace(str(with, "convert")); use != "" {
+		t, ok := env.Engine.types.get(use)
+		if !ok {
+			return nil, fmt.Errorf("with.convert %q is no node type of this server", use)
+		}
+		conv = t
+	}
+	convWith, _ := with["convert_with"].(map[string]any)
 	host := env.Engine.host
 	data, err := host.ReadAttachment(env.Project, file)
 	if err != nil {
@@ -96,6 +105,19 @@ func inImport(_ context.Context, env *Env, with map[string]any) (any, error) {
 	images := map[string]importedImage{}
 	skipped := []any{}
 	read := []string{file}
+	// store keeps a file as it is, as an attachment.
+	store := func(img importedImage, b []byte) {
+		vp, err := env.StoreAttachment(path.Base(img.src), b)
+		if err != nil {
+			skipped = append(skipped, map[string]any{"src": img.src, "reason": err.Error()})
+			return
+		}
+		attached[img.src] = vp
+		if info, ok := attach.AllowedExt[strings.ToLower(path.Ext(vp))]; ok && info.IsImage {
+			images[vp] = img
+		}
+	}
+	var toConvert []importedImage
 	for _, l := range pkgimport.Links(text, src) {
 		if _, ok := attached[l.Target]; ok {
 			continue
@@ -113,20 +135,51 @@ func inImport(_ context.Context, env *Env, with map[string]any) (any, error) {
 			skipped = append(skipped, map[string]any{"src": l.Target, "reason": err.Error()})
 			continue
 		}
-		vp, err := env.StoreAttachment(path.Base(l.Target), b)
-		if err != nil {
-			skipped = append(skipped, map[string]any{"src": l.Target, "reason": err.Error()})
+		read = append(read, in)
+		sum := sha256.Sum256(b)
+		img := importedImage{src: l.Target, inFile: in, sha: hex.EncodeToString(sum[:])}
+		if c, _, err := image.DecodeConfig(bytes.NewReader(b)); err == nil {
+			img.width, img.height = c.Width, c.Height
+		}
+		if conv != nil && convertible[strings.ToLower(path.Ext(l.Target))] {
+			attached[l.Target] = "" // taken: the link may come again
+			toConvert = append(toConvert, img)
 			continue
 		}
-		attached[l.Target] = vp
-		read = append(read, in)
-		if info, ok := attach.AllowedExt[strings.ToLower(path.Ext(vp))]; ok && info.IsImage {
-			sum := sha256.Sum256(b)
-			img := importedImage{src: l.Target, inFile: in, sha: hex.EncodeToString(sum[:])}
-			if c, _, err := image.DecodeConfig(bytes.NewReader(b)); err == nil {
-				img.width, img.height = c.Width, c.Height
+		store(img, b)
+	}
+	converted, convertErrors := 0, []any{}
+	for start := 0; start < len(toConvert); start += convertBatch {
+		batch := toConvert[start:min(start+convertBatch, len(toConvert))]
+		done, err := env.convertImages(ctx, conv, convWith, batch)
+		for i, img := range batch {
+			if err == nil && done[i].path != "" {
+				if done[i].width > 0 {
+					img.width, img.height = done[i].width, done[i].height
+				}
+				attached[img.src] = done[i].path
+				images[done[i].path] = img
+				converted++
+				continue
 			}
-			images[vp] = img
+			// A batch that failed whole (the plugin down, a tool error)
+			// gives no item: its images are stored as they are.
+			var why string
+			if err != nil {
+				why = err.Error()
+			} else {
+				why = done[i].why
+			}
+			if why != "" {
+				convertErrors = append(convertErrors, map[string]any{"src": img.src, "reason": why})
+			}
+			delete(attached, img.src)
+			b, rerr := host.ReadAttachment(env.Project, img.inFile)
+			if rerr != nil {
+				skipped = append(skipped, map[string]any{"src": img.src, "reason": rerr.Error()})
+				continue
+			}
+			store(img, b)
 		}
 	}
 	text, unresolved := pkgimport.RewriteMarkdown(text, src, notes, attached)
@@ -158,6 +211,9 @@ func inImport(_ context.Context, env *Env, with map[string]any) (any, error) {
 
 	out := map[string]any{"path": res.Path, "created": res.Created, "attachments": len(attached),
 		"image_count": 0, "removed": []string{}, "unresolved": unresolved, "skipped": skipped}
+	if conv != nil {
+		out["converted"], out["convert_errors"] = converted, convertErrors
+	}
 	if listImages {
 		out["images"] = []any{}
 	}
@@ -180,6 +236,73 @@ func inImport(_ context.Context, env *Env, with map[string]any) (any, error) {
 		}
 	}
 	return out, nil
+}
+
+// convertible are the images in.import hands its convert node; an svg, a
+// document or another file is stored as it is.
+var convertible = map[string]bool{".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true, ".tif": true, ".tiff": true}
+
+// convertBatch is the images of one call of the convert node.
+const convertBatch = 25
+
+// convertedImage is an image the convert node gave back: the attachment it
+// is stored as, and its size; or why it gave none (kept as it is, or an
+// error), path empty.
+type convertedImage struct {
+	path          string
+	width, height int
+	why           string
+}
+
+// convertImages hands a batch of images of the IN folder to the convert
+// node, as its files setting (by reference, for a plugin that takes them
+// so), with its other settings from with. The node answers with results, in
+// the order of its files, each naming the file it gave back (output), as
+// images.convert does (IMP-184); the files it gave back are attachments
+// already. An image it kept or failed on has no path.
+func (env *Env) convertImages(ctx context.Context, t Type, with map[string]any, batch []importedImage) ([]convertedImage, error) {
+	args := make(map[string]any, len(with)+1)
+	for k, v := range with {
+		args[k] = v
+	}
+	files := make([]any, len(batch))
+	for i, img := range batch {
+		files[i] = img.inFile
+	}
+	args["files"] = files
+	out, err := t.Run(ctx, env, args)
+	if err != nil {
+		return nil, fmt.Errorf("converting: %w", err)
+	}
+	m, _ := out.(map[string]any)
+	results, _ := m["results"].([]any)
+	if len(results) != len(batch) {
+		return nil, fmt.Errorf("converting: %d results for %d images", len(results), len(batch))
+	}
+	byName := map[string]string{}
+	stored, _ := m["files"].([]any)
+	for _, f := range stored {
+		fm, _ := f.(map[string]any)
+		name, _ := fm["name"].(string)
+		p, _ := fm["path"].(string)
+		byName[name] = p
+	}
+	done := make([]convertedImage, len(batch))
+	for i, r := range results {
+		rm, _ := r.(map[string]any)
+		if name, _ := rm["output"].(string); name != "" && byName[name] != "" {
+			w, _ := rm["width"].(float64)
+			h, _ := rm["height"].(float64)
+			done[i] = convertedImage{path: byName[name], width: int(w), height: int(h)}
+			continue
+		}
+		if e, _ := rm["error"].(string); e != "" {
+			done[i].why = e
+		} else if name, _ := rm["output"].(string); name != "" {
+			done[i].why = "the converted file was not stored: " + name
+		}
+	}
+	return done, nil
 }
 
 // describedKeys are what llm.describe_media writes in an image note: an
@@ -254,13 +377,13 @@ func (env *Env) syncMediaNotes(article, content string, images map[string]import
 			{Key: "occurrences", Value: e.count},
 			{Key: "inline", Value: e.ref.Inline},
 			{Key: "section", Value: sectionAt(lines, e.ref.Line)},
-			{Key: "sha256", Value: img.sha},
+			{Key: "in_sha256", Value: img.sha},
 			{Key: "in_file", Value: img.inFile},
 			{Key: "pipeline", Value: "[[" + strings.TrimSuffix(env.Run.Ref, ".md") + "]]"},
 			{Key: "pipeline_run", Value: env.Run.ID},
 			{Key: "tags", Value: []string{env.Project, "type:image"}},
 		}
-		var unset []string
+		unset := []string{"sha256"} // before in_sha256, the same value
 		if alt := strings.TrimSpace(e.ref.Alt); alt != "" {
 			set = append(set, frontmatter.Field{Key: "alt_original", Value: alt})
 		} else {
@@ -273,7 +396,13 @@ func (env *Env) syncMediaNotes(article, content string, images map[string]import
 		body := ""
 		if n, ok := mine[p]; ok {
 			raw, body = n.Raw, n.Body
-			if m, _ := n.Frontmatter["media"].(string); m != e.att {
+			// The description is of the original: it goes when the original
+			// changed, not when the attachment did (a conversion, IMP-184).
+			was, _ := n.Frontmatter["in_sha256"].(string)
+			if was == "" {
+				was, _ = n.Frontmatter["sha256"].(string)
+			}
+			if was != img.sha {
 				body = ""
 				unset = append(unset, describedKeys...)
 			} else if _, described := n.Frontmatter["label"]; !described {

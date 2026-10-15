@@ -33,6 +33,9 @@ const CODE_KEY: Record<string, string> = {
   'auth.password_change_required': 'password_change',
   'auth.enrollment_required': 'enrollment',
   'auth.invite_invalid': 'invite_invalid',
+  // A plugin's own error (its arguments, or its store failing): "invalid
+  // data" would send the reader to fix arguments that may be right.
+  'plugin.refused': 'plugin_refused',
 }
 
 /** Every catalogue key describeError may name, for the catalogue test. */

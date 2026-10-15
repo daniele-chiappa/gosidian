@@ -49,7 +49,8 @@ token_secret = "docling-token"
 
 The environment overrides the file (see [configuration](configuration.md)):
 `GOSIDIAN_PIPELINES_ENABLED`, `_WORKERS`, `_RETENTION`, `_STEP_TIMEOUT`,
-`_MAX_WAIT`, `_MAX_LLM_TOKENS`, `_HTTP_ALLOWLIST` (comma-separated),
+`_MAX_WAIT`, `_MAX_LLM_TOKENS`, `_MAX_INPUT_BYTES`, `_MAX_OUTPUT_BYTES`,
+`_HTTP_ALLOWLIST` (comma-separated),
 `_PUBLIC_URL`, `_FILES_URL`, `_TIMEZONE`, `_LLM_URL`, `_LLM_MODEL`,
 `_LLM_KEY_SECRET` for one provider named `default`, and `_PLUGINS`
 (`name=url,…`, plugins without a token).
@@ -106,6 +107,7 @@ why a pipeline cannot run.
 | `ingest` | a file of one of `kinds` is stored as an attachment of the project (with `folder`: a note made with it in that folder) | `file`, `name`, `stem`, `ext`, `folder`, `note`, `project` |
 | `schedule` | `every: "monday 09:00"`, `"day 18:30"` (the automations' syntax), once per slot; a slot missed by more than 10 minutes is not run late | `slot` |
 | `in` | a batch of files of the project's [IN folder](in.md) closes: one run per file it takes, or one per batch with `batch: true`; `folder` (of the IN folder), `kinds` (none: all) and `match` (a glob on the name) choose the files; `take: false` reads them without taking them (their status stays the other pipelines') | per file: `file`, `name`, `stem`, `ext`, `dir`, `size`, `sha256`, `etag` (a source's file), `source` (`local`, or `<plugin>/<source>`), `project`; per batch: `batch`, `dir`, `count`, `bytes`, `files` (the files, when they fit in the input; else `files_listed` is false and `in.list` reads them), `project` |
+| `commit` | a commit of the vault's [git sync](configuration.md#environment-variables) changes files under `folder` (of the project; empty: all of it) whose name matches `match` (a glob, `*.md`): one run per commit | `commit` (its SHA), `date` (in seconds), `project`, `folder`, `count`, `files` (`path`, `change`: `added`, `modified`, `deleted`, `renamed`, and `from` for a renamed file; when they fit in the input, else `files_listed` is false), `files_listed` |
 
 Every file store counts as an arrival: `memory_ingest`,
 `memory_upload_attachment`, `memory_upload_resource`, the media and table
@@ -119,11 +121,28 @@ same file again starts no run, a changed one does. A batch run is keyed by its b
 Each file a run takes is marked `working` with the run, then `done` or
 `error` as the run ends, unless the pipeline set its status itself.
 
+A `commit` run is keyed by the commit: the same commit starts no second
+run. It is for a pipeline that keeps something beside the notes, such as
+the chunks of an archive of vectors ([below](#chunks-for-an-archive-of-vectors)),
+and follows their versions: the commit is the version. A file whose last
+write was a run of the same pipeline, or of a pipeline it starts with
+`pipeline.run` (named as written, not by an expression), is left out of
+`files` (the authors the index keeps from the audit), so that a pipeline
+writing in its own folder does not start itself again; so are the runs
+notes, which every run's end rewrites, or two commit pipelines of the same
+folder would start each other forever. A commit of such files only starts
+none. Git sync commits the whole vault, some seconds after the last change
+(`commit_debounce`): a run reads the notes as they are when it runs, maybe
+newer than the commit. With git sync off a commit pipeline starts only by
+hand, and the Runs window says so.
+
 Any pipeline also starts by hand, whatever its trigger: an ingest pipeline
 run with `{"file": "team/attachments/….pdf", …}` as input works on that
 file again, and the IN window starts a pipeline on the files chosen, the
 way its trigger would: once per file for an `in` pipeline per file, once
-for the others.
+for the others. Another run starts any pipeline of its project with
+[`pipeline.run`](#one-pipeline-starting-another): its trigger is then
+`pipeline`, a trigger no pipeline declares.
 
 ### Nodes
 
@@ -147,7 +166,8 @@ those that continue on error), `failed` otherwise.
 ### Expressions
 
 `{{ name.field.0 }}` reads `trigger`, `run` (`id`, `pipeline`,
-`project`, `trigger`, `resume_url`, `resume_key`), the output of a node
+`project`, `trigger`, `resume_url`, `resume_key`, `created`: when the run
+was made, `2026-10-15T07:30:00Z`), the output of a node
 that runs before, and `item`/`index` inside an `each`. A string that is
 one expression keeps the value's type (a list, a number); text around
 an expression turns it into text. There are no operators: compute in a
@@ -157,17 +177,21 @@ an expression turns it into text. There are no operators: compute in a
 
 | Type | `with` | Output |
 |---|---|---|
-| `note.read` | `path` (inside the project; relative to it) | `path`, `title`, `frontmatter`, `body`, `etag` |
+| `note.read` | `path` (inside the project; relative to it), `media`: `keep` (default) or `inline`, the images as text ([below](#chunks-for-an-archive-of-vectors)), with `media_words` and `inline_max_side` | `path`, `title`, `frontmatter`, `body`, `etag`; with `media: inline`, `media` (the images counted) |
 | `note.write` | `path`, `body`, `title`, `frontmatter` (a map), `mode`: `upsert` (default), `create`, `replace` | `path`, `etag`, `created` |
+| `note.list` | `folder` (inside the project, relative to it; empty: all of it), `recursive` (default yes), `where` (memory_query's conditions, `{field, op, value}`), `sort` (default `path`), `fields` (frontmatter fields to give), `limit` (default 500, at most 5000), `cursor` | `notes` (`path`, `title`, `fields`), `count` (this page), `total` (all that match), `next` (the cursor of the next page; empty at the last) |
+| `note.sections` | `path`, `version` (ends each chunk's id after an `@`), `levels` (default `[section, paragraph]`; `[paragraph]` still cuts the sections, the paragraphs' parents and paths, but gives the paragraphs only), `max_chars` (default 6000), `context`: `heading` (default), `path`, `none`, `text` (default yes), `only` (bases), `meta` (added to each chunk's), `media`: `inline` (default) or `keep`, `media_words`, `inline_max_side` | `doc`, `title`, `version`, `sections`, `paragraphs`, `chunks` (as an archive's `upsert` takes them), `count`, `media` — see [below](#chunks-for-an-archive-of-vectors) |
+| `note.mark` | `path`, `set` (a name: `cut`, `review`), `marks` (each `base`, a chunk of `note.sections`, or `section`, the path of its headings, and `block`, its paragraph from 1; `color`: `blue`, `green`, `orange`, `red`, `cyan`, `grey`; `label`, `text`) | `path`, `set`, `count` — see [below](#marks-on-a-note) |
 | `wait.call` | `timeout` (default `24h`, at most `max_wait`) | the data the resume hands it |
+| `pipeline.run` | `pipeline` (a pipeline note of the project, relative to it), `input` (a map, the started run's `trigger`), `wait` (default yes), `timeout` (of the wait: default `24h`, at most `max_wait`), `key` | with `wait`: `run`, `pipeline`, `status`, `error`, `steps` (each node's status), `outputs` (each node's output, when they fit); without: `run`, `pipeline`, `status`, `existing` — see [below](#one-pipeline-starting-another) |
 | `starlark` | `code` setting `output`, a script (loops and `if` at the top level, `while`, `set`); `input`; the run's values in `ctx`, `json.encode`/`json.decode`; no `load`, no I/O, 10 million steps at most | the value of `output` itself: `{{ node }}`, or `{{ node.field }}` for a map |
 | `http.request` | `url` (in `http_allowlist`), `method`, `json` or `body`, `headers`, `secret_header: "Authorization=secret_name"`, `accept_errors` | `status`, `headers`, `json` or `body` (4 MiB at most) |
-| `llm.chat` | `prompt`, `system`, `provider` (default `default`), `model`, `max_tokens` (default 1024), `temperature`, `json: true` | `text`, `json`, `model`, `provider`, `usage` |
+| `llm.chat` | `prompt`, `system`, `provider` (default `default`), `model`, `max_tokens` (default 1024), `temperature`, `json: true`, `reasoning_effort` (`none`, `low`, `medium`, `high`: how much a model that reasons first may think; `none` turns it off on Ollama — a thinking model can spend all `max_tokens` before it answers) | `text`, `json`, `model`, `provider`, `usage`, `finish_reason` (`length` when `max_tokens` ran out), `reasoning` (the model's thinking, when it gives it) |
 | `llm.describe` | `image` (an attachment of the project, png/jpg/gif/webp, 10 MiB at most), `prompt`, and as `llm.chat` | as `llm.chat`, plus `image` |
-| `llm.describe_media` | `note` (whose image notes, in `<note>_img/`, get a description), `prompt` and `inline_prompt` (with `{title}`, `{section}`, `{context}`), `context_chars` (default 1200), `max_pixels` (default 2000000; 0 sends an image whole), `concurrency` (default 1, at most 8), `prompt_version` (default 1), `redo`, and as `llm.chat` (`max_tokens` default 600) | `described`, `skipped`, `unreadable`, `failed`, `downscaled`, `errors`, `usage`, `seconds` — see [below](#documents-from-the-in-folder) |
+| `llm.describe_media` | `note` (whose image notes, in `<note>_img/`, get a description), `prompt` and `inline_prompt` (with `{title}`, `{section}`, `{context}`), `inline_max_side` (default 128: an image in a sentence with a longer side, a screenshot, gets `prompt`; 0: every one gets `inline_prompt`), `images` (`all`, the default; `icons`, the images in a sentence up to `inline_max_side`; `others`, the rest: two passes, each with its own model), `context_chars` (default 1200), `max_pixels` (default 2000000; 0 sends an image whole), `concurrency` (default 1, at most 8), `prompt_version` (default 1), `redo`, and as `llm.chat` (`max_tokens` default 600) | `described`, `skipped`, `unreadable`, `excluded` (left to another pass by `images`), `failed`, `downscaled`, `errors`, `usage`, `seconds` — see [below](#documents-from-the-in-folder) |
 | `in.list` | `folder` (of the IN folder; empty: all), `recursive` (default yes), `match` (a glob on the name), `kinds`, `status`, `batch` (`{{ trigger.batch }}`), `limit` (default 500, at most 5000), `cursor` | `files` (`path`, `name`, `stem`, `ext`, `dir`, `size`, `sha256`, `etag`, `status`, `modified`, `batch`, `source`), `count`, `next` (the cursor of the next page; empty at the last) |
 | `in.move` | `file` (in the IN folder), `to` (a folder, `done/`, or a path, in the IN folder; empty, or where it is already: it stays; for a file of a [source](in.md#sources), inside the source: `done/` is its `done/`), `status` (`done`, `error`, `ignored`, `new`) | `path`, `from`, `status` |
-| `in.import` | `file` (a `.md` in the IN folder), `dest` (a folder of the project), `base` (the folder of the IN folder whose tree is kept under `dest`; empty: all of it), `media_notes` (default yes), `list_images` (default yes; no keeps only their count, for an `each` over many files) | `path`, `created`, `attachments`, `image_count`, `images` (`note`, `attachment`, `src`, `position`, `inline`), `removed`, `unresolved`, `skipped` (`src`, `reason`) — see [below](#documents-from-the-in-folder) |
+| `in.import` | `file` (a `.md` in the IN folder), `dest` (a folder of the project), `base` (the folder of the IN folder whose tree is kept under `dest`; empty: all of it), `media_notes` (default yes), `list_images` (default yes; no keeps only their count, for an `each` over many files), `convert` (a node that converts the images, `images.convert`) and `convert_with` (its settings) | `path`, `created`, `attachments`, `image_count`, `images` (`note`, `attachment`, `src`, `position`, `inline`), `removed`, `unresolved`, `skipped` (`src`, `reason`), with `convert` `converted` and `convert_errors` — see [below](#documents-from-the-in-folder) |
 | `<plugin>.<node>` | what the plugin's manifest says; a setting it lists in `files` names an attachment of the project or a file of its IN folder (or a list of them, for a plugin that takes files by reference: `{{ trigger.files }}`) | the plugin tool's result, plus `files` (`name`, `path`, `mime`, `markdown`): the files it gave back, stored as attachments |
 
 A plugin's nodes exist once the owner accepted its manifest
@@ -176,7 +200,10 @@ and the Runs window list them.
 
 A node's output is at most 1 MiB (`max_output_bytes`): write a large text
 into a note and pass its path. A run's input is at most 256 KiB
-(`max_input_bytes`): pass files by their vault path, not their bytes.
+(`max_input_bytes`): pass files by their vault path, not their bytes. Both
+are settings: a pipeline that keeps many results in a step (a test of a
+search over hundreds of questions, say) needs a larger output, and a
+plugin's own cap goes up with it.
 
 `llm.describe` and a plugin node read the file they name whole, 20 MiB at
 most, unless the plugin takes files **by reference** (`file_refs` in its
@@ -271,13 +298,27 @@ nodes:
   search): `type: image`, `media` (the
   attachment), `article` (the note), `position` and `occurrences` in the
   note, `inline` (inside a sentence), `section`, `alt_original`, `width`,
-  `height`, `sha256`, `in_file`. The document points at the image, the
+  `height`, `in_sha256`, `in_file`. The document points at the image, the
   image note at the document: it lists its images among its backlinks;
 - imported again, an image note keeps its description and any key added
   to it; an image that changed loses its description; the image note of
   an image no longer there goes (into the trash). A note of the folder that
   is not an image note of the document is left alone;
-- the files it read are `done`, with its run.
+- the files it read are `done`, with its run;
+- with `convert: images.convert` ([the images plugin](plugins.md)), the
+  document's PNG, JPEG, GIF, WebP and TIFF images go to that node before
+  they are stored, 25 at a time, by reference, with `convert_with` as its
+  settings (`{format: webp}`): the vault gets the converted file, and the
+  note and the image note point at it. An image the node keeps (it would
+  not get lighter) or fails on is stored as it is, the failures listed in
+  `convert_errors`. The node takes the images as `files` and answers with
+  `results` in their order, each naming the file it gave back (`output`),
+  as `images.convert` does.
+
+An image note keeps `in_sha256`, the SHA-256 of the original in the IN
+folder: its description goes only when the original changed. A new
+conversion of the same original (another format, a plugin that writes
+other bytes) changes its `media` and keeps the description.
 
 **`llm.describe_media`** describes the image notes of a note that have
 no description yet: the model gets the image, the note's title, the
@@ -296,6 +337,80 @@ model scaled down, as a PNG, its pixels averaged so that text stays
 readable; the attachment stays whole. A model reads an image at about one
 token per 32×32 pixels (Qwen-VL): a 4K screenshot passes the 4096 tokens of
 context Ollama gives a model by default.
+
+### Chunks for an archive of vectors
+
+**`note.sections`** cuts a note by its headings (IMP-170), into the chunks
+an archive of vectors keeps ([the database plugin](plugins.md)'s `upsert`
+takes them as they are: `id`, `text`, `title`, `doc`, `parent`, `level`,
+`meta`):
+
+- a **section** for each heading with text of its own, and for the text
+  before the first heading; a heading with none (only subheadings under
+  it) is in the path of those under it. A line in a fenced block is no
+  heading. A section longer than `max_chars` is cut into parts at its
+  paragraphs (a paragraph longer than that is a part alone);
+- a **paragraph** (`level` 2, `parent` its section or part) for each block
+  between blank lines: a list, a table, a fenced block whole;
+- the text of each starts with its section's heading (`context: heading`),
+  the title and the path of the headings (`path`) or nothing (`none`); its
+  `title` is the note's title and the path, which a preset's document
+  template may use;
+- its **base** names it from one version of the note to the next: the
+  note, the path of its headings (and which, when two have the same), its
+  part, its paragraph. The `id` is the base, and `@` and `version` when
+  given (a commit), so the chunks of two versions live side by side;
+  `meta` holds `base`, `hash` (of the text), `chars`, `section`,
+  `position`, and the keys of `with.meta`;
+- `text: false` gives each chunk's `id`, `parent`, `level`, `base`,
+  `hash` and `chars` only: what tells which chunks changed against those
+  stored (a plugin's `list` with `fields`), within a step's output
+  (`max_output_bytes`) for a long note. `only` then gives the chunks of some bases with
+  their text, a batch at a time for `upsert`.
+
+With **`media: inline`** (the default of `note.sections`; `note.read` and
+`memory_get` take it too) the images become text, from their image notes:
+an icon, an image inside a sentence up to `inline_max_side` pixels (128),
+`[icon: label]` in its sentence; a larger image in a sentence
+`[image: label (description)]`; an image on a line of its own a paragraph,
+`[image: label] description`. `media_words` changes the words
+(`{icon: icona, image: immagine}`). An image without a description keeps
+its alt text, unless Word wrote it (`… Descrizione generata
+automaticamente`). `media` counts the images, the icons, those described,
+those without (`missing`) and the alt texts left out (`word_alt`).
+
+### Marks on a note
+
+**`note.mark`** puts a set of coloured marks on a note (IMP-188): spans of
+it — a chunk of `note.sections` by its `base`, or a section by the path of
+its headings, whole or its paragraph `block` — each with a colour, a label
+beside it and a text on hover. The web UI shows them in the note window's
+cut view, beside the text, never in it: written into the note, they would
+change the author's text, make a commit at each run and grow old with the
+rules that made them.
+
+- A run replaces its set (`set`); a set without marks goes. A note has at
+  most 20 sets, a set 500 marks; a label 60 characters, a text 500.
+- The sets live in `marks.db` in the state dir, out of the vault and of
+  git; a note renamed through gosidian takes its sets along, deleted loses
+  them.
+- A set keeps the SHA-256 of the note it was made on: once the note
+  changed, the web UI says the set is of an earlier version, and still
+  places its marks where their sections and paragraphs are. A mark whose
+  place is gone is counted.
+- The cut view lists the sets, each to hide or show; the note window's
+  «Cut» has a dot while the note has some.
+
+```yaml
+  - id: mark
+    use: note.mark
+    with:
+      path: "{{ trigger.note }}"
+      set: cut
+      marks:
+        - {base: "{{ cut.chunks.0.meta.base }}", color: red, label: no description}
+        - {section: "Setup > Requirements", block: 2, color: orange, label: long}
+```
 
 ## Editing in the web UI
 
@@ -399,6 +514,56 @@ output. A wait that nobody resumes before its timeout fails.
 summary when it ends: `{run, pipeline, project, status, error, started,
 finished, steps: {name: status}}`.
 
+### One pipeline starting another
+
+A job many pipelines need, such as describing the images of an article,
+lives in a pipeline of its own, and each pipeline that imports documents
+ends by starting it with `pipeline.run`:
+
+```pipeline
+nodes:
+  - id: import
+    use: in.import
+    with: {file: "{{ trigger.file }}", dest: documents}
+  - id: describe
+    use: pipeline.run
+    with:
+      pipeline: pipelines/describe-images
+      input: {note: "{{ import.path }}", domain: "the product manual"}
+```
+
+- **The run it starts** belongs to the same project, has the trigger
+  `pipeline`, acts as the starting pipeline in the audit, and reads `input`
+  as its `trigger`. It is keyed by the step that started it: a step tried
+  again finds the same run, and `key` tells apart the runs one node starts
+  of the same pipeline.
+- **With `wait`** (the default) the step waits, as `wait.call` does, until
+  that run ends, and gives its outcome: the status of its nodes and their
+  outputs (`{{ describe.outputs.<node> }}`) when they fit in a step's
+  output. When that run fails or is canceled the step fails, with the same
+  outcome for the nodes after it that continue on error. A run that ends,
+  is canceled or fails while it waits (its wait expired) cancels the run it
+  waited for.
+- **Without `wait`** the step gives the run it started and goes on: in an
+  `each`, one run per element, each with its own step timeout and its own
+  `max_llm_tokens`. An `each` that waits is refused.
+- **A chain** of runs starting each other stops at four below the first:
+  the fifth fails. A pipeline that starts itself does not run forever.
+
+To work again on notes a pipeline did not make, `note.list` gives the
+notes of a folder, a page at a time:
+
+```pipeline
+nodes:
+  - id: articles
+    use: note.list
+    with: {folder: "{{ trigger.folder }}", where: [{field: type, op: ne, value: image}]}
+  - id: describe
+    use: pipeline.run
+    each: "{{ articles.notes }}"
+    with: {pipeline: pipelines/describe-images, input: {note: "{{ item.path }}"}, wait: false}
+```
+
 REST reference: `internal/api/v1/spec/openapi.yaml`, tag `pipelines`.
 
 ## What a pipeline may do
@@ -412,6 +577,8 @@ REST reference: `internal/api/v1/spec/openapi.yaml`, tag `pipelines`.
   included. The language model providers are the owner's configuration.
 - Use secrets **by name**: their values never appear in a note, a run or
   the audit.
+- Start **only pipelines of its own project** (`pipeline.run`), in a chain
+  at most four runs deep.
 - Call **only the registered plugins**, and only through the nodes of the
   manifest the owner accepted. A plugin gets the files the node names,
   nothing else of the vault; the files it gives back become attachments

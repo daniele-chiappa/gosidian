@@ -680,9 +680,44 @@ paths:
     post:
       tags: [notes]
       summary: Render markdown to sanitized HTML (Phase 1 follow-up).
+      description: |
+        With `cut` (`{collection?, max_chars?, context?, media_words?, inline_max_side?}`)
+        it answers the cut view instead (IMP-170, docs/web-ui/overview.md): the
+        note as the `note.sections` node cuts it, `{cut: {blocks: [{id, parent,
+        level, section, chars, hash, part, over, state, head, html}], sections,
+        paragraphs, media, max_chars, collection, stored, orphans, states, error}}`.
+        Against a `collection` (`<plugin>/<collection>` of an archive exposed in
+        the project) each block's `state` is `same`, `changed` or `missing`; a
+        collection that cannot be read gives `error` and no states. The note
+        must be a markdown note the reader may read (400 otherwise).
       responses:
         "501":
           $ref: "#/components/responses/NotImplemented"
+
+  /api/v1/cut/collections:
+    get:
+      tags: [notes]
+      summary: The collections the cut view can compare a note with.
+      description: |
+        The collections of the archives exposed in `project` whose `list` and
+        `collections` are read tools, for a reader of the project.
+      parameters:
+        - {name: project, in: query, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: "`{project, collections: [{source, plugin, collection, model, count}], problems: [string]}`; `problems` names the archives that did not answer."
+
+  /api/v1/marks:
+    get:
+      tags: [notes]
+      summary: The marks the pipelines put on a note (IMP-188).
+      parameters:
+        - {name: path, in: query, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: "`{path, sets: [{set, pipeline, run, created, stale, marks: [{base, section, block, color, label, text}]}]}`; `stale` when the set was made on another text of the note."
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /api/v1/note-titles:
     get:
@@ -852,6 +887,12 @@ paths:
     get:
       tags: [graph]
       summary: Force-directed graph payload (Phase 5).
+      description: |
+        Without `limit` it keeps the 2000 most linked nodes (and the focus);
+        `stats.total` is how many there were (docs/vault/graphs.md). With
+        `source=<plugin>/<graph>` it is a plugin's graph: a graph the plugin
+        answers with an error of its own (its arguments refused, its store
+        failing) is a 422 with code `plugin.refused` and the plugin's message.
       responses:
         "501":
           $ref: "#/components/responses/NotImplemented"

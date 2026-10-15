@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -66,7 +67,7 @@ nodes:
     with: {file: "{{ trigger.file }}", base: wiki, dest: documents/wiki}
   - id: describe
     use: llm.describe_media
-    with: {note: "{{ import.path }}", concurrency: 2, prompt_version: 3, redo: "{{ trigger.redo }}"}
+    with: {note: "{{ import.path }}", concurrency: 2, prompt_version: 3, redo: "{{ trigger.redo }}", inline_max_side: "{{ trigger.inline_max }}", images: "{{ trigger.images }}"}
 `
 
 func newDescribeFixture(t *testing.T, v *visionServer, maxTokens int) (*Engine, *fakeHost) {
@@ -136,6 +137,51 @@ func TestDescribeMedia_WritesDescriptions(t *testing.T) {
 	_, out = describeRun(t, e, map[string]any{"redo": true}, jobs.Done)
 	if out["described"] != 2.0 || len(v.calls()) != 4 {
 		t.Fatalf("redo: output %v, %d calls", out, len(v.calls()))
+	}
+}
+
+// An image inside a sentence gets the inline prompt only up to
+// inline_max_side: a screenshot put in a line gets the full one (BUG-124).
+func TestDescribeMedia_LargeInlineImageGetsTheFullPrompt(t *testing.T) {
+	v := &visionServer{}
+	e, host := newDescribeFixture(t, v, 0)
+	host.att["p/IN/wiki/A/B/Doc one_img/002.png"] = pngOf(t, 300, 200, color.Black)
+	inlineCalls := func() int {
+		n := 0
+		for _, p := range v.calls() {
+			if strings.Contains(p, "small image") {
+				n++
+			}
+		}
+		return n
+	}
+	if _, out := describeRun(t, e, map[string]any{"redo": false}, jobs.Done); out["described"] != 2.0 || inlineCalls() != 0 {
+		t.Fatalf("output %v, %d inline prompts", out, inlineCalls())
+	}
+	if _, out := describeRun(t, e, map[string]any{"redo": true, "inline_max": 0}, jobs.Done); out["described"] != 2.0 || inlineCalls() != 1 {
+		t.Fatalf("with 0: output %v, %d inline prompts", out, inlineCalls())
+	}
+}
+
+// images splits the work in two passes, each with its own model: the icons
+// (in a sentence, up to inline_max_side) and the others (IMP-179).
+func TestDescribeMedia_PassesForIconsAndOthers(t *testing.T) {
+	v := &visionServer{}
+	e, host := newDescribeFixture(t, v, 0)
+	_, out := describeRun(t, e, map[string]any{"images": "icons"}, jobs.Done)
+	if out["described"] != 1.0 || out["excluded"] != 1.0 || len(v.calls()) != 1 || !strings.Contains(v.calls()[0], "small image") {
+		t.Fatalf("icons: output %v, calls %d", out, len(v.calls()))
+	}
+	if strings.Contains(host.note(img1Note), "It shows the window.") || !strings.Contains(host.note(img2Note), "It shows the window.") {
+		t.Fatal("the icons pass described the screenshot, or not the icon")
+	}
+	_, out = describeRun(t, e, map[string]any{"images": "others"}, jobs.Done)
+	if out["described"] != 1.0 || out["skipped"] != 1.0 || out["excluded"] != 0.0 || strings.Contains(v.calls()[1], "small image") {
+		t.Fatalf("others: output %v", out)
+	}
+	run, _ := describeRun(t, e, map[string]any{"images": "screens"}, jobs.Failed)
+	if !strings.Contains(run.Error, "all, icons or others") {
+		t.Errorf("error %q", run.Error)
 	}
 }
 
@@ -215,4 +261,59 @@ func TestDescribeMedia_TokenCap(t *testing.T) {
 	if !strings.Contains(host.note(img1Note), "label: A screen") {
 		t.Errorf("the image described first lost its description:\n%s", host.note(img1Note))
 	}
+}
+
+func TestMediaAnswer(t *testing.T) {
+	// The shape of an answer a vision model gave (BUG-125): a Windows path
+	// whose last backslash closes the description's quote too soon.
+	broken := "{\n  \"label\": \"Cartella REPORTS con foglio di stile XML\",\n  \"description\": \"Finestra di esplorazione file mostra la cartella REPORTS in D:\\\\Data\\\\reports\\\\q3\\\\*\\\\\"  ,  \"contiene file PDF e un foglio di stile XSL.\"\n}"
+	for name, tc := range map[string]struct {
+		out         map[string]any
+		label, desc string
+		broken      bool
+	}{
+		"json":   {map[string]any{"json": map[string]any{"label": "A screen", "description": "It shows."}, "text": "{}"}, "A screen", "It shows.", false},
+		"prose":  {map[string]any{"text": "Just a window."}, "", "Just a window.", false},
+		"broken": {map[string]any{"text": broken}, "Cartella REPORTS con foglio di stile XML", `Finestra di esplorazione file mostra la cartella REPORTS in D:\Data\reports\q3\*\ contiene file PDF e un foglio di stile XSL.`, true},
+		"fenced": {map[string]any{"text": "```json\n{\"label\": \"Menu\", \"description\": \"Il menu\n}```"}, "Menu", "Il menu", true},
+		"empty":  {map[string]any{"text": "{\"oops\": 1"}, "", "", true},
+	} {
+		label, desc, b := mediaAnswer(tc.out)
+		if label != tc.label || desc != tc.desc || b != tc.broken {
+			t.Errorf("%s: %q %q %v, want %q %q %v", name, label, desc, b, tc.label, tc.desc, tc.broken)
+		}
+	}
+}
+
+// A JSON that does not read is tried again; at the last try, what reads of
+// it is kept (BUG-125).
+func TestDescribeMedia_BrokenJSON(t *testing.T) {
+	var calls atomic.Int32
+	v := &visionServer{answer: func(p string) (int, string) {
+		if strings.Contains(p, "small image") {
+			return http.StatusOK, `{"label": "Icona", "description": "Un'icona."}`
+		}
+		if calls.Add(1) == 1 {
+			return http.StatusOK, `{"label": "Rotta", "description": "metà"  ,  "e metà"`
+		}
+		return http.StatusOK, `{"label": "A screen", "description": "It shows the window."}`
+	}}
+	e, host := newDescribeFixture(t, v, 0)
+	_, out := describeRun(t, e, map[string]any{"redo": false}, jobs.Done)
+	if out["described"] != 2.0 || out["failed"] != 0.0 || calls.Load() != 2 {
+		t.Fatalf("output %v, %d calls for the screen", out, calls.Load())
+	}
+	mustContain(t, "the screen tried again", host.note(img1Note), "label: A screen", "\n\nIt shows the window.\n")
+
+	// Broken every time: the last try keeps what reads.
+	v.mu.Lock()
+	v.answer = func(string) (int, string) {
+		return http.StatusOK, `{"label": "Rotta", "description": "metà"  ,  "e metà"`
+	}
+	v.mu.Unlock()
+	_, out = describeRun(t, e, map[string]any{"redo": true}, jobs.Done)
+	if out["described"] != 2.0 || out["failed"] != 0.0 {
+		t.Fatalf("broken every time: %v", out)
+	}
+	mustContain(t, "what reads of a broken answer", host.note(img1Note), "label: Rotta", "\n\nmetà e metà\n")
 }

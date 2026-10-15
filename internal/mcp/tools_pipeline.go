@@ -95,7 +95,7 @@ func (s *Server) handlePipelines(ctx context.Context, req mcp.CallToolRequest) (
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("pipelines", err), nil
 	}
-	res := map[string]any{"project": project, "pipelines": pipeline.Infos(ps, store)}
+	res := map[string]any{"project": project, "pipelines": s.pipelines.Infos(ps)}
 	if s.plugins != nil && len(s.plugins.Names()) > 0 {
 		res["plugins"] = pluginBriefs(s.plugins)
 	}

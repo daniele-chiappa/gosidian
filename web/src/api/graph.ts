@@ -29,6 +29,9 @@ export interface GraphEdge {
 export interface GraphStats {
   node_count: number
   edge_count: number
+  /** The node count before the limit cut the graph (the server caps a
+   *  graph asked without one, BUG-127). */
+  total?: number
   truncated: boolean
   filter?: string
 }

@@ -119,6 +119,33 @@ func MIMEOf(name string) string {
 	return "application/octet-stream"
 }
 
+// CallFileRef is a file an agent's call of a plugin tool names (IMP-184),
+// inside project, as the plugin takes it by reference: as FileRef, its
+// ticket bound to call instead of a run, until DropCall.
+func (e *Engine) CallFileRef(project, call, p, base string) (map[string]any, error) {
+	rel, err := projectRel(project, p)
+	if err != nil {
+		return nil, err
+	}
+	st, err := e.host.StatFile(project, rel)
+	if err != nil {
+		return nil, err
+	}
+	id := newTicketID()
+	e.tickets.add(id, fileTicket{run: call, project: project, path: st.Path, expires: time.Now().Add(e.cfg.FileTicketTTL)})
+	return fileRef(st, base, id), nil
+}
+
+// DropCall ends the tickets of a call.
+func (e *Engine) DropCall(call string) { e.tickets.dropRun(call) }
+
+func fileRef(st FileStat, base, id string) map[string]any {
+	return map[string]any{
+		"name": st.Name, "mime": MIMEOf(st.Name), "size": st.Size, "sha256": st.SHA256,
+		"url": strings.TrimRight(base, "/") + FileTicketPath + id,
+	}
+}
+
 // FileRef is a file a node names, inside the run's project (an attachment,
 // or a file of the IN folder), as a plugin takes it by reference: name,
 // MIME type, size, SHA-256 and the URL under base it is fetched from while
@@ -132,9 +159,5 @@ func (env *Env) FileRef(p, base string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	id := env.Engine.mintFileTicket(env.Run, st.Path)
-	return map[string]any{
-		"name": st.Name, "mime": MIMEOf(st.Name), "size": st.Size, "sha256": st.SHA256,
-		"url": strings.TrimRight(base, "/") + FileTicketPath + id,
-	}, nil
+	return fileRef(st, base, env.Engine.mintFileTicket(env.Run, st.Path)), nil
 }

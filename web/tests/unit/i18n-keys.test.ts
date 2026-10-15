@@ -60,6 +60,7 @@ describe('i18n catalogues (IMP-155)', () => {
     ...each('members.visibility_note', ['public', 'internal', 'private']),
     ...each('admin.users.via', ['owner', 'public', 'internal']),
     ...each('admin.users.totp_policy_name', ['inherit', 'enabled', 'disabled']),
+    ...each('cut.state', ['same', 'changed', 'missing']),
   ]
 
   it('has every key built from a value', () => {

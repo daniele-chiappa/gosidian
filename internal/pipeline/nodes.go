@@ -74,7 +74,11 @@ func NewRegistry() *Registry {
 	r := &Registry{types: map[string]Type{}}
 	r.Register("note.read", TypeFunc(noteRead))
 	r.Register("note.write", TypeFunc(noteWrite))
+	r.Register("note.list", TypeFunc(noteList))
+	r.Register("note.sections", TypeFunc(noteSections))
+	r.Register("note.mark", TypeFunc(noteMark))
 	r.Register("wait.call", TypeFunc(waitCall))
+	r.Register("pipeline.run", TypeFunc(pipelineRun))
 	r.Register("starlark", TypeFunc(runStarlark))
 	r.Register("http.request", TypeFunc(httpRequest))
 	r.Register("llm.chat", TypeFunc(llmChat))
@@ -132,6 +136,17 @@ type WaitFor struct{ Until time.Time }
 
 func (WaitFor) Error() string { return "waiting" }
 
+// FailedWith is returned by a node that fails with an output the nodes
+// after it read (with on_error: continue): pipeline.run, whose child run
+// failed, gives the child's outcome.
+type FailedWith struct {
+	Output any
+	Err    error
+}
+
+func (f FailedWith) Error() string { return f.Err.Error() }
+func (f FailedWith) Unwrap() error { return f.Err }
+
 // RetryAfter is returned by a node that knows when to try again (a
 // service answering 429 or 503).
 type RetryAfter struct {
@@ -171,13 +186,17 @@ func number(with map[string]any, key string, def float64) float64 {
 
 // projectPath resolves a path a node names: inside the run's project. A
 // path that does not start with the project is relative to it.
-func (env *Env) projectPath(p string) (string, error) {
+func (env *Env) projectPath(p string) (string, error) { return projectRel(env.Project, p) }
+
+// projectRel is p as a vault path inside project: a path that does not
+// start with the project is relative to it.
+func projectRel(project, p string) (string, error) {
 	p = strings.TrimSpace(strings.TrimPrefix(p, "/"))
 	if p == "" {
 		return "", errors.New("an empty path")
 	}
-	if !strings.HasPrefix(p, env.Project+"/") {
-		p = env.Project + "/" + p
+	if !strings.HasPrefix(p, project+"/") {
+		p = project + "/" + p
 	}
 	clean := path.Clean(p)
 	if clean != p || strings.Contains(p, "..") {
@@ -216,6 +235,8 @@ type NoteData struct {
 	// Raw is the note as stored, for the nodes that change a few of its
 	// keys and leave the rest as written.
 	Raw []byte `json:"-"`
+	// Media counts the images of the body put as text (media: inline).
+	Media *MediaStats `json:"media,omitempty"`
 }
 
 func noteRead(_ context.Context, env *Env, with map[string]any) (any, error) {
@@ -227,7 +248,29 @@ func noteRead(_ context.Context, env *Env, with map[string]any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return env.Engine.host.ReadNote(env.Project, rel)
+	media := str(with, "media")
+	if media != "" && media != "keep" && media != "inline" {
+		return nil, fmt.Errorf("with.media %q: keep or inline", media)
+	}
+	note, err := env.Engine.host.ReadNote(env.Project, rel)
+	if err != nil || media != "inline" {
+		return note, err
+	}
+	// The body with its images as text, from their image notes (IMP-170).
+	reader, ok := env.Engine.host.(NoteReader)
+	if !ok {
+		return nil, errors.New("this server does not read the image notes of a note: media: keep")
+	}
+	words, err := mediaWords(with)
+	if err != nil {
+		return nil, err
+	}
+	body, st, err := InlineNoteMedia(reader, env.Project, note.Path, note.Body, words, int(number(with, "inline_max_side", DefaultInlineMaxSide)))
+	if err != nil {
+		return nil, err
+	}
+	note.Body, note.Media = body, &st
+	return note, nil
 }
 
 // WriteMode is how note.write treats an existing note.
@@ -314,16 +357,26 @@ func Actor(pipelinePath string) string { return "pipeline:" + pipelinePath }
 // --- wait.call ---
 
 func waitCall(_ context.Context, env *Env, with map[string]any) (any, error) {
+	until, err := env.Engine.waitUntil(with)
+	if err != nil {
+		return nil, err
+	}
+	return nil, WaitFor{Until: until}
+}
+
+// waitUntil is when a wait of with.timeout (default DefaultWaitTime, at
+// most MaxWait) starting now ends.
+func (e *Engine) waitUntil(with map[string]any) (time.Time, error) {
 	d := DefaultWaitTime
 	if s := str(with, "timeout"); s != "" {
 		v, err := time.ParseDuration(s)
 		if err != nil || v <= 0 {
-			return nil, fmt.Errorf("with.timeout %q is a duration (30m, 24h)", s)
+			return time.Time{}, fmt.Errorf("with.timeout %q is a duration (30m, 24h)", s)
 		}
 		d = v
 	}
-	if max := env.Engine.cfg.MaxWait; max > 0 && d > max {
-		return nil, fmt.Errorf("with.timeout %s is beyond the longest wait, %s", d, max)
+	if max := e.cfg.MaxWait; max > 0 && d > max {
+		return time.Time{}, fmt.Errorf("with.timeout %s is beyond the longest wait, %s", d, max)
 	}
-	return nil, WaitFor{Until: env.Engine.now().Add(d)}
+	return e.now().Add(d), nil
 }

@@ -8,6 +8,94 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.89.0] — 2026-10-15 — "chunks and commits"
+
+The pipelines learn to keep an archive of vectors in step with the notes:
+a node cuts a note into chunks for it, a commit of git sync starts the
+pipelines of the folder it changed, and the web UI shows a note as it is
+cut and what the archive holds of it. Pipelines start one another, a
+plugin's tool takes files of the project, and imported images are
+converted without loss. Pull the image and restart; nothing to migrate.
+Where the pipelines are off, only the fixes below change anything.
+
+### Added
+- **Chunks for an archive of vectors** — `note.sections` cuts a note by
+  its headings into sections (a long one in parts up to `max_chars`), each
+  with its headings as context (`heading`, `path` or `none`), and into
+  their paragraphs: each chunk with a stable id, its parent, the path of
+  its headings and the hash of its text, as a plugin that keeps vectors
+  takes them. `levels: [paragraph]` gives the paragraphs alone, `only` the
+  chunks asked, `version` ends the ids after an `@`, and `meta` is added
+  to each. Images read as text from their image notes (`[icon: label]` in
+  a sentence, `[image: label] description` on a line of its own);
+  `note.read` and `memory_get` give the same text with `media: inline`.
+- **The commit trigger** — `trigger: {on: commit, folder, match}` starts a
+  pipeline on each commit of git sync that changes files under its
+  folder, with the commit, its date and the files with their change; the
+  commit is the run's idempotency key, so an archive follows the versions
+  of the notes. What the pipeline wrote, or a pipeline it starts, and the
+  runs notes, start nothing: no pipeline starts itself, nor two each
+  other. The Runs window says when git sync makes no commits.
+- **The cut view** — **Cut**, in a markdown note's view mode, shows the
+  note as `note.sections` cuts it: sections and paragraphs with their
+  sizes, its images as a model reads them, those without a description in
+  red. Given a collection of an archive exposed in the project, each block
+  says whether the archive holds it as it is, holds another text of it,
+  or does not. Its rules are kept per project in the browser.
+- **Marks on a note** — `note.mark` puts coloured marks, with a label and
+  a text, on a note's sections, paragraphs or chunks, in named sets kept
+  beside the vault; the cut view shows them and says when a set was made
+  on another text of the note. `GET /api/v1/marks` reads them.
+- **Pipelines that start pipelines** — `pipeline.run` starts a pipeline of
+  the project with an `input`, and waits for it (the step gets its status,
+  its steps and its outputs) or not (`wait: false`, inside an `each`); a
+  chain stops at 4 runs, and a run that ends without the children it
+  waited for cancels them. `note.list` lists the notes of a folder, with
+  `memory_query`'s conditions, in pages.
+- **A plugin's tool that takes files** — a tool of a plugin's manifest may
+  list in `files` the arguments that name files of the project: the agent
+  gives vault paths, the plugin gets a reference bound to the call, and
+  the files a write tool gives back become attachments, which the agent
+  gets as paths. See docs/plugins.md.
+- **Images converted as they arrive** — `in.import` with `convert:
+  images.convert` hands a document's images to the images plugin
+  ([gosidian-images](https://github.com/daniele-chiappa/gosidian-plugins/tree/main/images)),
+  25 at a time, and the vault gets the converted files (an optimized PNG,
+  or WebP); an image it keeps or fails on is stored as it is. An image
+  note keeps the original's hash: a new conversion keeps its description.
+- **Images described in passes** — `llm.describe_media` with `images:
+  icons` or `others` describes the small images inside a sentence or the
+  rest, each pass with its own model and prompt.
+- **What a thinking model does** — the `llm` nodes take
+  `reasoning_effort` (`none` turns a model's thinking off on Ollama) and
+  give `finish_reason` (`length` when `max_tokens` ran out) and
+  `reasoning`.
+- **`run.created`** in a pipeline's expressions: when the run was made.
+- **Caps that are settings** — `[pipelines] max_input_bytes` and
+  `max_output_bytes` (`GOSIDIAN_PIPELINES_MAX_INPUT_BYTES`,
+  `_MAX_OUTPUT_BYTES`), and `[mcp] max_plugin_result`
+  (`GOSIDIAN_MCP_MAX_PLUGIN_RESULT`), the bytes of a plugin tool's result
+  an agent gets. See docs/configuration.md.
+
+### Changed
+- **A graph asked without a limit keeps its 2000 most linked nodes**, the
+  focus among them, and `stats.total` says how many there were: a vault of
+  tens of thousands of notes sent them all.
+- **A plugin's own error** — a plugin's graph the plugin answers with an
+  error is a 422 with code `plugin.refused` and the plugin's message, not
+  a «server not available»; the Graph window asks for a plugin graph's
+  required arguments before it calls it.
+
+### Fixed
+- `memory_gc_attachments` finds the orphan attachments in time linear in
+  the vault: with tens of thousands of notes its dry run did not end.
+- Thousands of files removed at once no longer open a SQLite connection
+  each: the watcher works through a queue, on a bounded pool.
+- `llm.describe_media` gives the one-line prompt only to a small image in
+  a sentence, and asks again when the model's JSON does not read.
+- A node skipped while nothing else runs decides the nodes after it: the
+  run no longer stops with «it could not start».
+
 ## [2.88.0] — 2026-10-13 — "documents from IN"
 
 Two node types for the pipelines: a markdown document of a project's IN

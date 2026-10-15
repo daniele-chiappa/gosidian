@@ -68,6 +68,11 @@ const (
 	// used or expired: the web UI says so and asks for a new link,
 	// instead of a format error the invitee cannot fix (BUG-099).
 	CodeAuthInviteInvalid = "auth.invite_invalid"
+	// CodePluginRefused is a plugin's own error (its tool answered one):
+	// arguments it refused, or its store failing. The message is the
+	// plugin's; "invalid format" would send the reader to fix arguments
+	// that may be right (BUG-128).
+	CodePluginRefused = "plugin.refused"
 )
 
 // WriteError writes a JSON ErrorResponse with the given HTTP status.

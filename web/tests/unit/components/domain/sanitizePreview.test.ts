@@ -27,6 +27,7 @@ describe('filterClass (BUG-117, S7-4)', () => {
   it("keeps the renderer's classes", () => {
     expect(filterClass('wikilink unresolved')).toBe('wikilink unresolved')
     expect(filterClass('gosidian-count gosidian-count-error')).toBe('gosidian-count gosidian-count-error')
+    expect(filterClass('gosidian-cut-thumb gosidian-cut-missing')).toBe('gosidian-cut-thumb gosidian-cut-missing')
     expect(filterClass('callout callout-warning')).toBe('callout callout-warning')
     expect(filterClass('chroma')).toBe('chroma')
     expect(filterClass('kd')).toBe('kd')

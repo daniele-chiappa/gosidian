@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -68,6 +69,9 @@ type Sync struct {
 	// web UI without restarting the container.
 	tokens *TokenStore
 
+	// onCommit are told of each commit git sync makes (OnCommit).
+	onCommit []func(CommitChanges)
+
 	mu      sync.Mutex
 	timer   *time.Timer
 	pending bool
@@ -111,6 +115,35 @@ const (
 // using TriggerCommit; on first call Start ensures the repo is initialized.
 func New(vaultDir string, cfg config.GitConfig) *Sync {
 	return &Sync{vaultDir: vaultDir, cfg: cfg}
+}
+
+// CommitChanges is a commit git sync made: its SHA, its date, and the
+// files it changed, as vault paths (the commit trigger of the pipelines,
+// IMP-170).
+type CommitChanges struct {
+	SHA   string
+	Date  time.Time
+	Files []Change
+}
+
+// Change is a file a commit changed: Status is added, modified, deleted or
+// renamed; From is the path a renamed file had.
+type Change struct {
+	Path   string
+	From   string
+	Status string
+}
+
+// OnCommit registers fn, told of each commit git sync makes, after it is
+// made and before any push. fn runs on the commit's goroutine, in the
+// order of the commits, and must be quick. Safe to call at any time.
+func (s *Sync) OnCommit(fn func(CommitChanges)) {
+	if fn == nil {
+		return
+	}
+	s.mu.Lock()
+	s.onCommit = append(s.onCommit, fn)
+	s.mu.Unlock()
 }
 
 // SetProjects wires the per-project flag store. When non-nil, refreshGitignore
@@ -197,6 +230,14 @@ func (s *Sync) Status() Status {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.status
+}
+
+// Commits says whether the sync makes commits: on, and its repository set
+// up. A failed commit or push does not stop it: the next commit may work.
+func (s *Sync) Commits() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cfg.Enabled && !s.initFailed
 }
 
 // recordError marks the sync as degraded, setting LastError/LastErrorAt and
@@ -682,6 +723,18 @@ func (s *Sync) commitAndPush() error {
 		return fmt.Errorf("git commit: %w", err)
 	}
 	log.Printf("gitsync: committed %q", msg)
+	s.mu.Lock()
+	listeners := s.onCommit
+	s.mu.Unlock()
+	if len(listeners) > 0 {
+		if c, err := s.lastCommit(); err != nil {
+			log.Printf("gitsync: reading the commit for its listeners: %v", err)
+		} else {
+			for _, fn := range listeners {
+				fn(c)
+			}
+		}
+	}
 
 	if !s.cfg.Push {
 		return nil
@@ -788,6 +841,61 @@ func (s *Sync) runEnv(env []string, cmd string, args ...string) error {
 		return errors.New(msg)
 	}
 	return nil
+}
+
+// lastCommit reads HEAD: its SHA, date and changed files. -z keeps the
+// paths as they are (no quoting of accents), -M finds the renames, --root
+// lists the files of a first commit.
+func (s *Sync) lastCommit() (CommitChanges, error) {
+	head, err := s.capture("git", "log", "-1", "--format=%H %ct")
+	if err != nil {
+		return CommitChanges{}, err
+	}
+	sha, secs, ok := strings.Cut(strings.TrimSpace(head), " ")
+	n, err := strconv.ParseInt(secs, 10, 64)
+	if !ok || err != nil {
+		return CommitChanges{}, fmt.Errorf("git log: %q", head)
+	}
+	out, err := s.capture("git", "diff-tree", "--no-commit-id", "--name-status", "-r", "-z", "-M", "--root", sha)
+	if err != nil {
+		return CommitChanges{}, err
+	}
+	return CommitChanges{SHA: sha, Date: time.Unix(n, 0).UTC(), Files: parseNameStatus(out)}, nil
+}
+
+// parseNameStatus reads `git diff-tree --name-status -z`: a status, then
+// the path, or the two paths of a rename or a copy.
+func parseNameStatus(out string) []Change {
+	f := strings.Split(strings.TrimRight(out, "\x00"), "\x00")
+	var changes []Change
+	for i := 0; i+1 < len(f); {
+		st := f[i]
+		if st == "" {
+			i++
+			continue
+		}
+		switch st[0] {
+		case 'R', 'C':
+			if i+2 >= len(f) {
+				return changes
+			}
+			status := "renamed"
+			if st[0] == 'C' {
+				status = "added"
+			}
+			changes = append(changes, Change{Path: f[i+2], From: f[i+1], Status: status})
+			i += 3
+			continue
+		case 'A':
+			changes = append(changes, Change{Path: f[i+1], Status: "added"})
+		case 'D':
+			changes = append(changes, Change{Path: f[i+1], Status: "deleted"})
+		default: // M, T: the content or the kind of the file
+			changes = append(changes, Change{Path: f[i+1], Status: "modified"})
+		}
+		i += 2
+	}
+	return changes
 }
 
 func (s *Sync) capture(cmd string, args ...string) (string, error) {

@@ -185,8 +185,17 @@ func (r *Registry) Graphs() []PluginGraph {
 	return out
 }
 
+// RefusedError is a call the plugin answered with an error of its own: it
+// refused the arguments (a collection missing, a number out of range), or
+// its store failed. It is no failure to reach the plugin, and its message
+// is the plugin's.
+type RefusedError struct{ Msg string }
+
+func (e *RefusedError) Error() string { return e.Msg }
+
 // Graph reads a plugin's graph: GraphTool with the graph's name and its
-// arguments, meta as the call's _meta. The result is the plugin's JSON.
+// arguments, meta as the call's _meta. The result is the plugin's JSON; a
+// graph the plugin refuses is a *RefusedError.
 func (r *Registry) Graph(ctx context.Context, plugin, graph string, args, meta map[string]any) (json.RawMessage, error) {
 	c, ok := r.plugins[plugin]
 	if !ok {
@@ -221,9 +230,9 @@ func (r *Registry) Graph(ctx context.Context, plugin, graph string, args, meta m
 		return nil, fmt.Errorf("plugin %s, graph %s: %w", plugin, graph, err)
 	}
 	if res.IsError {
-		return nil, fmt.Errorf("plugin %s, graph %s: %s", plugin, graph, strings.TrimSpace(resultText(res)))
+		return nil, &RefusedError{Msg: fmt.Sprintf("plugin %s, graph %s: %s", plugin, graph, strings.TrimSpace(resultText(res)))}
 	}
-	raw := resultJSON(res)
+	raw := ResultJSON(res)
 	if len(raw) > maxGraphResult {
 		return nil, fmt.Errorf("plugin %s gave the graph %s in %d bytes, more than %d", plugin, graph, len(raw), maxGraphResult)
 	}

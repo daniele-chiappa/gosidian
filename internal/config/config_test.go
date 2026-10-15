@@ -508,3 +508,39 @@ timeout = "20m"
 		t.Error("an entry without =url is accepted")
 	}
 }
+
+// The caps of a run's input and of a step's output come from the
+// environment too, for an installer without a config.toml.
+func TestPipelinesLimitsEnv(t *testing.T) {
+	t.Setenv("GOSIDIAN_PIPELINES_MAX_OUTPUT_BYTES", "8388608")
+	t.Setenv("GOSIDIAN_PIPELINES_MAX_INPUT_BYTES", "524288")
+	cfg := Default()
+	if err := cfg.ApplyEnv(); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Pipelines.MaxOutputBytes != 8<<20 || cfg.Pipelines.MaxInputBytes != 512<<10 {
+		t.Errorf("output %d, input %d", cfg.Pipelines.MaxOutputBytes, cfg.Pipelines.MaxInputBytes)
+	}
+	for _, bad := range []string{"8M", "0", "-1"} {
+		t.Setenv("GOSIDIAN_PIPELINES_MAX_OUTPUT_BYTES", bad)
+		if err := Default().ApplyEnv(); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}
+
+// The cap of a plugin tool's result comes from the environment too.
+func TestMCPMaxPluginResultEnv(t *testing.T) {
+	if Default().MCP.MaxPluginResult != 1<<20 {
+		t.Errorf("default %d, want 1 MiB", Default().MCP.MaxPluginResult)
+	}
+	t.Setenv("GOSIDIAN_MCP_MAX_PLUGIN_RESULT", "8388608")
+	cfg := Default()
+	if err := cfg.ApplyEnv(); err != nil || cfg.MCP.MaxPluginResult != 8<<20 {
+		t.Errorf("max_plugin_result %d, %v", cfg.MCP.MaxPluginResult, err)
+	}
+	t.Setenv("GOSIDIAN_MCP_MAX_PLUGIN_RESULT", "lots")
+	if err := Default().ApplyEnv(); err == nil {
+		t.Error("lots accepted")
+	}
+}

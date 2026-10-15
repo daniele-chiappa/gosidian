@@ -4,7 +4,7 @@ import { createI18n } from 'vue-i18n'
 import enUI from '@catalogs/ui.en.json'
 import type { GraphResponse } from '@/api/graph'
 
-vi.mock('@/api/graph', () => ({ fetchGraph: vi.fn() }))
+vi.mock('@/api/graph', () => ({ fetchGraph: vi.fn(), fetchGraphSources: vi.fn(async () => []) }))
 vi.mock('@/api/projects', () => ({ listProjects: vi.fn(async () => []) }))
 vi.mock('@/api/tags', () => ({ listTags: vi.fn(async () => []) }))
 vi.mock('@/api/noteTitles', () => ({ suggestNoteTitles: vi.fn(async () => []) }))
@@ -18,7 +18,7 @@ vi.mock('@vueuse/core', async (orig) => ({
   useDebounceFn: (fn: () => void) => fn,
 }))
 
-import { fetchGraph } from '@/api/graph'
+import { fetchGraph, fetchGraphSources } from '@/api/graph'
 import GraphView from '@/views/GraphView.vue'
 
 const i18n = () => createI18n({ legacy: false, locale: 'en', messages: { en: enUI } })
@@ -44,5 +44,54 @@ describe('GraphView (BUG-116, S6-10)', () => {
     await flushPromises()
     expect(fetchGraph).toHaveBeenCalledTimes(2)
     expect(w.text()).toContain('Nodes: 42')
+  })
+
+  it("asks for no plugin's graph until its required arguments are given (BUG-128)", async () => {
+    vi.mocked(fetchGraph).mockReset().mockResolvedValue(graph(3))
+    vi.mocked(fetchGraphSources).mockResolvedValue([
+      { source: 'links' },
+      {
+        source: 'vec-pg/docs',
+        input_schema: { type: 'object', properties: { collection: { type: 'string' } }, required: ['collection'] },
+      },
+    ])
+    const w = mount(GraphView, {
+      props: { project: 'rag', global: true, source: 'vec-pg/docs' },
+      global: { plugins: [i18n()], stubs: { GraphCanvas: true, Graph3DCanvas: true, SearchSelect: true } },
+    })
+    await flushPromises()
+    expect(fetchGraph).not.toHaveBeenCalled()
+    expect(w.find('[data-graph-args-needed]').text()).toContain('collection')
+    expect(w.find('aside').text()).toContain('collection *')
+
+    // The field saves on change, as when the reader leaves it.
+    const input = w.find('aside input[type="text"]')
+    expect(input.attributes('required')).toBeDefined()
+    expect(input.attributes('aria-required')).toBe('true')
+    ;(input.element as HTMLInputElement).value = 'docs'
+    await input.trigger('change')
+    await flushPromises()
+    expect(fetchGraph).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(fetchGraph).mock.calls[0]![0]).toMatchObject({ source: 'vec-pg/docs', with: { collection: 'docs' } })
+    expect(w.find('[data-graph-args-needed]').exists()).toBe(false)
+  })
+
+  it('leaves the limit empty, its placeholder the cap, and asks for no limit until one is given', async () => {
+    vi.mocked(fetchGraph).mockReset().mockResolvedValue(graph(3))
+    vi.mocked(fetchGraphSources).mockResolvedValue([])
+    const w = mount(GraphView, {
+      props: { project: 'A', global: true },
+      global: { plugins: [i18n()], stubs: { GraphCanvas: true, Graph3DCanvas: true, SearchSelect: true } },
+    })
+    await flushPromises()
+    const limit = w.find('input[placeholder="2000"]')
+    expect((limit.element as HTMLInputElement).value).toBe('')
+    expect(vi.mocked(fetchGraph).mock.calls.at(-1)![0]?.limit).toBeUndefined()
+    await limit.setValue(300)
+    await flushPromises()
+    expect(vi.mocked(fetchGraph).mock.calls.at(-1)![0]).toMatchObject({ limit: 300 })
+    await limit.setValue('')
+    await flushPromises()
+    expect(vi.mocked(fetchGraph).mock.calls.at(-1)![0]?.limit).toBeUndefined()
   })
 })

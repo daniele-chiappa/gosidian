@@ -292,7 +292,10 @@ type RunFilter struct {
 	Ref      string   // one pipeline
 	Projects []string // these projects; nil: all
 	Status   Status
-	Limit    int // default 50, at most 500
+	// IdemPrefix keeps the runs whose idempotency key starts with it: the
+	// runs another run started (pipeline.run, IMP-186).
+	IdemPrefix string
+	Limit      int // default 50, at most 500
 }
 
 // Runs lists runs.
@@ -315,6 +318,11 @@ func (s *Store) Runs(f RunFilter) ([]Run, error) {
 	if f.Status != "" {
 		where = append(where, "status = ?")
 		args = append(args, f.Status)
+	}
+	if f.IdemPrefix != "" {
+		esc := strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(f.IdemPrefix)
+		where = append(where, `idem_key LIKE ? ESCAPE '\'`)
+		args = append(args, esc+"%")
 	}
 	q := `SELECT ` + runCols + ` FROM runs`
 	if len(where) > 0 {

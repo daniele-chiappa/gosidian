@@ -115,6 +115,9 @@ type Engine struct {
 	in *infolder.Service
 	// tickets are the files the plugins fetch by reference.
 	tickets fileTickets
+	// commits says whether the vault's git sync makes commits, which start
+	// the commit pipelines (SetCommits); nil: it does not.
+	commits func() bool
 }
 
 // New is an engine acting through host, running on runner (which it
@@ -168,7 +171,7 @@ func (e *Engine) SetClock(now func() time.Time) { e.now = now }
 // StartRequest starts a run.
 type StartRequest struct {
 	Path    string // the pipeline note
-	Trigger string // manual, external, ingest, schedule
+	Trigger string // manual, external, ingest, schedule, in, commit, pipeline
 	Input   any    // the trigger's payload, a JSON value
 	Actor   string // who started it: an account, a token, the server
 	// IdemKey starts the run once: the same key again gives the run
@@ -193,14 +196,20 @@ func (e *Engine) Start(req StartRequest) (jobs.Run, bool, error) {
 		return jobs.Run{}, false, ErrDisabled
 	}
 	switch req.Trigger {
-	case TriggerManual:
+	case TriggerManual, TriggerPipeline:
 	case TriggerExternal:
 		if p.Spec.Trigger.On != TriggerExternal && p.Spec.Trigger.On != TriggerManual {
 			return jobs.Run{}, false, fmt.Errorf("the pipeline starts on %s, not from outside", p.Spec.Trigger.On)
 		}
-	case TriggerIngest, TriggerSchedule, TriggerIN:
+	case TriggerIngest, TriggerSchedule, TriggerIN, TriggerCommit:
 	default:
 		return jobs.Run{}, false, fmt.Errorf("unknown trigger %q", req.Trigger)
+	}
+	// The key of a run pipeline.run starts names the run its end resumes
+	// (endedChild): only the engine gives such keys, or anyone could end
+	// another run's waiting step.
+	if req.Trigger != TriggerPipeline && (strings.HasPrefix(req.IdemKey, keyWaited) || strings.HasPrefix(req.IdemKey, keySpawned)) {
+		return jobs.Run{}, false, fmt.Errorf("idempotency_key: %q and %q begin the keys of the runs pipeline.run starts", keyWaited, keySpawned)
 	}
 	if req.CallbackURL != "" && !e.allowed(req.CallbackURL) {
 		return jobs.Run{}, false, fmt.Errorf("callback_url %q is not among the addresses the server may call ([pipelines] http_allowlist)", req.CallbackURL)
@@ -248,6 +257,8 @@ func (e *Engine) scope(run jobs.Run, steps []jobs.Step) scope {
 		"run": map[string]any{
 			"id": run.ID, "pipeline": run.Ref, "project": run.Project, "trigger": run.Trigger,
 			"resume_url": e.ResumeURL(run), "resume_key": run.ResumeKey,
+			// When it started, for a report that dates what it writes.
+			"created": run.Created.UTC().Format(time.RFC3339),
 		},
 	}
 	for _, st := range steps {
@@ -324,6 +335,12 @@ func (e *Engine) Step(ctx context.Context, run jobs.Run, st jobs.Step, steps []j
 				delay = ra.After
 			}
 			return jobs.Outcome{Status: jobs.Queued, Error: err.Error(), RetryAt: e.now().Add(delay)}
+		}
+		var fw FailedWith
+		if errors.As(err, &fw) {
+			if b, merr := json.Marshal(fw.Output); merr == nil && len(b) <= e.cfg.MaxOutputBytes {
+				return jobs.Outcome{Status: jobs.Failed, Error: err.Error(), Output: b}
+			}
 		}
 		return jobs.Outcome{Status: jobs.Failed, Error: err.Error()}
 	}
@@ -408,49 +425,38 @@ func (e *Engine) Next(run jobs.Run, steps []jobs.Step) ([]jobs.StepChange, *jobs
 	var changes []jobs.StepChange
 	sc := e.scope(run, steps)
 	now := e.now()
-	for _, st := range steps {
-		if st.Status != jobs.Pending {
-			continue
-		}
-		node, ok := spec.Node(st.Name)
-		if !ok {
-			changes = append(changes, jobs.StepChange{Name: st.Name, Status: jobs.Canceled, Error: "not in the pipeline", Finished: now})
-			continue
-		}
-		ready, blocked, allSkipped := true, "", len(node.After) > 0
-		for _, d := range node.After {
-			ds := byName[d]
-			switch ds.Status {
-			case jobs.Done:
-				allSkipped = false
-			case jobs.Skipped:
-			case jobs.Failed:
-				allSkipped = false
-				if !continues(d) {
-					blocked = d
-				}
-			case jobs.Canceled:
-				blocked = d
-			default:
-				ready = false
+	// A node skipped, canceled or failed here can decide the nodes waiting
+	// on it at once: the passes go on until one decides none of those, or
+	// a run whose last step was skipped would stop with its next ones
+	// pending (BUG-126). A queued node decides nothing until it ran.
+	decided := map[string]bool{}
+	for pass := 0; pass <= len(steps); pass++ {
+		released := false
+		for _, st := range steps {
+			if st.Status != jobs.Pending || decided[st.Name] {
+				continue
+			}
+			c, ok := e.decide(spec, st.Name, byName, continues, sc, now)
+			if !ok {
+				continue
+			}
+			changes = append(changes, c)
+			decided[st.Name] = true
+			ns := byName[st.Name]
+			ns.Status = c.Status
+			byName[st.Name] = ns
+			// The nodes decided after it in this call read it as a later
+			// call would (scope): a skipped or failed node gives nothing,
+			// it is not unknown.
+			if c.Status == jobs.Skipped || c.Status == jobs.Failed {
+				sc[st.Name] = nil
+			}
+			if c.Status != jobs.Queued {
+				released = true
 			}
 		}
-		switch {
-		case blocked != "":
-			changes = append(changes, jobs.StepChange{Name: st.Name, Status: jobs.Canceled, Error: blocked + " did not end well", Finished: now})
-		case !ready:
-		case allSkipped:
-			changes = append(changes, jobs.StepChange{Name: st.Name, Status: jobs.Skipped, Finished: now})
-		default:
-			skip, err := e.skips(node, sc)
-			switch {
-			case err != nil:
-				changes = append(changes, jobs.StepChange{Name: st.Name, Status: jobs.Failed, Error: err.Error(), Finished: now})
-			case skip:
-				changes = append(changes, jobs.StepChange{Name: st.Name, Status: jobs.Skipped, Finished: now})
-			default:
-				changes = append(changes, jobs.StepChange{Name: st.Name, Status: jobs.Queued})
-			}
+		if !released {
+			break
 		}
 	}
 	// The end of the run, when every node ended: failed only for a node
@@ -485,6 +491,48 @@ func firstError(st jobs.Step, changes []jobs.StepChange) string {
 		}
 	}
 	return st.Error
+}
+
+// decide is what becomes of a pending node, given the steps it waits for:
+// queued, skipped, canceled or failed; false while it must wait.
+func (e *Engine) decide(spec *Spec, name string, byName map[string]jobs.Step, continues func(string) bool, sc scope, now time.Time) (jobs.StepChange, bool) {
+	node, ok := spec.Node(name)
+	if !ok {
+		return jobs.StepChange{Name: name, Status: jobs.Canceled, Error: "not in the pipeline", Finished: now}, true
+	}
+	ready, blocked, allSkipped := true, "", len(node.After) > 0
+	for _, d := range node.After {
+		switch byName[d].Status {
+		case jobs.Done:
+			allSkipped = false
+		case jobs.Skipped:
+		case jobs.Failed:
+			allSkipped = false
+			if !continues(d) {
+				blocked = d
+			}
+		case jobs.Canceled:
+			blocked = d
+		default:
+			ready = false
+		}
+	}
+	switch {
+	case blocked != "":
+		return jobs.StepChange{Name: name, Status: jobs.Canceled, Error: blocked + " did not end well", Finished: now}, true
+	case !ready:
+		return jobs.StepChange{}, false
+	case allSkipped:
+		return jobs.StepChange{Name: name, Status: jobs.Skipped, Finished: now}, true
+	}
+	skip, err := e.skips(node, sc)
+	switch {
+	case err != nil:
+		return jobs.StepChange{Name: name, Status: jobs.Failed, Error: err.Error(), Finished: now}, true
+	case skip:
+		return jobs.StepChange{Name: name, Status: jobs.Skipped, Finished: now}, true
+	}
+	return jobs.StepChange{Name: name, Status: jobs.Queued}, true
 }
 
 func (e *Engine) skips(node *Node, sc scope) (bool, error) {
@@ -526,6 +574,12 @@ func (e *Engine) Ended(run jobs.Run, steps []jobs.Step) {
 		if err := e.callback(run, steps); err != nil {
 			e.log.Warn("pipeline: the callback", "run", run.ID, "url", run.CallbackURL, "err", err)
 		}
+	}
+	// pipeline.run (IMP-186): a parent waits for this run, and this run's
+	// own children wait for nobody once it ended without them.
+	e.endedChild(run, steps)
+	if run.Status != jobs.Done {
+		e.stopChildren(run)
 	}
 }
 

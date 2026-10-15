@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gosidian/gosidian/internal/config"
+	"github.com/gosidian/gosidian/internal/gitsync"
 	"github.com/gosidian/gosidian/internal/infolder"
 	"github.com/gosidian/gosidian/internal/jobs"
 	mcpsrv "github.com/gosidian/gosidian/internal/mcp"
@@ -45,7 +46,7 @@ func openSecrets(sdir string) (*secrets.Store, error) {
 // startPipelines opens jobs.db, builds the engine on the MCP server and
 // starts the runner and the schedules. The returned stop waits for the
 // runner to put down its steps (ctx must be done) and closes jobs.db.
-func startPipelines(ctx context.Context, cfg *config.Config, sdir string, mcpServer *mcpsrv.Server, in *infolder.Service) (stop func(time.Duration), reg *plugins.Registry) {
+func startPipelines(ctx context.Context, cfg *config.Config, sdir string, mcpServer *mcpsrv.Server, in *infolder.Service, syncer *gitsync.Sync) (stop func(time.Duration, func()), reg *plugins.Registry) {
 	pc := cfg.Pipelines
 	loc := time.Local
 	tz := pc.Timezone
@@ -111,6 +112,15 @@ func startPipelines(ctx context.Context, cfg *config.Config, sdir string, mcpSer
 	in.SetSink(engine)
 	// The plugins' sources, bound to IN folders (IMP-172 phase 2).
 	in.SetSources(reg)
+	// The commits of git sync start the commit pipelines (IMP-170).
+	engine.SetCommits(syncer.Commits)
+	syncer.OnCommit(func(c gitsync.CommitChanges) {
+		files := make([]pipeline.CommitFile, len(c.Files))
+		for i, f := range c.Files {
+			files[i] = pipeline.CommitFile{Path: f.Path, From: f.From, Change: f.Status}
+		}
+		engine.Committed(pipeline.Commit{SHA: c.SHA, Date: c.Date, Files: files})
+	})
 	mcpServer.SetPipelines(engine)
 	mcpServer.SetPlugins(reg)
 	if len(reg.Names()) > 0 {
@@ -125,12 +135,16 @@ func startPipelines(ctx context.Context, cfg *config.Config, sdir string, mcpSer
 	}
 	log.Printf("pipelines: enabled (%d workers, step timeout %s, retention %s, time zone %s, llm %v, plugins %v, http allowlist %d, state %s)",
 		max(pc.Workers, 1), pc.StepTimeout, pc.Retention, loc, names, reg.Names(), len(pc.HTTPAllowlist), dbPath)
-	return func(d time.Duration) {
+	// stop waits up to d for the steps to end, then calls before (the last
+	// git commit: the runs of its commit pipelines are queued for the next
+	// start) while the jobs database is still open, and closes it.
+	return func(d time.Duration, before func()) {
 		select {
 		case <-done:
 		case <-time.After(d):
 			log.Printf("pipelines: steps still running at shutdown, the next start takes them back")
 		}
+		before()
 		_ = store.Close()
 	}, reg
 }

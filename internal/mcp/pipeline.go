@@ -17,6 +17,7 @@ import (
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/infolder"
 	"github.com/gosidian/gosidian/internal/jobs"
+	"github.com/gosidian/gosidian/internal/marks"
 	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/gosidian/gosidian/internal/pipeline"
 	"github.com/gosidian/gosidian/internal/plugins"
@@ -39,6 +40,21 @@ func (s *Server) Pipelines() *pipeline.Engine { return s.pipelines }
 // [pipelines] is off.
 func (s *Server) SetPlugins(r *plugins.Registry) { s.plugins = r }
 
+// SetMarks gives note.mark the store of the marks (IMP-188).
+func (s *Server) SetMarks(m *marks.Store) { s.marks = m }
+
+// PutMarks keeps a set of marks on a note of the project
+// (pipeline.Marker).
+func (h pipelineHost) PutMarks(project string, set marks.Set) error {
+	if err := inProject(project, set.Path); err != nil {
+		return err
+	}
+	if h.s.marks == nil {
+		return errors.New("this server keeps no marks")
+	}
+	return h.s.marks.Put(set)
+}
+
 // Plugins is the plugin registry, nil when the pipelines are off.
 func (s *Server) Plugins() *plugins.Registry { return s.plugins }
 
@@ -53,6 +69,24 @@ func (s *Server) SetPipelinesSwitch(on bool) { s.pipelinesOn = on }
 func (s *Server) PipelineHost() pipeline.Host { return pipelineHost{s} }
 
 type pipelineHost struct{ s *Server }
+
+// The optional faces of the host the nodes look for.
+var (
+	_ pipeline.Folders    = pipelineHost{}
+	_ pipeline.NoteLister = pipelineHost{}
+	_ pipeline.Authors    = pipelineHost{}
+	_ pipeline.Marker     = pipelineHost{}
+)
+
+// LastWriter is who wrote a note last, as the index keeps it from the
+// audit: pipeline:<path> for a run of that pipeline (pipeline.Authors).
+func (h pipelineHost) LastWriter(rel string) string {
+	a, ok, err := h.s.index.AuthorOf(rel)
+	if err != nil || !ok {
+		return ""
+	}
+	return a.ModifiedBy
+}
 
 // maxAttachmentRead caps an attachment a node reads (an image for a model).
 const maxAttachmentRead = 20 << 20
@@ -164,6 +198,45 @@ func (h pipelineHost) NotesIn(project, folder string) ([]string, error) {
 		}
 	}
 	return out, nil
+}
+
+// ListNotes gives note.list a page of the notes of a folder of the project,
+// from the index, with memory_query's conditions and sort
+// (pipeline.NoteLister, IMP-186).
+func (h pipelineHost) ListNotes(project string, q pipeline.NoteQuery) ([]pipeline.NoteRow, int, error) {
+	folder := strings.Trim(q.Folder, "/")
+	if folder != project {
+		if err := inProject(project, folder+"/"); err != nil {
+			return nil, 0, err
+		}
+	}
+	if q.Recursive {
+		folder += "/**"
+	}
+	var where []index.FieldCond
+	if !isEmptyList(q.Where) {
+		w, err := parseWhere(q.Where)
+		if err != nil {
+			return nil, 0, fmt.Errorf("with.where: %w", err)
+		}
+		where = w
+	}
+	keys, err := index.ParseSort(q.Sort, "")
+	if err != nil {
+		return nil, 0, fmt.Errorf("with.sort: %w", err)
+	}
+	opts := index.QueryOptions{Projects: []string{project}, Folders: []string{folder}, Where: where,
+		Limit: q.Limit, Offset: q.Offset, Fields: q.Fields}
+	opts.SetSortKeys(keys)
+	hits, total, err := h.s.index.Query(opts)
+	if err != nil {
+		return nil, 0, err
+	}
+	rows := make([]pipeline.NoteRow, 0, len(hits))
+	for _, hit := range hits {
+		rows = append(rows, pipeline.NoteRow{Path: hit.Path, Title: hit.Title, Fields: hit.FieldValues()})
+	}
+	return rows, total, nil
 }
 
 // DeleteNote deletes a note of the project as the pipeline: into the trash

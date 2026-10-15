@@ -106,7 +106,11 @@ function openInGraph() {
       <span
         v-if="data"
         class="gosidian-diagram__status"
-      >{{ data.stats.node_count }} · {{ data.stats.edge_count }}</span>
+      >{{
+        data.stats.truncated
+          ? t('graph.truncated_short', { shown: data.stats.node_count, total: data.stats.total ?? data.stats.node_count })
+          : data.stats.node_count
+      }} · {{ data.stats.edge_count }}</span>
     </div>
     <p
       v-if="parsed.problem"

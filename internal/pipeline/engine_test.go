@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/gosidian/gosidian/internal/jobs"
+	"github.com/gosidian/gosidian/internal/marks"
 	"github.com/gosidian/gosidian/internal/parser"
 )
 
@@ -33,6 +34,12 @@ type fakeHost struct {
 	changed int
 	stored  []string // "actor path" of each StoreAttachment
 	deleted []string // the notes DeleteNote deleted
+	// lastQuery is the last note.list asked (notelist_test.go).
+	lastQuery NoteQuery
+	// writers are who wrote each note last (commit_test.go).
+	writers map[string]string
+	// marks are the sets note.mark put, by path#set (marknode_test.go).
+	marks map[string]marks.Set
 }
 
 func newFakeHost() *fakeHost {
@@ -508,6 +515,34 @@ nodes:
 	}
 }
 
+// llm.chat passes reasoning_effort on, and gives the finish reason and a
+// thinking model's reasoning: an empty text that ran out of max_tokens
+// while the model thought shows as such.
+func TestEngine_LLMChatReasoning(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(b, &got)
+		_, _ = io.WriteString(w, `{"model":"think-1","choices":[{"message":{"content":"","reasoning":"Let me think..."},"finish_reason":"length"}],"usage":{"prompt_tokens":10,"completion_tokens":600,"total_tokens":610}}`)
+	}))
+	defer srv.Close()
+	e, host := newEngine(t, Config{Providers: []Provider{{Name: "default", BaseURL: srv.URL + "/v1", Model: "think-1"}}})
+	host.notes["p/think.md"] = pipelineNote(`
+nodes:
+  - {id: c, use: llm.chat, with: {prompt: "judge", json: true, reasoning_effort: none, max_tokens: 600}}
+`)
+	run, _, _ := e.Start(StartRequest{Path: "p/think.md", Trigger: TriggerManual})
+	waitStatus(t, e, run.ID, jobs.Done)
+	if got["reasoning_effort"] != "none" {
+		t.Errorf("the request has reasoning_effort %v", got["reasoning_effort"])
+	}
+	var out map[string]any
+	_ = json.Unmarshal(stepOf(t, e, run.ID, "c").Output, &out)
+	if out["finish_reason"] != "length" || out["reasoning"] != "Let me think..." || out["text"] != "" {
+		t.Errorf("output %v", out)
+	}
+}
+
 func TestEngine_HTTPRequestAllowlist(t *testing.T) {
 	var hits int
 	var mu sync.Mutex
@@ -610,5 +645,74 @@ func TestStarlark_ScriptAtTopLevel(t *testing.T) {
 	_ = json.Unmarshal(stepOf(t, e, run.ID, "a").Output, &out)
 	if out["md"] != "a x/1.png b x/2.png" || out["seen"] != true {
 		t.Errorf("output = %v", out)
+	}
+}
+
+// A node reads when its run was made: a report dates what it writes.
+func TestEngine_RunCreated(t *testing.T) {
+	e, host := newEngine(t, Config{})
+	host.notes["p/when.md"] = pipelineNote(`nodes:
+  - {id: a, use: starlark, with: {input: {at: "{{ run.created }}"}, code: "output = input['at']"}}`)
+	before := time.Now().UTC().Truncate(time.Second)
+	run, _, err := e.Start(StartRequest{Path: "p/when.md", Trigger: TriggerManual})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, e, run.ID, jobs.Done)
+	var at string
+	_ = json.Unmarshal(stepOf(t, e, run.ID, "a").Output, &at)
+	got, err := time.Parse(time.RFC3339, at)
+	if err != nil || got.Before(before) || got.After(time.Now().UTC()) {
+		t.Errorf("run.created = %q (%v), want a time from %v on", at, err, before)
+	}
+}
+
+// A node skipped when nothing else runs decides the nodes waiting on it
+// at once: one waiting on it alone is skipped too, one waiting also on a
+// node done runs, and the run ends done (BUG-126; it stopped failed with
+// "it could not start").
+func TestEngine_SkipReleasesTheNodesAfter(t *testing.T) {
+	e, host := newEngine(t, Config{})
+	host.notes["p/pipelines/skip.md"] = pipelineNote(`
+trigger: {on: manual}
+nodes:
+  - {id: a, use: starlark, with: {code: "output = 1"}}
+  - {id: b, use: starlark, when: "{{ trigger.go }}", with: {code: "output = 2"}}
+  - {id: c, use: starlark, with: {code: "output = 3"}}
+  - {id: d, use: starlark, after: [a, b], with: {code: "output = 4"}}
+  - {id: f, use: starlark, after: [c], with: {code: "output = 5"}}
+`)
+	run, _, err := e.Start(StartRequest{Path: "p/pipelines/skip.md", Trigger: TriggerManual, Input: map[string]any{"go": false}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run = waitStatus(t, e, run.ID, jobs.Done)
+	for name, want := range map[string]jobs.Status{"a": jobs.Done, "b": jobs.Skipped, "c": jobs.Skipped, "d": jobs.Done, "f": jobs.Skipped} {
+		if st := stepOf(t, e, run.ID, name); st.Status != want {
+			t.Errorf("%s: %s, want %s", name, st.Status, want)
+		}
+	}
+}
+
+// A condition may name a node skipped in the same turn: it reads nothing,
+// as it would a turn later, and does not fail the node.
+func TestEngine_ConditionReadsANodeJustSkipped(t *testing.T) {
+	e, host := newEngine(t, Config{})
+	host.notes["p/pipelines/skip.md"] = pipelineNote(`
+trigger: {on: manual}
+nodes:
+  - {id: a, use: starlark, with: {code: "output = 1"}}
+  - {id: b, use: starlark, after: [a], when: "{{ trigger.go }}", with: {code: "output = 2"}}
+  - {id: d, use: starlark, after: [a, b], unless: "{{ b }}", with: {code: "output = 4"}}
+`)
+	run, _, err := e.Start(StartRequest{Path: "p/pipelines/skip.md", Trigger: TriggerManual, Input: map[string]any{"go": false}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run = waitStatus(t, e, run.ID, jobs.Done)
+	for name, want := range map[string]jobs.Status{"a": jobs.Done, "b": jobs.Skipped, "d": jobs.Done} {
+		if st := stepOf(t, e, run.ID, name); st.Status != want {
+			t.Errorf("%s: %s, want %s (%s)", name, st.Status, want, st.Error)
+		}
 	}
 }

@@ -226,7 +226,7 @@ func (s *sourceSession) call(ctx context.Context, tool string, args map[string]a
 	if res.IsError {
 		return fmt.Errorf("plugin %s, %s: %s", s.c.Name, tool, strings.TrimSpace(resultText(res)))
 	}
-	if err := json.Unmarshal(resultJSON(res), out); err != nil {
+	if err := json.Unmarshal(ResultJSON(res), out); err != nil {
 		return fmt.Errorf("plugin %s, %s: the result is not what a source gives: %w", s.c.Name, tool, err)
 	}
 	return nil

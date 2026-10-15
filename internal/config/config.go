@@ -393,6 +393,9 @@ type LLMProvider struct {
 type MCPConfig struct {
 	WritePerMinute int   `toml:"write_per_minute"` // default 60, per MCP session; a token gets 5× (IMP-141)
 	MaxNoteBytes   int64 `toml:"max_note_bytes"`   // default 1 MiB
+	// MaxPluginResult caps the bytes of a plugin tool's result an agent
+	// gets; default 1 MiB.
+	MaxPluginResult int64 `toml:"max_plugin_result"`
 	// PackageMaxFiles and PackageMaxBytes cap a memory_ingest package
 	// (as: package, IMP-116): its files, and its size unpacked.
 	PackageMaxFiles    int      `toml:"package_max_files"`    // default 500
@@ -567,6 +570,13 @@ func (c *Config) ApplyEnv() error {
 			return fmt.Errorf("GOSIDIAN_MCP_MAX_NOTE_BYTES: %w", err)
 		}
 		c.MCP.MaxNoteBytes = n
+	}
+	if v := os.Getenv("GOSIDIAN_MCP_MAX_PLUGIN_RESULT"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("GOSIDIAN_MCP_MAX_PLUGIN_RESULT: %q is no number of bytes", v)
+		}
+		c.MCP.MaxPluginResult = n
 	}
 	if v := os.Getenv("GOSIDIAN_MCP_PACKAGE_MAX_FILES"); v != "" {
 		n, err := strconv.Atoi(v)
@@ -890,6 +900,9 @@ func (c *Config) applyDefaults() {
 	if c.MCP.MaxNoteBytes == 0 {
 		c.MCP.MaxNoteBytes = 1 << 20 // 1 MiB
 	}
+	if c.MCP.MaxPluginResult == 0 {
+		c.MCP.MaxPluginResult = 1 << 20 // 1 MiB
+	}
 	if c.OAuth.AccessTTL == 0 {
 		c.OAuth.AccessTTL = time.Hour
 	}
@@ -1034,6 +1047,24 @@ func (c *Config) applyPipelinesEnv() error {
 			return fmt.Errorf("GOSIDIAN_PIPELINES_MAX_LLM_TOKENS: %w", err)
 		}
 		c.Pipelines.MaxLLMTokens = n
+	}
+	// The caps of a run's input and of a step's output are the
+	// installer's to raise: a test that keeps hundreds of results in a
+	// step needs more than the 1 MiB default.
+	for _, n := range []struct {
+		env string
+		dst *int
+	}{
+		{"GOSIDIAN_PIPELINES_MAX_INPUT_BYTES", &c.Pipelines.MaxInputBytes},
+		{"GOSIDIAN_PIPELINES_MAX_OUTPUT_BYTES", &c.Pipelines.MaxOutputBytes},
+	} {
+		if v := os.Getenv(n.env); v != "" {
+			b, err := strconv.Atoi(v)
+			if err != nil || b <= 0 {
+				return fmt.Errorf("%s: %q is no number of bytes", n.env, v)
+			}
+			*n.dst = b
+		}
 	}
 	if v := os.Getenv("GOSIDIAN_PIPELINES_HTTP_ALLOWLIST"); v != "" {
 		var prefixes []string

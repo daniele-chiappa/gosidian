@@ -161,8 +161,9 @@ most the node's `timeout` (5 minutes unless the pipeline sets one) and
 the plugin's `timeout`, and never longer than the step timeout: a slow
 conversion wants `timeout: 14m` on its node.
 
-A node's output is at most 1 MiB, as any node's: a plugin that makes a
-long text should keep it in its output once, not twice.
+A node's output is at most `[pipelines] max_output_bytes` (1 MiB unless
+the installer raises it), as any node's: a plugin that makes a long text
+should keep it in its output once, not twice.
 
 ### Files by reference
 
@@ -256,6 +257,11 @@ search over the archive the plugin keeps, say. The manifest lists them:
   changes the plugin's data.
 - `input_schema` is a JSON Schema of type object. It must not declare
   `project`: gosidian adds that argument itself.
+- `files` lists the arguments that name **files of the project** (from
+  2.89, IMP-184): an attachment or a file of its IN folder, by its vault
+  path, or a list of up to 100 (paths, or entries with a `path`). The tool
+  needs `file_refs: true` and `permissions.files`. A node's tool that takes
+  files may be a tool too, when it lists them here.
 
 The owner accepts the tools with the manifest, then **exposes** the plugin
 in the projects whose agents may use them:
@@ -281,10 +287,23 @@ When an agent calls `vec-pg_search`, gosidian:
 3. calls the plugin's tool `search` with the other arguments as they
    came, and in the call's `_meta` `gosidian/project`, `gosidian/caller`
    (the token's id) and `gosidian/access`;
-4. gives the agent the plugin's result as it is, up to 1 MiB, within two
+4. gives the agent the plugin's result as it is, up to `[mcp]
+   max_plugin_result` (1 MiB unless the installer raises it), within two
    minutes or the plugin's `timeout`;
 5. writes the call in the audit log (`plugin_call`, the project and the
    tool), and counts a `write` call against the token's write limits.
+
+**A tool that takes files.** gosidian reads each path the agent gives in
+the call's project (a path of another project is read inside this one,
+where it is not), and hands the plugin, in its place, where to fetch it,
+as a node gets it ([files by reference](#files-by-reference)): the ticket
+is bound to the call, and ends with it. The files a `write` tool gives
+back (embedded resources with a blob, as a node's) become attachments of
+the project, written as the agent (`upload_attachment` in the audit), and
+the agent gets the plugin's result with them as `files`
+(`[{name, path, mime, markdown}]`, the links to them by name rewritten as
+for a node) in place of their bytes; `skipped` lists those refused. A
+`read` tool's result comes back as the plugin gave it.
 
 `memory_pipelines` lists each plugin's tools and the projects they are
 exposed in.
@@ -334,7 +353,8 @@ gosidian reads a graph with the tool `gosidian_graph`, the graph's name in
   own key, a source its credentials.
 - It does not let it read the vault: the plugin gets the files a node
   names, in the pipeline's project, or a ticket for each, and gives back
-  files and data. A tool gets the arguments of the agent's call, no file.
+  files and data. A tool gets the arguments of the agent's call, and a
+  ticket for each file of the project its `files` arguments name.
 
 ## The docling plugin
 

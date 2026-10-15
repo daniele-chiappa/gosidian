@@ -36,6 +36,8 @@ export interface PipelineInfo {
   nodes?: string[]
   /** Why the server would refuse to run it. */
   problem?: string
+  /** What keeps it from starting by itself: a commit trigger with git sync off. */
+  notice?: string
   last_run?: RunBrief
 }
 

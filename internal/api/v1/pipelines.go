@@ -87,7 +87,7 @@ func (r *Router) handlePipelines(w http.ResponseWriter, req *http.Request) {
 			seen = append(seen, pl)
 		}
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"pipelines": pipeline.Infos(seen, r.deps.Pipelines.Runner().Store())})
+	WriteJSON(w, http.StatusOK, map[string]any{"pipelines": r.deps.Pipelines.Infos(seen)})
 }
 
 // pipelineRoutes serves /api/v1/pipelines/<path>/runs: a POST with a run

@@ -169,6 +169,17 @@ func (r *Runner) Submit(run Run, steps []Step) (Run, bool, error) {
 // Resume ends a waiting step with output, and the run goes on. step ""
 // resumes the only waiting step of the run.
 func (r *Runner) Resume(runID, step string, output json.RawMessage) error {
+	return r.EndWait(runID, step, Done, output, "")
+}
+
+// EndWait ends a waiting step as Done, with output, or as Failed, with
+// errMsg, and the run goes on: a step that waited for another run fails
+// when that run failed (pipeline.run, IMP-186). step "" ends the only
+// waiting step of the run.
+func (r *Runner) EndWait(runID, step string, status Status, output json.RawMessage, errMsg string) error {
+	if status != Done && status != Failed {
+		return fmt.Errorf("%w: a wait ends done or failed, not %s", ErrState, status)
+	}
 	l := r.runLock(runID)
 	l.Lock()
 	steps, err := r.store.Steps(runID)
@@ -194,7 +205,7 @@ func (r *Runner) Resume(runID, step string, output json.RawMessage) error {
 		}
 		return fmt.Errorf("%w: no step waits", ErrState)
 	}
-	err = r.store.apply(runID, []StepChange{{Name: target.Name, Status: Done, Output: output, Finished: r.opts.Now()}}, nil)
+	err = r.store.apply(runID, []StepChange{{Name: target.Name, Status: status, Output: output, Error: errMsg, Finished: r.opts.Now()}}, nil)
 	l.Unlock()
 	if err != nil {
 		return err

@@ -1,6 +1,8 @@
 package v1
 
 import (
+	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -41,6 +43,8 @@ type previewRequest struct {
 	// Path is the note being previewed, when there is one: its views
 	// resolve this.<field> against it (IMP-127).
 	Path string `json:"path,omitempty"`
+	// Cut asks for the cut view of the note at Path instead (IMP-170).
+	Cut *cutRequest `json:"cut,omitempty"`
 }
 
 // previewResponse returns the note rendered as HTML for the SPA's preview
@@ -59,6 +63,8 @@ type previewResponse struct {
 	// diagrams and opens these; a target that resolves to no note the
 	// reader may see is not there (IMP-169).
 	DiagramLinks map[string]string `json:"diagram_links,omitempty"`
+	// Cut is the cut view, when asked: HTML is then empty.
+	Cut *cutResponse `json:"cut,omitempty"`
 }
 
 // handlePreview renders markdown to HTML through the same parser
@@ -82,6 +88,21 @@ func (r *Router) handlePreview(w http.ResponseWriter, req *http.Request) {
 	}
 
 	p := principalFromContext(req)
+	if body.Cut != nil {
+		cut, err := r.previewCut(req.Context(), p, callerOf(req), body.Path, body.Markdown, body.Cut)
+		var bad *cutRequestError
+		switch {
+		case errors.As(err, &bad):
+			WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
+			return
+		case err != nil:
+			slog.Default().Warn("api/v1: the cut view", "path", body.Path, "err", err)
+			WriteError(w, http.StatusInternalServerError, CodeServerInternal, "the cut view failed: see the server log")
+			return
+		}
+		WriteJSON(w, http.StatusOK, previewResponse{Cut: cut})
+		return
+	}
 	md := []byte(body.Markdown)
 	var data []views.Data
 	if r.deps.Index != nil {

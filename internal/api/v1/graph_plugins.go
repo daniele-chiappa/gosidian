@@ -3,6 +3,7 @@ package v1
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"slices"
 	"sort"
@@ -206,6 +207,14 @@ func (r *Router) handlePluginGraph(w http.ResponseWriter, req *http.Request, sou
 		_ = r.deps.Audit.Write(e)
 	}
 	if err != nil {
+		// The plugin answered with an error of its own, the arguments
+		// refused or its store failing: the reader reads its message, the
+		// server is not at fault (BUG-128).
+		var refused *plugins.RefusedError
+		if errors.As(err, &refused) {
+			WriteError(w, http.StatusUnprocessableEntity, CodePluginRefused, err.Error())
+			return
+		}
 		WriteError(w, http.StatusBadGateway, CodeServerInternal, err.Error())
 		return
 	}

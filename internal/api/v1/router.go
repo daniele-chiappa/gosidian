@@ -7,6 +7,7 @@ import (
 	"github.com/gosidian/gosidian/internal/gitsync"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/infolder"
+	"github.com/gosidian/gosidian/internal/marks"
 	"github.com/gosidian/gosidian/internal/oauth"
 	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/gosidian/gosidian/internal/pipeline"
@@ -49,6 +50,9 @@ type Deps struct {
 	// IN is the state of the projects' IN folders (IMP-172); nil in tests
 	// that need none.
 	IN *infolder.Service
+	// Marks are the marks the pipelines put on notes (IMP-188); nil keeps
+	// none.
+	Marks *marks.Store
 }
 
 // Router owns the http.Handler tree under /api/v1/*. A separate type
@@ -148,6 +152,8 @@ func (r *Router) registerAuthed() {
 	r.mux.Handle("/api/v1/notes/", authed(r.handleNoteByPath))
 	r.mux.Handle("/api/v1/note-titles", authed(r.handleNoteTitles))
 	r.mux.Handle("/api/v1/preview", authed(r.handlePreview))
+	r.mux.Handle("/api/v1/cut/collections", authed(r.handleCutCollections))
+	r.mux.Handle("/api/v1/marks", authed(r.handleMarks))
 
 	r.mux.Handle("/api/v1/projects", authed(r.handleProjects))
 	r.mux.Handle("/api/v1/projects/", authed(r.handleProjectByName))

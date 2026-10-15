@@ -98,6 +98,18 @@ describe('PipelinesView (IMP-166)', () => {
     expect(rows[2]!.text()).not.toContain('Start')
   })
 
+  it('says why a commit pipeline does not start by itself, and keeps Start', async () => {
+    vi.mocked(listPipelines).mockResolvedValue([
+      { path: 'mine/pipelines/cut.md', title: 'Cut', project: 'mine', trigger: 'commit', nodes: ['cut (note.sections)'], notice: 'git sync is off' },
+    ])
+    const w = mount(PipelinesView, { global: { plugins: [i18n()] } })
+    await flushPromises()
+    const row = w.find('[data-pipelines]').find('li')
+    expect(row.text()).toContain("the server's git sync is off")
+    expect(row.text()).toContain('cut (note.sections)')
+    expect(row.text()).toContain('Start')
+  })
+
   it('lists no plugins section without plugins, and the plugins with their state and the accept command', async () => {
     let w = mount(PipelinesView, { global: { plugins: [i18n()] } })
     await flushPromises()

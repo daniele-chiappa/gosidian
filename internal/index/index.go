@@ -18,6 +18,13 @@ import (
 //go:embed schema.sql
 var schemaSQL string
 
+// maxOpenConns bounds the index's SQLite connections, readers and the
+// writer together; maxIdleConns of them stay open between queries.
+const (
+	maxOpenConns = 16
+	maxIdleConns = 4
+)
+
 type Index struct {
 	mu    sync.Mutex
 	db    *sql.DB
@@ -44,6 +51,13 @@ func Open(path string) (*Index, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Without a bound database/sql opens a connection per concurrent query,
+	// each with its own page cache: a burst of thousands of watcher queries
+	// took 27 GB (BUG-123). No method holds a connection while it asks for
+	// another (writes run in one transaction under mu, rows are closed
+	// before the next query), so the bound cannot deadlock the index.
+	db.SetMaxOpenConns(maxOpenConns)
+	db.SetMaxIdleConns(maxIdleConns)
 	migrated, err := migrate(db)
 	if err != nil {
 		db.Close()

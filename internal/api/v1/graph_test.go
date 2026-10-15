@@ -150,6 +150,35 @@ func TestGraph_LimitTruncatesByDegree(t *testing.T) {
 	}
 }
 
+// A graph asked without a limit is cut to the default one, which the
+// summary names, and says how many nodes it had (BUG-127).
+func TestGraph_DefaultLimitCapsAndCounts(t *testing.T) {
+	defer func(n int) { defaultGraphLimit = n }(defaultGraphLimit)
+	f := graphFixture(t)
+
+	defaultGraphLimit = 10
+	resp := decodeGraph(t, f.doAuthRecorder(http.MethodGet, "/api/v1/graph", "", nil).body)
+	if resp.Stats.NodeCount != 5 || resp.Stats.Total != 5 || resp.Stats.Truncated || resp.Stats.Filter != "" {
+		t.Errorf("under the default: got %+v, want 5 of 5, not truncated, no filter", resp.Stats)
+	}
+
+	defaultGraphLimit = 2
+	resp = decodeGraph(t, f.doAuthRecorder(http.MethodGet, "/api/v1/graph", "", nil).body)
+	if resp.Stats.NodeCount != 2 || resp.Stats.Total != 5 || !resp.Stats.Truncated || resp.Stats.Filter != "limit=2" {
+		t.Errorf("over the default: got %+v, want 2 of 5, truncated, limit=2", resp.Stats)
+	}
+}
+
+// The limit keeps the focus of an ego graph, though its degree is the
+// lowest.
+func TestGraph_LimitKeepsTheFocus(t *testing.T) {
+	f := graphFixture(t)
+	resp := decodeGraph(t, f.doAuthRecorder(http.MethodGet, "/api/v1/graph?focus=rc/a.md&depth=2&limit=1", "", nil).body)
+	if ids := nodeIDs(resp.Nodes); len(ids) != 1 || ids[0] != "rc/a.md" || resp.Stats.Total != 3 {
+		t.Errorf("got %v of %d, want [rc/a.md] of 3", ids, resp.Stats.Total)
+	}
+}
+
 func TestGraph_ETag304(t *testing.T) {
 	f := graphFixture(t)
 	first := f.doAuthRecorder(http.MethodGet, "/api/v1/graph", "", nil)

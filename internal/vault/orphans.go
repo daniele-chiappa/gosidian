@@ -1,8 +1,10 @@
 package vault
 
 import (
+	"bytes"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -69,18 +71,14 @@ func (v *Vault) ProjectAttachments(project string, allowedExt map[string]bool) (
 // case. Read as written only, a link to Image.PNG, to %c3%a9 or to an é
 // typed on a Mac kept no file, and the collection removed it (IMP-163).
 func (v *Vault) Unreferenced(names []string) (map[string]bool, error) {
-	left := map[string][]string{}
-	for _, n := range names {
-		f := foldRef(n)
-		left[n] = []string{f, strings.ReplaceAll(f, " ", "+")}
-	}
+	m := newRefMatcher(names)
 	scan := func(root string, skipHidden bool) error {
 		if _, err := os.Stat(root); err != nil {
 			return nil
 		}
 		return filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-			if err != nil || len(left) == 0 {
-				if len(left) == 0 {
+			if err != nil || len(m.left) == 0 {
+				if len(m.left) == 0 {
 					return fs.SkipAll
 				}
 				return nil
@@ -98,15 +96,9 @@ func (v *Vault) Unreferenced(names []string) (map[string]bool, error) {
 			if err != nil {
 				return nil
 			}
-			text := foldRef(string(b))
-			decoded := foldRef(percentDecode(string(b)))
-			for name, forms := range left {
-				for _, f := range forms {
-					if strings.Contains(text, f) || strings.Contains(decoded, f) {
-						delete(left, name)
-						break
-					}
-				}
+			m.match(foldRef(string(b)))
+			if bytes.IndexByte(b, '%') >= 0 {
+				m.match(foldRef(percentDecode(string(b))))
 			}
 			return nil
 		})
@@ -117,11 +109,77 @@ func (v *Vault) Unreferenced(names []string) (map[string]bool, error) {
 	if err := scan(filepath.Join(v.Root, ".gosidian", "trash"), false); err != nil {
 		return nil, err
 	}
-	out := make(map[string]bool, len(left))
-	for n := range left {
-		out[n] = true
+	return m.left, nil
+}
+
+// refMatcher finds which of a set of attachment names some texts name, as
+// substrings of the texts folded by foldRef, in time linear in the texts
+// (BUG-122: a Contains per name and file took hours on 30,000 attachments
+// and 18,500 notes). A name ends with its extension, so a text names it only
+// where an occurrence of that extension ends: there the matcher looks the
+// stretch before up, at each length a name has, in a map of the names.
+type refMatcher struct {
+	byLen   map[int]map[string][]string // a form's length → the form → its names
+	lengths []int
+	exts    []string            // the extensions the forms end with
+	plain   map[string][]string // the forms without an extension → their names
+	left    map[string]bool     // the names not found yet
+}
+
+func newRefMatcher(names []string) *refMatcher {
+	m := &refMatcher{byLen: map[int]map[string][]string{}, plain: map[string][]string{}, left: make(map[string]bool, len(names))}
+	exts := map[string]bool{}
+	for _, n := range names {
+		m.left[n] = true
+		f := foldRef(n)
+		for _, form := range []string{f, strings.ReplaceAll(f, " ", "+")} {
+			ext := path.Ext(form)
+			if ext == "" || ext == form {
+				m.plain[form] = append(m.plain[form], n)
+				continue
+			}
+			exts[ext] = true
+			forms := m.byLen[len(form)]
+			if forms == nil {
+				forms = map[string][]string{}
+				m.byLen[len(form)] = forms
+				m.lengths = append(m.lengths, len(form))
+			}
+			forms[form] = append(forms[form], n)
+		}
 	}
-	return out, nil
+	for e := range exts {
+		m.exts = append(m.exts, e)
+	}
+	return m
+}
+
+// match takes the names a folded text names out of left.
+func (m *refMatcher) match(text string) {
+	for _, ext := range m.exts {
+		for i := 0; ; {
+			j := strings.Index(text[i:], ext)
+			if j < 0 {
+				break
+			}
+			end := i + j + len(ext)
+			for _, l := range m.lengths {
+				if l <= end {
+					for _, n := range m.byLen[l][text[end-l:end]] {
+						delete(m.left, n)
+					}
+				}
+			}
+			i += j + 1
+		}
+	}
+	for form, ns := range m.plain {
+		if strings.Contains(text, form) {
+			for _, n := range ns {
+				delete(m.left, n)
+			}
+		}
+	}
 }
 
 // foldRef is s as Unreferenced compares it: composed (NFC) and lower case.

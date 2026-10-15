@@ -12,12 +12,15 @@ import (
 
 // Info is a pipeline in a listing.
 type Info struct {
-	Path    string    `json:"path"`
-	Title   string    `json:"title"`
-	Project string    `json:"project"`
-	Trigger string    `json:"trigger,omitempty"`
-	Nodes   []string  `json:"nodes,omitempty"`
-	Problem string    `json:"problem,omitempty"`
+	Path    string   `json:"path"`
+	Title   string   `json:"title"`
+	Project string   `json:"project"`
+	Trigger string   `json:"trigger,omitempty"`
+	Nodes   []string `json:"nodes,omitempty"`
+	Problem string   `json:"problem,omitempty"`
+	// Notice is what keeps a pipeline from starting by itself, without
+	// stopping it by hand: a commit trigger with git sync off.
+	Notice  string    `json:"notice,omitempty"`
 	LastRun *RunBrief `json:"last_run,omitempty"`
 }
 

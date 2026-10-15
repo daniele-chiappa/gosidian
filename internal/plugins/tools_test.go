@@ -147,7 +147,7 @@ func TestRegistry_ExposeAndCallTool(t *testing.T) {
 		Args map[string]any `json:"args"`
 		Meta map[string]any `json:"meta"`
 	}
-	if err := json.Unmarshal(resultJSON(res), &out); err != nil {
+	if err := json.Unmarshal(ResultJSON(res), &out); err != nil {
 		t.Fatal(err)
 	}
 	if out.Args["query"] != "pulsante" || out.Meta[MetaProject] != "p" || out.Meta[MetaCaller] != "t1" {

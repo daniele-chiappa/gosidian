@@ -156,7 +156,33 @@ node's settings as a form made from its type's schema, offering the
 it is typed; **Save** writes the block back in its note. Where the
 pipelines run, the window also starts a run, resumes a waiting one and
 cancels one, and draws a run's state on the nodes, live; so does the Runs
-window for the run it opens.
+window for the run it opens. A pipeline that starts on a commit says
+there, while git sync is off, that it starts only by hand.
+
+## The cut view
+
+Where the server runs pipelines, the window of a markdown note has
+**Cut**, in view mode: the note as `note.sections` cuts it for an archive
+of vectors ([chunks](../pipelines.md#chunks-for-an-archive-of-vectors)).
+Each section has a blue bar on its left and each paragraph a cyan one,
+with its id and size above it; the text is the one a model reads, each
+image small beside its label and description, and one without a
+description in red. The note is never written.
+
+- **Rules of the cut** — the collection, the words of the images, the
+  longest side of an icon, what a chunk's text starts with, the longest
+  section — are kept per project in the browser. They must be those of the pipeline's `note.sections`, or no
+  block matches the archive, and the view says so.
+- Given a **collection** of an archive exposed in the project (a plugin
+  whose `list` and `collections` are read tools; one that does not answer
+  is named under the choice), each bar says what it holds: green the same text, orange another (the note
+  changed since it was cut: to cut again), grey nothing; and how many of
+  its chunks the note no longer has.
+- The **marks** the pipelines put on the note
+  ([note.mark](../pipelines.md#marks-on-a-note)) sit on the blocks they
+  name: a bar on the right in their colour and their label, their text on
+  hover or when the label has the focus. Each set can be hidden; one made on an earlier version of the
+  note says so. **Cut** has a dot while the note has marks.
 
 ## The IN folder
 

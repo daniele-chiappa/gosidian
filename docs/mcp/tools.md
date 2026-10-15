@@ -102,7 +102,11 @@ a note naming it (and the likely intended argument, e.g. `Project` →
   A note with ```` ```diagram ```` blocks also returns `diagrams`: for
   each its `kind`, `title`, `line`, the diagram in words (`text`) and its
   `problems` ([diagrams](../diagrams.md)); `memory_bootstrap` gives the
-  format in `capabilities.diagrams`.
+  format in `capabilities.diagrams`. With `media: "inline"` a note's
+  images come as text, from their image notes (`[icon: label]` inside a
+  sentence, `[image: label] description` on a line of their own), and
+  `media_inline` counts them: a document read whole, as a model would read
+  it ([pipelines](../pipelines.md#chunks-for-an-archive-of-vectors)).
   `memory_get_section` takes the start of a heading when it names only
   one, such as an ID (`BUG-014` for `## BUG-014 — …`), and answers with
   the full heading; among several, the one of the highest level wins
@@ -335,7 +339,8 @@ from the caller's token identity and cannot be forged, while
   ([automations](../vault/databases.md#automations)).
 - `memory_pipelines(project?, path?, run?, limit?)` — the pipelines
   (notes `type: pipeline`) with their trigger and nodes, or the problem
-  that keeps one from running; with `path` its last runs, with `run` one
+  that keeps one from running, and a `notice` for one that starts on a
+  commit while git sync is off; with `path` its last runs, with `run` one
   run and its steps (outputs cut at 4 KiB). Without `path` and `run` it
   also lists the plugins with their status and the node types they add
   (`<plugin>.<node>`, [plugins](../plugins.md)). Read-only. Off unless the

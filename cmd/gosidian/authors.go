@@ -8,6 +8,7 @@ import (
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/gosidian/gosidian/internal/index"
+	"github.com/gosidian/gosidian/internal/marks"
 	"github.com/gosidian/gosidian/internal/webauth"
 )
 
@@ -120,4 +121,41 @@ func (n *authorNames) user(id string) (string, bool) {
 		return u.Username, true
 	}
 	return "", false
+}
+
+// wireMarks keeps the marks of the notes with them (IMP-188): a note, a
+// folder or a project renamed takes its marks along, deleted loses them.
+func wireMarks(m *marks.Store, al *audit.Log) {
+	al.OnWrite(func(e audit.Entry) {
+		var err error
+		// Marks are on markdown notes: any other path is a folder, "v1.2"
+		// included (a file renamed then matches no set).
+		folder := !strings.HasSuffix(strings.ToLower(e.Path), ".md")
+		switch e.Action {
+		case audit.ActionRename:
+			if e.To == "" {
+				return
+			}
+			if folder {
+				err = m.Renamed(e.Path+"/", e.To+"/")
+			} else {
+				err = m.Renamed(e.Path, e.To)
+			}
+		case audit.ActionDelete:
+			if folder {
+				err = m.Deleted(e.Path + "/")
+			} else {
+				err = m.Deleted(e.Path)
+			}
+		case audit.ActionRenameProject:
+			err = m.Renamed(e.Path+"/", e.To+"/")
+		case audit.ActionDeleteProject:
+			err = m.Deleted(e.Path + "/")
+		default:
+			return
+		}
+		if err != nil {
+			log.Printf("marks: %s %s: %v", e.Action, e.Path, err)
+		}
+	})
 }

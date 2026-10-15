@@ -117,16 +117,16 @@ func (n node) Run(ctx context.Context, env *pipeline.Env, with map[string]any) (
 		return nil, fmt.Errorf("plugin %s, %s: %s", c.Name, spec.Tool, strings.TrimSpace(resultText(res)))
 	}
 	var out any
-	if raw := resultJSON(res); len(raw) > 0 {
+	if raw := ResultJSON(res); len(raw) > 0 {
 		if err := json.Unmarshal(raw, &out); err != nil {
 			out = map[string]any{"text": string(raw)}
 		}
 	}
-	files, skipped := storeFiles(env, res.Content)
+	files, skipped := StoreFiles(res.Content, env.StoreAttachment)
 	if len(files) == 0 && len(skipped) == 0 {
 		return out, nil
 	}
-	out = linkFiles(out, files)
+	out = LinkFiles(out, files)
 	m, isMap := out.(map[string]any)
 	if !isMap {
 		m = map[string]any{}
@@ -169,8 +169,10 @@ func (n node) fileList(env *pipeline.Env, spec NodeSpec, f string, list []any, b
 	return refs, nil
 }
 
-// storeFiles stores the files of a tool result as attachments.
-func storeFiles(env *pipeline.Env, content []mcp.Content) ([]any, []any) {
+// StoreFiles stores the files of a tool result with store (a run's
+// attachments, or those of an agent's call): the stored ones as
+// {name, path, mime, markdown}, the refused ones as {name, error}.
+func StoreFiles(content []mcp.Content, store func(name string, data []byte) (string, error)) ([]any, []any) {
 	files, skipped := []any{}, []any{}
 	total, images := 0, 0
 	for _, c := range content {
@@ -201,7 +203,7 @@ func storeFiles(env *pipeline.Env, content []mcp.Content) ([]any, []any) {
 			skip(fmt.Sprintf("more than %d MiB of files", maxFilesBytes>>20))
 			continue
 		}
-		rel, err := env.StoreAttachment(name, data)
+		rel, err := store(name, data)
 		if err != nil {
 			skip(err.Error())
 			continue
@@ -212,11 +214,11 @@ func storeFiles(env *pipeline.Env, content []mcp.Content) ([]any, []any) {
 	return files, skipped
 }
 
-// linkFiles writes, in every string of a node's output, the markdown links
+// LinkFiles writes, in every string of a node's output, the markdown links
 // to the files a plugin gave back by their names (](fig-1.png), also with
 // a title, ](fig-1.png "caption")) as links to the attachments they were
 // stored as.
-func linkFiles(v any, files []any) any {
+func LinkFiles(v any, files []any) any {
 	links := map[string]string{}
 	for _, f := range files {
 		m, _ := f.(map[string]any)

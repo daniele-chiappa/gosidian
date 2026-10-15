@@ -1,7 +1,8 @@
 /**
  * Per-account client state must not survive a change of account in the same
- * browser tab: the tree, the effective-access map, the recently-viewed notes
- * and the persisted window layout all belong to whoever was signed in, and
+ * browser tab: the tree, the effective-access map, the recently-viewed notes,
+ * the persisted window layout and the cut view's rules (which name projects
+ * and collections) all belong to whoever was signed in, and
  * showing them — even for the few hundred milliseconds it takes the new
  * account's requests to land — leaks project and note names across accounts.
  *
@@ -19,6 +20,8 @@ import { cancelAll } from '@/composables/useConfirm'
 const LAST_USER_KEY = 'gosidian.lastUser'
 /** Must match the storageKey passed to usePlanciaSync in AppShell. */
 const PLANCIA_STORAGE_KEY = 'gosidian.plancia'
+/** The cut view's rules, one key per project (NoteView). */
+export const CUT_STORAGE_PREFIX = 'gosidian.cut.'
 
 export function resetSessionState(): void {
   useTreeStore().invalidateAll()
@@ -28,6 +31,13 @@ export function resetSessionState(): void {
   cancelAll()
   try {
     localStorage.removeItem(PLANCIA_STORAGE_KEY)
+    // Collected first: removing a key while walking them shifts the indexes.
+    const cut: string[] = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)
+      if (k?.startsWith(CUT_STORAGE_PREFIX)) cut.push(k)
+    }
+    for (const k of cut) localStorage.removeItem(k)
   } catch {
     /* storage disabled: nothing persisted to drop */
   }

@@ -40,9 +40,15 @@ the plugin again.
 | `source` | `links`, or `<plugin>/<graph>` |
 | `with` | a plugin's graph's arguments, as its schema declares them |
 | `project` | the links: the project to show; a plugin's graph: the project it is asked for (default: the note's) |
-| `tag`, `focus`, `depth` (1 to 6), `min_degree`, `limit` (up to 5000) | the links' filters |
+| `tag`, `focus`, `depth` (1 to 6), `min_degree`, `limit` (up to 5000; without it, 2000) | the links' filters |
 | `color` | what groups the nodes; for a plugin's graph, one of its arguments |
 | `mode` | `2d` (default) or `3d` |
+
+Past the limit the graph keeps its most linked notes, and the focus with
+`focus`. The links' graph has a limit of 2000 nodes when it asks for none,
+since a canvas that moves and paints every note of a project of thousands
+freezes the page: the Graph window says how many nodes it shows of how
+many, and a block says it beside the counts.
 
 The server checks the block when a note is written (a note on the call
 says what does not read) and in the lint (`graph-invalid`). **Save as a

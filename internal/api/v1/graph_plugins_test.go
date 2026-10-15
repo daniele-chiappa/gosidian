@@ -19,7 +19,8 @@ import (
 // mapPlugin is a plugin with a graph, chunks: three nodes, two edges, one
 // edge to a node it does not have, a link to a note and one to a file
 // that is no note; it counts its calls and answers with the project of
-// the call's _meta as a node's group.
+// the call's _meta as a node's group. Without a collection it refuses the
+// call, as an archive does.
 func mapPlugin(t *testing.T, calls *atomic.Int32) *httptest.Server {
 	t.Helper()
 	s := server.NewMCPServer("vec", "1.0.0", server.WithToolCapabilities(false))
@@ -36,6 +37,9 @@ func mapPlugin(t *testing.T, calls *atomic.Int32) *httptest.Server {
 		calls.Add(1)
 		project, _ := req.Params.Meta.AdditionalFields[plugins.MetaProject].(string)
 		with, _ := req.GetArguments()["with"].(map[string]any)
+		if c, _ := with["collection"].(string); c == "" {
+			return mcp.NewToolResultError(`collection "": lower-case letters, digits and _`), nil
+		}
 		b, _ := json.Marshal(map[string]any{
 			"nodes": []any{
 				map[string]any{"id": "a", "label": "A", "group": project, "link": "rc/a.md", "text": "first"},
@@ -129,10 +133,13 @@ func TestGraph_PluginSource(t *testing.T) {
 		t.Errorf("refresh: %d calls", calls.Load())
 	}
 	for q, code := range map[string]int{
-		"?source=vec/chunks":                              http.StatusBadRequest,
-		"?source=vec/chunks&project=rc&with=%5B1%5D":      http.StatusBadRequest,
-		"?source=Vec&project=rc":                          http.StatusBadRequest,
-		"?source=vec/maps&project=rc":                     http.StatusBadGateway,
+		"?source=vec/chunks":                         http.StatusBadRequest,
+		"?source=vec/chunks&project=rc&with=%5B1%5D": http.StatusBadRequest,
+		"?source=Vec&project=rc":                     http.StatusBadRequest,
+		"?source=vec/maps&project=rc":                http.StatusBadGateway,
+		// A graph the plugin refuses is the reader's to fix, not a server
+		// that is down (BUG-128).
+		"?source=vec/chunks&project=rc":                   http.StatusUnprocessableEntity,
 		"?source=vec/chunks&project=dockers&with=" + with: http.StatusNotFound,
 	} {
 		if w := get(q); w.code != code {

@@ -28,6 +28,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_GIT_TOKEN_ENV` | `git.token_env` | empty |
 | `GOSIDIAN_MCP_WRITE_PER_MINUTE` | `mcp.write_per_minute` | `60` (writes per minute of one MCP session, rolling window; all the sessions of a token together get 5× that, IMP-141) |
 | `GOSIDIAN_MCP_MAX_NOTE_BYTES` | `mcp.max_note_bytes` | `1048576` (1 MiB) |
+| `GOSIDIAN_MCP_MAX_PLUGIN_RESULT` | `mcp.max_plugin_result` | `1048576` (1 MiB: the bytes of a plugin tool's result an agent gets; a plugin's own cap goes up with it, such as the database plugin's `limits.max_result`) |
 | `GOSIDIAN_MCP_PACKAGE_MAX_FILES` | `mcp.package_max_files` | `500` (files of a `memory_ingest` package) |
 | `GOSIDIAN_MCP_PACKAGE_MAX_BYTES` | `mcp.package_max_bytes` | `20971520` (20 MiB, a package unpacked) |
 | `GOSIDIAN_MCP_SHRINK_GUARD_PERCENT` | `mcp.shrink_guard_percent` | `10` (`memory_update`, and `memory_ingest` with `overwrite`, refuse a content under this percentage of the note's size unless the call passes `allow_shrink: true`: a placeholder written over a note by mistake; `0` turns the guard off) |
@@ -53,6 +54,8 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_PIPELINES_RETENTION` | `pipelines.retention` | `720h` (runs kept in `<state-dir>/jobs.db` after they end; `0` keeps them) |
 | `GOSIDIAN_PIPELINES_MAX_WAIT` | `pipelines.max_wait` | `168h` (the longest a `wait.call` may wait) |
 | `GOSIDIAN_PIPELINES_MAX_LLM_TOKENS` | `pipelines.max_llm_tokens` | `0` (no cap on the LLM tokens of one run) |
+| `GOSIDIAN_PIPELINES_MAX_INPUT_BYTES` | `pipelines.max_input_bytes` | `262144` (the bytes of a run's input) |
+| `GOSIDIAN_PIPELINES_MAX_OUTPUT_BYTES` | `pipelines.max_output_bytes` | `1048576` (the bytes of a step's output; raise it for steps that keep many results, and a plugin's own cap with it, such as the database plugin's `limits.max_result`) |
 | `GOSIDIAN_PIPELINES_HTTP_ALLOWLIST` | `pipelines.http_allowlist` | empty (comma-separated URL prefixes `http.request` and the callbacks may call; empty: none) |
 | `GOSIDIAN_PIPELINES_PUBLIC_URL` | `pipelines.public_url` | the `[oauth]` issuer (the server's address in `{{ run.resume_url }}`; empty: a path) |
 | `GOSIDIAN_PIPELINES_FILES_URL` | `pipelines.files_url` | the public URL (the server's address as the [plugins](plugins.md#files-by-reference) reach it, for the files they fetch by reference: `http://gosidian:8080` on a compose network; a plugin's own `files_url` wins) |

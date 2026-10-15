@@ -44,11 +44,18 @@ type graphResponse struct {
 }
 
 type graphStats struct {
-	NodeCount int    `json:"node_count"`
-	EdgeCount int    `json:"edge_count"`
+	NodeCount int `json:"node_count"`
+	EdgeCount int `json:"edge_count"`
+	// Total is the node count before the limit cut the graph.
+	Total     int    `json:"total"`
 	Truncated bool   `json:"truncated"`
 	Filter    string `json:"filter,omitempty"`
 }
+
+// defaultGraphLimit caps a graph asked without a limit: a canvas that
+// simulates and paints every node of a project of thousands of notes
+// freezes the page (BUG-127). A var so the tests can lower it.
+var defaultGraphLimit = 2000
 
 // handleGraph powers the /graph view. Tier 1 server-side filters
 // drop the working set before it hits the wire so the client doesn't
@@ -58,7 +65,8 @@ type graphStats struct {
 //	?tag=<name>         — restrict to notes carrying the tag
 //	?min_degree=<n>     — drop nodes with fewer than n edges
 //	?focus=<path>&depth=<n> — ego-graph BFS n hops from focus
-//	?limit=<n>          — cap total nodes (drops lowest-degree first)
+//	?limit=<n>          — cap total nodes (drops lowest-degree first;
+//	                      defaultGraphLimit when absent)
 //	?include_cross=true — admit cross-project edges (project mode)
 //
 // Response carries an ETag derived from the filtered payload so
@@ -90,8 +98,9 @@ func (r *Router) handleGraph(w http.ResponseWriter, req *http.Request) {
 	if depth <= 0 {
 		depth = 2
 	}
-	if limit < 0 {
-		limit = 0
+	asked := limit > 0
+	if !asked {
+		limit = defaultGraphLimit
 	}
 
 	rawNodes, rawEdges, err := r.deps.Index.GraphData(project, includeCross)
@@ -204,10 +213,15 @@ func (r *Router) handleGraph(w http.ResponseWriter, req *http.Request) {
 		edges = filterEdges(edges, alive)
 	}
 
+	total := len(nodes)
 	truncated := false
 	if limit > 0 && len(nodes) > limit {
-		// Sort by degree desc, then by path asc for stable output.
+		// Sort by degree desc, then by path asc for stable output; the
+		// focus of an ego graph stays whatever its degree.
 		sort.Slice(nodes, func(i, j int) bool {
+			if fi, fj := nodes[i].ID == focus, nodes[j].ID == focus; fi != fj {
+				return fi
+			}
 			if nodes[i].Degree != nodes[j].Degree {
 				return nodes[i].Degree > nodes[j].Degree
 			}
@@ -237,8 +251,9 @@ func (r *Router) handleGraph(w http.ResponseWriter, req *http.Request) {
 		Stats: graphStats{
 			NodeCount: len(nodes),
 			EdgeCount: len(edges),
+			Total:     total,
 			Truncated: truncated,
-			Filter:    summarizeFilter(project, tag, focus, depth, minDegree, limit),
+			Filter:    summarizeFilter(project, tag, focus, depth, minDegree, shownLimit(asked, truncated, limit)),
 		},
 	}
 
@@ -355,6 +370,15 @@ func hashGraph(resp graphResponse) string {
 		h.Write(buf[:4])
 	}
 	return `"` + hex.EncodeToString(h.Sum(nil)[:16]) + `"`
+}
+
+// shownLimit is the limit the filter summary names: one asked for, or the
+// default when it cut the graph.
+func shownLimit(asked, truncated bool, limit int) int {
+	if asked || truncated {
+		return limit
+	}
+	return 0
 }
 
 func summarizeFilter(project, tag, focus string, depth, minDegree, limit int) string {

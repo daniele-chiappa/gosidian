@@ -26,6 +26,7 @@ import (
 	"github.com/gosidian/gosidian/internal/infolder"
 	"github.com/gosidian/gosidian/internal/insights"
 	"github.com/gosidian/gosidian/internal/ldap"
+	"github.com/gosidian/gosidian/internal/marks"
 	mcpsrv "github.com/gosidian/gosidian/internal/mcp"
 	"github.com/gosidian/gosidian/internal/metrics"
 	"github.com/gosidian/gosidian/internal/oauth"
@@ -265,6 +266,14 @@ func main() {
 	// Who created and last modified each note, from the audit log, as the
 	// fields created_by and modified_by of queries (IMP-127 iteration 3).
 	wireAuthors(idx, auditLog, tokenStore, webauthStore)
+	// The marks the pipelines put on notes (IMP-188), in the state dir; a
+	// note renamed or deleted takes them along.
+	marksStore, err := marks.Open(filepath.Join(sdir, "marks.db"))
+	if err != nil {
+		log.Fatalf("marks: %v", err)
+	}
+	defer marksStore.Close()
+	wireMarks(marksStore, auditLog)
 
 	// v2.2: global TOTP policy from config. Backward-compat: if the mode
 	// resolves to "off" (the default) but an account already has a secret
@@ -531,7 +540,9 @@ func main() {
 	mcpsrv.Version = version
 	mcpServer := mcpsrv.New(v, idx, tokenStore)
 	mcpServer.SetAuditLog(auditLog)
+	mcpServer.SetMarks(marksStore)
 	mcpServer.SetWriteLimits(cfg.MCP.WritePerMinute, cfg.MCP.MaxNoteBytes)
+	mcpServer.SetPluginResultLimit(cfg.MCP.MaxPluginResult)
 	mcpServer.SetOpenWhenEmpty(cfg.MCP.Open)
 	// One upload quota for an account's MCP tokens and web sessions
 	// (IMP-034); off unless [uploads] quota_bytes is set.
@@ -619,9 +630,9 @@ func main() {
 	go inFolders.Run(ctx)
 	// The pipelines (IMP-166, ADR-035): after the scan, like the
 	// automations; off unless [pipelines] enabled.
-	stopPipelines := func(time.Duration) {}
+	stopPipelines := func(_ time.Duration, before func()) { before() }
 	if cfg.Pipelines.Enabled {
-		stopPipelines, pluginReg = startPipelines(ctx, cfg, sdir, mcpServer, inFolders)
+		stopPipelines, pluginReg = startPipelines(ctx, cfg, sdir, mcpServer, inFolders, syncer)
 	}
 	// A token owned by a web account is narrowed on every request to what
 	// that account may currently read and write (BUG-055): the resolver maps
@@ -730,6 +741,7 @@ func main() {
 		Pipelines:  mcpServer.Pipelines(), // nil when [pipelines] is off: /pipelines, /runs answer 404
 		Plugins:    mcpServer.Plugins(),   // nil when [pipelines] is off
 		IN:         inFolders,
+		Marks:      marksStore,
 	})
 	srv.MountAPIv1(apiRouter)
 	srv.SetVaultFileAuthorizer(apiRouter.VaultFileAuthorizer()) // ADR-022: attachments share the API auth
@@ -754,12 +766,14 @@ func main() {
 	<-ctx.Done()
 	log.Printf("shutting down")
 	// The runner puts its steps down first: a step a pipeline was writing
-	// lands before the last git commit.
-	stopPipelines(3 * time.Second)
-	// Flush any pending git commit before exit.
-	if cfg.Git.Enabled {
-		syncer.Flush()
-	}
+	// lands before the last git commit, which comes before the jobs
+	// database closes, so that the runs it starts are there at the next
+	// start.
+	stopPipelines(3*time.Second, func() {
+		if cfg.Git.Enabled {
+			syncer.Flush()
+		}
+	})
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	// Both listeners close first; the event streams and long polls end only
