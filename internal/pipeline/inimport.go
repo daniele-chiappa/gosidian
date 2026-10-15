@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"image"
 	_ "image/gif" // the sizes of the images in.import stores
@@ -87,6 +88,12 @@ func inImport(ctx context.Context, env *Env, with map[string]any) (any, error) {
 		conv = t
 	}
 	convWith, _ := with["convert_with"].(map[string]any)
+	// The images of one call of the convert node: at most what a plugin
+	// takes in one call ([pipelines] max_plugin_files), which refuses more.
+	convBatch := int(number(with, "convert_batch", defaultConvertBatch))
+	if convBatch < 1 {
+		return nil, errors.New("with.convert_batch: 1 or more")
+	}
 	host := env.Engine.host
 	data, err := host.ReadAttachment(env.Project, file)
 	if err != nil {
@@ -149,8 +156,8 @@ func inImport(ctx context.Context, env *Env, with map[string]any) (any, error) {
 		store(img, b)
 	}
 	converted, convertErrors := 0, []any{}
-	for start := 0; start < len(toConvert); start += convertBatch {
-		batch := toConvert[start:min(start+convertBatch, len(toConvert))]
+	for start := 0; start < len(toConvert); start += convBatch {
+		batch := toConvert[start:min(start+convBatch, len(toConvert))]
 		done, err := env.convertImages(ctx, conv, convWith, batch)
 		for i, img := range batch {
 			if err == nil && done[i].path != "" {
@@ -242,8 +249,9 @@ func inImport(ctx context.Context, env *Env, with map[string]any) (any, error) {
 // document or another file is stored as it is.
 var convertible = map[string]bool{".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true, ".tif": true, ".tiff": true}
 
-// convertBatch is the images of one call of the convert node.
-const convertBatch = 25
+// defaultConvertBatch is the images of one call of the convert node when
+// its convert_batch says nothing.
+const defaultConvertBatch = 25
 
 // convertedImage is an image the convert node gave back: the attachment it
 // is stored as, and its size; or why it gave none (kept as it is, or an

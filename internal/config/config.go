@@ -36,6 +36,7 @@ type Config struct {
 	OAuth        OAuthConfig        `toml:"oauth"`
 	Uploads      UploadsConfig      `toml:"uploads"`
 	Pipelines    PipelinesConfig    `toml:"pipelines"`
+	Web          WebConfig          `toml:"web"`
 
 	// totpWarning says why the configured TOTP mode was read otherwise
 	// (TOTPModeOf); "" when it was read as written.
@@ -339,6 +340,38 @@ type PipelinesConfig struct {
 	MaxLLMTokens int `toml:"max_llm_tokens"`
 	// MaxWait is the longest a wait.call may wait; default 7 days.
 	MaxWait time.Duration `toml:"max_wait"`
+	// MaxRunDepth is how many runs may start each other in a chain
+	// through pipeline.run; default 4.
+	MaxRunDepth int `toml:"max_run_depth"`
+	// MaxRunChildren is how many runs one run may start through
+	// pipeline.run, in an each too; default 1000.
+	MaxRunChildren int `toml:"max_run_children"`
+	// MaxListItems caps what a node lists or is asked for in one call:
+	// a page of note.list, note.sections' only; default 5000.
+	MaxListItems int `toml:"max_list_items"`
+	// MaxChunkMeta caps the meta of a chunk note.sections gives, in bytes
+	// of JSON; default 16384, the database plugin's limits.max_meta.
+	MaxChunkMeta int `toml:"max_chunk_meta"`
+	// The marks note.mark puts on a note (IMP-188): the sets of a note,
+	// the marks of a set, and the characters of a mark's label and text;
+	// default 20, 500, 60 and 500.
+	MaxMarkSets  int `toml:"max_mark_sets"`
+	MaxMarks     int `toml:"max_marks"`
+	MaxMarkLabel int `toml:"max_mark_label"`
+	MaxMarkText  int `toml:"max_mark_text"`
+	// MaxPluginFiles caps the files of one call of a plugin, a node's or
+	// an agent's tool; default 100. MaxPluginFilesOut caps the files one
+	// result gives back; default 200.
+	MaxPluginFiles    int `toml:"max_plugin_files"`
+	MaxPluginFilesOut int `toml:"max_plugin_files_out"`
+	// MaxPluginFilesBytes caps the bytes of the files a plugin gives back
+	// in one result; default 100 MiB.
+	MaxPluginFilesBytes int64 `toml:"max_plugin_files_bytes"`
+	// MaxPluginGraphBytes caps a plugin's graph; default 8 MiB.
+	MaxPluginGraphBytes int `toml:"max_plugin_graph_bytes"`
+	// StarlarkSteps caps the steps of a starlark script; default 10
+	// million.
+	StarlarkSteps uint64 `toml:"starlark_steps"`
 	// HTTPAllowlist holds the URL prefixes http.request and the callbacks
 	// may call; empty: none.
 	HTTPAllowlist []string `toml:"http_allowlist"`
@@ -396,6 +429,12 @@ type MCPConfig struct {
 	// MaxPluginResult caps the bytes of a plugin tool's result an agent
 	// gets; default 1 MiB.
 	MaxPluginResult int64 `toml:"max_plugin_result"`
+	// PluginToolTimeout caps an agent's call of a plugin's tool, within
+	// the plugin's own timeout; default 2m.
+	PluginToolTimeout time.Duration `toml:"plugin_tool_timeout"`
+	// MaxStepOutputShown is how many bytes of a step's output
+	// memory_pipelines shows; default 4096.
+	MaxStepOutputShown int `toml:"max_step_output_shown"`
 	// PackageMaxFiles and PackageMaxBytes cap a memory_ingest package
 	// (as: package, IMP-116): its files, and its size unpacked.
 	PackageMaxFiles    int      `toml:"package_max_files"`    // default 500
@@ -420,6 +459,24 @@ type MCPConfig struct {
 	// stays 0: a percent of 0 turns the guard off.
 	ShrinkGuardPercent  int   `toml:"shrink_guard_percent"`
 	ShrinkGuardMinBytes int64 `toml:"shrink_guard_min_bytes"`
+}
+
+// WebConfig holds the limits of the web UI's views.
+type WebConfig struct {
+	// GraphDefaultNodes is how many of the most linked nodes a graph asked
+	// without a limit keeps; default 2000. GraphMaxNodes is the most a
+	// graph, or a graph block, may ask for; default 5000.
+	GraphDefaultNodes int `toml:"graph_default_nodes"`
+	GraphMaxNodes     int `toml:"graph_max_nodes"`
+	// GraphMaxEdges is the most edges a plugin's graph may have; default
+	// 50000.
+	GraphMaxEdges int `toml:"graph_max_edges"`
+	// CutMaxChunks is the most chunks of a note the cut view reads from
+	// an archive; default 5000.
+	CutMaxChunks int `toml:"cut_max_chunks"`
+	// PluginTimeout caps a plugin's answer the web UI waits for (a graph,
+	// the cut view), within the plugin's own timeout; default 2m.
+	PluginTimeout time.Duration `toml:"plugin_timeout"`
 }
 
 // GitConfig controls the auto-sync of the vault to a git remote.
@@ -578,6 +635,16 @@ func (c *Config) ApplyEnv() error {
 		}
 		c.MCP.MaxPluginResult = n
 	}
+	if v := os.Getenv("GOSIDIAN_MCP_PLUGIN_TOOL_TIMEOUT"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return fmt.Errorf("GOSIDIAN_MCP_PLUGIN_TOOL_TIMEOUT: %q is no duration", v)
+		}
+		c.MCP.PluginToolTimeout = d
+	}
+	if err := envPositiveInts(map[string]*int{"GOSIDIAN_MCP_MAX_STEP_OUTPUT_SHOWN": &c.MCP.MaxStepOutputShown}); err != nil {
+		return err
+	}
 	if v := os.Getenv("GOSIDIAN_MCP_PACKAGE_MAX_FILES"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
@@ -679,6 +746,9 @@ func (c *Config) ApplyEnv() error {
 		c.MCP.IngestURLAllowlist = prefixes
 	}
 	if err := c.applyPipelinesEnv(); err != nil {
+		return err
+	}
+	if err := c.applyWebEnv(); err != nil {
 		return err
 	}
 	if v := os.Getenv("GOSIDIAN_AUTOMATIONS_ENABLED"); v != "" {
@@ -903,6 +973,12 @@ func (c *Config) applyDefaults() {
 	if c.MCP.MaxPluginResult == 0 {
 		c.MCP.MaxPluginResult = 1 << 20 // 1 MiB
 	}
+	if c.MCP.PluginToolTimeout <= 0 {
+		c.MCP.PluginToolTimeout = 2 * time.Minute
+	}
+	if c.MCP.MaxStepOutputShown <= 0 {
+		c.MCP.MaxStepOutputShown = 4 << 10
+	}
 	if c.OAuth.AccessTTL == 0 {
 		c.OAuth.AccessTTL = time.Hour
 	}
@@ -932,6 +1008,39 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Pipelines.MaxWait <= 0 {
 		c.Pipelines.MaxWait = 7 * 24 * time.Hour
+	}
+	for _, n := range []struct {
+		dst *int
+		def int
+	}{
+		{&c.Pipelines.MaxRunDepth, 4},
+		{&c.Pipelines.MaxRunChildren, 1000},
+		{&c.Pipelines.MaxListItems, 5000},
+		{&c.Pipelines.MaxChunkMeta, 16 << 10},
+		{&c.Pipelines.MaxMarkSets, 20},
+		{&c.Pipelines.MaxMarks, 500},
+		{&c.Pipelines.MaxMarkLabel, 60},
+		{&c.Pipelines.MaxMarkText, 500},
+		{&c.Pipelines.MaxPluginFiles, 100},
+		{&c.Pipelines.MaxPluginFilesOut, 200},
+		{&c.Pipelines.MaxPluginGraphBytes, 8 << 20},
+		{&c.Web.GraphDefaultNodes, 2000},
+		{&c.Web.GraphMaxNodes, 5000},
+		{&c.Web.GraphMaxEdges, 50000},
+		{&c.Web.CutMaxChunks, 5000},
+	} {
+		if *n.dst <= 0 {
+			*n.dst = n.def
+		}
+	}
+	if c.Pipelines.MaxPluginFilesBytes <= 0 {
+		c.Pipelines.MaxPluginFilesBytes = 100 << 20
+	}
+	if c.Pipelines.StarlarkSteps == 0 {
+		c.Pipelines.StarlarkSteps = 10_000_000
+	}
+	if c.Web.PluginTimeout <= 0 {
+		c.Web.PluginTimeout = 2 * time.Minute
 	}
 	if c.Webauth.SessionTTL == 0 {
 		c.Webauth.SessionTTL = 24 * time.Hour
@@ -1014,6 +1123,43 @@ func mergePlugins(file, env []PluginConfig) []PluginConfig {
 // applyPipelinesEnv reads the GOSIDIAN_PIPELINES_* variables. One LLM
 // provider can come from the environment too, named "default", for a
 // compose file that has no config.toml.
+// applyWebEnv reads the limits of the web UI's views (IMP-190).
+func (c *Config) applyWebEnv() error {
+	if err := envPositiveInts(map[string]*int{
+		"GOSIDIAN_WEB_GRAPH_DEFAULT_NODES": &c.Web.GraphDefaultNodes,
+		"GOSIDIAN_WEB_GRAPH_MAX_NODES":     &c.Web.GraphMaxNodes,
+		"GOSIDIAN_WEB_GRAPH_MAX_EDGES":     &c.Web.GraphMaxEdges,
+		"GOSIDIAN_WEB_CUT_MAX_CHUNKS":      &c.Web.CutMaxChunks,
+	}); err != nil {
+		return err
+	}
+	if v := os.Getenv("GOSIDIAN_WEB_PLUGIN_TIMEOUT"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return fmt.Errorf("GOSIDIAN_WEB_PLUGIN_TIMEOUT: %q is no duration", v)
+		}
+		c.Web.PluginTimeout = d
+	}
+	return nil
+}
+
+// envPositiveInts sets each setting whose variable is set, to a number
+// above 0: a cap of 0 would refuse everything.
+func envPositiveInts(vars map[string]*int) error {
+	for env, dst := range vars {
+		v := os.Getenv(env)
+		if v == "" {
+			continue
+		}
+		n, err := strconv.Atoi(v)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("%s: %q is no number above 0", env, v)
+		}
+		*dst = n
+	}
+	return nil
+}
+
 func (c *Config) applyPipelinesEnv() error {
 	if v := os.Getenv("GOSIDIAN_PIPELINES_ENABLED"); v != "" {
 		c.Pipelines.Enabled = envBool(v)
@@ -1065,6 +1211,37 @@ func (c *Config) applyPipelinesEnv() error {
 			}
 			*n.dst = b
 		}
+	}
+	// The other caps of the pipelines (IMP-190), each the installer's to
+	// raise.
+	if err := envPositiveInts(map[string]*int{
+		"GOSIDIAN_PIPELINES_MAX_RUN_DEPTH":          &c.Pipelines.MaxRunDepth,
+		"GOSIDIAN_PIPELINES_MAX_RUN_CHILDREN":       &c.Pipelines.MaxRunChildren,
+		"GOSIDIAN_PIPELINES_MAX_LIST_ITEMS":         &c.Pipelines.MaxListItems,
+		"GOSIDIAN_PIPELINES_MAX_CHUNK_META":         &c.Pipelines.MaxChunkMeta,
+		"GOSIDIAN_PIPELINES_MAX_MARK_SETS":          &c.Pipelines.MaxMarkSets,
+		"GOSIDIAN_PIPELINES_MAX_MARKS":              &c.Pipelines.MaxMarks,
+		"GOSIDIAN_PIPELINES_MAX_MARK_LABEL":         &c.Pipelines.MaxMarkLabel,
+		"GOSIDIAN_PIPELINES_MAX_MARK_TEXT":          &c.Pipelines.MaxMarkText,
+		"GOSIDIAN_PIPELINES_MAX_PLUGIN_FILES":       &c.Pipelines.MaxPluginFiles,
+		"GOSIDIAN_PIPELINES_MAX_PLUGIN_FILES_OUT":   &c.Pipelines.MaxPluginFilesOut,
+		"GOSIDIAN_PIPELINES_MAX_PLUGIN_GRAPH_BYTES": &c.Pipelines.MaxPluginGraphBytes,
+	}); err != nil {
+		return err
+	}
+	if v := os.Getenv("GOSIDIAN_PIPELINES_MAX_PLUGIN_FILES_BYTES"); v != "" {
+		b, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || b <= 0 {
+			return fmt.Errorf("GOSIDIAN_PIPELINES_MAX_PLUGIN_FILES_BYTES: %q is no number of bytes", v)
+		}
+		c.Pipelines.MaxPluginFilesBytes = b
+	}
+	if v := os.Getenv("GOSIDIAN_PIPELINES_STARLARK_STEPS"); v != "" {
+		n, err := strconv.ParseUint(v, 10, 64)
+		if err != nil || n == 0 {
+			return fmt.Errorf("GOSIDIAN_PIPELINES_STARLARK_STEPS: %q is no number of steps", v)
+		}
+		c.Pipelines.StarlarkSteps = n
 	}
 	if v := os.Getenv("GOSIDIAN_PIPELINES_HTTP_ALLOWLIST"); v != "" {
 		var prefixes []string

@@ -211,7 +211,10 @@ var baseSchemas = []NodeSchema{
 	"base": {"type": "string", "description": "The folder of the IN folder whose tree is kept under dest; empty for all of it"},
 	"dest": {"type": "string", "format": "path", "description": "The folder of the project the note goes into, with the tree under base"},
 	"media_notes": {"type": "boolean", "default": true, "description": "An image note for each image, in <note>_img/"},
-	"list_images": {"type": "boolean", "default": true, "description": "List the image notes in the output; no: their count only (an each over many files)"}}}`),
+	"list_images": {"type": "boolean", "default": true, "description": "List the image notes in the output; no: their count only (an each over many files)"},
+	"convert": {"type": "string", "description": "A node that converts the images as they arrive, images.convert"},
+	"convert_with": {"type": "object", "description": "The settings of the convert node"},
+	"convert_batch": {"type": "integer", "default": 25, "description": "The images of one call of the convert node; at most the server's max_plugin_files"}}}`),
 		Output: json.RawMessage(`{"type": "object", "properties": {
 	"path": {"type": "string"}, "created": {"type": "boolean"}, "attachments": {"type": "integer"},
 	"image_count": {"type": "integer"},

@@ -28,9 +28,6 @@ import (
 const (
 	defaultSectionChars = 6000
 	minSectionChars     = 200
-	maxSectionChars     = 1 << 20
-	// maxOnly caps the pieces note.sections is asked for by base.
-	maxOnly = 5000
 )
 
 // MediaWords are the words an image's text starts with: "[icon: …]",
@@ -437,8 +434,9 @@ func noteSections(_ context.Context, env *Env, with map[string]any) (any, error)
 		rel += ".md"
 	}
 	opt := cutOptions{maxChars: int(number(with, "max_chars", defaultSectionChars)), paragraphs: true, context: str(with, "context")}
-	if opt.maxChars < minSectionChars || opt.maxChars > maxSectionChars {
-		return nil, fmt.Errorf("with.max_chars: %d to %d", minSectionChars, maxSectionChars)
+	// A section longer than a step's output could never come out of it.
+	if maxChars := env.Engine.cfg.MaxOutputBytes; opt.maxChars < minSectionChars || opt.maxChars > maxChars {
+		return nil, fmt.Errorf("with.max_chars: %d to %d ([pipelines] max_output_bytes)", minSectionChars, maxChars)
 	}
 	switch opt.context {
 	case "":
@@ -480,8 +478,8 @@ func noteSections(_ context.Context, env *Env, with map[string]any) (any, error)
 	var only map[string]bool
 	if v, ok := with["only"]; ok && v != nil {
 		list, ok := v.([]any)
-		if !ok || len(list) > maxOnly {
-			return nil, fmt.Errorf("with.only: a list of up to %d bases", maxOnly)
+		if maxOnly := env.Engine.cfg.MaxListItems; !ok || len(list) > maxOnly {
+			return nil, fmt.Errorf("with.only: a list of up to %d bases ([pipelines] max_list_items)", maxOnly)
 		}
 		only = map[string]bool{}
 		for _, b := range list {
@@ -493,8 +491,8 @@ func noteSections(_ context.Context, env *Env, with map[string]any) (any, error)
 		}
 	}
 	extra, _ := with["meta"].(map[string]any)
-	if b, _ := json.Marshal(extra); len(b) > 16<<10 {
-		return nil, errors.New("with.meta: over 16 KiB")
+	if b, _ := json.Marshal(extra); len(b) > env.Engine.cfg.MaxChunkMeta {
+		return nil, fmt.Errorf("with.meta: over %d bytes ([pipelines] max_chunk_meta)", env.Engine.cfg.MaxChunkMeta)
 	}
 	words, err := mediaWords(with)
 	if err != nil {

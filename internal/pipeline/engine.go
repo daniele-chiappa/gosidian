@@ -87,6 +87,17 @@ type Config struct {
 	MaxWait time.Duration
 	// StarlarkSteps caps a starlark script; default 10 million.
 	StarlarkSteps uint64
+	// MaxRunDepth is how many runs may start each other in a chain
+	// through pipeline.run; default 4. MaxRunChildren is how many runs
+	// one run may start through it; default 1000.
+	MaxRunDepth    int
+	MaxRunChildren int
+	// MaxListItems caps what a node lists or is asked for in one call:
+	// a page of note.list, note.sections' only; default 5000.
+	MaxListItems int
+	// MaxChunkMeta caps the meta of a chunk of note.sections, in bytes of
+	// JSON; default 16 KiB.
+	MaxChunkMeta int
 	// HTTPAllowlist holds the URL prefixes http.request and the
 	// callbacks may call; empty: none.
 	HTTPAllowlist []string
@@ -100,6 +111,11 @@ type Config struct {
 	// reference; default 15 minutes (the server's step timeout).
 	FileTicketTTL time.Duration
 }
+
+// MaxOutputBytes is a step's output in bytes ([pipelines]
+// max_output_bytes): the longest section note.sections cuts, which the cut
+// view takes as its own.
+func (e *Engine) MaxOutputBytes() int { return e.cfg.MaxOutputBytes }
 
 // Engine runs pipelines on a job runner.
 type Engine struct {
@@ -134,6 +150,14 @@ func New(host Host, runner *jobs.Runner, cfg Config, secrets Secrets, logger *sl
 	}
 	if cfg.StarlarkSteps == 0 {
 		cfg.StarlarkSteps = 10_000_000
+	}
+	for _, n := range []struct {
+		dst *int
+		def int
+	}{{&cfg.MaxRunDepth, 4}, {&cfg.MaxRunChildren, 1000}, {&cfg.MaxListItems, 5000}, {&cfg.MaxChunkMeta, 16 << 10}} {
+		if *n.dst <= 0 {
+			*n.dst = n.def
+		}
 	}
 	if cfg.Location == nil {
 		cfg.Location = time.Local

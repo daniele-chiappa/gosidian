@@ -293,7 +293,7 @@ func TestVersion_PublicGet(t *testing.T) {
 		t.Fatalf("status=%d", w.Code)
 	}
 	v := decodeJSON[versionResponse](t, w.Body)
-	if v.Version != "test-version" || v.API != "v1" {
+	if v.Version != "test-version" || v.API != "v1" || v.GraphDefaultNodes != 2000 || v.GraphMaxNodes != 5000 {
 		t.Errorf("version: %+v", v)
 	}
 }

@@ -133,6 +133,11 @@ type Server struct {
 	maxNoteBytes int64
 	// maxPluginResult caps a plugin tool's result ([mcp] max_plugin_result).
 	maxPluginResult int64
+	// pluginToolTimeout caps an agent's call of a plugin's tool ([mcp]
+	// plugin_tool_timeout), stepOutputShown a step's output in
+	// memory_pipelines ([mcp] max_step_output_shown).
+	pluginToolTimeout time.Duration
+	stepOutputShown   int
 	// packageMaxFiles and packageMaxBytes cap a memory_ingest package
 	// (IMP-116); SetPackageLimits overrides the defaults.
 	packageMaxFiles int
@@ -474,6 +479,23 @@ func (s *Server) SetPluginResultLimit(n int64) {
 	}
 }
 
+// SetPluginToolTimeout configures the longest an agent's call of a
+// plugin's tool may take, within the plugin's own timeout. Zero keeps the
+// default, 2 minutes.
+func (s *Server) SetPluginToolTimeout(d time.Duration) {
+	if d > 0 {
+		s.pluginToolTimeout = d
+	}
+}
+
+// SetStepOutputShown configures how many bytes of a step's output
+// memory_pipelines shows. Zero keeps the default, 4 KiB.
+func (s *Server) SetStepOutputShown(n int) {
+	if n > 0 {
+		s.stepOutputShown = n
+	}
+}
+
 // SetPackageLimits configures the caps of a memory_ingest package: its
 // files, and its size unpacked. Zero keeps the defaults.
 func (s *Server) SetPackageLimits(maxFiles int, maxBytes int64) {
@@ -610,11 +632,14 @@ func New(v *vault.Vault, idx *index.Index, tokens *auth.Store) *Server {
 		limiter:         newWriteLimiter(60),
 		maxNoteBytes:    1 << 20,
 		maxPluginResult: defaultMaxPluginResult,
-		packageMaxFiles: 500,
-		packageMaxBytes: 20 << 20,
-		shrinkPercent:   10,
-		shrinkMinBytes:  1024,
-		nudges:          newNudgeTracker(),
+		// The two below: SetPluginToolTimeout, SetStepOutputShown.
+		pluginToolTimeout: defaultPluginToolTimeout,
+		stepOutputShown:   defaultStepOutputShown,
+		packageMaxFiles:   500,
+		packageMaxBytes:   20 << 20,
+		shrinkPercent:     10,
+		shrinkMinBytes:    1024,
+		nudges:            newNudgeTracker(),
 	}
 	s.streams, s.endStreams = context.WithCancel(context.Background())
 	// The self-improve nudge middleware is bound to s, so s must exist

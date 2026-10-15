@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"sort"
@@ -22,17 +23,13 @@ import (
 // /api/v1/graph/sources lists what a project's Graph window may show.
 
 const (
-	// maxGraphNodes and maxGraphEdges cap a plugin's graph: past them the
-	// browser draws too slowly to read.
-	maxGraphNodes = 5000
-	maxGraphEdges = 50000
-	// maxGraphArgs caps the JSON of a graph's arguments.
+	// maxGraphArgs caps the JSON of a graph's arguments, a format rather
+	// than a cap of the graph ([web] graph_max_nodes and graph_max_edges).
 	maxGraphArgs = 4 << 10
 	// graphCacheTTL keeps a graph that costs the plugin seconds (the
 	// neighbours of thousands of vectors); refresh=1 asks again.
-	graphCacheTTL   = 15 * time.Minute
-	graphCacheSize  = 32
-	pluginGraphWait = 2 * time.Minute
+	graphCacheTTL  = 15 * time.Minute
+	graphCacheSize = 32
 )
 
 // pluginGraphNode is a node of a plugin's graph: link names a note of the
@@ -196,7 +193,7 @@ func (r *Router) handlePluginGraph(w http.ResponseWriter, req *http.Request, sou
 	if user != nil {
 		caller = "web:" + user.Username
 	}
-	ctx, cancel := context.WithTimeout(req.Context(), pluginGraphWait)
+	ctx, cancel := context.WithTimeout(req.Context(), r.web.PluginTimeout)
 	defer cancel()
 	raw, err := r.deps.Plugins.Graph(ctx, plugin, graph, args, map[string]any{plugins.MetaProject: project, plugins.MetaCaller: caller, plugins.MetaAccess: plugins.AccessRead})
 	if r.deps.Audit != nil {
@@ -246,8 +243,8 @@ func (r *Router) readPluginGraph(req *http.Request, raw json.RawMessage) (plugin
 	if err := json.Unmarshal(raw, &in); err != nil {
 		return pluginGraphResponse{}, errInvalidGraph("it is not a graph's JSON: " + err.Error())
 	}
-	if len(in.Nodes) > maxGraphNodes || len(in.Edges) > maxGraphEdges {
-		return pluginGraphResponse{}, errInvalidGraph("more than 5000 nodes or 50000 edges")
+	if len(in.Nodes) > r.web.GraphMaxNodes || len(in.Edges) > r.web.GraphMaxEdges {
+		return pluginGraphResponse{}, errInvalidGraph(fmt.Sprintf("more than %d nodes or %d edges ([web] graph_max_nodes, graph_max_edges)", r.web.GraphMaxNodes, r.web.GraphMaxEdges))
 	}
 	princ := principalFromContext(req)
 	out := pluginGraphResponse{Nodes: make([]pluginGraphNode, 0, len(in.Nodes)), Edges: []pluginGraphEdge{}}

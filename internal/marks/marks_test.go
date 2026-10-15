@@ -69,28 +69,45 @@ func TestStore(t *testing.T) {
 
 func TestSet_Check(t *testing.T) {
 	ok := Set{Path: "p/a.md", Name: "cut", Marks: []Mark{{Color: "cyan"}}}
-	if err := ok.Check(); err != nil {
+	d := DefaultLimits
+	if err := ok.Check(d); err != nil {
 		t.Fatal(err)
 	}
 	for name, s := range map[string]Set{
 		"name":  {Name: "Cut!", Marks: ok.Marks},
 		"color": {Name: "cut", Marks: []Mark{{Color: "pink"}}},
-		"label": {Name: "cut", Marks: []Mark{{Color: "red", Label: strings.Repeat("x", MaxLabel+1)}}},
+		"label": {Name: "cut", Marks: []Mark{{Color: "red", Label: strings.Repeat("x", d.Label+1)}}},
 		"block": {Name: "cut", Marks: []Mark{{Color: "red", Block: -1}}},
-		"many":  {Name: "cut", Marks: make([]Mark, MaxMarks+1)},
+		"many":  {Name: "cut", Marks: make([]Mark, d.Marks+1)},
 	} {
-		if s.Check() == nil {
+		if s.Check(d) == nil {
 			t.Errorf("%s: no error", name)
 		}
 	}
 	st := open(t)
-	for i := range MaxSets {
+	for i := range d.Sets {
 		if err := st.Put(Set{Path: "p/a.md", Name: "s" + string(rune('a'+i)), Hash: "h", Marks: ok.Marks}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if err := st.Put(Set{Path: "p/a.md", Name: "one-more", Hash: "h", Marks: ok.Marks}); err == nil {
-		t.Error("a set past MaxSets")
+		t.Error("a set past the cap")
+	}
+}
+
+// The config raises the caps, and a 0 keeps the default.
+func TestStore_Limits(t *testing.T) {
+	st := open(t)
+	st.SetLimits(Limits{Sets: 1, Text: 1000})
+	long := Set{Path: "p/a.md", Name: "a", Hash: "h", Marks: []Mark{{Color: "red", Text: strings.Repeat("x", 800)}}}
+	if err := st.Put(long); err != nil {
+		t.Fatalf("a text of 800 under a cap of 1000: %v", err)
+	}
+	if err := st.Put(Set{Path: "p/a.md", Name: "b", Hash: "h", Marks: []Mark{{Color: "red"}}}); err == nil {
+		t.Error("a second set past a cap of 1")
+	}
+	if st.limits.Marks != DefaultLimits.Marks || st.limits.Label != DefaultLimits.Label {
+		t.Errorf("limits %+v", st.limits)
 	}
 }
 

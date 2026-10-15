@@ -96,7 +96,7 @@ func TestNoteList_Refusals(t *testing.T) {
 	host.mu.Lock()
 	q := host.lastQuery
 	host.mu.Unlock()
-	if q.Folder != "p" || q.Limit != noteListMax || len(out.Notes) == 0 {
+	if q.Folder != "p" || q.Limit != 5000 || len(out.Notes) == 0 {
 		t.Errorf("query %+v, %d notes", q, len(out.Notes))
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"go.yaml.in/yaml/v3"
 
@@ -92,10 +93,21 @@ var (
 // The fields of the links only, and the limits of the numbers.
 var linksOnly = map[string]bool{"tag": true, "focus": true, "depth": true, "min_degree": true}
 
-const (
-	maxDepth = 6
-	maxLimit = 5000
-)
+const maxDepth = 6
+
+// maxLimit is the most nodes a block may ask for: [web] graph_max_nodes,
+// which the server sets at start (SetMaxLimit).
+var maxLimit atomic.Int64
+
+func init() { maxLimit.Store(5000) }
+
+// SetMaxLimit sets the most nodes a block may ask for; 0 or less keeps
+// the one there is.
+func SetMaxLimit(n int) {
+	if n > 0 {
+		maxLimit.Store(int64(n))
+	}
+}
 
 // Parse reads a block. A block that does not read still gives what it
 // could, with its problems.
@@ -156,8 +168,8 @@ func Parse(src string) (Spec, []Problem) {
 			case "min_degree":
 				s.MinDegree = n
 			case "limit":
-				if n > maxLimit {
-					bad(v, "limit is at most %d", maxLimit)
+				if max := int(maxLimit.Load()); n > max {
+					bad(v, "limit is at most %d ([web] graph_max_nodes)", max)
 				}
 				s.Limit = n
 			}

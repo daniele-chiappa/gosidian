@@ -8,6 +8,43 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.90.0] — 2026-10-15 — "limits as settings"
+
+The caps the pipelines, the plugins, the agents' tools and the web UI's
+views had in the code are settings, each with a `GOSIDIAN_*` variable,
+their defaults the old values: a vault larger than the ones they were
+measured on raises them. Pull the image and restart; nothing to migrate,
+and nothing changes for who sets none, but for the few lines under
+Changed.
+
+### Added
+- **The limits are settings** — `[pipelines] max_run_depth`,
+  `max_list_items`, `max_chunk_meta`, `max_mark_sets`, `max_marks`,
+  `max_mark_label`, `max_mark_text`, `max_plugin_files`,
+  `max_plugin_files_out`, `max_plugin_files_bytes`,
+  `max_plugin_graph_bytes` and `starlark_steps`; `[mcp]
+  plugin_tool_timeout` and `max_step_output_shown`; a new `[web]` section
+  with `graph_default_nodes`, `graph_max_nodes`, `graph_max_edges`,
+  `cut_max_chunks` and `plugin_timeout`. A setting a plugin mirrors goes
+  up with the plugin's own. See docs/configuration.md.
+- `in.import` takes `convert_batch`, the images of one call of its
+  convert node (25 by default).
+
+### Changed
+- **A run starts at most 1000 runs** with `pipeline.run`, in an `each`
+  too (`[pipelines] max_run_children`): an `each` over thousands of notes
+  in a pipeline that starts itself started them at every level of the
+  chain.
+- `GET /api/v1/graph` gives at most `[web] graph_max_nodes` nodes, a limit
+  asked or none; it had no most. `/api/v1/version` gives
+  `graph_default_nodes` and `graph_max_nodes`, which the Graph window
+  names.
+- The cut view waits for an archive up to `[web] plugin_timeout` (2
+  minutes), as a plugin's graph does; it waited 30 seconds for the chunks
+  and 15 for the collections.
+- `note.sections`' `max_chars` goes up to `max_output_bytes`, in the node
+  and in the cut view; it stopped at 1 MiB.
+
 ## [2.89.0] — 2026-10-15 — "chunks and commits"
 
 The pipelines learn to keep an archive of vectors in step with the notes:

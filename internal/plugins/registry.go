@@ -98,7 +98,44 @@ type Registry struct {
 
 	mu   sync.Mutex
 	live map[string]liveState
+	// limits are set once, before the registry serves (SetLimits).
+	limits Limits
 }
+
+// Limits are the caps of what goes to and comes from a plugin: the files
+// a call names (a node's setting, an agent's tool), the files a result
+// gives back and their bytes, and a graph's bytes.
+type Limits struct {
+	Files      int
+	FilesOut   int
+	FilesBytes int64
+	GraphBytes int
+}
+
+// DefaultLimits are the caps the config does not change.
+var DefaultLimits = Limits{Files: 100, FilesOut: 200, FilesBytes: 100 << 20, GraphBytes: 8 << 20}
+
+// SetLimits sets the caps ([pipelines] max_plugin_files…); a cap of 0
+// keeps its default. Call it before the registry serves.
+func (r *Registry) SetLimits(l Limits) {
+	d := DefaultLimits
+	if l.Files <= 0 {
+		l.Files = d.Files
+	}
+	if l.FilesOut <= 0 {
+		l.FilesOut = d.FilesOut
+	}
+	if l.FilesBytes <= 0 {
+		l.FilesBytes = d.FilesBytes
+	}
+	if l.GraphBytes <= 0 {
+		l.GraphBytes = d.GraphBytes
+	}
+	r.limits = l
+}
+
+// Limits are the caps in force.
+func (r *Registry) Limits() Limits { return r.limits }
 
 // New checks the registrations and opens the accepted manifests of
 // stateDir. version is the server's, told to the plugins.
@@ -107,7 +144,7 @@ func New(cfgs []Config, stateDir string, sec Secrets, version string, logger *sl
 		logger = slog.Default()
 	}
 	r := &Registry{plugins: map[string]Config{}, store: newStore(filepath.Join(stateDir, FileName)),
-		secrets: sec, version: version, log: logger, live: map[string]liveState{}}
+		secrets: sec, version: version, log: logger, live: map[string]liveState{}, limits: DefaultLimits}
 	for _, c := range cfgs {
 		switch {
 		case !ValidName(c.Name):

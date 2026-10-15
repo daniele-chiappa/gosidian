@@ -46,7 +46,12 @@ func newPlugins(pc config.PipelinesConfig, sdir string, sec pipeline.Secrets, lo
 	if sec != nil {
 		ps = sec
 	}
-	return plugins.New(cfgs, sdir, ps, version, logger)
+	reg, err := plugins.New(cfgs, sdir, ps, version, logger)
+	if err != nil {
+		return nil, err
+	}
+	reg.SetLimits(plugins.Limits{Files: pc.MaxPluginFiles, FilesOut: pc.MaxPluginFilesOut, FilesBytes: pc.MaxPluginFilesBytes, GraphBytes: pc.MaxPluginGraphBytes})
+	return reg, nil
 }
 
 func runPluginCmd(args []string) {

@@ -8,7 +8,9 @@ vi.mock('@/api/graph', () => ({ fetchGraph: vi.fn(), fetchGraphSources: vi.fn(as
 vi.mock('@/api/projects', () => ({ listProjects: vi.fn(async () => []) }))
 vi.mock('@/api/tags', () => ({ listTags: vi.fn(async () => []) }))
 vi.mock('@/api/noteTitles', () => ({ suggestNoteTitles: vi.fn(async () => []) }))
-vi.mock('@/stores/ui', () => ({ useUIStore: () => ({ graphMode: '2d', setGraphMode: vi.fn() }) }))
+vi.mock('@/stores/ui', () => ({
+  useUIStore: () => ({ graphMode: '2d', setGraphMode: vi.fn(), graphDefaultNodes: 2000, graphMaxNodes: 5000 }),
+}))
 vi.mock('plancia', async (orig) => ({
   ...(await orig<typeof import('plancia')>()),
   useWindowsStore: () => ({ windows: [], open: vi.fn(), identify: vi.fn(), setTitle: vi.fn() }),

@@ -179,8 +179,8 @@ an expression turns it into text. There are no operators: compute in a
 |---|---|---|
 | `note.read` | `path` (inside the project; relative to it), `media`: `keep` (default) or `inline`, the images as text ([below](#chunks-for-an-archive-of-vectors)), with `media_words` and `inline_max_side` | `path`, `title`, `frontmatter`, `body`, `etag`; with `media: inline`, `media` (the images counted) |
 | `note.write` | `path`, `body`, `title`, `frontmatter` (a map), `mode`: `upsert` (default), `create`, `replace` | `path`, `etag`, `created` |
-| `note.list` | `folder` (inside the project, relative to it; empty: all of it), `recursive` (default yes), `where` (memory_query's conditions, `{field, op, value}`), `sort` (default `path`), `fields` (frontmatter fields to give), `limit` (default 500, at most 5000), `cursor` | `notes` (`path`, `title`, `fields`), `count` (this page), `total` (all that match), `next` (the cursor of the next page; empty at the last) |
-| `note.sections` | `path`, `version` (ends each chunk's id after an `@`), `levels` (default `[section, paragraph]`; `[paragraph]` still cuts the sections, the paragraphs' parents and paths, but gives the paragraphs only), `max_chars` (default 6000), `context`: `heading` (default), `path`, `none`, `text` (default yes), `only` (bases), `meta` (added to each chunk's), `media`: `inline` (default) or `keep`, `media_words`, `inline_max_side` | `doc`, `title`, `version`, `sections`, `paragraphs`, `chunks` (as an archive's `upsert` takes them), `count`, `media` — see [below](#chunks-for-an-archive-of-vectors) |
+| `note.list` | `folder` (inside the project, relative to it; empty: all of it), `recursive` (default yes), `where` (memory_query's conditions, `{field, op, value}`), `sort` (default `path`), `fields` (frontmatter fields to give), `limit` (default 500, at most `[pipelines] max_list_items`, 5000), `cursor` | `notes` (`path`, `title`, `fields`), `count` (this page), `total` (all that match), `next` (the cursor of the next page; empty at the last) |
+| `note.sections` | `path`, `version` (ends each chunk's id after an `@`), `levels` (default `[section, paragraph]`; `[paragraph]` still cuts the sections, the paragraphs' parents and paths, but gives the paragraphs only), `max_chars` (default 6000; 200 to `max_output_bytes`), `context`: `heading` (default), `path`, `none`, `text` (default yes), `only` (bases, up to `max_list_items`), `meta` (added to each chunk's, up to `max_chunk_meta` bytes), `media`: `inline` (default) or `keep`, `media_words`, `inline_max_side` | `doc`, `title`, `version`, `sections`, `paragraphs`, `chunks` (as an archive's `upsert` takes them), `count`, `media` — see [below](#chunks-for-an-archive-of-vectors) |
 | `note.mark` | `path`, `set` (a name: `cut`, `review`), `marks` (each `base`, a chunk of `note.sections`, or `section`, the path of its headings, and `block`, its paragraph from 1; `color`: `blue`, `green`, `orange`, `red`, `cyan`, `grey`; `label`, `text`) | `path`, `set`, `count` — see [below](#marks-on-a-note) |
 | `wait.call` | `timeout` (default `24h`, at most `max_wait`) | the data the resume hands it |
 | `pipeline.run` | `pipeline` (a pipeline note of the project, relative to it), `input` (a map, the started run's `trigger`), `wait` (default yes), `timeout` (of the wait: default `24h`, at most `max_wait`), `key` | with `wait`: `run`, `pipeline`, `status`, `error`, `steps` (each node's status), `outputs` (each node's output, when they fit); without: `run`, `pipeline`, `status`, `existing` — see [below](#one-pipeline-starting-another) |
@@ -191,7 +191,7 @@ an expression turns it into text. There are no operators: compute in a
 | `llm.describe_media` | `note` (whose image notes, in `<note>_img/`, get a description), `prompt` and `inline_prompt` (with `{title}`, `{section}`, `{context}`), `inline_max_side` (default 128: an image in a sentence with a longer side, a screenshot, gets `prompt`; 0: every one gets `inline_prompt`), `images` (`all`, the default; `icons`, the images in a sentence up to `inline_max_side`; `others`, the rest: two passes, each with its own model), `context_chars` (default 1200), `max_pixels` (default 2000000; 0 sends an image whole), `concurrency` (default 1, at most 8), `prompt_version` (default 1), `redo`, and as `llm.chat` (`max_tokens` default 600) | `described`, `skipped`, `unreadable`, `excluded` (left to another pass by `images`), `failed`, `downscaled`, `errors`, `usage`, `seconds` — see [below](#documents-from-the-in-folder) |
 | `in.list` | `folder` (of the IN folder; empty: all), `recursive` (default yes), `match` (a glob on the name), `kinds`, `status`, `batch` (`{{ trigger.batch }}`), `limit` (default 500, at most 5000), `cursor` | `files` (`path`, `name`, `stem`, `ext`, `dir`, `size`, `sha256`, `etag`, `status`, `modified`, `batch`, `source`), `count`, `next` (the cursor of the next page; empty at the last) |
 | `in.move` | `file` (in the IN folder), `to` (a folder, `done/`, or a path, in the IN folder; empty, or where it is already: it stays; for a file of a [source](in.md#sources), inside the source: `done/` is its `done/`), `status` (`done`, `error`, `ignored`, `new`) | `path`, `from`, `status` |
-| `in.import` | `file` (a `.md` in the IN folder), `dest` (a folder of the project), `base` (the folder of the IN folder whose tree is kept under `dest`; empty: all of it), `media_notes` (default yes), `list_images` (default yes; no keeps only their count, for an `each` over many files), `convert` (a node that converts the images, `images.convert`) and `convert_with` (its settings) | `path`, `created`, `attachments`, `image_count`, `images` (`note`, `attachment`, `src`, `position`, `inline`), `removed`, `unresolved`, `skipped` (`src`, `reason`), with `convert` `converted` and `convert_errors` — see [below](#documents-from-the-in-folder) |
+| `in.import` | `file` (a `.md` in the IN folder), `dest` (a folder of the project), `base` (the folder of the IN folder whose tree is kept under `dest`; empty: all of it), `media_notes` (default yes), `list_images` (default yes; no keeps only their count, for an `each` over many files), `convert` (a node that converts the images, `images.convert`), `convert_with` (its settings) and `convert_batch` (the images of one call, default 25) | `path`, `created`, `attachments`, `image_count`, `images` (`note`, `attachment`, `src`, `position`, `inline`), `removed`, `unresolved`, `skipped` (`src`, `reason`), with `convert` `converted` and `convert_errors` — see [below](#documents-from-the-in-folder) |
 | `<plugin>.<node>` | what the plugin's manifest says; a setting it lists in `files` names an attachment of the project or a file of its IN folder (or a list of them, for a plugin that takes files by reference: `{{ trigger.files }}`) | the plugin tool's result, plus `files` (`name`, `path`, `mime`, `markdown`): the files it gave back, stored as attachments |
 
 A plugin's nodes exist once the owner accepted its manifest
@@ -307,7 +307,8 @@ nodes:
 - the files it read are `done`, with its run;
 - with `convert: images.convert` ([the images plugin](plugins.md)), the
   document's PNG, JPEG, GIF, WebP and TIFF images go to that node before
-  they are stored, 25 at a time, by reference, with `convert_with` as its
+  they are stored, 25 at a time (`convert_batch`, at most the server's
+  `max_plugin_files`), by reference, with `convert_with` as its
   settings (`{format: webp}`): the vault gets the converted file, and the
   note and the image note point at it. An image the node keeps (it would
   not get lighter) or fails on is stored as it is, the failures listed in
@@ -390,7 +391,9 @@ change the author's text, make a commit at each run and grow old with the
 rules that made them.
 
 - A run replaces its set (`set`); a set without marks goes. A note has at
-  most 20 sets, a set 500 marks; a label 60 characters, a text 500.
+  most 20 sets, a set 500 marks; a label 60 characters, a text 500
+  (`[pipelines] max_mark_sets`, `max_marks`, `max_mark_label`,
+  `max_mark_text`).
 - The sets live in `marks.db` in the state dir, out of the vault and of
   git; a note renamed through gosidian takes its sets along, deleted loses
   them.
@@ -547,8 +550,13 @@ nodes:
 - **Without `wait`** the step gives the run it started and goes on: in an
   `each`, one run per element, each with its own step timeout and its own
   `max_llm_tokens`. An `each` that waits is refused.
-- **A chain** of runs starting each other stops at four below the first:
-  the fifth fails. A pipeline that starts itself does not run forever.
+- **A chain** of runs starting each other stops at four below the first
+  (`[pipelines] max_run_depth`): the fifth fails. A pipeline that starts
+  itself does not run forever.
+- **One run starts at most 1000 runs** (`[pipelines] max_run_children`),
+  in an `each` too: the element past it fails the step, and the runs it
+  started stay. Without it, an `each` over thousands of notes in a
+  pipeline that starts itself would start them at every level.
 
 To work again on notes a pipeline did not make, `note.list` gives the
 notes of a folder, a page at a time:
@@ -578,7 +586,7 @@ REST reference: `internal/api/v1/spec/openapi.yaml`, tag `pipelines`.
 - Use secrets **by name**: their values never appear in a note, a run or
   the audit.
 - Start **only pipelines of its own project** (`pipeline.run`), in a chain
-  at most four runs deep.
+  at most four runs deep, at most 1000 from one run (both settings).
 - Call **only the registered plugins**, and only through the nodes of the
   manifest the owner accepted. A plugin gets the files the node names,
   nothing else of the vault; the files it gives back become attachments

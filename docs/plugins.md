@@ -259,7 +259,8 @@ search over the archive the plugin keeps, say. The manifest lists them:
   `project`: gosidian adds that argument itself.
 - `files` lists the arguments that name **files of the project** (from
   2.89, IMP-184): an attachment or a file of its IN folder, by its vault
-  path, or a list of up to 100 (paths, or entries with a `path`). The tool
+  path, or a list of up to 100 by default (`[pipelines] max_plugin_files`;
+  paths, or entries with a `path`). The tool
   needs `file_refs: true` and `permissions.files`. A node's tool that takes
   files may be a tool too, when it lists them here.
 
@@ -337,7 +338,9 @@ gosidian reads a graph with the tool `gosidian_graph`, the graph's name in
 - `group` colours the node; `link`, a note of the vault the viewer reads,
   opens it on a click; `text` is what the node shows; `x`, `y` (and `z`),
   about -1 to 1, fix its place, for a layout of the plugin's.
-- At most 5000 nodes, 50,000 edges, 8 MiB. gosidian drops an edge twice or
+- At most 5000 nodes, 50,000 edges, 8 MiB by default (`[web]
+  graph_max_nodes`, `graph_max_edges`, `[pipelines] max_plugin_graph_bytes`
+  in [the configuration](configuration.md)). gosidian drops an edge twice or
   to a node the graph does not have, and a link to a note the viewer may
   not read.
 - `GET /api/v1/graph?source=<plugin>/<graph>&project=<p>&with=<JSON>`

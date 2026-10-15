@@ -460,3 +460,27 @@ func TestINImport_ConvertFailingWhole(t *testing.T) {
 	}
 	mustContain(t, "an image stored as it is", host.note("p/documents/wiki/A/B/Doc one_img/a.md"), ".png\n", "width: 4")
 }
+
+// convert_batch sets the images of one call of the convert node.
+func TestINImport_ConvertBatch(t *testing.T) {
+	e, host := newEngine(t, Config{})
+	fc := &fakeConvert{version: "v1"}
+	e.Types().Register("fake.convert", fc)
+	host.notes["p/pipelines/wiki-md.md"] = pipelineNote(strings.Replace(importPipeline, "dest: documents/wiki}",
+		"dest: documents/wiki, convert: fake.convert, convert_batch: 4}", 1))
+	var doc strings.Builder
+	doc.WriteString("# Doc one\n\n")
+	for i := range 10 {
+		name := fmt.Sprintf("%03d.png", i)
+		doc.WriteString("![](Doc%20one_img/" + name + ")\n\n")
+		host.att["p/IN/wiki/A/B/Doc one_img/"+name] = pngOf(t, 3+i, 2, color.White)
+	}
+	host.att["p/IN/wiki/A/B/Doc one.md"] = []byte(doc.String())
+	_, out := startImport(t, e)
+	fc.mu.Lock()
+	calls := fc.calls
+	fc.mu.Unlock()
+	if calls != 3 || out["converted"] != 10.0 {
+		t.Fatalf("%d calls, output %v", calls, out)
+	}
+}

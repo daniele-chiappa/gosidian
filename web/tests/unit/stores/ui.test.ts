@@ -64,6 +64,14 @@ describe('ui store', () => {
     expect(ui.pipelinesEnabled).toBe(false)
   })
 
+  it("reads the server's caps of a graph, the defaults without them (IMP-190)", async () => {
+    mockedGetVersion.mockResolvedValue({ version: 'test', api: 'v1', graph_default_nodes: 3000, graph_max_nodes: 20000 })
+    const ui = useUIStore()
+    expect([ui.graphDefaultNodes, ui.graphMaxNodes]).toEqual([2000, 5000])
+    await ui.hydrate()
+    expect([ui.graphDefaultNodes, ui.graphMaxNodes]).toEqual([3000, 20000])
+  })
+
   describe('enabled languages (IMP-148)', () => {
     it('first boot takes the default and offers only the enabled languages', async () => {
       mockedGetVersion.mockResolvedValue({ version: 'test', api: 'v1', default_lang: 'it', enabled_langs: ['it', 'en'] })

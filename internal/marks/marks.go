@@ -27,14 +27,16 @@ import (
 // The colours of a mark: the theme's, readable in the light and the dark.
 var Colors = []string{"blue", "green", "orange", "red", "cyan", "grey"}
 
-// Limits of a set.
-const (
-	MaxMarks   = 500
-	MaxSets    = 20
-	MaxLabel   = 60
-	MaxText    = 500
-	maxSection = 1024
-)
+// Limits are the caps of the marks ([pipelines] max_mark_sets,
+// max_marks, max_mark_label, max_mark_text): the sets of a note, the marks
+// of a set, and the characters of a mark's label and text.
+type Limits struct{ Sets, Marks, Label, Text int }
+
+// DefaultLimits are the caps the config does not change.
+var DefaultLimits = Limits{Sets: 20, Marks: 500, Label: 60, Text: 500}
+
+// maxSection is a section's path of headings, a format rather than a cap.
+const maxSection = 1024
 
 // Mark is a span of a note: a chunk of note.sections by its base, else a
 // section by the path of its headings ("" the text before the first one),
@@ -62,22 +64,23 @@ type Set struct {
 
 var setName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
 
-// Check says what is wrong with a set, nil when nothing.
-func (s Set) Check() error {
+// Check says what is wrong with a set under the limits l, nil when
+// nothing.
+func (s Set) Check(l Limits) error {
 	if !setName.MatchString(s.Name) {
 		return fmt.Errorf("set %q: lower-case letters, digits, _ and -, at most 32", s.Name)
 	}
-	if len(s.Marks) > MaxMarks {
-		return fmt.Errorf("set %s: %d marks, at most %d", s.Name, len(s.Marks), MaxMarks)
+	if len(s.Marks) > l.Marks {
+		return fmt.Errorf("set %s: %d marks, at most %d ([pipelines] max_marks)", s.Name, len(s.Marks), l.Marks)
 	}
 	for i, m := range s.Marks {
 		switch {
 		case !validColor(m.Color):
 			return fmt.Errorf("marks[%d].color %q: %s", i, m.Color, strings.Join(Colors, ", "))
-		case utf8.RuneCountInString(m.Label) > MaxLabel:
-			return fmt.Errorf("marks[%d].label: at most %d characters", i, MaxLabel)
-		case utf8.RuneCountInString(m.Text) > MaxText:
-			return fmt.Errorf("marks[%d].text: at most %d characters", i, MaxText)
+		case utf8.RuneCountInString(m.Label) > l.Label:
+			return fmt.Errorf("marks[%d].label: at most %d characters ([pipelines] max_mark_label)", i, l.Label)
+		case utf8.RuneCountInString(m.Text) > l.Text:
+			return fmt.Errorf("marks[%d].text: at most %d characters ([pipelines] max_mark_text)", i, l.Text)
 		case m.Block < 0 || len(m.Section) > maxSection || len(m.Base) > 256:
 			return fmt.Errorf("marks[%d]: block from 1, a section of at most %d bytes, a base of at most 256", i, maxSection)
 		}
@@ -95,7 +98,10 @@ func validColor(c string) bool {
 }
 
 // Store is the sets of marks of the vault's notes.
-type Store struct{ db *sql.DB }
+type Store struct {
+	db     *sql.DB
+	limits Limits
+}
 
 const schema = `CREATE TABLE IF NOT EXISTS sets (
 	path TEXT NOT NULL,
@@ -119,16 +125,28 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("marks: schema: %w", err)
 	}
-	return &Store{db: db}, nil
+	return &Store{db: db, limits: DefaultLimits}, nil
+}
+
+// SetLimits sets the caps of the marks; a cap of 0 keeps its default. Call
+// it before the store is used.
+func (s *Store) SetLimits(l Limits) {
+	d := DefaultLimits
+	for _, f := range []struct{ dst, def *int }{{&l.Sets, &d.Sets}, {&l.Marks, &d.Marks}, {&l.Label, &d.Label}, {&l.Text, &d.Text}} {
+		if *f.dst <= 0 {
+			*f.dst = *f.def
+		}
+	}
+	s.limits = l
 }
 
 // Close closes the store.
 func (s *Store) Close() error { return s.db.Close() }
 
 // Put replaces the set of its name on its note; a set without marks
-// removes it. A note has at most MaxSets sets.
+// removes it. A note has at most the limits' Sets sets.
 func (s *Store) Put(set Set) error {
-	if err := set.Check(); err != nil {
+	if err := set.Check(s.limits); err != nil {
 		return err
 	}
 	if len(set.Marks) == 0 {
@@ -153,8 +171,8 @@ func (s *Store) Put(set Set) error {
 	if err := tx.QueryRow(`SELECT count(*) FROM sets WHERE path = ? AND name != ?`, set.Path, set.Name).Scan(&n); err != nil {
 		return err
 	}
-	if n >= MaxSets {
-		return fmt.Errorf("note %s has %d sets of marks, at most %d", set.Path, n, MaxSets)
+	if n >= s.limits.Sets {
+		return fmt.Errorf("note %s has %d sets of marks, at most %d ([pipelines] max_mark_sets)", set.Path, n, s.limits.Sets)
 	}
 	if _, err := tx.Exec(`INSERT INTO sets (path, name, pipeline, run, hash, created, marks) VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (path, name) DO UPDATE SET pipeline = excluded.pipeline, run = excluded.run, hash = excluded.hash,

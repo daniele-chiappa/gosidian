@@ -56,10 +56,8 @@ func noteMark(_ context.Context, env *Env, with map[string]any) (any, error) {
 		return nil, err
 	}
 	sum := sha256.Sum256(note.Raw)
+	// The store checks the set, under the caps of the config.
 	set := marks.Set{Path: rel, Name: name, Pipeline: env.Run.Ref, Run: env.Run.ID, Hash: hex.EncodeToString(sum[:]), Marks: list}
-	if err := set.Check(); err != nil {
-		return nil, err
-	}
 	if err := marker.PutMarks(env.Project, set); err != nil {
 		return nil, err
 	}

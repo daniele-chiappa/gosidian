@@ -30,10 +30,6 @@ const (
 	keySpawned = "spawned:"
 )
 
-// MaxRunDepth is how many runs may start each other in a chain through
-// pipeline.run: a pipeline that starts itself stops there.
-const MaxRunDepth = 4
-
 func pipelineRun(_ context.Context, env *Env, with map[string]any) (any, error) {
 	p, err := required(with, "pipeline")
 	if err != nil {
@@ -69,8 +65,10 @@ func pipelineRun(_ context.Context, env *Env, with map[string]any) (any, error) 
 			return nil, err
 		}
 	}
-	if n := e.depth(env.Run); n >= MaxRunDepth {
-		return nil, fmt.Errorf("this run was started by %d others in a chain of pipeline.run, and may start none (at most %d)", n, MaxRunDepth)
+	// A chain of runs stops at [pipelines] max_run_depth: a pipeline that
+	// starts itself stops there.
+	if n := e.depth(env.Run); n >= e.cfg.MaxRunDepth {
+		return nil, fmt.Errorf("this run was started by %d others in a chain of pipeline.run, and may start none (at most %d: [pipelines] max_run_depth)", n, e.cfg.MaxRunDepth)
 	}
 
 	key := keySpawned
@@ -85,6 +83,9 @@ func pipelineRun(_ context.Context, env *Env, with map[string]any) (any, error) 
 	}
 	if k := strings.TrimSpace(str(with, "key")); k != "" {
 		key += ":" + k
+	}
+	if err := e.roomForChild(env.Run, rel, key); err != nil {
+		return nil, err
 	}
 	child, existing, err := e.Start(StartRequest{Path: rel, Trigger: TriggerPipeline, Input: input, Actor: Actor(env.Run.Ref), IdemKey: key})
 	if err != nil {
@@ -109,6 +110,34 @@ func pipelineRun(_ context.Context, env *Env, with map[string]any) (any, error) 
 	return nil, WaitFor{Until: until}
 }
 
+// roomForChild says whether run may start the child keyed key: it has
+// started fewer than [pipelines] max_run_children, or this one already (a
+// step tried again finds it). An each over thousands of notes with
+// wait: false, in a pipeline that starts itself, would start them at every
+// level of the chain.
+func (e *Engine) roomForChild(run jobs.Run, ref, key string) error {
+	st := e.runner.Store()
+	n := 0
+	for _, prefix := range []string{keyWaited, keySpawned} {
+		c, err := st.CountRuns(prefix + run.ID + ":")
+		if err != nil {
+			return err
+		}
+		n += c
+	}
+	if n < e.cfg.MaxRunChildren {
+		return nil
+	}
+	if same, err := st.Runs(jobs.RunFilter{Ref: ref, IdemPrefix: key, Limit: 500}); err == nil {
+		for _, r := range same {
+			if r.IdemKey == key {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("this run started %d runs with pipeline.run, and may start no more (at most %d: [pipelines] max_run_children)", n, e.cfg.MaxRunChildren)
+}
+
 // parentOf reads a child's idempotency key: the run that started it, the
 // node, and whether that node waits for it.
 func parentOf(idemKey string) (run, node string, waited, ok bool) {
@@ -130,7 +159,7 @@ func parentOf(idemKey string) (run, node string, waited, ok bool) {
 // 0 for a run nothing started.
 func (e *Engine) depth(run jobs.Run) int {
 	d := 0
-	for d <= MaxRunDepth {
+	for d <= e.cfg.MaxRunDepth {
 		parent, _, _, ok := parentOf(run.IdemKey)
 		if !ok {
 			return d
@@ -242,19 +271,30 @@ func (e *Engine) resumeParent(parent, node string, status jobs.Status, out json.
 }
 
 // stopChildren cancels the children a run waited for, when it ended
-// without them: canceled, or failed (its wait expired).
+// without them: canceled, or failed (its wait expired). It reads them a
+// page at a time by status, as each canceled one leaves its page, until a
+// page cancels none.
 func (e *Engine) stopChildren(run jobs.Run) {
-	kids, err := e.runner.Store().Runs(jobs.RunFilter{IdemPrefix: keyWaited + run.ID + ":", Limit: 500})
-	if err != nil {
-		e.log.Warn("pipeline: the children of a run", "run", run.ID, "err", err)
-		return
-	}
-	for _, k := range kids {
-		if k.Status.Terminal() {
-			continue
-		}
-		if err := e.runner.Cancel(k.ID); err != nil && !errors.Is(err, jobs.ErrState) {
-			e.log.Warn("pipeline: canceling a child run", "run", k.ID, "parent", run.ID, "err", err)
+	for _, status := range []jobs.Status{jobs.Pending, jobs.Queued, jobs.Running, jobs.Waiting} {
+		for {
+			kids, err := e.runner.Store().Runs(jobs.RunFilter{IdemPrefix: keyWaited + run.ID + ":", Status: status, Limit: 500})
+			if err != nil {
+				e.log.Warn("pipeline: the children of a run", "run", run.ID, "err", err)
+				return
+			}
+			stopped := 0
+			for _, k := range kids {
+				err := e.runner.Cancel(k.ID)
+				switch {
+				case err == nil:
+					stopped++
+				case !errors.Is(err, jobs.ErrState):
+					e.log.Warn("pipeline: canceling a child run", "run", k.ID, "parent", run.ID, "err", err)
+				}
+			}
+			if stopped == 0 {
+				break
+			}
 		}
 	}
 }

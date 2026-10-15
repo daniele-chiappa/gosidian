@@ -49,6 +49,10 @@ interface UIState {
   /** The server runs pipelines (VersionInfo.pipelines_enabled), read with
    *  the languages; not persisted. */
   pipelinesEnabled: boolean
+  /** The server's caps of a graph (VersionInfo.graph_default_nodes,
+   *  graph_max_nodes), which the Graph window names; not persisted. */
+  graphDefaultNodes: number
+  graphMaxNodes: number
 }
 
 const VALID_PRESETS: ThemePreset[] = [
@@ -72,6 +76,8 @@ export const useUIStore = defineStore('ui', {
     graphMode: '2d',
     enabledLocales: [...VALID_LOCALES],
     pipelinesEnabled: false,
+    graphDefaultNodes: 2000,
+    graphMaxNodes: 5000,
   }),
   actions: {
     setPreset(preset: ThemePreset) {
@@ -122,6 +128,8 @@ export const useUIStore = defineStore('ui', {
         v = null
       }
       this.pipelinesEnabled = Boolean(v?.pipelines_enabled)
+      if (v?.graph_default_nodes && v.graph_default_nodes > 0) this.graphDefaultNodes = v.graph_default_nodes
+      if (v?.graph_max_nodes && v.graph_max_nodes > 0) this.graphMaxNodes = v.graph_max_nodes
       const enabled = (v?.enabled_langs ?? []).filter(isLocale)
       this.enabledLocales = enabled.length ? enabled : [...VALID_LOCALES]
       if (!this.locale || !this.enabledLocales.includes(this.locale)) {

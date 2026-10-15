@@ -23,9 +23,10 @@ import (
 
 const pipelinesOff = "pipelines are off on this server ([pipelines] enabled, GOSIDIAN_PIPELINES_ENABLED)"
 
-// maxOutputShown caps a step's output in memory_pipelines: the whole
-// output stays in the run, and a large one is written to a note anyway.
-const maxOutputShown = 4 << 10
+// defaultStepOutputShown caps a step's output in memory_pipelines unless
+// [mcp] max_step_output_shown says otherwise: the whole output stays in
+// the run, and a large one is written to a note anyway.
+const defaultStepOutputShown = 4 << 10
 
 // maxWaitSeconds caps memory_pipeline_run's wait.
 const maxWaitSeconds = 60
@@ -75,7 +76,7 @@ func (s *Server) handlePipelines(ctx context.Context, req mcp.CallToolRequest) (
 		if err != nil {
 			return mcp.NewToolResultErrorFromErr("steps", err), nil
 		}
-		return mcp.NewToolResultJSON(map[string]any{"run": pipeline.Brief(run), "pipeline": run.Ref, "steps": pipeline.StepViews(run, steps, maxOutputShown)})
+		return mcp.NewToolResultJSON(map[string]any{"run": pipeline.Brief(run), "pipeline": run.Ref, "steps": pipeline.StepViews(run, steps, s.stepOutputShown)})
 	}
 	limit := int(req.GetFloat("limit", 20))
 	if limit <= 0 || limit > 100 {
@@ -201,7 +202,7 @@ func (s *Server) pipelineStart(ctx context.Context, req mcp.CallToolRequest, arg
 	out := map[string]any{"run": pipeline.Brief(run), "pipeline": run.Ref, "existing": existing}
 	if run.Status.Terminal() || run.Status == jobs.Waiting {
 		if steps, err := s.pipelines.Runner().Store().Steps(run.ID); err == nil {
-			out["steps"] = pipeline.StepViews(run, steps, maxOutputShown)
+			out["steps"] = pipeline.StepViews(run, steps, s.stepOutputShown)
 		}
 	}
 	return mcp.NewToolResultJSON(out)

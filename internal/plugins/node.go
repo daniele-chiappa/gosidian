@@ -16,13 +16,6 @@ import (
 )
 
 const (
-	// maxFiles caps the files one call may give back.
-	maxFiles = 200
-	// maxFilesBytes caps their size together.
-	maxFilesBytes = 100 << 20
-	// maxListFiles caps the files one setting may name as a list.
-	maxListFiles = 100
-
 	// MetaLLMTokensLeft is the _meta field of a node's call with the LLM
 	// tokens the run may still use, when [pipelines] max_llm_tokens caps
 	// them.
@@ -122,7 +115,7 @@ func (n node) Run(ctx context.Context, env *pipeline.Env, with map[string]any) (
 			out = map[string]any{"text": string(raw)}
 		}
 	}
-	files, skipped := StoreFiles(res.Content, env.StoreAttachment)
+	files, skipped := n.r.StoreFiles(res.Content, env.StoreAttachment)
 	if len(files) == 0 && len(skipped) == 0 {
 		return out, nil
 	}
@@ -148,8 +141,8 @@ func (n node) fileList(env *pipeline.Env, spec NodeSpec, f string, list []any, b
 	if !spec.FileRefs {
 		return nil, fmt.Errorf("with.%s is a list of files: %s takes one file (only a plugin that takes files by reference gets several)", f, n.use)
 	}
-	if len(list) == 0 || len(list) > maxListFiles {
-		return nil, fmt.Errorf("with.%s names %d files: from 1 to %d", f, len(list), maxListFiles)
+	if max := n.r.Limits().Files; len(list) == 0 || len(list) > max {
+		return nil, fmt.Errorf("with.%s names %d files: from 1 to %d ([pipelines] max_plugin_files)", f, len(list), max)
 	}
 	refs := make([]any, 0, len(list))
 	for i, item := range list {
@@ -172,9 +165,11 @@ func (n node) fileList(env *pipeline.Env, spec NodeSpec, f string, list []any, b
 // StoreFiles stores the files of a tool result with store (a run's
 // attachments, or those of an agent's call): the stored ones as
 // {name, path, mime, markdown}, the refused ones as {name, error}.
-func StoreFiles(content []mcp.Content, store func(name string, data []byte) (string, error)) ([]any, []any) {
+func (reg *Registry) StoreFiles(content []mcp.Content, store func(name string, data []byte) (string, error)) ([]any, []any) {
+	lim := reg.Limits()
 	files, skipped := []any{}, []any{}
-	total, images := 0, 0
+	var total int64
+	images := 0
 	for _, c := range content {
 		var name, mime, b64 string
 		if r, ok := mcp.AsEmbeddedResource(c); ok {
@@ -190,8 +185,8 @@ func StoreFiles(content []mcp.Content, store func(name string, data []byte) (str
 			continue
 		}
 		skip := func(why string) { skipped = append(skipped, map[string]any{"name": name, "error": why}) }
-		if len(files) >= maxFiles {
-			skip(fmt.Sprintf("more than %d files", maxFiles))
+		if len(files) >= lim.FilesOut {
+			skip(fmt.Sprintf("more than %d files ([pipelines] max_plugin_files_out)", lim.FilesOut))
 			continue
 		}
 		data, err := base64.StdEncoding.DecodeString(b64)
@@ -199,8 +194,8 @@ func StoreFiles(content []mcp.Content, store func(name string, data []byte) (str
 			skip("not base64")
 			continue
 		}
-		if total += len(data); total > maxFilesBytes {
-			skip(fmt.Sprintf("more than %d MiB of files", maxFilesBytes>>20))
+		if total += int64(len(data)); total > lim.FilesBytes {
+			skip(fmt.Sprintf("more than %d bytes of files ([pipelines] max_plugin_files_bytes)", lim.FilesBytes))
 			continue
 		}
 		rel, err := store(name, data)

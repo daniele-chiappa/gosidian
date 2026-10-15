@@ -22,6 +22,7 @@ import (
 	"github.com/gosidian/gosidian/internal/automation"
 	"github.com/gosidian/gosidian/internal/config"
 	"github.com/gosidian/gosidian/internal/gitsync"
+	"github.com/gosidian/gosidian/internal/graphspec"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/infolder"
 	"github.com/gosidian/gosidian/internal/insights"
@@ -273,6 +274,7 @@ func main() {
 		log.Fatalf("marks: %v", err)
 	}
 	defer marksStore.Close()
+	marksStore.SetLimits(marks.Limits{Sets: cfg.Pipelines.MaxMarkSets, Marks: cfg.Pipelines.MaxMarks, Label: cfg.Pipelines.MaxMarkLabel, Text: cfg.Pipelines.MaxMarkText})
 	wireMarks(marksStore, auditLog)
 
 	// v2.2: global TOTP policy from config. Backward-compat: if the mode
@@ -543,6 +545,8 @@ func main() {
 	mcpServer.SetMarks(marksStore)
 	mcpServer.SetWriteLimits(cfg.MCP.WritePerMinute, cfg.MCP.MaxNoteBytes)
 	mcpServer.SetPluginResultLimit(cfg.MCP.MaxPluginResult)
+	mcpServer.SetPluginToolTimeout(cfg.MCP.PluginToolTimeout)
+	mcpServer.SetStepOutputShown(cfg.MCP.MaxStepOutputShown)
 	mcpServer.SetOpenWhenEmpty(cfg.MCP.Open)
 	// One upload quota for an account's MCP tokens and web sessions
 	// (IMP-034); off unless [uploads] quota_bytes is set.
@@ -685,6 +689,9 @@ func main() {
 	// v2.0: REST API router under /api/v1/. Mounted always (purely
 	// additive). The SPA shell on `/` is gated by env var below.
 	apiv1.Version = version
+	// The graph blocks the lint, the web UI and the agents read ask for at
+	// most [web] graph_max_nodes.
+	graphspec.SetMaxLimit(cfg.Web.GraphMaxNodes)
 	i18nCfg, i18nWarns := cfg.I18n.Effective()
 	for _, w := range i18nWarns {
 		log.Printf("config: %s", w)
@@ -720,6 +727,8 @@ func main() {
 	}
 	apiRouter := apiv1.NewRouter(&apiv1.Deps{
 		UploadQuota: uploadQuota,
+		Web: apiv1.WebLimits{GraphDefaultNodes: cfg.Web.GraphDefaultNodes, GraphMaxNodes: cfg.Web.GraphMaxNodes,
+			GraphMaxEdges: cfg.Web.GraphMaxEdges, CutMaxChunks: cfg.Web.CutMaxChunks, PluginTimeout: cfg.Web.PluginTimeout},
 		Auth: &apiv1.AuthDeps{
 			WebAuth:   webauthStore,
 			SpaAuth:   spaTokenStore,

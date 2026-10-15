@@ -2,6 +2,7 @@ package v1
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/gitsync"
@@ -30,17 +31,19 @@ type Deps struct {
 	// UploadQuota caps the bytes an account uploads in a window, shared
 	// with its MCP tokens (IMP-034); nil = no limit.
 	UploadQuota *uploadquota.Quota
-	Auth        *AuthDeps
-	Audit       *audit.Log
-	Vault       *vault.Vault
-	Events      *events.Hub
-	Index       *index.Index
-	Trash       *trash.Bin
-	Renderer    *parser.Renderer
-	Projects    *projects.Store
-	GitSync     *gitsync.Sync // optional; nil disables /history
-	ConfigPath  string        // path to cfg.toml; "" disables /settings PUT
-	OAuth       *oauth.Server // optional; nil disables the consent API (IMP-092)
+	// Web is the caps of the views ([web]); a zero keeps its default.
+	Web        WebLimits
+	Auth       *AuthDeps
+	Audit      *audit.Log
+	Vault      *vault.Vault
+	Events     *events.Hub
+	Index      *index.Index
+	Trash      *trash.Bin
+	Renderer   *parser.Renderer
+	Projects   *projects.Store
+	GitSync    *gitsync.Sync // optional; nil disables /history
+	ConfigPath string        // path to cfg.toml; "" disables /settings PUT
+	OAuth      *oauth.Server // optional; nil disables the consent API (IMP-092)
 	// Pipelines is the pipeline engine (IMP-166); nil while [pipelines] is
 	// off, and the /pipelines and /runs routes answer 404.
 	Pipelines *pipeline.Engine
@@ -61,7 +64,9 @@ type Deps struct {
 // vault, call ServeHTTP — and gives a single place to attach
 // telemetry hooks.
 type Router struct {
-	deps          *Deps
+	deps *Deps
+	// web is the caps of the views, Deps.Web with its defaults.
+	web           WebLimits
 	mux           *http.ServeMux
 	loginLimiter  *loginLimiter
 	exportLimiter *ratelimit.Window // per account, see export.go
@@ -70,11 +75,42 @@ type Router struct {
 	graphCache graphCache
 }
 
+// WebLimits are the caps of the web UI's views ([web] in config.toml): the
+// nodes of a graph asked without a limit, and at most; the edges of a
+// plugin's graph; the chunks the cut view reads from an archive; and the
+// longest it waits for a plugin.
+type WebLimits struct {
+	GraphDefaultNodes int
+	GraphMaxNodes     int
+	GraphMaxEdges     int
+	CutMaxChunks      int
+	PluginTimeout     time.Duration
+}
+
+// withDefaults is l with a default for each cap left at zero.
+func (l WebLimits) withDefaults() WebLimits {
+	for _, n := range []struct {
+		dst *int
+		def int
+	}{{&l.GraphDefaultNodes, 2000}, {&l.GraphMaxNodes, 5000}, {&l.GraphMaxEdges, 50000}, {&l.CutMaxChunks, 5000}} {
+		if *n.dst <= 0 {
+			*n.dst = n.def
+		}
+	}
+	if l.PluginTimeout <= 0 {
+		l.PluginTimeout = 2 * time.Minute
+	}
+	// A default over the most a graph may ask would never be honoured.
+	l.GraphDefaultNodes = min(l.GraphDefaultNodes, l.GraphMaxNodes)
+	return l
+}
+
 // NewRouter wires the v1 routes against the given dependencies. The
 // caller mounts the returned handler under the /api/v1/ prefix.
 func NewRouter(deps *Deps) *Router {
 	r := &Router{
 		deps:          deps,
+		web:           deps.Web.withDefaults(),
 		mux:           http.NewServeMux(),
 		loginLimiter:  newLoginLimiter(),
 		exportLimiter: ratelimit.New(exportWindow, exportMax),

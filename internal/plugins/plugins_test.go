@@ -643,8 +643,14 @@ func TestNode_FileListRefused(t *testing.T) {
 		"one file only": {reg, "{id: c, use: docling.convert, with: {file: [attachments/a.pdf]}}", "takes one file"},
 		"empty list":    {reg2, "{id: c, use: agent.look, with: {docs: []}}", "from 1 to 100"},
 		"no path":       {reg2, "{id: c, use: agent.look, with: {docs: [{name: x}]}}", "with.docs[0] names no file"},
+		// [pipelines] max_plugin_files, set to 1 below.
+		"past the cap": {reg2, "{id: c, use: agent.look, with: {docs: [attachments/a.pdf, attachments/a.pdf]}}", "from 1 to 1 ([pipelines] max_plugin_files)"},
 	} {
 		t.Run(name, func(t *testing.T) {
+			if name == "past the cap" {
+				c.reg.SetLimits(Limits{Files: 1})
+				defer c.reg.SetLimits(Limits{})
+			}
 			e, host := newEngine(t, c.reg)
 			host.mu.Lock()
 			host.notes["p/pipelines/x.md"] = "---\ntype: pipeline\n---\n\n```pipeline\nnodes:\n  - " + c.body + "\n```\n"

@@ -9,7 +9,6 @@ import (
 	"path"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/authz"
@@ -71,10 +70,6 @@ type cutResponse struct {
 	Error string `json:"error,omitempty"`
 }
 
-// maxCutChunks is the most chunks of a note the view reads from an archive,
-// a page at a time.
-const maxCutChunks = 5000
-
 // previewCut is the cut view of md, the text of the note at notePath.
 func (r *Router) previewCut(ctx context.Context, p authz.Principal, caller, notePath, md string, c *cutRequest) (*cutResponse, error) {
 	if !strings.HasSuffix(strings.ToLower(notePath), ".md") || !r.canSee(p, notePath) {
@@ -91,10 +86,15 @@ func (r *Router) previewCut(ctx context.Context, p authz.Principal, caller, note
 		}
 		opt.InlineMax = *c.InlineMaxSide
 	}
+	// The rules are note.sections': a section up to a step's output.
+	maxChars := 1 << 20
+	if r.deps.Pipelines != nil {
+		maxChars = r.deps.Pipelines.MaxOutputBytes()
+	}
 	switch {
 	case opt.MaxChars == 0:
-	case opt.MaxChars < 200 || opt.MaxChars > 1<<20:
-		return nil, badCut("max_chars: 200 to 1048576")
+	case opt.MaxChars < 200 || opt.MaxChars > maxChars:
+		return nil, badCut("max_chars: 200 to %d ([pipelines] max_output_bytes)", maxChars)
 	}
 	switch opt.Context {
 	case "", "heading", "path", "none":
@@ -196,7 +196,9 @@ func (r *Router) storedChunks(ctx context.Context, project, caller, notePath, so
 		return nil, fmt.Errorf("plugin %s has no list tool a reader may call", plugin)
 	}
 	r.auditPluginRead(ctx, caller, project, source)
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	// The reader waits: at most [web] plugin_timeout, and a page at a
+	// time up to [web] cut_max_chunks.
+	ctx, cancel := context.WithTimeout(ctx, r.web.PluginTimeout)
 	defer cancel()
 	out := map[string]map[string]bool{}
 	cursor, n := "", 0
@@ -227,8 +229,8 @@ func (r *Router) storedChunks(ctx context.Context, project, caller, notePath, so
 		if err := json.Unmarshal(body, &list); err != nil {
 			return nil, fmt.Errorf("plugin %s: the list is not what an archive gives: %w", plugin, err)
 		}
-		if n += len(list.Chunks); n > maxCutChunks {
-			return nil, fmt.Errorf("the note has more than %d chunks in %s", maxCutChunks, source)
+		if n += len(list.Chunks); n > r.web.CutMaxChunks {
+			return nil, fmt.Errorf("the note has more than %d chunks in %s ([web] cut_max_chunks)", r.web.CutMaxChunks, source)
 		}
 		for _, ch := range list.Chunks {
 			base := ch.Meta.Base
@@ -306,7 +308,7 @@ func (r *Router) handleCutCollections(w http.ResponseWriter, req *http.Request) 
 				continue
 			}
 			r.auditPluginRead(req.Context(), caller, project, name+"/collections")
-			ctx, cancel := context.WithTimeout(req.Context(), 15*time.Second)
+			ctx, cancel := context.WithTimeout(req.Context(), r.web.PluginTimeout)
 			res, err := r.deps.Plugins.CallTool(ctx, name, "collections", map[string]any{},
 				map[string]any{plugins.MetaProject: project, plugins.MetaCaller: caller, plugins.MetaAccess: plugins.AccessRead})
 			cancel()

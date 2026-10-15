@@ -29,6 +29,8 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_MCP_WRITE_PER_MINUTE` | `mcp.write_per_minute` | `60` (writes per minute of one MCP session, rolling window; all the sessions of a token together get 5× that, IMP-141) |
 | `GOSIDIAN_MCP_MAX_NOTE_BYTES` | `mcp.max_note_bytes` | `1048576` (1 MiB) |
 | `GOSIDIAN_MCP_MAX_PLUGIN_RESULT` | `mcp.max_plugin_result` | `1048576` (1 MiB: the bytes of a plugin tool's result an agent gets; a plugin's own cap goes up with it, such as the database plugin's `limits.max_result`) |
+| `GOSIDIAN_MCP_PLUGIN_TOOL_TIMEOUT` | `mcp.plugin_tool_timeout` | `2m` (the longest an agent waits for a plugin's tool, within the plugin's own `timeout`) |
+| `GOSIDIAN_MCP_MAX_STEP_OUTPUT_SHOWN` | `mcp.max_step_output_shown` | `4096` (the bytes of a step's output `memory_pipelines` shows; the whole output stays in the run) |
 | `GOSIDIAN_MCP_PACKAGE_MAX_FILES` | `mcp.package_max_files` | `500` (files of a `memory_ingest` package) |
 | `GOSIDIAN_MCP_PACKAGE_MAX_BYTES` | `mcp.package_max_bytes` | `20971520` (20 MiB, a package unpacked) |
 | `GOSIDIAN_MCP_SHRINK_GUARD_PERCENT` | `mcp.shrink_guard_percent` | `10` (`memory_update`, and `memory_ingest` with `overwrite`, refuse a content under this percentage of the note's size unless the call passes `allow_shrink: true`: a placeholder written over a note by mistake; `0` turns the guard off) |
@@ -56,12 +58,27 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_PIPELINES_MAX_LLM_TOKENS` | `pipelines.max_llm_tokens` | `0` (no cap on the LLM tokens of one run) |
 | `GOSIDIAN_PIPELINES_MAX_INPUT_BYTES` | `pipelines.max_input_bytes` | `262144` (the bytes of a run's input) |
 | `GOSIDIAN_PIPELINES_MAX_OUTPUT_BYTES` | `pipelines.max_output_bytes` | `1048576` (the bytes of a step's output; raise it for steps that keep many results, and a plugin's own cap with it, such as the database plugin's `limits.max_result`) |
+| `GOSIDIAN_PIPELINES_MAX_RUN_DEPTH` | `pipelines.max_run_depth` | `4` (how many runs may start each other in a chain through `pipeline.run`: a pipeline that starts itself stops there) |
+| `GOSIDIAN_PIPELINES_MAX_RUN_CHILDREN` | `pipelines.max_run_children` | `1000` (how many runs one run may start through `pipeline.run`, in an `each` too) |
+| `GOSIDIAN_PIPELINES_MAX_LIST_ITEMS` | `pipelines.max_list_items` | `5000` (what a node lists or is asked for in one call: a page of `note.list`, the `only` of `note.sections`) |
+| `GOSIDIAN_PIPELINES_MAX_CHUNK_META` | `pipelines.max_chunk_meta` | `16384` (the bytes of a chunk's `meta` from `note.sections`; the database plugin's `limits.max_meta` goes up with it) |
+| `GOSIDIAN_PIPELINES_MAX_MARK_SETS`, `_MAX_MARKS`, `_MAX_MARK_LABEL`, `_MAX_MARK_TEXT` | `pipelines.max_mark_sets`, `max_marks`, `max_mark_label`, `max_mark_text` | `20`, `500`, `60`, `500` (the sets of marks of a note, the marks of a set, and the characters of a mark's label and text: [note.mark](pipelines.md#marks-on-a-note)) |
+| `GOSIDIAN_PIPELINES_MAX_PLUGIN_FILES` | `pipelines.max_plugin_files` | `100` (the files one call of a [plugin](plugins.md) names, a node's or an agent's tool; a plugin's own cap goes up with it, such as `IMAGES_MAX_FILES`) |
+| `GOSIDIAN_PIPELINES_MAX_PLUGIN_FILES_OUT` | `pipelines.max_plugin_files_out` | `200` (the files one result of a plugin gives back) |
+| `GOSIDIAN_PIPELINES_MAX_PLUGIN_FILES_BYTES` | `pipelines.max_plugin_files_bytes` | `104857600` (100 MiB: the bytes of the files one result gives back) |
+| `GOSIDIAN_PIPELINES_MAX_PLUGIN_GRAPH_BYTES` | `pipelines.max_plugin_graph_bytes` | `8388608` (8 MiB: the bytes of a plugin's graph) |
+| `GOSIDIAN_PIPELINES_STARLARK_STEPS` | `pipelines.starlark_steps` | `10000000` (the steps of a `starlark` script) |
 | `GOSIDIAN_PIPELINES_HTTP_ALLOWLIST` | `pipelines.http_allowlist` | empty (comma-separated URL prefixes `http.request` and the callbacks may call; empty: none) |
 | `GOSIDIAN_PIPELINES_PUBLIC_URL` | `pipelines.public_url` | the `[oauth]` issuer (the server's address in `{{ run.resume_url }}`; empty: a path) |
 | `GOSIDIAN_PIPELINES_FILES_URL` | `pipelines.files_url` | the public URL (the server's address as the [plugins](plugins.md#files-by-reference) reach it, for the files they fetch by reference: `http://gosidian:8080` on a compose network; a plugin's own `files_url` wins) |
 | `GOSIDIAN_PIPELINES_TIMEZONE` | `pipelines.timezone` | the automations' zone (the days and times of the `schedule` triggers) |
 | `GOSIDIAN_PIPELINES_LLM_URL`, `_LLM_MODEL`, `_LLM_KEY_SECRET` | `[[pipelines.llm]]` | none (one OpenAI-compatible provider named `default`: its URL up to `/v1`, its model, the name of the secret with its key; more providers in the file) |
 | `GOSIDIAN_PIPELINES_PLUGINS` | `[[pipelines.plugins]]` | none (comma-separated `name=url` entries: [plugins](plugins.md) whose MCP endpoint is the url, without a token; an entry replaces the url of the file's plugin of the same name. A token needs `token_secret` in the file) |
+| `GOSIDIAN_WEB_GRAPH_DEFAULT_NODES` | `web.graph_default_nodes` | `2000` (the most linked nodes a graph asked without a limit keeps; at most `graph_max_nodes`) |
+| `GOSIDIAN_WEB_GRAPH_MAX_NODES` | `web.graph_max_nodes` | `5000` (the most nodes a graph, a `graph` block or a plugin's graph may have) |
+| `GOSIDIAN_WEB_GRAPH_MAX_EDGES` | `web.graph_max_edges` | `50000` (the most edges of a plugin's graph) |
+| `GOSIDIAN_WEB_CUT_MAX_CHUNKS` | `web.cut_max_chunks` | `5000` (the chunks of a note the [cut view](web-ui/overview.md#the-cut-view) reads from an archive) |
+| `GOSIDIAN_WEB_PLUGIN_TIMEOUT` | `web.plugin_timeout` | `2m` (the longest the web UI waits for a plugin, a graph or the cut view, within the plugin's own `timeout`) |
 | `GOSIDIAN_SECRETS_KEY` | — | empty (32 bytes in base64, `openssl rand -base64 32`: the key of `<state-dir>/secrets.json`, the secrets the pipelines use; without it `gosidian secret` refuses and the nodes that need a secret fail) |
 | `GOSIDIAN_TRASH_ENABLED` | `trash.enabled` | `false` |
 | `GOSIDIAN_TRASH_RETENTION` | `trash.retention` | `720h`; `0` keeps entries until purged |
@@ -96,6 +113,11 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_GLOBAL_PRIVATE_PROJECT` | `global.private_project` | `global-private` |
 | `GOSIDIAN_ANCHORS_ENABLED` | `agent_anchors.enabled` | `false` (master switch for [agent anchors](mcp/agent-anchors.md); per-project opt-in via the `use_anchors` flag) |
 | — | `lint.hot_oversize_bytes` | `8192` (threshold for the `hot-oversize` lint rule and the bootstrap's `maintenance.hot_oversize`) |
+
+The limits above are the defaults the code ships with; each is a setting
+because a vault larger than the ones they were measured on needs more
+(IMP-190). A setting a plugin mirrors goes up with the plugin's own: a
+cap raised on one side only still stops at the other.
 
 The `config.toml` at `<state-dir>/config.toml` holds the
 persistent form of the same settings and is edited from the web UI at

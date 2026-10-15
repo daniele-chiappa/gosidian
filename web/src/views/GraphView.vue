@@ -473,13 +473,13 @@ onMounted(async () => {
           >
         </label>
         <label class="block text-sm">
-          <span class="text-text-muted text-xs">{{ t('graph.limit') }}</span>
+          <span class="text-text-muted text-xs">{{ t('graph.limit', { default: ui.graphDefaultNodes }) }}</span>
           <input
             v-model.number="limit"
             type="number"
             min="0"
-            max="5000"
-            placeholder="2000"
+            :max="ui.graphMaxNodes"
+            :placeholder="String(ui.graphDefaultNodes)"
             class="h-control py-0 mt-1 w-full rounded bg-bg border border-border px-2 text-sm"
           >
         </label>
@@ -551,7 +551,7 @@ onMounted(async () => {
           class="text-warning"
           data-graph-truncated
         >
-          {{ t('graph.truncated', { shown: data.stats.node_count, total: data.stats.total ?? data.stats.node_count }) }}
+          {{ t('graph.truncated', { shown: data.stats.node_count, total: data.stats.total ?? data.stats.node_count, max: ui.graphMaxNodes }) }}
         </p>
         <p v-if="data.cached">
           {{ t('graph.cached') }}

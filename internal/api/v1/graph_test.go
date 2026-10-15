@@ -153,16 +153,15 @@ func TestGraph_LimitTruncatesByDegree(t *testing.T) {
 // A graph asked without a limit is cut to the default one, which the
 // summary names, and says how many nodes it had (BUG-127).
 func TestGraph_DefaultLimitCapsAndCounts(t *testing.T) {
-	defer func(n int) { defaultGraphLimit = n }(defaultGraphLimit)
 	f := graphFixture(t)
 
-	defaultGraphLimit = 10
+	f.router.web.GraphDefaultNodes = 10
 	resp := decodeGraph(t, f.doAuthRecorder(http.MethodGet, "/api/v1/graph", "", nil).body)
 	if resp.Stats.NodeCount != 5 || resp.Stats.Total != 5 || resp.Stats.Truncated || resp.Stats.Filter != "" {
 		t.Errorf("under the default: got %+v, want 5 of 5, not truncated, no filter", resp.Stats)
 	}
 
-	defaultGraphLimit = 2
+	f.router.web.GraphDefaultNodes = 2
 	resp = decodeGraph(t, f.doAuthRecorder(http.MethodGet, "/api/v1/graph", "", nil).body)
 	if resp.Stats.NodeCount != 2 || resp.Stats.Total != 5 || !resp.Stats.Truncated || resp.Stats.Filter != "limit=2" {
 		t.Errorf("over the default: got %+v, want 2 of 5, truncated, limit=2", resp.Stats)
@@ -198,4 +197,18 @@ func nodeIDs(nodes []graphNode) []string {
 		out = append(out, n.ID)
 	}
 	return out
+}
+
+// A graph asks for at most [web] graph_max_nodes, a limit or none; a default
+// over the most is the most.
+func TestGraph_MaxNodes(t *testing.T) {
+	f := graphFixture(t)
+	f.router.web.GraphMaxNodes = 3
+	resp := decodeGraph(t, f.doAuthRecorder(http.MethodGet, "/api/v1/graph?limit=4", "", nil).body)
+	if resp.Stats.NodeCount != 3 || resp.Stats.Total != 5 || !resp.Stats.Truncated {
+		t.Errorf("limit 4 under a most of 3: %+v", resp.Stats)
+	}
+	if l := (WebLimits{GraphDefaultNodes: 9000, GraphMaxNodes: 6000}).withDefaults(); l.GraphDefaultNodes != 6000 || l.GraphMaxEdges != 50000 || l.CutMaxChunks != 5000 {
+		t.Errorf("defaults %+v", l)
+	}
 }

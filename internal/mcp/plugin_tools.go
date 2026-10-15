@@ -31,9 +31,10 @@ import (
 // comes back as the plugin gave it.
 
 const (
-	// pluginToolTimeout caps a call of a plugin's tool, within the
-	// plugin's own timeout when it has a shorter one.
-	pluginToolTimeout = 2 * time.Minute
+	// defaultPluginToolTimeout caps a call of a plugin's tool, within the
+	// plugin's own timeout when it has a shorter one, unless [mcp]
+	// plugin_tool_timeout says otherwise: an agent waits for it.
+	defaultPluginToolTimeout = 2 * time.Minute
 	// defaultMaxPluginResult caps the text and the structured content of
 	// a plugin tool's result, unless [mcp] max_plugin_result says more.
 	defaultMaxPluginResult = 1 << 20
@@ -212,7 +213,7 @@ func (s *Server) handlePluginTool(name string) server.ToolHandlerFunc {
 			defer s.pipelines.DropCall(call)
 		}
 		meta := map[string]any{plugins.MetaProject: project, plugins.MetaCaller: tok.ID, plugins.MetaAccess: t.access}
-		cctx, cancel := context.WithTimeout(ctx, pluginToolTimeout)
+		cctx, cancel := context.WithTimeout(ctx, s.pluginToolTimeout)
 		defer cancel()
 		res, err := s.plugins.CallTool(cctx, t.plugin, t.tool, args, meta)
 		s.auditWrite(ctx, audit.ActionPluginCall, project, name, int64(len(raw)))
@@ -228,9 +229,6 @@ func (s *Server) handlePluginTool(name string) server.ToolHandlerFunc {
 		return res, nil
 	}
 }
-
-// maxToolFiles caps the files one argument of an agent's call names.
-const maxToolFiles = 100
 
 // handFiles puts, in place of each argument of t that names files of the
 // project (a vault path, a list of them, or entries with a path), where the
@@ -279,9 +277,9 @@ func (s *Server) handFiles(t pluginTool, project string, args map[string]any) (s
 			args[f] = r
 			continue
 		}
-		if len(list) == 0 || len(list) > maxToolFiles {
+		if max := s.plugins.Limits().Files; len(list) == 0 || len(list) > max {
 			s.pipelines.DropCall(call)
-			return "", fmt.Errorf("%s names %d files: from 1 to %d", f, len(list), maxToolFiles)
+			return "", fmt.Errorf("%s names %d files: from 1 to %d ([pipelines] max_plugin_files)", f, len(list), max)
 		}
 		refs := make([]any, len(list))
 		for i, item := range list {
@@ -301,7 +299,7 @@ func (s *Server) handFiles(t pluginTool, project string, args map[string]any) (s
 // the project, written as the caller, and gives the agent its result with
 // them as files ({name, path, mime, markdown}) in place of their bytes.
 func (s *Server) storeToolFiles(ctx context.Context, project string, res *mcp.CallToolResult) *mcp.CallToolResult {
-	files, skipped := plugins.StoreFiles(res.Content, func(name string, data []byte) (string, error) {
+	files, skipped := s.plugins.StoreFiles(res.Content, func(name string, data []byte) (string, error) {
 		r, err := attach.Store(s.vault, data, name, project)
 		if err != nil {
 			return "", err

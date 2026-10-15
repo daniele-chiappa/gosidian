@@ -43,7 +43,6 @@ type NoteLister interface {
 // A page of note.list.
 const (
 	noteListDefault = 500
-	noteListMax     = 5000
 )
 
 func noteList(_ context.Context, env *Env, with map[string]any) (any, error) {
@@ -75,7 +74,7 @@ func noteList(_ context.Context, env *Env, with map[string]any) (any, error) {
 	if q.Limit <= 0 {
 		q.Limit = noteListDefault
 	}
-	q.Limit = min(q.Limit, noteListMax)
+	q.Limit = min(q.Limit, env.Engine.cfg.MaxListItems)
 	if c := strings.TrimSpace(str(with, "cursor")); c != "" {
 		n, err := strconv.Atoi(c)
 		if err != nil || n < 0 {

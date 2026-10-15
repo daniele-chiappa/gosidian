@@ -52,11 +52,6 @@ type graphStats struct {
 	Filter    string `json:"filter,omitempty"`
 }
 
-// defaultGraphLimit caps a graph asked without a limit: a canvas that
-// simulates and paints every node of a project of thousands of notes
-// freezes the page (BUG-127). A var so the tests can lower it.
-var defaultGraphLimit = 2000
-
 // handleGraph powers the /graph view. Tier 1 server-side filters
 // drop the working set before it hits the wire so the client doesn't
 // need WebGL to handle larger vaults:
@@ -66,7 +61,8 @@ var defaultGraphLimit = 2000
 //	?min_degree=<n>     — drop nodes with fewer than n edges
 //	?focus=<path>&depth=<n> — ego-graph BFS n hops from focus
 //	?limit=<n>          — cap total nodes (drops lowest-degree first;
-//	                      defaultGraphLimit when absent)
+//	                      [web] graph_default_nodes when absent,
+//	                      graph_max_nodes at most)
 //	?include_cross=true — admit cross-project edges (project mode)
 //
 // Response carries an ETag derived from the filtered payload so
@@ -98,10 +94,15 @@ func (r *Router) handleGraph(w http.ResponseWriter, req *http.Request) {
 	if depth <= 0 {
 		depth = 2
 	}
+	// A graph asked without a limit keeps [web] graph_default_nodes: a
+	// canvas that simulates and paints every node of a project of
+	// thousands of notes freezes the page (BUG-127); one asked with a
+	// limit keeps at most graph_max_nodes.
 	asked := limit > 0
 	if !asked {
-		limit = defaultGraphLimit
+		limit = r.web.GraphDefaultNodes
 	}
+	limit = min(limit, r.web.GraphMaxNodes)
 
 	rawNodes, rawEdges, err := r.deps.Index.GraphData(project, includeCross)
 	if err != nil {

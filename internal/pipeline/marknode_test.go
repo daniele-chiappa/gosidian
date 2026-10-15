@@ -15,6 +15,9 @@ func (h *fakeHost) PutMarks(project string, set marks.Set) error {
 	if !strings.HasPrefix(set.Path, project+"/") {
 		return ErrNoNote
 	}
+	if err := set.Check(marks.DefaultLimits); err != nil {
+		return err
+	}
 	if h.marks == nil {
 		h.marks = map[string]marks.Set{}
 	}

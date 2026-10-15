@@ -29,6 +29,10 @@ type versionResponse struct {
 	// PipelinesEnabled is true when the server runs pipelines ([pipelines]
 	// enabled): the SPA shows the Runs window and the project flag.
 	PipelinesEnabled bool `json:"pipelines_enabled,omitempty"`
+	// GraphDefaultNodes and GraphMaxNodes are [web] graph_default_nodes
+	// and graph_max_nodes, which the Graph window names.
+	GraphDefaultNodes int `json:"graph_default_nodes"`
+	GraphMaxNodes     int `json:"graph_max_nodes"`
 }
 
 // Version is set by cmd/gosidian/main.go before constructing the
@@ -72,12 +76,14 @@ func (r *Router) handleVersion(w http.ResponseWriter, req *http.Request) {
 	}
 	defaultLang, enabled := currentI18n()
 	WriteJSON(w, http.StatusOK, versionResponse{
-		Version:          Version,
-		API:              "v1",
-		DefaultLang:      defaultLang,
-		EnabledLangs:     enabled,
-		OpenMode:         OpenMode,
-		PipelinesEnabled: r.deps != nil && r.deps.Pipelines != nil,
+		Version:           Version,
+		API:               "v1",
+		DefaultLang:       defaultLang,
+		EnabledLangs:      enabled,
+		OpenMode:          OpenMode,
+		PipelinesEnabled:  r.deps != nil && r.deps.Pipelines != nil,
+		GraphDefaultNodes: r.web.GraphDefaultNodes,
+		GraphMaxNodes:     r.web.GraphMaxNodes,
 	})
 }
 

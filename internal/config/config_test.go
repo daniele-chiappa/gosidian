@@ -544,3 +544,58 @@ func TestMCPMaxPluginResultEnv(t *testing.T) {
 		t.Error("lots accepted")
 	}
 }
+
+// The caps decided in the code until v2.89 are settings (IMP-190): their
+// defaults are the old values, and the environment raises them.
+func TestLimitsAreSettings(t *testing.T) {
+	c := Default()
+	p, w := c.Pipelines, c.Web
+	if p.MaxRunDepth != 4 || p.MaxRunChildren != 1000 || p.MaxListItems != 5000 || p.MaxChunkMeta != 16<<10 ||
+		p.MaxMarkSets != 20 || p.MaxMarks != 500 || p.MaxMarkLabel != 60 || p.MaxMarkText != 500 ||
+		p.MaxPluginFiles != 100 || p.MaxPluginFilesOut != 200 || p.MaxPluginFilesBytes != 100<<20 || p.MaxPluginGraphBytes != 8<<20 || p.StarlarkSteps != 10_000_000 {
+		t.Errorf("pipelines defaults %+v", p)
+	}
+	if w.GraphDefaultNodes != 2000 || w.GraphMaxNodes != 5000 || w.GraphMaxEdges != 50000 || w.CutMaxChunks != 5000 || w.PluginTimeout != 2*time.Minute {
+		t.Errorf("web defaults %+v", w)
+	}
+	if c.MCP.PluginToolTimeout != 2*time.Minute || c.MCP.MaxStepOutputShown != 4096 {
+		t.Errorf("mcp defaults %v %d", c.MCP.PluginToolTimeout, c.MCP.MaxStepOutputShown)
+	}
+	for k, v := range map[string]string{
+		"GOSIDIAN_PIPELINES_MAX_RUN_DEPTH": "6", "GOSIDIAN_PIPELINES_MAX_RUN_CHILDREN": "20000",
+		"GOSIDIAN_PIPELINES_MAX_LIST_ITEMS": "20000", "GOSIDIAN_PIPELINES_MAX_CHUNK_META": "65536",
+		"GOSIDIAN_PIPELINES_MAX_MARK_SETS": "40", "GOSIDIAN_PIPELINES_MAX_MARKS": "2000",
+		"GOSIDIAN_PIPELINES_MAX_MARK_LABEL": "80", "GOSIDIAN_PIPELINES_MAX_MARK_TEXT": "2000",
+		"GOSIDIAN_PIPELINES_MAX_PLUGIN_FILES": "400", "GOSIDIAN_PIPELINES_MAX_PLUGIN_FILES_OUT": "800",
+		"GOSIDIAN_PIPELINES_MAX_PLUGIN_FILES_BYTES": "1073741824",
+		"GOSIDIAN_PIPELINES_MAX_PLUGIN_GRAPH_BYTES": "33554432", "GOSIDIAN_PIPELINES_STARLARK_STEPS": "50000000",
+		"GOSIDIAN_MCP_PLUGIN_TOOL_TIMEOUT": "10m", "GOSIDIAN_MCP_MAX_STEP_OUTPUT_SHOWN": "65536",
+		"GOSIDIAN_WEB_GRAPH_DEFAULT_NODES": "3000", "GOSIDIAN_WEB_GRAPH_MAX_NODES": "20000",
+		"GOSIDIAN_WEB_CUT_MAX_CHUNKS": "20000", "GOSIDIAN_WEB_PLUGIN_TIMEOUT": "5m",
+	} {
+		t.Setenv(k, v)
+	}
+	c = Default()
+	if err := c.ApplyEnv(); err != nil {
+		t.Fatal(err)
+	}
+	p, w = c.Pipelines, c.Web
+	if p.MaxRunDepth != 6 || p.MaxRunChildren != 20000 || p.MaxListItems != 20000 || p.MaxChunkMeta != 65536 ||
+		p.MaxMarkSets != 40 || p.MaxMarks != 2000 || p.MaxMarkLabel != 80 || p.MaxMarkText != 2000 ||
+		p.MaxPluginFiles != 400 || p.MaxPluginFilesOut != 800 || p.MaxPluginFilesBytes != 1<<30 || p.MaxPluginGraphBytes != 32<<20 || p.StarlarkSteps != 50_000_000 {
+		t.Errorf("pipelines from the environment %+v", p)
+	}
+	if w.GraphDefaultNodes != 3000 || w.GraphMaxNodes != 20000 || w.CutMaxChunks != 20000 || w.PluginTimeout != 5*time.Minute ||
+		c.MCP.PluginToolTimeout != 10*time.Minute || c.MCP.MaxStepOutputShown != 65536 {
+		t.Errorf("web %+v, mcp %v %d", w, c.MCP.PluginToolTimeout, c.MCP.MaxStepOutputShown)
+	}
+	for k, bad := range map[string]string{"GOSIDIAN_PIPELINES_MAX_RUN_DEPTH": "0", "GOSIDIAN_WEB_CUT_MAX_CHUNKS": "-1",
+		"GOSIDIAN_PIPELINES_STARLARK_STEPS": "0", "GOSIDIAN_WEB_PLUGIN_TIMEOUT": "soon", "GOSIDIAN_MCP_MAX_STEP_OUTPUT_SHOWN": "4K"} {
+		t.Run(k, func(t *testing.T) {
+			t.Setenv(k, bad)
+			if err := Default().ApplyEnv(); err == nil {
+				t.Errorf("%s=%q accepted", k, bad)
+			}
+		})
+	}
+}

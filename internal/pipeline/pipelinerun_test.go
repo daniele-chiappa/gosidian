@@ -193,7 +193,7 @@ nodes:
 	}
 }
 
-// A pipeline that starts itself stops after MaxRunDepth runs below the
+// A pipeline that starts itself stops after max_run_depth runs below the
 // first.
 func TestPipelineRunNode_AChainStops(t *testing.T) {
 	e, host := newEngine(t, Config{})
@@ -213,7 +213,7 @@ nodes:
 				ended++
 			}
 		}
-		return len(runs) == MaxRunDepth+1 && ended == len(runs)
+		return len(runs) == e.cfg.MaxRunDepth+1 && ended == len(runs)
 	}, "the chain ended")
 	time.Sleep(50 * time.Millisecond) // a sixth would have started by now
 	runs, _ = e.Runner().Store().Runs(jobs.RunFilter{Ref: "p/loop.md"})
@@ -226,7 +226,7 @@ nodes:
 			}
 		}
 	}
-	if len(runs) != MaxRunDepth+1 || failed != 1 {
+	if len(runs) != e.cfg.MaxRunDepth+1 || failed != 1 {
 		t.Fatalf("%d runs, %d failed", len(runs), failed)
 	}
 }
@@ -308,5 +308,28 @@ nodes:
 	time.Sleep(100 * time.Millisecond)
 	if st := stepOf(t, e, run.ID, "hold"); st.Status != jobs.Waiting {
 		t.Fatalf("a run of another project resumed the step: %+v", st)
+	}
+}
+
+// A run starts at most max_run_children runs: the element past it fails
+// the step, and the children it started stay.
+func TestPipelineRunNode_ChildrenCap(t *testing.T) {
+	e, host := newEngine(t, Config{MaxRunChildren: 2, MaxRunDepth: 6})
+	if e.cfg.MaxRunDepth != 6 {
+		t.Fatalf("depth %d", e.cfg.MaxRunDepth)
+	}
+	host.notes["p/echo.md"] = pipelineNote(childEcho)
+	host.notes["p/fan.md"] = pipelineNote(`
+nodes:
+  - {id: list, use: starlark, with: {code: "output = ['a', 'b', 'c']"}}
+  - {id: fan, use: pipeline.run, each: "{{ list }}", with: {pipeline: echo, input: {word: "{{ item }}"}, wait: false}}
+`)
+	run, _, _ := e.Start(StartRequest{Path: "p/fan.md", Trigger: TriggerManual})
+	got := waitStatus(t, e, run.ID, jobs.Failed)
+	if !strings.Contains(got.Error, "max_run_children") {
+		t.Errorf("error %q", got.Error)
+	}
+	if kids := childrenOf(t, e, "spawned:"+run.ID+":"); len(kids) != 2 {
+		t.Errorf("%d children, want 2", len(kids))
 	}
 }

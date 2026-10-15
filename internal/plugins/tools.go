@@ -157,9 +157,6 @@ func (r *Registry) CallTool(ctx context.Context, plugin, tool string, args, meta
 	return res, nil
 }
 
-// maxGraphResult caps the JSON of a plugin's graph.
-const maxGraphResult = 8 << 20
-
 // PluginGraph is a graph of an accepted manifest.
 type PluginGraph struct {
 	// Source is how a view names it: <plugin>/<graph>.
@@ -233,8 +230,8 @@ func (r *Registry) Graph(ctx context.Context, plugin, graph string, args, meta m
 		return nil, &RefusedError{Msg: fmt.Sprintf("plugin %s, graph %s: %s", plugin, graph, strings.TrimSpace(resultText(res)))}
 	}
 	raw := ResultJSON(res)
-	if len(raw) > maxGraphResult {
-		return nil, fmt.Errorf("plugin %s gave the graph %s in %d bytes, more than %d", plugin, graph, len(raw), maxGraphResult)
+	if max := r.Limits().GraphBytes; len(raw) > max {
+		return nil, fmt.Errorf("plugin %s gave the graph %s in %d bytes, more than %d ([pipelines] max_plugin_graph_bytes)", plugin, graph, len(raw), max)
 	}
 	return raw, nil
 }

@@ -120,6 +120,7 @@ CREATE INDEX IF NOT EXISTS runs_ref ON runs(ref, created);
 CREATE INDEX IF NOT EXISTS runs_project ON runs(project, created);
 CREATE INDEX IF NOT EXISTS runs_status ON runs(status);
 CREATE UNIQUE INDEX IF NOT EXISTS runs_idem ON runs(ref, idem_key) WHERE idem_key != '';
+CREATE INDEX IF NOT EXISTS runs_idem_key ON runs(idem_key) WHERE idem_key != '';
 CREATE TABLE IF NOT EXISTS steps (
 	run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
 	name TEXT NOT NULL,
@@ -296,6 +297,15 @@ type RunFilter struct {
 	// runs another run started (pipeline.run, IMP-186).
 	IdemPrefix string
 	Limit      int // default 50, at most 500
+}
+
+// CountRuns counts the runs whose idempotency key starts with idemPrefix:
+// the runs another run started (pipeline.run). The keys are ASCII, and a
+// range on them reads the index, where a LIKE would read every run.
+func (s *Store) CountRuns(idemPrefix string) (int, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT count(*) FROM runs WHERE idem_key >= ? AND idem_key < ?`, idemPrefix, idemPrefix+"\x7f").Scan(&n)
+	return n, err
 }
 
 // Runs lists runs.

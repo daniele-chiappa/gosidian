@@ -56,3 +56,19 @@ func TestFind(t *testing.T) {
 		t.Fatalf("%+v", blocks)
 	}
 }
+
+// The most nodes a block asks for is the server's [web] graph_max_nodes.
+func TestParse_MaxLimitIsASetting(t *testing.T) {
+	defer SetMaxLimit(5000)
+	if _, problems := Parse("limit: 6000\n"); len(problems) == 0 {
+		t.Error("6000 over the default 5000 read")
+	}
+	SetMaxLimit(8000)
+	if _, problems := Parse("limit: 6000\n"); len(problems) != 0 {
+		t.Errorf("6000 under 8000: %v", problems)
+	}
+	SetMaxLimit(0)
+	if maxLimit.Load() != 8000 {
+		t.Errorf("0 changed the most to %d", maxLimit.Load())
+	}
+}
