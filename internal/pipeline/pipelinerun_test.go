@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"context"
 	"encoding/json"
 	"path"
 	"sort"
@@ -93,6 +94,52 @@ nodes:
 	call := outputMap(t, stepOf(t, e, run.ID, "call"))
 	if say := call["outputs"].(map[string]any)["say"]; say != "later" {
 		t.Fatalf("call %v", call)
+	}
+}
+
+// A start that waits goes on while its run waits only for the run it
+// started, and gets the answer once both ended (a bot whose pipeline
+// starts another, IMP-191).
+func TestPipelineRunNode_AStartWaitsThroughTheChild(t *testing.T) {
+	e, host := newEngine(t, Config{})
+	host.notes["p/hold.md"] = pipelineNote(`
+nodes:
+  - {id: hold, use: wait.call, with: {timeout: 1h}}
+  - {id: say, use: starlark, with: {input: "{{ hold.word }}", code: "output = input"}}
+`)
+	host.notes["p/parent.md"] = pipelineNote(`
+answer: reply
+nodes:
+  - {id: call, use: pipeline.run, with: {pipeline: hold}}
+  - {id: reply, use: starlark, with: {input: "{{ call.outputs.say }}", code: "output = input"}}
+`)
+	run, _, err := e.Start(StartRequest{Path: "p/parent.md", Trigger: TriggerManual})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.Wait(context.Background(), run.ID, 1500*time.Millisecond)
+	if err != nil || got.Status != jobs.Waiting || e.Settled(got) {
+		t.Fatalf("a run that waits for its child, its time passed: %s settled %v %v", got.Status, e.Settled(got), err)
+	}
+	kids := childrenOf(t, e, "parent:"+run.ID+":")
+	if len(kids) != 1 {
+		t.Fatalf("children %+v", kids)
+	}
+	waitStatus(t, e, kids[0].ID, jobs.Waiting)
+	if !e.Settled(waitStatus(t, e, kids[0].ID, jobs.Waiting)) {
+		t.Error("the child waits for a call: settled")
+	}
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		_ = e.Runner().Resume(kids[0].ID, "", json.RawMessage(`{"word":"ecco"}`))
+	}()
+	got, err = e.Wait(context.Background(), run.ID, 10*time.Second)
+	if err != nil || got.Status != jobs.Done {
+		t.Fatalf("after the child: %s %v", got.Status, err)
+	}
+	steps, _ := e.Runner().Store().Steps(run.ID)
+	if a, ok := AnswerOf(got, steps); !ok || a != "ecco" {
+		t.Errorf("answer %v %v", a, ok)
 	}
 }
 

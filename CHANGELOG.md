@@ -8,6 +8,34 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.92.0] — 2026-10-16 — "folders"
+
+A bot's scopes from a folder's tree, and a start that waits goes on while
+its run waits for a run it started. Pull the image and restart; nothing to
+migrate. The nested scopes show in the chat with `gosidian-chat` 0.2.0 of
+[gosidian-plugins](https://github.com/daniele-chiappa/gosidian-plugins);
+0.1.0 keeps working with the first level.
+
+### Added
+- **Scopes from folders**: a bot's block takes `folders` (`path`, a
+  folder of the project; `levels`, 1 to 3; `key`; `labels`). Each time
+  gosidian hands the bot to its plugin it makes a scope of each folder
+  under `path` that holds notes, and of those between, nested down the
+  levels: labelled with the folder's name, named after its path. A
+  scope's filter keeps the chunks whose `meta.<key>` (default `folder`)
+  is that folder or one under it, at any depth; the pipeline that cuts the
+  documents writes that key. A note's media folder (`<note>_img/`) is no
+  scope. `chat_configure` gets the scopes with their `children`, and
+  `scope_labels`, what the chat calls each level. See `docs/chat.md`.
+
+### Fixed
+- **A start that waits goes on while its run waits for the runs it
+  started**: a run at a `pipeline.run` step was taken as one that waits
+  for a call from outside, and the start came back at once without its
+  answer; a bot whose pipeline starts another did not answer. The start
+  now comes back when the run ended, or `202` when the time passed; a run
+  at a `wait.call` comes back as before.
+
 ## [2.91.1] — 2026-10-16 — "bots"
 
 A bot's note opens its chat. Pull the image and restart; nothing to

@@ -3,6 +3,7 @@ package mcp
 import (
 	"errors"
 	"fmt"
+	"path"
 	"strings"
 	"time"
 
@@ -53,6 +54,42 @@ func (h chatHost) Note(rel string) (chatbot.Note, error) {
 	}
 	project, _, _ := strings.Cut(rel, "/")
 	return chatbot.Note{Path: rel, Project: project, Content: note.Content}, nil
+}
+
+// Folders are the folders under root that hold notes, at any depth; a
+// note's media folder (<note>_img/, the pipelines' image notes) and what
+// it holds are none.
+func (h chatHost) Folders(root string) ([]string, error) {
+	root = strings.Trim(root, "/")
+	rows, err := h.s.index.NotesByPrefix(root)
+	if err != nil {
+		return nil, err
+	}
+	notes := make(map[string]bool, len(rows))
+	for _, r := range rows {
+		notes[r.Path] = true
+	}
+	media := func(dir string) bool {
+		for d := dir; d != root && d != "." && d != "/"; d = path.Dir(d) {
+			if b, ok := strings.CutSuffix(path.Base(d), "_img"); ok && notes[path.Join(path.Dir(d), b+".md")] {
+				return true
+			}
+		}
+		return false
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, r := range rows {
+		d := path.Dir(r.Path)
+		if d == root || seen[d] {
+			continue
+		}
+		seen[d] = true
+		if !media(d) {
+			out = append(out, d)
+		}
+	}
+	return out, nil
 }
 
 func (h chatHost) PipelineOn(rel string) (string, error) {

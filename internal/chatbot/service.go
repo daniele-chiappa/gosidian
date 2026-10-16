@@ -48,6 +48,9 @@ type Host interface {
 	// PipelineOn is how the pipeline note at path starts; an error says
 	// why it cannot run (no such note, a project without pipelines).
 	PipelineOn(path string) (string, error)
+	// Folders are the folders under root (a path of the vault) that hold
+	// notes, at any depth; the media folders of the notes are none.
+	Folders(root string) ([]string, error)
 	// NotesBefore are the notes of a folder, at any depth, last changed
 	// before t.
 	NotesBefore(folder string, t time.Time) ([]string, error)
@@ -459,14 +462,26 @@ func (s *Service) configureArgs(n Note, spec Spec, st *State) (map[string]any, e
 		}
 		access["signed_secret"] = v
 	}
-	scopes := []any{}
-	for _, sc := range spec.Scopes {
-		m := map[string]any{"name": sc.Name, "label": sc.Label}
-		if sc.Filter != nil {
-			m["filter"] = sc.Filter
+	all := spec.Scopes
+	labels := []string{}
+	if f := spec.Folders; f != nil {
+		root := n.Project + "/" + f.Path
+		folders, err := s.host.Folders(root)
+		if err != nil {
+			return nil, fmt.Errorf("folders.path %s: %v", f.Path, err)
 		}
-		scopes = append(scopes, m)
+		taken := map[string]bool{}
+		for _, sc := range spec.Scopes {
+			taken[sc.Name] = true
+		}
+		more := ExpandFolders(*f, root, folders, taken)
+		if len(more) == 0 {
+			return nil, fmt.Errorf("folders.path %s: no folder with notes under it", f.Path)
+		}
+		all = append(append([]Scope{}, spec.Scopes...), more...)
+		labels = f.Labels
 	}
+	scopes := scopeArgs(all)
 	limits := map[string]any{}
 	for k, v := range spec.Limits {
 		limits[k] = v
@@ -481,11 +496,27 @@ func (s *Service) configureArgs(n Note, spec Spec, st *State) (map[string]any, e
 	return map[string]any{
 		"bot": spec.Name, "note": n.Path,
 		"title": spec.Title, "welcome": spec.Welcome,
-		"scopes": scopes, "access": access, "limits": limits, "conversations": conv,
+		"scopes": scopes, "scope_labels": labels, "access": access, "limits": limits, "conversations": conv,
 		"sources":      map[string]any{"base_url": spec.Sources.BaseURL, "gosidian_url": strings.TrimRight(s.opts.GosidianURL, "/")},
 		"run":          map[string]any{"url": base + "/api/v1/pipelines/" + pipelinePath + "/runs", "token": token, "pipeline": pipelinePath},
 		"gosidian_url": strings.TrimRight(s.opts.GosidianURL, "/"),
 	}, nil
+}
+
+// scopeArgs are scopes as chat_configure takes them, with their children.
+func scopeArgs(scopes []Scope) []any {
+	out := []any{}
+	for _, sc := range scopes {
+		m := map[string]any{"name": sc.Name, "label": sc.Label}
+		if sc.Filter != nil {
+			m["filter"] = sc.Filter
+		}
+		if len(sc.Children) > 0 {
+			m["children"] = scopeArgs(sc.Children)
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 // runToken is the bot's run token of its pipeline, kept among the

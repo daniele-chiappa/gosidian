@@ -33,6 +33,7 @@ welcome: "Ask me about the procedures."
 scopes:
   - {name: warehouse, label: Warehouse, filter: {meta: {area: warehouse}}}
   - {name: sales, label: Sales, filter: {meta: {area: sales}}}
+folders: {path: documents/manual, levels: 2, labels: [Area, Topic]}
 access:
   users: true
   keys: [{name: site, secret: chat-site-key, origins: ["https://www.example.com"]}]
@@ -51,6 +52,7 @@ limits: {per_minute: 10, max_tokens: 4000}
 | `plugin` | the chat plugin that serves it (default `chat`) |
 | `title`, `welcome` | what the chat shows |
 | `scopes` | the parts of the archive the bot opens, each a `name`, a `label` and a `filter` (the archive's [filter](plugins.md)): the person chatting chooses among them, and the pipeline gets their filters. A client cannot send a filter of its own |
+| `folders` | more scopes, from the folders under `path`, a folder of the project: [below](#scopes-from-folders) |
 | `access` | who may chat, [below](#who-may-chat) |
 | `sources` | `base_url`: the public address of the documents, for the links of an answer's sources; empty, the notes in gosidian |
 | `conversations` | `folder`: where the pipeline writes the conversations (a folder of the project); `keep`: how long they are kept (`90d`, `12h`; none: always). Older ones go to the trash |
@@ -59,6 +61,36 @@ limits: {per_minute: 10, max_tokens: 4000}
 The lint rule `chat-invalid` reports a block that does not read, a note
 `type: chat` without one block, and a pipeline that is no note of the
 project; a write of the note says so too.
+
+## Scopes from folders
+
+`folders` makes a scope of each folder under `path`, down `levels` levels
+(1 to 3, default 1), after the block's own `scopes`. The chat offers one
+choice per level: the folders under `path`, then those of the folder
+chosen.
+
+| `folders` | |
+|---|---|
+| `path` | a folder of the project, whose folders become the scopes |
+| `levels` | how deep the choice goes, 1 to 3 (default 1) |
+| `key` | the key of the chunks' meta that holds their document's folder (default `folder`) |
+| `labels` | what the chat calls each level: `[Area, Topic]` |
+
+- A scope's **label** is its folder's name; its **name** the folder's path
+  under `path` as lower-case letters, digits and `-`
+  (`Sales/Invoices`: `sales-invoices`), with a piece of a hash when that
+  is longer than 48 or another scope has it.
+- Its **filter** keeps the chunks whose `meta.<key>` is that folder or one
+  under it, at any depth, as paths of the vault:
+  `{meta: {folder: {in: ["p/documents/manual/Sales", "p/documents/manual/Sales/Invoices"]}}}`.
+  The pipeline that cuts the documents writes `<key>`: the document's
+  folder, as the chunks' `doc` names it (`path.Dir(doc)`). A folder with
+  more folders under it than the archive's `limits.max_in` (1000) needs
+  that limit raised in the archive's preset.
+- **The folders** are those that hold notes, and those between; a note's
+  media folder (`<note>_img/`) is none. gosidian reads them each time it
+  hands the bot to its plugin: a new folder shows within five minutes, or
+  when the note is saved.
 
 ## Who may chat
 
@@ -177,7 +209,8 @@ A chat plugin is a [plugin](plugins.md) with two tools, both `write`:
 |---|---|
 | `bot`, `note` | the bot's name, its note (its project is in the call's `_meta`, `gosidian/project`, as in every call of gosidian's) |
 | `title`, `welcome` | as the block says |
-| `scopes` | `[{name, label, filter}]` |
+| `scopes` | `[{name, label, filter, children}]`: `children`, the scopes of a folder's subfolders, the same form |
+| `scope_labels` | what the chat calls each level of `children`, from `folders.labels` |
 | `access` | `users` and `users_secret` (the secret of gosidian's tokens), `keys` (`[{name, key, origins}]`, the values), `signed_secret`, `open` |
 | `run` | `url` (`POST` there to start the pipeline), `token` (the run token, `Authorization: Bearer`), `pipeline` |
 | `sources` | `base_url`, `gosidian_url` (gosidian's public address, for the links to its notes) |

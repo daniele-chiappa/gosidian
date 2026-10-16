@@ -228,7 +228,7 @@ func (r *Router) startRun(w http.ResponseWriter, req *http.Request, path, trigge
 		if now, err := r.deps.Pipelines.Wait(req.Context(), run.ID, d); err == nil {
 			run = now
 		}
-		if run.Status.Terminal() || run.Status == jobs.Waiting {
+		if r.deps.Pipelines.Settled(run) {
 			status = http.StatusOK
 			if steps, err := r.deps.Pipelines.Runner().Store().Steps(run.ID); err == nil {
 				if answer, ok := pipeline.AnswerOf(run, steps); ok {

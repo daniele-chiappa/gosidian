@@ -503,7 +503,7 @@ start: a node should be safe to repeat (note.write with `upsert` is).
 **From an agent** — `memory_pipeline_run({path, input, idempotency_key,
 callback_url, wait})` starts a run (write access to the project); `wait`
 (in seconds, at most `[pipelines] max_sync_wait`, 60 by default) returns
-when it ended or waits, with the steps and the pipeline's `answer`. `{action: "resume", run,
+when it ended or waits for a call, with the steps and the pipeline's `answer`. `{action: "resume", run,
 data}` hands data to a waiting step, `{action: "cancel", run}` stops it.
 `memory_pipelines({project, path?, run?})` reads pipelines, runs and steps.
 `memory_bootstrap` says `capabilities.pipelines: true` where they run.
@@ -535,8 +535,10 @@ the start waits up to that many seconds (at most `[pipelines]
 max_sync_wait`) for the run to end: `200` with the run and `answer`, the
 output of the node the pipeline names as its answer (none when it names
 none, or the node did not end done). A run that stops at a `wait.call`
-comes back as it waits; one that did not end in time comes back `202`, as
-without `wait`, and `GET /api/v1/runs/<id>` follows it.
+comes back as it waits; one that waits only for the runs it started
+(`pipeline.run`) is still at work, and the start waits on. One that did
+not end in time comes back `202`, as without `wait`, and
+`GET /api/v1/runs/<id>` follows it.
 
 **An asynchronous job** — a node hands `{{ run.resume_url }}` to a
 service and a `wait.call` node waits for it: the service POSTs its result

@@ -244,8 +244,9 @@ func (w *waiters) notify(id string) {
 }
 
 // Wait returns the run once it ended or waits (a wait.call), d passed, or
-// ctx ended: as it stands then. A change of the run wakes it, and it reads
-// the run again every second besides.
+// ctx ended: as it stands then. A run that waits only for the runs it
+// started (pipeline.run) is still at work: Wait goes on. A change of the
+// run wakes it, and it reads the run again every second besides.
 func (e *Engine) Wait(ctx context.Context, id string, d time.Duration) (jobs.Run, error) {
 	ch := e.waits.add(id)
 	defer e.waits.remove(id, ch)
@@ -255,7 +256,7 @@ func (e *Engine) Wait(ctx context.Context, id string, d time.Duration) (jobs.Run
 	defer tick.Stop()
 	for {
 		run, err := e.runner.Store().Run(id)
-		if err != nil || run.Status.Terminal() || run.Status == jobs.Waiting {
+		if err != nil || e.Settled(run) {
 			return run, err
 		}
 		select {
@@ -267,6 +268,38 @@ func (e *Engine) Wait(ctx context.Context, id string, d time.Duration) (jobs.Run
 		case <-tick.C:
 		}
 	}
+}
+
+// Settled says whether a start that waits returns the run as it is: it
+// ended, or it waits for a call from outside (wait.call). One that waits
+// only for the runs it started is still at work.
+func (e *Engine) Settled(run jobs.Run) bool {
+	return run.Status.Terminal() || run.Status == jobs.Waiting && !e.waitsForRuns(run)
+}
+
+// waitsForRuns says whether every step the run waits at is a
+// pipeline.run's, which waits for a run it started: one the runner ends
+// by itself, unlike a wait.call's, which waits for a call from outside.
+func (e *Engine) waitsForRuns(run jobs.Run) bool {
+	spec, err := SpecOf(run)
+	if err != nil {
+		return false
+	}
+	steps, err := e.runner.Store().Steps(run.ID)
+	if err != nil {
+		return false
+	}
+	waiting := 0
+	for _, st := range steps {
+		if st.Status != jobs.Waiting {
+			continue
+		}
+		waiting++
+		if n, ok := spec.Node(st.Name); !ok || n.Use != "pipeline.run" {
+			return false
+		}
+	}
+	return waiting > 0
 }
 
 // SyncWait is how long a start that asks to wait w waits: w capped by

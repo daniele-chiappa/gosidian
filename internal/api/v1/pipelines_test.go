@@ -433,6 +433,15 @@ func TestPipelinesREST_StartAndWait(t *testing.T) {
 	if w := f.doAuthRecorder(http.MethodPost, "/api/v1/pipelines/Alpha/pipelines/ask.md/runs", `{"wait":5}`, nil); w.code != http.StatusOK || runOf(t, w.body).Status != jobs.Waiting {
 		t.Errorf("a wait.call: %d %s", w.code, w.body)
 	}
+	// One that waits for the run it started is still at work: 202 once the
+	// time passed.
+	parent := "---\ntitle: Parent\ntype: pipeline\n---\n\n```pipeline\nnodes:\n  - {id: call, use: pipeline.run, with: {pipeline: pipelines/ask}}\n```\n"
+	if w := f.doAuthRecorder(http.MethodPost, "/api/v1/notes", mustJSON(t, map[string]string{"path": "Alpha/pipelines/parent.md", "content": parent}), nil); w.code != http.StatusCreated {
+		t.Fatalf("seed: %d %s", w.code, w.body)
+	}
+	if w := f.doAuthRecorder(http.MethodPost, "/api/v1/pipelines/Alpha/pipelines/parent.md/runs", `{"wait":1}`, nil); w.code != http.StatusAccepted || runOf(t, w.body).Status != jobs.Waiting {
+		t.Errorf("a run that waits for its child: %d %s", w.code, w.body)
+	}
 }
 
 // TestRouter_RunTokenRate: [pipelines] run_token_rate sets the starts of a

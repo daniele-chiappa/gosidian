@@ -45,18 +45,34 @@ type Spec struct {
 	Welcome  string `json:"welcome,omitempty"`
 	// Scopes are those the bot opens: the person chatting chooses among
 	// them, and the plugin hands the pipeline their filters.
-	Scopes        []Scope        `json:"scopes,omitempty"`
+	Scopes []Scope `json:"scopes,omitempty"`
+	// Folders makes scopes of the folders under one, at configure time,
+	// after Scopes: the person chatting picks one per level.
+	Folders       *Folders       `json:"folders,omitempty"`
 	Access        Access         `json:"access"`
 	Sources       Sources        `json:"sources"`
 	Conversations Conversations  `json:"conversations"`
 	Limits        map[string]int `json:"limits,omitempty"`
 }
 
-// Scope is a part of the archive the bot may answer from.
+// Scope is a part of the archive the bot may answer from. A scope of a
+// folder has its subfolders' as Children.
 type Scope struct {
-	Name   string         `json:"name"`
-	Label  string         `json:"label,omitempty"`
-	Filter map[string]any `json:"filter,omitempty"`
+	Name     string         `json:"name"`
+	Label    string         `json:"label,omitempty"`
+	Filter   map[string]any `json:"filter,omitempty"`
+	Children []Scope        `json:"children,omitempty"`
+}
+
+// Folders are the scopes of a folder's tree: a scope for each folder under
+// Path, down Levels levels, whose filter keeps the chunks whose meta Key
+// holds that folder or one under it. The pipeline that cuts the documents
+// writes Key, the document's folder as the chunks' doc names it.
+type Folders struct {
+	Path   string   `json:"path"`
+	Levels int      `json:"levels"`
+	Key    string   `json:"key"`
+	Labels []string `json:"labels,omitempty"`
 }
 
 // Access says who may chat. Keys and Signed name secrets of gosidian
@@ -127,6 +143,7 @@ var (
 	botName    = regexp.MustCompile(`^[a-z][a-z0-9-]{0,47}$`)
 	pluginName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 	secretName = regexp.MustCompile(`^[a-z][a-z0-9_.-]{0,63}$`)
+	metaKey    = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 	lineRe     = regexp.MustCompile(`line (\d+)`)
 	fieldRe    = regexp.MustCompile(`line (\d+): field (\S+) not found in type \S+`)
 	nonSlug    = regexp.MustCompile(`[^a-z0-9]+`)
@@ -137,7 +154,13 @@ const (
 	maxScopes = 100
 	maxKeys   = 50
 	maxText   = 2000
+	maxLevels = 3
+	maxLabel  = 100
 )
+
+// DefaultFolderKey is the key of the chunks' meta a scope of a folder
+// filters on, when the block names none.
+const DefaultFolderKey = "folder"
 
 // limitNames are the limits a block may set, handed to the plugin.
 var limitNames = map[string]bool{"per_minute": true, "per_session": true, "max_tokens": true, "max_message": true}
@@ -153,6 +176,12 @@ type rawSpec struct {
 		Label  string         `yaml:"label"`
 		Filter map[string]any `yaml:"filter"`
 	} `yaml:"scopes"`
+	Folders *struct {
+		Path   string   `yaml:"path"`
+		Levels int      `yaml:"levels"`
+		Key    string   `yaml:"key"`
+		Labels []string `yaml:"labels"`
+	} `yaml:"folders"`
 	Access *struct {
 		Users *bool `yaml:"users"`
 		Keys  []struct {
@@ -187,7 +216,7 @@ func Parse(src, notePath string) (Spec, []Problem) {
 		msg := err.Error()
 		if m := fieldRe.FindStringSubmatch(msg); m != nil {
 			line, _ := strconv.Atoi(m[1])
-			return s, []Problem{{Line: line, Msg: fmt.Sprintf("%s is no field of a bot: name, plugin, pipeline, title, welcome, scopes, access, sources, conversations, limits", m[2])}}
+			return s, []Problem{{Line: line, Msg: fmt.Sprintf("%s is no field of a bot: name, plugin, pipeline, title, welcome, scopes, folders, access, sources, conversations, limits", m[2])}}
 		}
 		p := Problem{Msg: "the YAML does not read: " + strings.TrimPrefix(msg, "yaml: ")}
 		if m := lineRe.FindStringSubmatch(msg); m != nil {
@@ -242,6 +271,38 @@ func Parse(src, notePath string) (Spec, []Problem) {
 			label = name
 		}
 		s.Scopes = append(s.Scopes, Scope{Name: name, Label: label, Filter: sc.Filter})
+	}
+	if f := r.Folders; f != nil {
+		fs := Folders{Path: strings.Trim(strings.TrimSpace(f.Path), "/"), Levels: f.Levels, Key: strings.TrimSpace(f.Key)}
+		switch {
+		case fs.Path == "":
+			bad("folders.path names a folder of the project, whose folders become the scopes")
+		case strings.Contains(fs.Path, "..") || path.Clean(fs.Path) != fs.Path:
+			bad("folders.path %q: a folder of the project", fs.Path)
+		}
+		if fs.Levels == 0 {
+			fs.Levels = 1
+		}
+		if fs.Levels < 1 || fs.Levels > maxLevels {
+			bad("folders.levels: 1 to %d, the levels of folders the chat offers", maxLevels)
+		}
+		if fs.Key == "" {
+			fs.Key = DefaultFolderKey
+		}
+		if !metaKey.MatchString(fs.Key) {
+			bad("folders.key %q: a key of the chunks' meta, letters, digits, _ and -", fs.Key)
+		}
+		if len(f.Labels) > fs.Levels {
+			bad("folders.labels: one per level, at most %d", fs.Levels)
+		}
+		for _, l := range f.Labels {
+			l = strings.TrimSpace(l)
+			if len(l) > maxLabel {
+				bad("folders.labels: at most %d characters each", maxLabel)
+			}
+			fs.Labels = append(fs.Labels, l)
+		}
+		s.Folders = &fs
 	}
 	s.Access.Users = true
 	if a := r.Access; a != nil {

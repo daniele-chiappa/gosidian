@@ -51,6 +51,11 @@ func TestParse(t *testing.T) {
 		"pipeline: x\nconversations: {folder: c, keep: soon}":                                       "days",
 		"pipeline: x\nlimits: {burst: 3}":                                                           "per_minute",
 		"pipeline: x\nscopes: [{name: a}, {name: a}]":                                               "twice",
+		"pipeline: x\nfolders: {levels: 2}":                                                         "folders.path names",
+		"pipeline: x\nfolders: {path: ../docs}":                                                     "folders.path",
+		"pipeline: x\nfolders: {path: docs, levels: 4}":                                             "folders.levels",
+		"pipeline: x\nfolders: {path: docs, key: a.b}":                                              "folders.key",
+		"pipeline: x\nfolders: {path: docs, labels: [Area, Topic]}":                                 "folders.labels",
 		"pipeline: x\nunknown: 1":                                                                   "unknown is no field of a bot",
 		"pipeline: [x":                                                                              "does not read",
 	} {
@@ -69,6 +74,10 @@ func TestParse(t *testing.T) {
 	if _, _, ok := FromNote("p/b.md", []byte("# none\n")); ok {
 		t.Error("a note without a block")
 	}
+	f, problems := Parse("pipeline: x\nfolders: {path: /documents/manual/}", "p/b.md")
+	if len(problems) > 0 || f.Folders == nil || f.Folders.Path != "documents/manual" || f.Folders.Levels != 1 || f.Folders.Key != "folder" || len(f.Folders.Labels) != 0 {
+		t.Errorf("folders: %+v %v", f.Folders, problems)
+	}
 	for in, want := range map[string]string{"p/a/Il Bot.md": "il-bot", "p/2024.md": "bot-2024", "p/!!.md": "bot-"} {
 		if got := DefaultName(in); got != want {
 			t.Errorf("DefaultName(%q) = %q, want %q", in, got, want)
@@ -82,6 +91,17 @@ type fakeHost struct {
 	on        map[string]string
 	old       []string
 	discarded []string
+	folders   []string
+}
+
+func (h *fakeHost) Folders(root string) ([]string, error) {
+	var out []string
+	for _, d := range h.folders {
+		if strings.HasPrefix(d, root+"/") {
+			out = append(out, d)
+		}
+	}
+	return out, nil
 }
 
 func (h *fakeHost) ChatNotes() ([]Note, error) {
@@ -405,5 +425,66 @@ func TestService_NoSecrets(t *testing.T) {
 	s.Reconcile(context.Background())
 	if st, _ := s.Status("p/bots/assistente.md"); st.Configured || !strings.Contains(st.Error, "GOSIDIAN_SECRETS_KEY") {
 		t.Errorf("%+v", st)
+	}
+}
+
+func TestExpandFolders(t *testing.T) {
+	root := "p/docs"
+	folders := []string{
+		"p/docs/Cucina/Primi/Pasta fresca",
+		"p/docs/Cucina/Primi/Risotti/Antichi",
+		"p/docs/Cucina/Dolci",
+		"p/docs/Giardino e orto/Attività di stagione/Calendario",
+		"p/other/Cucina",
+	}
+	got := ExpandFolders(Folders{Path: "docs", Levels: 2, Key: "categoria"}, root, folders, map[string]bool{"cucina": true})
+	if len(got) != 2 {
+		t.Fatalf("level 1: %+v", got)
+	}
+	orto, cucina := got[1], got[0]
+	if orto.Name != "giardino-e-orto" || orto.Label != "Giardino e orto" || len(orto.Children) != 1 ||
+		orto.Children[0].Name != "giardino-e-orto-attivita-di-stagione" || orto.Children[0].Label != "Attività di stagione" {
+		t.Errorf("accents and spaces: %+v", orto)
+	}
+	if len(orto.Children[0].Children) != 0 {
+		t.Errorf("deeper than the levels: %+v", orto.Children[0].Children)
+	}
+	// cucina is a scope of the block's: this one has the hash.
+	if !strings.HasPrefix(cucina.Name, "cucina-") || len(cucina.Name) != len("cucina-")+6 || len(cucina.Children) != 2 {
+		t.Errorf("a name taken: %+v", cucina)
+	}
+	in := cucina.Children[1].Filter["meta"].(map[string]any)["categoria"].(map[string]any)["in"].([]string)
+	want := []string{"p/docs/Cucina/Primi", "p/docs/Cucina/Primi/Pasta fresca", "p/docs/Cucina/Primi/Risotti", "p/docs/Cucina/Primi/Risotti/Antichi"}
+	if strings.Join(in, "|") != strings.Join(want, "|") {
+		t.Errorf("the folders of Primi, at any depth: %v", in)
+	}
+	long := ExpandFolders(Folders{Path: "docs", Levels: 1, Key: "f"}, root, []string{"p/docs/" + strings.Repeat("Molto lungo ", 6)}, nil)
+	if n := long[0].Name; len(n) > 48 || !botName.MatchString(n) {
+		t.Errorf("a long name: %q", n)
+	}
+	if n := ExpandFolders(Folders{Path: "docs", Levels: 1, Key: "f"}, root, []string{"p/docs/2024"}, nil)[0].Name; n != "f-2024" {
+		t.Errorf("a name that starts with a digit: %q", n)
+	}
+}
+
+func TestService_Folders(t *testing.T) {
+	s, host, pl, _, _ := newService(t)
+	host.notes["p/bots/assistente.md"] = strings.Replace(bot, "access:\n", "folders: {path: docs, levels: 2, key: categoria, labels: [Area, Modulo]}\naccess:\n", 1)
+	s.Reconcile(context.Background())
+	if st, _ := s.Status("p/bots/assistente.md"); st.Configured || !strings.Contains(st.Error, "no folder with notes") {
+		t.Errorf("no folders: %+v", st)
+	}
+	host.folders = []string{"p/docs/Cucina/Primi", "p/docs/Cucina/Dolci", "p/docs/Attrezzi"}
+	s.Reconcile(context.Background())
+	if st, _ := s.Status("p/bots/assistente.md"); !st.Configured {
+		t.Fatalf("%+v", st)
+	}
+	c := pl.last(ToolConfigure)
+	sc := c.args["scopes"].([]any)
+	if len(sc) != 4 || sc[2].(map[string]any)["name"] != "attrezzi" || sc[2].(map[string]any)["children"] != nil || sc[3].(map[string]any)["name"] != "cucina" || len(sc[3].(map[string]any)["children"].([]any)) != 2 {
+		t.Errorf("scopes: %v", sc)
+	}
+	if l := c.args["scope_labels"].([]string); len(l) != 2 || l[1] != "Modulo" {
+		t.Errorf("scope_labels: %v", c.args["scope_labels"])
 	}
 }
