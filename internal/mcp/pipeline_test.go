@@ -423,3 +423,73 @@ func TestPipelineHost_ListNotes(t *testing.T) {
 		t.Error("a where that is no list passed")
 	}
 }
+
+// TestPipelineHost_UpdateNote: note.write's append and frontmatter_merge
+// through the server: each turn adds to the conversation, a rating merges
+// into its frontmatter; and memory_pipeline_run gives a chat's answer.
+func TestPipelineHost_UpdateNote(t *testing.T) {
+	s, _ := pipelineServer(t)
+	ctx := context.Background()
+	const bot = "---\ntitle: Bot\ntype: pipeline\n---\n\n```pipeline\n" + `trigger: {on: chat}
+answer: reply
+nodes:
+  - id: kind
+    use: starlark
+    with: {input: "{{ trigger.kind }}", code: "output = {'message': input == 'message', 'rating': input == 'rating'}"}
+  - id: reply
+    use: starlark
+    when: "{{ kind.message }}"
+    with: {input: "{{ trigger.message }}", code: "output = {'text': 'eco: ' + input}"}
+  - id: turn
+    use: note.write
+    when: "{{ kind.message }}"
+    with:
+      path: "chat/{{ trigger.session }}"
+      mode: append
+      frontmatter: {type: chat-conversation, session: "{{ trigger.session }}"}
+      body: "## {{ run.id }}\n\n{{ trigger.message }}\n\n{{ reply.text }}"
+  - id: rate
+    use: note.write
+    after: [kind]
+    when: "{{ kind.rating }}"
+    with:
+      path: "chat/{{ trigger.session }}"
+      frontmatter_merge: true
+      frontmatter: {ratings: {"{{ trigger.turn }}": "{{ trigger.rating }}"}}
+` + "```\n"
+	if res, err := s.handleCreate(ctx, call(map[string]any{"path": "p/pipelines/bot.md", "content": bot})); err != nil || res.IsError {
+		t.Fatalf("create: %v %+v", err, res)
+	}
+	start := func(in map[string]any) string {
+		t.Helper()
+		res, err := s.handlePipelineRun(ctx, call(map[string]any{"path": "p/pipelines/bot.md", "input": in, "wait": 5}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := resultText(t, res)
+		if !strings.Contains(text, `"status":"done"`) {
+			t.Fatalf("run: %s", text)
+		}
+		return text
+	}
+	first := start(map[string]any{"message": "prima", "session": "s1"})
+	if !strings.Contains(first, `"answer":{"text":"eco: prima"}`) || !strings.Contains(first, `"interactive":true`) {
+		t.Errorf("the answer: %s", first)
+	}
+	turn := runID(t, first)
+	start(map[string]any{"message": "seconda", "session": "s1"})
+	start(map[string]any{"kind": "rating", "turn": turn, "rating": 8, "session": "s1"})
+	note, err := s.vault.Load("p/chat/s1.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := string(note.Content)
+	for _, want := range []string{"type: chat-conversation", turn + ": 8", "prima\n\neco: prima", "seconda\n\neco: seconda"} {
+		if !strings.Contains(c, want) {
+			t.Errorf("the conversation lacks %q:\n%s", want, c)
+		}
+	}
+	if strings.Index(c, "eco: prima") > strings.Index(c, "eco: seconda") {
+		t.Errorf("the turns out of order:\n%s", c)
+	}
+}

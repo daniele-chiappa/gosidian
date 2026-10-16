@@ -55,6 +55,7 @@ import {
   hasMermaid,
   hasPipeline,
   hasGraph,
+  hasChat,
   splitViews,
   type DiagramSegment,
   type MermaidSegment,
@@ -67,6 +68,7 @@ import { i18n } from '@/locales'
 import DiagramBlock from './DiagramBlock.vue'
 import PipelineBlock from './PipelineBlock.vue'
 import GraphBlock from './GraphBlock.vue'
+import ChatBlock from './ChatBlock.vue'
 import { usePreviewLinks } from './usePreviewLinks'
 
 // notePath: the note the HTML belongs to, which relative links start from.
@@ -98,6 +100,7 @@ const segments = computed(() =>
   hasDiagrams(sanitized.value) ||
   hasPipeline(sanitized.value) ||
   hasGraph(sanitized.value) ||
+  hasChat(sanitized.value) ||
   (props.diagramsEditable && hasMermaid(sanitized.value))
     ? splitViews(sanitized.value)
     : null,
@@ -234,6 +237,7 @@ function openDiagramLink(l: { target: string; kind: 'note' | 'url' }) {
         @edit="editPipeline(s)"
       />
       <GraphBlock v-else-if="s.kind === 'graph'" :source="s.source" :note-path="notePath" />
+      <ChatBlock v-else-if="s.kind === 'chat'" :source="s.source" :note-path="notePath" />
       <div v-else-if="s.kind === 'mermaid'" class="gosidian-mermaid" data-mermaid>
         <div class="contents" v-html="s.html" />
         <div v-if="canEditDiagram(s)" class="gosidian-mermaid__tools not-prose">

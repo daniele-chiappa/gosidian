@@ -44,7 +44,7 @@ func parseRef(src string) (ref, error) {
 }
 
 // refsIn returns the references in a setting value: strings, and the
-// strings nested in lists and maps.
+// strings nested in lists and maps, their keys too.
 func refsIn(v any) ([]ref, error) {
 	var out []ref
 	var walk func(v any) error
@@ -65,7 +65,10 @@ func refsIn(v any) ([]ref, error) {
 				}
 			}
 		case map[string]any:
-			for _, e := range t {
+			for k, e := range t {
+				if err := walk(k); err != nil {
+					return err
+				}
 				if err := walk(e); err != nil {
 					return err
 				}
@@ -151,12 +154,27 @@ func (sc scope) eval(v any) (any, error) {
 		return out, nil
 	case map[string]any:
 		out := make(map[string]any, len(t))
+		from := map[string]string{}
 		for k, e := range t {
+			// A key with expressions is written as a string: a rating keyed
+			// by the turn it rates, {"{{ trigger.turn }}": 7}.
+			key := k
+			if strings.Contains(k, "{{") {
+				kv, err := sc.eval(k)
+				if err != nil {
+					return nil, err
+				}
+				key = render(kv)
+			}
+			if prev, ok := from[key]; ok {
+				return nil, fmt.Errorf("the keys %q and %q both give %q", prev, k, key)
+			}
+			from[key] = k
 			ev, err := sc.eval(e)
 			if err != nil {
 				return nil, err
 			}
-			out[k] = ev
+			out[key] = ev
 		}
 		return out, nil
 	default:

@@ -327,6 +327,17 @@ type PipelinesConfig struct {
 	Enabled bool `toml:"enabled"`
 	// Workers is how many steps run at once; default 2.
 	Workers int `toml:"workers"`
+	// InteractiveWorkers run only the steps of the interactive runs (a
+	// chat's messages, priority: interactive), on top of Workers, which
+	// take those first too; default 1, 0 for none of their own.
+	InteractiveWorkers int `toml:"interactive_workers"`
+	// MaxSyncWait is the longest a start waits for its run to end, over
+	// HTTP (wait) or MCP (memory_pipeline_run's wait); default 60s.
+	MaxSyncWait time.Duration `toml:"max_sync_wait"`
+	// RunTokenRate is how many runs a run token starts in a minute, and how
+	// many resumes a run's key makes; default 60. A chat's widget starts a
+	// run per message of everyone who chats.
+	RunTokenRate int `toml:"run_token_rate"`
 	// Retention is how long the runs that ended are kept in jobs.db;
 	// default 30 days, 0 keeps them.
 	Retention time.Duration `toml:"retention"`
@@ -525,6 +536,8 @@ func Default() *Config {
 	// 30 days at the next start, and the prune emptied the trash (BUG-105).
 	cfg.Trash.Retention = 30 * 24 * time.Hour
 	cfg.Pipelines.Retention = 30 * 24 * time.Hour
+	// And here, as 0 means none of their own (IMP-191).
+	cfg.Pipelines.InteractiveWorkers = 1
 	// And here, as 0 turns the cache off: applyDefaults put it back to 128
 	// (IMP-163).
 	cfg.Vault.CacheSize = 128
@@ -1000,6 +1013,12 @@ func (c *Config) applyDefaults() {
 	if c.Pipelines.StepTimeout <= 0 {
 		c.Pipelines.StepTimeout = 15 * time.Minute
 	}
+	if c.Pipelines.InteractiveWorkers < 0 {
+		c.Pipelines.InteractiveWorkers = 0
+	}
+	if c.Pipelines.MaxSyncWait <= 0 {
+		c.Pipelines.MaxSyncWait = time.Minute
+	}
 	if c.Pipelines.MaxInputBytes <= 0 {
 		c.Pipelines.MaxInputBytes = 256 << 10
 	}
@@ -1015,6 +1034,7 @@ func (c *Config) applyDefaults() {
 	}{
 		{&c.Pipelines.MaxRunDepth, 4},
 		{&c.Pipelines.MaxRunChildren, 1000},
+		{&c.Pipelines.RunTokenRate, 60},
 		{&c.Pipelines.MaxListItems, 5000},
 		{&c.Pipelines.MaxChunkMeta, 16 << 10},
 		{&c.Pipelines.MaxMarkSets, 20},
@@ -1171,6 +1191,13 @@ func (c *Config) applyPipelinesEnv() error {
 		}
 		c.Pipelines.Workers = n
 	}
+	if v := os.Getenv("GOSIDIAN_PIPELINES_INTERACTIVE_WORKERS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return fmt.Errorf("GOSIDIAN_PIPELINES_INTERACTIVE_WORKERS: %q, 0 or more", v)
+		}
+		c.Pipelines.InteractiveWorkers = n
+	}
 	for _, d := range []struct {
 		env string
 		dst *time.Duration
@@ -1178,6 +1205,7 @@ func (c *Config) applyPipelinesEnv() error {
 		{"GOSIDIAN_PIPELINES_RETENTION", &c.Pipelines.Retention},
 		{"GOSIDIAN_PIPELINES_STEP_TIMEOUT", &c.Pipelines.StepTimeout},
 		{"GOSIDIAN_PIPELINES_MAX_WAIT", &c.Pipelines.MaxWait},
+		{"GOSIDIAN_PIPELINES_MAX_SYNC_WAIT", &c.Pipelines.MaxSyncWait},
 	} {
 		if v := os.Getenv(d.env); v != "" {
 			dur, err := time.ParseDuration(v)
@@ -1217,6 +1245,7 @@ func (c *Config) applyPipelinesEnv() error {
 	if err := envPositiveInts(map[string]*int{
 		"GOSIDIAN_PIPELINES_MAX_RUN_DEPTH":          &c.Pipelines.MaxRunDepth,
 		"GOSIDIAN_PIPELINES_MAX_RUN_CHILDREN":       &c.Pipelines.MaxRunChildren,
+		"GOSIDIAN_PIPELINES_RUN_TOKEN_RATE":         &c.Pipelines.RunTokenRate,
 		"GOSIDIAN_PIPELINES_MAX_LIST_ITEMS":         &c.Pipelines.MaxListItems,
 		"GOSIDIAN_PIPELINES_MAX_CHUNK_META":         &c.Pipelines.MaxChunkMeta,
 		"GOSIDIAN_PIPELINES_MAX_MARK_SETS":          &c.Pipelines.MaxMarkSets,

@@ -146,4 +146,15 @@ func TestScope_Eval(t *testing.T) {
 	if !truthy([]any{1}) || truthy("") || truthy(float64(0)) || truthy(nil) || !truthy("x") {
 		t.Fatal("truthy")
 	}
+	// A key with expressions is written as a string (IMP-191).
+	v, err = sc.eval(map[string]any{"ratings": map[string]any{"{{ trigger.name }}": "{{ trigger.n }}", "p-{{ trigger.n }}": 1}})
+	if r := v.(map[string]any)["ratings"].(map[string]any); err != nil || r["doc.pdf"] != float64(3) || r["p-3"] != 1 {
+		t.Errorf("keys: %#v %v", v, err)
+	}
+	if _, err := sc.eval(map[string]any{"{{ trigger.name }}": 1, "doc.pdf": 2}); err == nil || !strings.Contains(err.Error(), "both give") {
+		t.Errorf("two keys that give the same: %v", err)
+	}
+	if refs, err := refsIn(map[string]any{"{{ read.ok }}": "x"}); err != nil || len(refs) != 1 || refs[0].root != "read" {
+		t.Errorf("the references of a key: %v %v", refs, err)
+	}
 }

@@ -13,6 +13,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/gosidian/gosidian/internal/jobs"
+	"github.com/gosidian/gosidian/internal/parser"
 )
 
 // Env is what a node sees while it runs.
@@ -280,7 +281,18 @@ const (
 	WriteUpsert  WriteMode = "upsert"
 	WriteCreate  WriteMode = "create"
 	WriteReplace WriteMode = "replace"
+	// WriteAppend adds the body after the note's, and merges the
+	// frontmatter into its own: a turn of a conversation (IMP-191).
+	WriteAppend WriteMode = "append"
 )
+
+// NoteUpdater is a host that writes a note from what it holds, as one
+// change: build gets the note's content, nil when there is none, while no
+// other write of the note can come in between. note.write's append and
+// frontmatter_merge need it.
+type NoteUpdater interface {
+	UpdateNote(project, path string, build func(existing []byte) ([]byte, error), actor string) (WriteResult, error)
+}
 
 // WriteResult is note.write's output.
 type WriteResult struct {
@@ -305,9 +317,13 @@ func noteWrite(_ context.Context, env *Env, with map[string]any) (any, error) {
 	switch mode {
 	case "":
 		mode = WriteUpsert
-	case WriteUpsert, WriteCreate, WriteReplace:
+	case WriteUpsert, WriteCreate, WriteReplace, WriteAppend:
 	default:
-		return nil, fmt.Errorf("with.mode %q: upsert, create or replace", mode)
+		return nil, fmt.Errorf("with.mode %q: upsert, create, replace or append", mode)
+	}
+	merge, _ := with["frontmatter_merge"].(bool)
+	if merge && mode == WriteCreate {
+		return nil, errors.New("with.frontmatter_merge: a note that create writes has no frontmatter to merge into")
 	}
 	fm := map[string]any{}
 	if m, ok := with["frontmatter"].(map[string]any); ok {
@@ -327,11 +343,65 @@ func noteWrite(_ context.Context, env *Env, with map[string]any) (any, error) {
 			fm["source"] = "[[" + f + "]]"
 		}
 	}
-	content, err := withFrontmatter(fm, str(with, "body"))
-	if err != nil {
-		return nil, err
+	if mode != WriteAppend && !merge {
+		content, err := withFrontmatter(fm, str(with, "body"))
+		if err != nil {
+			return nil, err
+		}
+		return env.Engine.host.WriteNote(env.Project, rel, content, mode, Actor(env.Run.Ref))
 	}
-	return env.Engine.host.WriteNote(env.Project, rel, content, mode, Actor(env.Run.Ref))
+	up, ok := env.Engine.host.(NoteUpdater)
+	if !ok {
+		return nil, errors.New("this server does not merge into a note: write it whole")
+	}
+	body, hasBody := with["body"].(string)
+	return up.UpdateNote(env.Project, rel, func(existing []byte) ([]byte, error) {
+		if existing == nil {
+			if mode == WriteReplace {
+				return nil, ErrNoNote
+			}
+			return withFrontmatter(mergeFrontmatter(map[string]any{}, fm), body)
+		}
+		old := map[string]any{}
+		if raw := parser.ExtractFrontmatterRaw(existing); raw != "" {
+			if err := yaml.Unmarshal([]byte(raw), &old); err != nil {
+				return nil, fmt.Errorf("the note's frontmatter: %w", err)
+			}
+			if old == nil {
+				old = map[string]any{}
+			}
+		}
+		oldBody := parser.BodyAfterFrontmatter(existing)
+		switch {
+		case mode == WriteAppend:
+			if strings.TrimSpace(body) != "" {
+				oldBody = strings.TrimRight(oldBody, "\n") + "\n\n" + strings.TrimLeft(body, "\n")
+			}
+		case hasBody:
+			oldBody = body
+		}
+		return withFrontmatter(mergeFrontmatter(old, fm), oldBody)
+	}, Actor(env.Run.Ref))
+}
+
+// mergeFrontmatter merges set into fm: a key set to a map merges into the
+// map fm holds, a key set to null goes, any other value replaces fm's.
+func mergeFrontmatter(fm, set map[string]any) map[string]any {
+	for k, v := range set {
+		switch nv := v.(type) {
+		case nil:
+			delete(fm, k)
+		case map[string]any:
+			cur, ok := fm[k].(map[string]any)
+			if !ok {
+				cur = map[string]any{}
+			}
+			fm[k] = mergeFrontmatter(cur, nv)
+		default:
+			fm[k] = v
+		}
+	}
+	return fm
 }
 
 // withFrontmatter is a note: the frontmatter as YAML, then the body.

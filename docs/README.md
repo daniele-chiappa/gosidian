@@ -61,6 +61,8 @@ trial, read the [root README](../README.md) first.
   by folder and frontmatter, computed when the note is read
 - [Pipelines](pipelines.md) — notes `type: pipeline` the server runs
   when a document arrives, a service calls or the clock strikes (opt-in)
+- [Bots](chat.md) — notes `type: chat`: a chat on the documents of a
+  project, served by a chat plugin, answered by a pipeline
 - [The IN folder](in.md) — a project's files to work on, under their own
   names and in their own tree, which the pipelines take in batches
 - [Diagrams](diagrams.md) — ```` ```diagram ```` blocks of YAML: flows,

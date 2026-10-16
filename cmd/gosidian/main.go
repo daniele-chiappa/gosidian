@@ -637,6 +637,9 @@ func main() {
 	stopPipelines := func(_ time.Duration, before func()) { before() }
 	if cfg.Pipelines.Enabled {
 		stopPipelines, pluginReg = startPipelines(ctx, cfg, sdir, mcpServer, inFolders, syncer)
+		if c := mcpServer.Chat(); c != nil {
+			wireChat(c, auditLog)
+		}
 	}
 	// A token owned by a web account is narrowed on every request to what
 	// that account may currently read and write (BUG-055): the resolver maps
@@ -751,6 +754,7 @@ func main() {
 		Plugins:    mcpServer.Plugins(),   // nil when [pipelines] is off
 		IN:         inFolders,
 		Marks:      marksStore,
+		Chat:       mcpServer.Chat(), // nil when [pipelines] is off: /chat answers 404
 	})
 	srv.MountAPIv1(apiRouter)
 	srv.SetVaultFileAuthorizer(apiRouter.VaultFileAuthorizer()) // ADR-022: attachments share the API auth

@@ -61,8 +61,10 @@ var baseSchemas = []NodeSchema{
 	"title": {"type": "string"},
 	"body": {"type": "string", "format": "multiline", "description": "The note's text, after its frontmatter"},
 	"frontmatter": {"type": "object", "description": "Fields of the frontmatter"},
-	"mode": {"type": "string", "enum": ["upsert", "create", "replace"], "default": "upsert",
-	  "description": "upsert writes or updates, create fails when the note is there, replace fails when it is not"}}}`),
+	"frontmatter_merge": {"type": "boolean", "default": false,
+	  "description": "Merge frontmatter into the note's own instead of replacing it (a map merges into a map, null removes a key), and keep its body when body is not given"},
+	"mode": {"type": "string", "enum": ["upsert", "create", "replace", "append"], "default": "upsert",
+	  "description": "upsert writes or updates, create fails when the note is there, replace fails when it is not, append adds body after the note's and merges the frontmatter (a note it does not find it creates)"}}}`),
 		Output: json.RawMessage(`{"type": "object", "properties": {
 	"path": {"type": "string"}, "etag": {"type": "string"}, "created": {"type": "boolean"}}}`)},
 	{Type: "note.list", Description: "Lists notes of the project, a page at a time",

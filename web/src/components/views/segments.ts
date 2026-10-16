@@ -9,6 +9,15 @@ export type Segment =
   | MermaidSegment
   | PipelineSegment
   | GraphSegment
+  | ChatSegment
+
+/** The ```chat block of a bot's note (IMP-191). */
+export interface ChatSegment {
+  kind: 'chat'
+  index: number
+  source: string
+  html: string
+}
 
 /** A ```graph block at the top level (IMP-183): a saved view of the graph. */
 export interface GraphSegment {
@@ -90,6 +99,11 @@ export function hasGraph(html: string): boolean {
   return html.includes('language-graph')
 }
 
+/** Whether preview HTML may hold a bot's block. */
+export function hasChat(html: string): boolean {
+  return html.includes('language-chat')
+}
+
 /** Whether preview HTML may hold a Mermaid block. */
 export function hasMermaid(html: string): boolean {
   return html.includes('language-mermaid')
@@ -113,6 +127,7 @@ export function splitViews(html: string): Segment[] {
   let mermaids = 0
   let pipelines = 0
   let graphs = 0
+  let chats = 0
   // Whether the last thing kept was a diagram's block: a twin follows it.
   let afterDiagram = false
   const flush = () => {
@@ -177,6 +192,13 @@ export function splitViews(html: string): Segment[] {
     if (graphSrc !== null) {
       flush()
       out.push({ kind: 'graph', index: graphs++, source: graphSrc, html: (node as HTMLElement).outerHTML })
+      afterDiagram = false
+      continue
+    }
+    const chatSrc = diagramSource(node, 'chat')
+    if (chatSrc !== null) {
+      flush()
+      out.push({ kind: 'chat', index: chats++, source: chatSrc, html: (node as HTMLElement).outerHTML })
       afterDiagram = false
       continue
     }

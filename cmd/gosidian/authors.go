@@ -7,6 +7,7 @@ import (
 
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/auth"
+	"github.com/gosidian/gosidian/internal/chatbot"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/marks"
 	"github.com/gosidian/gosidian/internal/webauth"
@@ -121,6 +122,20 @@ func (n *authorNames) user(id string) (string, bool) {
 		return u.Username, true
 	}
 	return "", false
+}
+
+// wireChat tells the bots' service of the notes written, moved and
+// deleted (IMP-191): a bot's note is handed to its plugin again soon after.
+func wireChat(c *chatbot.Service, al *audit.Log) {
+	al.OnWrite(func(e audit.Entry) {
+		switch e.Action {
+		case audit.ActionCreate, audit.ActionUpdate, audit.ActionAppend, audit.ActionDelete:
+			c.Changed(e.Path)
+		case audit.ActionRename:
+			c.Changed(e.Path)
+			c.Changed(e.To)
+		}
+	})
 }
 
 // wireMarks keeps the marks of the notes with them (IMP-188): a note, a

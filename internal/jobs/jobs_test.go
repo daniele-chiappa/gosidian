@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"path/filepath"
@@ -321,7 +322,7 @@ func TestRunner_AStepLeftRunningIsTakenBackAfterARestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A process claims the step and dies before it ends.
-	if got, err := st.claim(time.Now(), 1, time.Hour); err != nil || len(got) != 1 {
+	if got, err := st.claim(time.Now(), 1, time.Hour, false); err != nil || len(got) != 1 {
 		t.Fatal(err, got)
 	}
 	st.Close()
@@ -390,5 +391,115 @@ func TestStore_PruneKeepsTheRunsNotEnded(t *testing.T) {
 	}
 	if _, err := st.Run(live.ID); err != nil {
 		t.Fatal("the live run is gone")
+	}
+}
+
+// TestRunner_InteractiveLane: while the one worker runs a long step, the
+// worker of the interactive lane runs an interactive run's steps.
+func TestRunner_InteractiveLane(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "jobs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	exec := &fakeExec{fns: map[string]func(context.Context, Step) Outcome{
+		"slow": func(ctx context.Context, _ Step) Outcome {
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+			return Outcome{Status: Done}
+		},
+	}}
+	r := NewRunner(st, Options{Workers: 1, InteractiveWorkers: 1, Poll: 10 * time.Millisecond, Lease: time.Minute})
+	r.Register("test", exec)
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan struct{})
+	go func() { r.Start(ctx); close(stopped) }()
+	t.Cleanup(func() { close(release); cancel(); <-stopped; st.Close() })
+
+	batch, _, err := r.Submit(Run{Kind: "test", Ref: "batch.md", Project: "p"}, chain("slow", "after"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitRun(t, r, batch.ID, Running)
+	// A normal run waits behind the long step: the lane is not its.
+	other, _, err := r.Submit(Run{Kind: "test", Ref: "other.md", Project: "p"}, chain("a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	chat, _, err := r.Submit(Run{Kind: "test", Ref: "chat.md", Project: "p", Priority: PriorityInteractive}, chain("search", "answer"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitRun(t, r, chat.ID, Done)
+	if run, _ := r.Store().Run(other.ID); run.Status != Queued {
+		t.Errorf("the normal run is %s: the lane ran it", run.Status)
+	}
+	if run, _ := r.Store().Run(batch.ID); run.Status != Running {
+		t.Errorf("the batch is %s", run.Status)
+	}
+	if got, _ := r.Store().Run(chat.ID); got.Priority != PriorityInteractive {
+		t.Errorf("priority %d", got.Priority)
+	}
+}
+
+// TestStore_ClaimTakesInteractiveFirst: the steps of interactive runs come
+// first, and the lane's claim takes only them.
+func TestStore_ClaimTakesInteractiveFirst(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "jobs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	old := time.Now().Add(-time.Hour)
+	if _, _, err := st.CreateRun(Run{Kind: "test", Ref: "a.md", Project: "p"}, []Step{{Name: "x", Status: Queued, NotBefore: old}}); err != nil {
+		t.Fatal(err)
+	}
+	chat, _, err := st.CreateRun(Run{Kind: "test", Ref: "b.md", Project: "p", Priority: PriorityInteractive}, []Step{{Name: "y", Status: Queued}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.claim(time.Now(), 1, time.Minute, false)
+	if err != nil || len(got) != 1 || got[0].RunID != chat.ID {
+		t.Fatalf("claim: %+v %v", got, err)
+	}
+	if got, err := st.claim(time.Now(), 5, time.Minute, true); err != nil || len(got) != 0 {
+		t.Errorf("the lane took a normal step: %+v %v", got, err)
+	}
+	if got, err := st.claim(time.Now(), 5, time.Minute, false); err != nil || len(got) != 1 || got[0].Name != "x" {
+		t.Errorf("claim of the rest: %+v %v", got, err)
+	}
+}
+
+// TestStore_OpensADatabaseWithoutPriority: a jobs.db made before the
+// runs had a priority gets the column, and its runs are normal.
+func TestStore_OpensADatabaseWithoutPriority(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "jobs.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := strings.Replace(schema, ",\n\tpriority INTEGER NOT NULL DEFAULT 0\n", "\n", 1)
+	if old == schema {
+		t.Fatal("the schema has no priority to leave out")
+	}
+	if _, err := db.Exec(old); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO runs (id, kind, ref, project, status, created) VALUES ('r1', 'test', 'a.md', 'p', 'done', 1)`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	for i := 0; i < 2; i++ { // twice: the second open finds the column
+		st, err := Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		run, err := st.Run("r1")
+		if err != nil || run.Priority != PriorityNormal {
+			t.Errorf("open %d: %+v %v", i+1, run, err)
+		}
+		st.Close()
 	}
 }

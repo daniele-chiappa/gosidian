@@ -599,3 +599,40 @@ func TestLimitsAreSettings(t *testing.T) {
 		})
 	}
 }
+
+// The settings of the chat's runs (IMP-191): the interactive lane, the
+// longest a start waits, the starts of a run token.
+func TestPipelinesInteractiveSettings(t *testing.T) {
+	p := Default().Pipelines
+	if p.InteractiveWorkers != 1 || p.MaxSyncWait != time.Minute || p.RunTokenRate != 60 {
+		t.Errorf("defaults: %d %s %d", p.InteractiveWorkers, p.MaxSyncWait, p.RunTokenRate)
+	}
+	path := filepath.Join(t.TempDir(), "cfg.toml")
+	if err := os.WriteFile(path, []byte("[pipelines]\ninteractive_workers = 0\nmax_sync_wait = \"2m\"\nrun_token_rate = 600\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := c.Pipelines; p.InteractiveWorkers != 0 || p.MaxSyncWait != 2*time.Minute || p.RunTokenRate != 600 {
+		t.Errorf("from the file: %d %s %d", p.InteractiveWorkers, p.MaxSyncWait, p.RunTokenRate)
+	}
+	t.Setenv("GOSIDIAN_PIPELINES_INTERACTIVE_WORKERS", "3")
+	t.Setenv("GOSIDIAN_PIPELINES_MAX_SYNC_WAIT", "90s")
+	t.Setenv("GOSIDIAN_PIPELINES_RUN_TOKEN_RATE", "1200")
+	if err := c.ApplyEnv(); err != nil {
+		t.Fatal(err)
+	}
+	if p := c.Pipelines; p.InteractiveWorkers != 3 || p.MaxSyncWait != 90*time.Second || p.RunTokenRate != 1200 {
+		t.Errorf("from the environment: %d %s %d", p.InteractiveWorkers, p.MaxSyncWait, p.RunTokenRate)
+	}
+	for k, bad := range map[string]string{"GOSIDIAN_PIPELINES_INTERACTIVE_WORKERS": "-1", "GOSIDIAN_PIPELINES_RUN_TOKEN_RATE": "0", "GOSIDIAN_PIPELINES_MAX_SYNC_WAIT": "1min"} {
+		t.Run(k, func(t *testing.T) {
+			t.Setenv(k, bad)
+			if err := Default().ApplyEnv(); err == nil {
+				t.Errorf("%s=%q accepted", k, bad)
+			}
+		})
+	}
+}

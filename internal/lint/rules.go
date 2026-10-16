@@ -36,6 +36,7 @@ var allRules = []ruleSpec{
 	{name: "diagram-invalid", defaultSeverity: SeverityWarning, fn: checkDiagrams},
 	{name: "diagram-twin-stale", defaultSeverity: SeverityWarning, fn: checkDiagramTwins},
 	{name: "graph-invalid", defaultSeverity: SeverityWarning, fn: checkGraphs},
+	{name: "chat-invalid", defaultSeverity: SeverityWarning, fn: checkChats},
 }
 
 // checkDatabaseFields checks the rows of each database note of the project

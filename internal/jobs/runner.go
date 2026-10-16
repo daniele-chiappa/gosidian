@@ -38,9 +38,13 @@ type Executor interface {
 
 // Options tunes a Runner.
 type Options struct {
-	Workers int           // steps run at once; default 2
-	Poll    time.Duration // how often the queue is read when nothing wakes it; default 2s
-	Lease   time.Duration // how long a step may run; default 15m
+	Workers int // steps run at once; default 2
+	// InteractiveWorkers run only the steps of the interactive runs, which
+	// the other workers also take before the rest: a chat's message does
+	// not wait behind a long batch. 0: none of their own.
+	InteractiveWorkers int
+	Poll               time.Duration // how often the queue is read when nothing wakes it; default 2s
+	Lease              time.Duration // how long a step may run; default 15m
 	// Retention is how long the runs that ended are kept; 0 keeps them.
 	Retention time.Duration
 	Logger    *slog.Logger
@@ -392,8 +396,20 @@ func (r *Runner) Start(ctx context.Context) {
 		r.opts.Logger.Info("jobs: steps left running by the last process queued again", "steps", n)
 	}
 	slots := make(chan struct{}, r.opts.Workers)
+	islots := make(chan struct{}, max(r.opts.InteractiveWorkers, 0))
 	var wg sync.WaitGroup
 	defer wg.Wait()
+	launch := func(steps []Step, slots chan struct{}) {
+		for _, st := range steps {
+			slots <- struct{}{}
+			wg.Add(1)
+			go func(st Step) {
+				defer wg.Done()
+				defer func() { <-slots; r.Wake() }()
+				r.runStep(ctx, st)
+			}(st)
+		}
+	}
 	ticker := time.NewTicker(r.opts.Poll)
 	defer ticker.Stop()
 	lastPrune := time.Time{}
@@ -408,21 +424,21 @@ func (r *Runner) Start(ctx context.Context) {
 				r.opts.Logger.Info("jobs: old runs pruned", "runs", n)
 			}
 		}
-		free := r.opts.Workers - len(slots)
-		if free > 0 {
-			steps, err := r.store.claim(now, free, r.opts.Lease)
+		// The interactive lane first, so its workers take the interactive
+		// steps and leave the others' workers to the rest.
+		if free := cap(islots) - len(islots); free > 0 {
+			steps, err := r.store.claim(now, free, r.opts.Lease, true)
 			if err != nil {
 				r.opts.Logger.Error("jobs: reading the queue", "err", err)
 			}
-			for _, st := range steps {
-				slots <- struct{}{}
-				wg.Add(1)
-				go func(st Step) {
-					defer wg.Done()
-					defer func() { <-slots; r.Wake() }()
-					r.runStep(ctx, st)
-				}(st)
+			launch(steps, islots)
+		}
+		if free := r.opts.Workers - len(slots); free > 0 {
+			steps, err := r.store.claim(now, free, r.opts.Lease, false)
+			if err != nil {
+				r.opts.Logger.Error("jobs: reading the queue", "err", err)
 			}
+			launch(steps, slots)
 		}
 		select {
 		case <-ctx.Done():

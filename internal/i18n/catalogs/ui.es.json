@@ -359,5 +359,23 @@
     "count_notes": "nota | notas",
     "created_by": "Creada por {who}",
     "modified_by": "Modificada por {who}"
+  },
+  "chat": {
+    "open": "Abrir el chat",
+    "close": "Cerrar el chat",
+    "reconfigure": "Configurar de nuevo",
+    "snippet": "Código para el sitio",
+    "code": "Código",
+    "configured": "Configurado en el plugin {plugin}",
+    "not_configured": "No configurado: {error}",
+    "pending": "Aún no configurado en el plugin {plugin}",
+    "block_problem": "El bloque no se lee: {problem}",
+    "line": "línea {line}:",
+    "load_failed": "El estado del bot no se carga",
+    "token_failed": "El chat no se abre",
+    "configure_failed": "El bot no se configura",
+    "users_off": "El bot no acepta a los usuarios de gosidian (access.users: false): pruébalo desde el sitio.",
+    "snippet_hint": "Pégalo en la página del sitio: el widget se abre en el contenedor con ese id.",
+    "snippet_key": "<valor de la clave {key}>"
   }
 }

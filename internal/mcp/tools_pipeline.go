@@ -28,9 +28,6 @@ const pipelinesOff = "pipelines are off on this server ([pipelines] enabled, GOS
 // the run, and a large one is written to a note anyway.
 const defaultStepOutputShown = 4 << 10
 
-// maxWaitSeconds caps memory_pipeline_run's wait.
-const maxWaitSeconds = 60
-
 func (s *Server) registerPipelineTools() {
 	s.impl.AddTool(mcp.NewTool("memory_pipelines",
 		mcp.WithDescription("Read the pipelines of a project (notes `type: pipeline` with a ```pipeline YAML block, run by the server when [pipelines] is on and the project has use_pipelines): with project only, the pipelines with their trigger, nodes, problems and last run, and the plugins with the node types they add (<plugin>.<node>, status ok when they run) and the tools they offer agents (<plugin>_<tool>, in the projects listed in exposed_in); with path, the runs of that pipeline, newest first; with run, one run with the status, error and output of each step. Start, resume or cancel a run with memory_pipeline_run. Format and node types: docs/pipelines.md."),
@@ -41,13 +38,13 @@ func (s *Server) registerPipelineTools() {
 	), s.handlePipelines)
 
 	s.impl.AddTool(mcp.NewTool("memory_pipeline_run",
-		mcp.WithDescription("Start, resume or cancel a pipeline run. start (the default): path names the pipeline note, input is the JSON object its nodes read as {{ trigger.… }} (pass files as vault paths, not bytes), idempotency_key starts it once for the same key, callback_url is POSTed the run's summary when it ends (only addresses in [pipelines] http_allowlist), wait (seconds, at most 60) returns once the run ended or waits, else at once with the run's id. resume: run (and step when more than one waits) gets data as the output of its waiting wait.call node. cancel: stops the run. Needs write access to the pipeline's project; read the result with memory_pipelines."),
+		mcp.WithDescription("Start, resume or cancel a pipeline run. start (the default): path names the pipeline note, input is the JSON object its nodes read as {{ trigger.… }} (pass files as vault paths, not bytes), idempotency_key starts it once for the same key, callback_url is POSTed the run's summary when it ends (only addresses in [pipelines] http_allowlist), wait (seconds, at most [pipelines] max_sync_wait, 60 by default) returns once the run ended or waits, with its steps and the output of the node the pipeline names as its answer, else at once with the run's id. resume: run (and step when more than one waits) gets data as the output of its waiting wait.call node. cancel: stops the run. Needs write access to the pipeline's project; read the result with memory_pipelines."),
 		mcp.WithString("action", mcp.Description("start (default), resume or cancel.")),
 		mcp.WithString("path", mcp.Description("start: the pipeline note.")),
 		mcp.WithObject("input", mcp.Description("start: the trigger's payload, a JSON object.")),
 		mcp.WithString("idempotency_key", mcp.Description("start: the same key starts the pipeline once and gives back that run.")),
 		mcp.WithString("callback_url", mcp.Description("start: an address to POST the summary to when the run ends.")),
-		mcp.WithNumber("wait", mcp.Description("start: seconds to wait for the run to end or wait (0-60, default 0).")),
+		mcp.WithNumber("wait", mcp.Description("start: seconds to wait for the run to end or wait (default 0; at most [pipelines] max_sync_wait).")),
 		mcp.WithString("run", mcp.Description("resume, cancel: the run's id.")),
 		mcp.WithString("step", mcp.Description("resume: the waiting step, when more than one waits.")),
 		mcp.WithObject("data", mcp.Description("resume: the waiting step's output, a JSON object.")),
@@ -193,36 +190,21 @@ func (s *Server) pipelineStart(ctx context.Context, req mcp.CallToolRequest, arg
 	if !existing {
 		s.auditWrite(ctx, audit.ActionPipelineRun, path, run.ID, int64(len(raw)))
 	}
-	if w := int(req.GetFloat("wait", 0)); w > 0 {
-		if w > maxWaitSeconds {
-			w = maxWaitSeconds
+	if d := s.pipelines.SyncWait(time.Duration(req.GetFloat("wait", 0) * float64(time.Second))); d > 0 {
+		if r, err := s.pipelines.Wait(ctx, run.ID, d); err == nil {
+			run = r
 		}
-		run = s.waitRun(ctx, run.ID, time.Duration(w)*time.Second)
 	}
 	out := map[string]any{"run": pipeline.Brief(run), "pipeline": run.Ref, "existing": existing}
 	if run.Status.Terminal() || run.Status == jobs.Waiting {
 		if steps, err := s.pipelines.Runner().Store().Steps(run.ID); err == nil {
 			out["steps"] = pipeline.StepViews(run, steps, s.stepOutputShown)
+			if answer, ok := pipeline.AnswerOf(run, steps); ok {
+				out["answer"] = answer
+			}
 		}
 	}
 	return mcp.NewToolResultJSON(out)
-}
-
-// waitRun polls a run until it ends or waits, or d passes.
-func (s *Server) waitRun(ctx context.Context, id string, d time.Duration) jobs.Run {
-	store := s.pipelines.Runner().Store()
-	deadline := time.Now().Add(d)
-	for {
-		run, err := store.Run(id)
-		if err != nil || run.Status.Terminal() || run.Status == jobs.Waiting || time.Now().After(deadline) {
-			return run
-		}
-		select {
-		case <-ctx.Done():
-			return run
-		case <-time.After(200 * time.Millisecond):
-		}
-	}
 }
 
 func (s *Server) pipelineAct(ctx context.Context, req mcp.CallToolRequest, args map[string]any, action string) (*mcp.CallToolResult, error) {

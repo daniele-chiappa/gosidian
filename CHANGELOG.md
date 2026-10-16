@@ -8,6 +8,61 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.91.0] — 2026-10-16 — "bots"
+
+Runs someone waits for, and bots: a note `type: chat` that a chat plugin
+serves as a chat on the documents of a project, answered by a pipeline of
+the project. Pull the image and restart: the jobs database gets a column
+of its own at the first start; nothing else to migrate, and nothing
+changes for a vault without bots.
+
+### Added
+- **Starts that wait for an answer** — `wait` (seconds) on `POST
+  /api/v1/pipelines/<path>/runs`, in the body or as `?wait=`, waits for the
+  run and gives `200` with its **answer**, the output of the node the
+  pipeline names with `answer:`; `202` as before when it did not end in
+  time. `memory_pipeline_run`'s `wait` gives the answer too, and so does
+  the callback. `[pipelines] max_sync_wait` (60 s) caps the wait.
+- **The trigger `chat`** — a message (`message`, `history`, `scopes`,
+  `session`, `user`) or the rating of an answer (`kind: rating`, `turn`,
+  `rating` from -10 to 10, `comment`), with a checked input: a run token
+  of a chat pipeline starts chat runs.
+- **Interactive runs** — a pipeline with `priority: interactive`, or one
+  that starts on `chat`, and the runs it starts, have their steps taken
+  before the others'; `[pipelines] interactive_workers` (1, on top of
+  `workers`) run only those. A message gets an answer in its usual time
+  while a batch fills the other workers.
+- **`note.write` appends and merges** — `mode: append` adds the body
+  after the note's and merges the frontmatter into its own;
+  `frontmatter_merge` merges the frontmatter (a map into a map, `null`
+  removes a key) and keeps the body. Each is one write of the note: a
+  conversation's turns and ratings, written by runs at once, do not
+  overwrite each other.
+- A key of a map in a node's `with` may hold expressions:
+  `ratings: {"{{ trigger.turn }}": "{{ trigger.rating }}"}`.
+- **Bots: notes `type: chat`** — a ```` ```chat ```` block names the
+  pipeline that answers, the scopes the bot opens (each a filter of the
+  archive of vectors), who may chat (gosidian's users, a site's keys and
+  origins, tokens a site signs, anyone), where the conversations go and
+  how long they stay. The server hands the bot to its chat plugin when
+  the note is saved and every five minutes, with a run token of the
+  pipeline and the values of the secrets the block names (the note holds
+  their names only); a bot whose note goes is taken out of the plugin and
+  its token revoked. The note shows where the bot stands, opens its chat
+  with a token the server signs for the reader (`POST
+  /api/v1/chat/token`), and gives the code that puts the widget in a
+  site's page. The lint rule `chat-invalid`; conversations older than
+  `keep` go to the trash. docs/chat.md describes the block and the
+  contract a chat plugin follows.
+- `[pipelines] run_token_rate` (60): the runs a run token starts in a
+  minute, which was a constant: a chat's widget starts one per message of
+  everyone who chats.
+
+### Changed
+- `memory_pipeline_run` waits up to `[pipelines] max_sync_wait` instead
+  of a fixed 60 seconds, and wakes when its run changes instead of
+  polling.
+
 ## [2.90.0] — 2026-10-15 — "limits as settings"
 
 The caps the pipelines, the plugins, the agents' tools and the web UI's

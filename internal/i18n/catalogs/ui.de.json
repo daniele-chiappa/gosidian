@@ -359,5 +359,23 @@
     "count_notes": "Notiz | Notizen",
     "created_by": "Erstellt von {who}",
     "modified_by": "Geändert von {who}"
+  },
+  "chat": {
+    "open": "Chat öffnen",
+    "close": "Chat schließen",
+    "reconfigure": "Neu konfigurieren",
+    "snippet": "Code für die Website",
+    "code": "Code",
+    "configured": "Im Plugin {plugin} konfiguriert",
+    "not_configured": "Nicht konfiguriert: {error}",
+    "pending": "Noch nicht im Plugin {plugin} konfiguriert",
+    "block_problem": "Der Block ist nicht lesbar: {problem}",
+    "line": "Zeile {line}:",
+    "load_failed": "Der Status des Bots lädt nicht",
+    "token_failed": "Der Chat öffnet sich nicht",
+    "configure_failed": "Der Bot lässt sich nicht konfigurieren",
+    "users_off": "Der Bot nimmt keine gosidian-Benutzer an (access.users: false): von der Website aus testen.",
+    "snippet_hint": "In die Seite der Website einfügen: das Widget öffnet sich im Container mit dieser id.",
+    "snippet_key": "<Wert des Schlüssels {key}>"
   }
 }

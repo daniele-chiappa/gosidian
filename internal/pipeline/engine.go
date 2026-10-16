@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gosidian/gosidian/internal/infolder"
@@ -110,6 +111,13 @@ type Config struct {
 	// FileTicketTTL is how long a plugin may fetch a file it got by
 	// reference; default 15 minutes (the server's step timeout).
 	FileTicketTTL time.Duration
+	// MaxSyncWait is the longest a start may wait for its run to end, over
+	// HTTP or MCP; default 60 seconds.
+	MaxSyncWait time.Duration
+	// RunTokenRate is how many runs one run token starts in a minute, and
+	// how many resumes one run's key makes; default 60. A chat's widget
+	// starts a run per message of everyone who chats with it.
+	RunTokenRate int
 }
 
 // MaxOutputBytes is a step's output in bytes ([pipelines]
@@ -134,6 +142,8 @@ type Engine struct {
 	// commits says whether the vault's git sync makes commits, which start
 	// the commit pipelines (SetCommits); nil: it does not.
 	commits func() bool
+	// waits are the callers waiting for a run to change (Wait).
+	waits waiters
 }
 
 // New is an engine acting through host, running on runner (which it
@@ -165,6 +175,12 @@ func New(host Host, runner *jobs.Runner, cfg Config, secrets Secrets, logger *sl
 	if cfg.FileTicketTTL <= 0 {
 		cfg.FileTicketTTL = 15 * time.Minute
 	}
+	if cfg.MaxSyncWait <= 0 {
+		cfg.MaxSyncWait = time.Minute
+	}
+	if cfg.RunTokenRate <= 0 {
+		cfg.RunTokenRate = 60
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -173,11 +189,109 @@ func New(host Host, runner *jobs.Runner, cfg Config, secrets Secrets, logger *sl
 	e.client = guardedClient(e)
 	runner.Register(Kind, e)
 	runner.SetOnChange(func(id string) {
+		e.waits.notify(id)
 		if run, err := runner.Store().Run(id); err == nil {
 			host.Changed(run)
 		}
 	})
 	return e
+}
+
+// waiters are the callers waiting for runs to change, each with a channel
+// that a change of its run wakes.
+type waiters struct {
+	mu sync.Mutex
+	m  map[string][]chan struct{}
+}
+
+func (w *waiters) add(id string) chan struct{} {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.m == nil {
+		w.m = map[string][]chan struct{}{}
+	}
+	ch := make(chan struct{}, 1)
+	w.m[id] = append(w.m[id], ch)
+	return ch
+}
+
+func (w *waiters) remove(id string, ch chan struct{}) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	list := w.m[id]
+	for i, c := range list {
+		if c == ch {
+			list = append(list[:i], list[i+1:]...)
+			break
+		}
+	}
+	if len(list) == 0 {
+		delete(w.m, id)
+	} else {
+		w.m[id] = list
+	}
+}
+
+func (w *waiters) notify(id string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, ch := range w.m[id] {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// Wait returns the run once it ended or waits (a wait.call), d passed, or
+// ctx ended: as it stands then. A change of the run wakes it, and it reads
+// the run again every second besides.
+func (e *Engine) Wait(ctx context.Context, id string, d time.Duration) (jobs.Run, error) {
+	ch := e.waits.add(id)
+	defer e.waits.remove(id, ch)
+	deadline := time.NewTimer(d)
+	defer deadline.Stop()
+	tick := time.NewTicker(time.Second)
+	defer tick.Stop()
+	for {
+		run, err := e.runner.Store().Run(id)
+		if err != nil || run.Status.Terminal() || run.Status == jobs.Waiting {
+			return run, err
+		}
+		select {
+		case <-ctx.Done():
+			return run, nil
+		case <-deadline.C:
+			return e.runner.Store().Run(id)
+		case <-ch:
+		case <-tick.C:
+		}
+	}
+}
+
+// SyncWait is how long a start that asks to wait w waits: w capped by
+// [pipelines] max_sync_wait; 0 for none.
+func (e *Engine) SyncWait(w time.Duration) time.Duration {
+	if w <= 0 {
+		return 0
+	}
+	return min(w, e.cfg.MaxSyncWait)
+}
+
+// AnswerOf is the output of the node the run's pipeline names as its
+// answer, once that node is done: ok is false when it names none, or the
+// node did not end done.
+func AnswerOf(run jobs.Run, steps []jobs.Step) (answer any, ok bool) {
+	spec, err := SpecOf(run)
+	if err != nil || spec.Answer == "" {
+		return nil, false
+	}
+	for _, st := range steps {
+		if st.Name == spec.Answer && st.Status == jobs.Done {
+			return decode(st.Output), true
+		}
+	}
+	return nil, false
 }
 
 // Types is the registry of node types, to add more.
@@ -202,6 +316,10 @@ type StartRequest struct {
 	// it started.
 	IdemKey     string
 	CallbackURL string
+	// Priority is the least priority of the run (jobs.Priority…): a run
+	// that an interactive one starts is interactive too. An interactive
+	// pipeline's runs are interactive whatever it says.
+	Priority int
 }
 
 // ErrDisabled: the pipeline's project does not run pipelines.
@@ -222,12 +340,34 @@ func (e *Engine) Start(req StartRequest) (jobs.Run, bool, error) {
 	switch req.Trigger {
 	case TriggerManual, TriggerPipeline:
 	case TriggerExternal:
-		if p.Spec.Trigger.On != TriggerExternal && p.Spec.Trigger.On != TriggerManual {
+		switch p.Spec.Trigger.On {
+		case TriggerExternal, TriggerManual:
+		case TriggerChat:
+			// A run token of a chat pipeline starts a chat run.
+			req.Trigger = TriggerChat
+		default:
 			return jobs.Run{}, false, fmt.Errorf("the pipeline starts on %s, not from outside", p.Spec.Trigger.On)
+		}
+	case TriggerChat:
+		if p.Spec.Trigger.On != TriggerChat {
+			return jobs.Run{}, false, fmt.Errorf("the pipeline starts on %s, not on chat", p.Spec.Trigger.On)
 		}
 	case TriggerIngest, TriggerSchedule, TriggerIN, TriggerCommit:
 	default:
 		return jobs.Run{}, false, fmt.Errorf("unknown trigger %q", req.Trigger)
+	}
+	// A chat pipeline started by hand gets a chat's input as well: a
+	// manual test is a message.
+	if req.Trigger == TriggerChat || (p.Spec.Trigger.On == TriggerChat && req.Trigger == TriggerManual) {
+		in, err := CheckChatInput(req.Input)
+		if err != nil {
+			return jobs.Run{}, false, err
+		}
+		req.Input = in
+	}
+	priority := req.Priority
+	if p.Spec.Interactive() {
+		priority = jobs.PriorityInteractive
 	}
 	// The key of a run pipeline.run starts names the run its end resumes
 	// (endedChild): only the engine gives such keys, or anyone could end
@@ -255,7 +395,7 @@ func (e *Engine) Start(req StartRequest) (jobs.Run, bool, error) {
 	}
 	run, existing, err := e.runner.Submit(jobs.Run{
 		Kind: Kind, Ref: p.Path, Project: p.Project, Trigger: req.Trigger, Input: input, Spec: spec,
-		IdemKey: req.IdemKey, Actor: req.Actor, CallbackURL: req.CallbackURL, ResumeKey: jobs.NewSecret(),
+		IdemKey: req.IdemKey, Actor: req.Actor, CallbackURL: req.CallbackURL, ResumeKey: jobs.NewSecret(), Priority: priority,
 	}, steps)
 	return run, existing, err
 }

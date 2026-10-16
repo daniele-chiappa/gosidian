@@ -156,6 +156,9 @@ type RunSummary struct {
 	Started  time.Time         `json:"started,omitzero"`
 	Finished time.Time         `json:"finished,omitzero"`
 	Steps    map[string]string `json:"steps"`
+	// Answer is the output of the node the pipeline names as its answer,
+	// when it ended done (IMP-191).
+	Answer any `json:"answer,omitempty"`
 }
 
 // Summary is a run's summary.
@@ -164,6 +167,9 @@ func Summary(run jobs.Run, steps []jobs.Step) RunSummary {
 		Started: run.Started, Finished: run.Finished, Steps: map[string]string{}}
 	for _, st := range steps {
 		s.Steps[st.Name] = string(st.Status)
+	}
+	if a, ok := AnswerOf(run, steps); ok {
+		s.Answer = a
 	}
 	return s
 }

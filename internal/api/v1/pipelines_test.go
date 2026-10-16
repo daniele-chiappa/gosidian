@@ -3,12 +3,17 @@ package v1
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/mark3labs/mcp-go/mcp"
+
+	"github.com/gosidian/gosidian/internal/chatbot"
 	"github.com/gosidian/gosidian/internal/jobs"
 	mcpsrv "github.com/gosidian/gosidian/internal/mcp"
 	"github.com/gosidian/gosidian/internal/pipeline"
@@ -373,5 +378,164 @@ func TestPipelineEditorRoutes_PipelinesOn(t *testing.T) {
 	w := f.doAuthRecorder(http.MethodGet, "/api/v1/pipeline-nodes", "", nil)
 	if w.code != http.StatusOK || !strings.Contains(w.body, `"pipelines_enabled":true`) {
 		t.Fatalf("nodes: %d %s", w.code, w.body)
+	}
+}
+
+const restChatPipeline = "---\ntitle: Bot\ntype: pipeline\n---\n\n```pipeline\n" + `trigger: {on: chat}
+answer: reply
+nodes:
+  - {id: reply, use: starlark, with: {input: "{{ trigger.message }}", code: "output = {'text': 'eco: ' + input}"}}
+` + "```\n"
+
+// TestPipelinesREST_StartAndWait: a run token of a chat pipeline starts
+// an interactive chat run, and a start that waits gets its answer.
+func TestPipelinesREST_StartAndWait(t *testing.T) {
+	f := newPipelineFixture(t)
+	if w := f.doAuthRecorder(http.MethodPost, "/api/v1/notes", mustJSON(t, map[string]string{"path": "Alpha/pipelines/bot.md", "content": restChatPipeline}), nil); w.code != http.StatusCreated {
+		t.Fatalf("seed: %d %s", w.code, w.body)
+	}
+	store := f.engine.Runner().Store()
+	_, secret, err := store.CreateToken("Alpha/pipelines/bot.md", "widget", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bearer := map[string]string{"Authorization": "Bearer " + secret}
+	w := f.request(http.MethodPost, "/api/v1/pipelines/Alpha/pipelines/bot.md/runs", `{"input":{"message":"ciao"},"wait":5}`, bearer)
+	if w.Code != http.StatusOK {
+		t.Fatalf("start: %d %s", w.Code, w.Body)
+	}
+	var out struct {
+		Run    pipeline.RunBrief `json:"run"`
+		Answer map[string]any    `json:"answer"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Run.Status != jobs.Done || out.Run.Trigger != pipeline.TriggerChat || !out.Run.Interactive || out.Answer["text"] != "eco: ciao" {
+		t.Errorf("start and wait: %s", w.Body)
+	}
+	// ?wait= does the same; a start that does not wait answers at once.
+	if w := f.request(http.MethodPost, "/api/v1/pipelines/Alpha/pipelines/bot.md/runs?wait=5", `{"input":{"message":"due"}}`, bearer); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"eco: due"`) {
+		t.Errorf("?wait: %d %s", w.Code, w.Body)
+	}
+	if w := f.request(http.MethodPost, "/api/v1/pipelines/Alpha/pipelines/bot.md/runs", `{"input":{"message":"tre"}}`, bearer); w.Code != http.StatusAccepted || strings.Contains(w.Body.String(), "answer") {
+		t.Errorf("no wait: %d %s", w.Code, w.Body)
+	}
+	for _, body := range []string{`{"input":{"text":"no message"}}`, `{"input":{"message":"x"},"wait":"soon"}`} {
+		if w := f.request(http.MethodPost, "/api/v1/pipelines/Alpha/pipelines/bot.md/runs", body, bearer); w.Code != http.StatusBadRequest {
+			t.Errorf("%s: %d %s", body, w.Code, w.Body)
+		}
+	}
+	if w := f.request(http.MethodPost, "/api/v1/pipelines/Alpha/pipelines/bot.md/runs?wait=-1", `{"input":{"message":"x"}}`, bearer); w.Code != http.StatusBadRequest {
+		t.Errorf("wait=-1: %d", w.Code)
+	}
+	// A run that stops at a wait.call comes back as it waits.
+	if w := f.doAuthRecorder(http.MethodPost, "/api/v1/pipelines/Alpha/pipelines/ask.md/runs", `{"wait":5}`, nil); w.code != http.StatusOK || runOf(t, w.body).Status != jobs.Waiting {
+		t.Errorf("a wait.call: %d %s", w.code, w.body)
+	}
+}
+
+// TestRouter_RunTokenRate: [pipelines] run_token_rate sets the starts of a
+// run token in a minute.
+func TestRouter_RunTokenRate(t *testing.T) {
+	store, err := jobs.Open(filepath.Join(t.TempDir(), "jobs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	s := mcpsrv.New(vault.New(t.TempDir()), nil, nil)
+	e := pipeline.New(s.PipelineHost(), jobs.NewRunner(store, jobs.Options{}), pipeline.Config{RunTokenRate: 2}, nil, nil)
+	r := NewRouter(&Deps{Pipelines: e})
+	now := time.Now()
+	if !r.runLimiter.Allow("token:a", now) || !r.runLimiter.Allow("token:a", now) || r.runLimiter.Allow("token:a", now) {
+		t.Error("two starts a minute, not three")
+	}
+	if r := NewRouter(&Deps{}); !r.runLimiter.Allow("token:a", now) {
+		t.Error("without pipelines")
+	}
+}
+
+// chatPlugins answers chat_configure as a chat plugin would.
+type chatPlugins struct{ configured int }
+
+func (c *chatPlugins) CallTool(_ context.Context, _, tool string, args, _ map[string]any) (*mcp.CallToolResult, error) {
+	if tool == chatbot.ToolConfigure {
+		c.configured++
+	}
+	b, _ := json.Marshal(map[string]any{"embed_url": "https://chat.example.com/embed/" + fmt.Sprint(args["bot"]), "script_url": "https://chat.example.com/chat.js"})
+	return mcp.NewToolResultStructured(json.RawMessage(b), string(b)), nil
+}
+
+func (c *chatPlugins) FilesURL(string) string { return "http://gosidian:8080" }
+
+func (c *chatPlugins) State(name string) (plugins.State, bool) {
+	return plugins.State{Name: name, Status: plugins.StatusOK}, true
+}
+
+type chatSecrets map[string]string
+
+func (s chatSecrets) Get(n string) (string, error) {
+	if v, ok := s[n]; ok {
+		return v, nil
+	}
+	return "", errors.New("no such secret")
+}
+func (s chatSecrets) Set(n, v string) error { s[n] = v; return nil }
+func (s chatSecrets) Delete(n string) error { delete(s, n); return nil }
+
+// TestChatREST: the status of a bot's note, its configuration on demand,
+// and a token for a user who reads its project.
+func TestChatREST(t *testing.T) {
+	f := newPipelineFixture(t)
+	if w := f.doAuthRecorder(http.MethodGet, "/api/v1/chat/status?note=Alpha/bots/bot.md", "", nil); w.code != http.StatusNotFound {
+		t.Errorf("chat off: %d", w.code)
+	}
+	for path, content := range map[string]string{
+		"Alpha/pipelines/bot.md": restChatPipeline,
+		"Alpha/bots/bot.md":      "---\ntitle: Bot\ntype: chat\n---\n\n```chat\npipeline: pipelines/bot\nscopes: [{name: tutto}]\n```\n",
+		"Alpha/bots/broken.md":   "---\ntitle: Broken\ntype: chat\n---\n\n```chat\ntitle: no pipeline\n```\n",
+	} {
+		if w := f.doAuthRecorder(http.MethodPost, "/api/v1/notes", mustJSON(t, map[string]string{"path": path, "content": content}), nil); w.code != http.StatusCreated {
+			t.Fatalf("seed %s: %d %s", path, w.code, w.body)
+		}
+	}
+	s := mcpsrv.New(vault.New(f.vaultRoot), f.idx, nil)
+	s.SetProjects(f.projects)
+	s.SetPipelinesSwitch(true)
+	s.SetPipelines(f.engine)
+	pl := &chatPlugins{}
+	chat, err := chatbot.New(s.ChatHost(), pl, f.engine.Runner().Store(), chatSecrets{}, t.TempDir(), chatbot.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.router.deps.Chat = chat
+	w := f.doAuthRecorder(http.MethodGet, "/api/v1/chat/status?note=Alpha/bots/broken.md", "", nil)
+	if w.code != http.StatusOK || !strings.Contains(w.body, "pipeline names") {
+		t.Errorf("broken: %d %s", w.code, w.body)
+	}
+	if w := f.doAuthRecorder(http.MethodPost, "/api/v1/chat/token", `{"note":"Alpha/bots/bot.md"}`, nil); w.code != http.StatusConflict {
+		t.Errorf("a token before the bot is configured: %d %s", w.code, w.body)
+	}
+	w = f.doAuthRecorder(http.MethodPost, "/api/v1/chat/configure", `{"note":"Alpha/bots/bot.md"}`, nil)
+	if w.code != http.StatusOK || !strings.Contains(w.body, `"configured":true`) || pl.configured != 1 {
+		t.Fatalf("configure: %d %s", w.code, w.body)
+	}
+	w = f.doAuthRecorder(http.MethodPost, "/api/v1/chat/token", `{"note":"Alpha/bots/bot.md"}`, nil)
+	if w.code != http.StatusOK || !strings.Contains(w.body, `"embed_url":"https://chat.example.com/embed/bot"`) || strings.Count(w.body, ".") < 3 {
+		t.Errorf("token: %d %s", w.code, w.body)
+	}
+	w = f.doAuthRecorder(http.MethodGet, "/api/v1/chat/status?note=Alpha/bots/bot.md", "", nil)
+	if w.code != http.StatusOK || !strings.Contains(w.body, `"bot":"bot"`) || !strings.Contains(w.body, `"state":{`) || strings.Contains(w.body, "token_id\":\"\"") {
+		t.Errorf("status: %d %s", w.code, w.body)
+	}
+	for _, p := range []string{"/api/v1/chat/status?note=Private/bots/x.md", "/api/v1/chat/status?note=Alpha/notes/not-a-pipe.md", "/api/v1/chat/status"} {
+		if w := f.doAuthRecorder(http.MethodGet, p, "", nil); w.code < 400 {
+			t.Errorf("%s: %d %s", p, w.code, w.body)
+		}
+	}
+	// The run token gosidian made starts the bot's pipeline.
+	tokens, _ := f.engine.Runner().Store().Tokens("Alpha/pipelines/bot.md")
+	if len(tokens) != 1 || tokens[0].Name != "chat:chat/bot" {
+		t.Errorf("tokens: %+v", tokens)
 	}
 }

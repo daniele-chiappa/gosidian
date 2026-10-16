@@ -15,6 +15,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/gosidian/gosidian/internal/chatbot"
 	"github.com/gosidian/gosidian/internal/config"
 	"github.com/gosidian/gosidian/internal/gitsync"
 	"github.com/gosidian/gosidian/internal/infolder"
@@ -83,11 +84,13 @@ func startPipelines(ctx context.Context, cfg *config.Config, sdir string, mcpSer
 	if publicURL == "" {
 		publicURL = cfg.OAuth.Issuer
 	}
+	interactive := pc.InteractiveWorkers
 	runner := jobs.NewRunner(store, jobs.Options{
-		Workers:   pc.Workers,
-		Lease:     pc.StepTimeout,
-		Retention: pc.Retention,
-		Logger:    slog.Default(),
+		Workers:            pc.Workers,
+		InteractiveWorkers: interactive,
+		Lease:              pc.StepTimeout,
+		Retention:          pc.Retention,
+		Logger:             slog.Default(),
 	})
 	mcpServer.SetPipelinesSwitch(true)
 	engine := pipeline.New(mcpServer.PipelineHost(), runner, pipeline.Config{
@@ -105,6 +108,8 @@ func startPipelines(ctx context.Context, cfg *config.Config, sdir string, mcpSer
 		Providers:      providers,
 		Location:       loc,
 		FileTicketTTL:  pc.StepTimeout,
+		MaxSyncWait:    pc.MaxSyncWait,
+		RunTokenRate:   pc.RunTokenRate,
 	}, sec, slog.Default())
 	reg, err = newPlugins(pc, sdir, sec, slog.Default())
 	if err != nil {
@@ -128,6 +133,18 @@ func startPipelines(ctx context.Context, cfg *config.Config, sdir string, mcpSer
 	})
 	mcpServer.SetPipelines(engine)
 	mcpServer.SetPlugins(reg)
+	// The bots (IMP-191): the notes type: chat, handed to their chat
+	// plugin with a run token of their pipeline.
+	var chatSecrets chatbot.Secrets
+	if cs, ok := sec.(chatbot.Secrets); ok {
+		chatSecrets = cs
+	}
+	chat, err := chatbot.New(mcpServer.ChatHost(), reg, store, chatSecrets, sdir, chatbot.Options{GosidianURL: strings.TrimSuffix(publicURL, "/"), Logger: slog.Default()})
+	if err != nil {
+		log.Fatalf("chat: %v", err)
+	}
+	mcpServer.SetChat(chat)
+	go chat.Start(ctx)
 	if len(reg.Names()) > 0 {
 		go reg.Start(ctx, pluginCheckEvery)
 	}
@@ -138,8 +155,8 @@ func startPipelines(ctx context.Context, cfg *config.Config, sdir string, mcpSer
 	for _, p := range providers {
 		names = append(names, p.Name)
 	}
-	log.Printf("pipelines: enabled (%d workers, step timeout %s, retention %s, time zone %s, llm %v, plugins %v, http allowlist %d, state %s)",
-		max(pc.Workers, 1), pc.StepTimeout, pc.Retention, loc, names, reg.Names(), len(pc.HTTPAllowlist), dbPath)
+	log.Printf("pipelines: enabled (%d workers and %d interactive, step timeout %s, retention %s, time zone %s, llm %v, plugins %v, http allowlist %d, state %s)",
+		max(pc.Workers, 1), interactive, pc.StepTimeout, pc.Retention, loc, names, reg.Names(), len(pc.HTTPAllowlist), dbPath)
 	// stop waits up to d for the steps to end, then calls before (the last
 	// git commit: the runs of its commit pipelines are queued for the next
 	// start) while the jobs database is still open, and closes it.

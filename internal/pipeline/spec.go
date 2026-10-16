@@ -42,7 +42,17 @@ const (
 	// (IMP-186). Not a trigger a pipeline declares: any pipeline starts
 	// this way, as any starts by hand.
 	TriggerPipeline = "pipeline"
+	// TriggerChat: a message of a chat, or the rating of an answer
+	// (IMP-191), started from outside like external, with a run token,
+	// or by hand; its input is checked (CheckChatInput), and its runs are
+	// interactive.
+	TriggerChat = "chat"
 )
+
+// PriorityInteractive is the priority of a pipeline whose runs someone
+// waits for: their steps go before the others', and to the interactive
+// workers ([pipelines] interactive_workers).
+const PriorityInteractive = "interactive"
 
 // Limits of a spec.
 const (
@@ -104,6 +114,17 @@ type Node struct {
 type Spec struct {
 	Trigger Trigger `json:"trigger"`
 	Nodes   []Node  `json:"nodes"`
+	// Answer names the node whose output is the run's answer: what a start
+	// that waits gives back, and the callback (IMP-191).
+	Answer string `json:"answer,omitempty"`
+	// Priority is PriorityInteractive, or empty for a normal pipeline.
+	Priority string `json:"priority,omitempty"`
+}
+
+// Interactive says whether the pipeline's runs are interactive: it says
+// so, or it starts on chat.
+func (s *Spec) Interactive() bool {
+	return s.Priority == PriorityInteractive || s.Trigger.On == TriggerChat
 }
 
 // Node returns the node with id.
@@ -161,7 +182,9 @@ type rawSpec struct {
 		Batch  bool     `yaml:"batch"`
 		Take   *bool    `yaml:"take"`
 	} `yaml:"trigger"`
-	Nodes yaml.Node `yaml:"nodes"`
+	Nodes    yaml.Node `yaml:"nodes"`
+	Answer   string    `yaml:"answer"`
+	Priority string    `yaml:"priority"`
 }
 
 // Types tells which node types exist, for Parse to check `use`.
@@ -176,7 +199,7 @@ func Parse(src string, types Types) (*Spec, error) {
 	if err := yaml.Unmarshal([]byte(src), &r); err != nil {
 		return nil, fmt.Errorf("the pipeline is not valid YAML: %w", err)
 	}
-	s := &Spec{Trigger: Trigger{
+	s := &Spec{Answer: strings.TrimSpace(r.Answer), Priority: strings.TrimSpace(r.Priority), Trigger: Trigger{
 		On:     strings.TrimSpace(r.Trigger.On),
 		Folder: strings.Trim(strings.TrimSpace(r.Trigger.Folder), "/"),
 		Every:  strings.TrimSpace(r.Trigger.Every),
@@ -194,7 +217,7 @@ func Parse(src string, types Types) (*Spec, error) {
 		s.Trigger.On = TriggerManual
 	}
 	switch s.Trigger.On {
-	case TriggerManual, TriggerExternal:
+	case TriggerManual, TriggerExternal, TriggerChat:
 	case TriggerIngest:
 		if len(s.Trigger.Kinds) == 0 {
 			return nil, fmt.Errorf("trigger ingest: kinds lists the file extensions it takes (kinds: [pdf, docx])")
@@ -222,10 +245,17 @@ func Parse(src string, types Types) (*Spec, error) {
 			}
 		}
 	default:
-		return nil, fmt.Errorf("trigger on %q: it is manual, external, ingest, schedule, in or commit", s.Trigger.On)
+		return nil, fmt.Errorf("trigger on %q: it is manual, external, chat, ingest, schedule, in or commit", s.Trigger.On)
 	}
 	if r.Trigger.Take != nil && s.Trigger.On != TriggerIN {
 		return nil, fmt.Errorf("trigger %s: take is for the in trigger (take: false leaves the files' status alone)", s.Trigger.On)
+	}
+	switch s.Priority {
+	case "", "normal":
+		s.Priority = ""
+	case PriorityInteractive:
+	default:
+		return nil, fmt.Errorf("priority %q: interactive, for a pipeline whose runs someone waits for, or normal", s.Priority)
 	}
 
 	raws, err := rawNodes(&r.Nodes)
@@ -252,6 +282,11 @@ func Parse(src string, types Types) (*Spec, error) {
 	}
 	if err := s.check(); err != nil {
 		return nil, err
+	}
+	if s.Answer != "" {
+		if _, ok := s.Node(s.Answer); !ok {
+			return nil, fmt.Errorf("answer names %q, which is not a node", s.Answer)
+		}
 	}
 	return s, nil
 }

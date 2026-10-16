@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
+	"github.com/gosidian/gosidian/internal/chatbot"
 	"github.com/gosidian/gosidian/internal/gitsync"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/infolder"
@@ -56,6 +57,9 @@ type Deps struct {
 	// Marks are the marks the pipelines put on notes (IMP-188); nil keeps
 	// none.
 	Marks *marks.Store
+	// Chat is the bots' service (IMP-191), nil while the pipelines are
+	// off: /chat answers 404.
+	Chat *chatbot.Service
 }
 
 // Router owns the http.Handler tree under /api/v1/*. A separate type
@@ -108,13 +112,17 @@ func (l WebLimits) withDefaults() WebLimits {
 // NewRouter wires the v1 routes against the given dependencies. The
 // caller mounts the returned handler under the /api/v1/ prefix.
 func NewRouter(deps *Deps) *Router {
+	runRate := runTokenMax
+	if deps.Pipelines != nil {
+		runRate = deps.Pipelines.Config().RunTokenRate
+	}
 	r := &Router{
 		deps:          deps,
 		web:           deps.Web.withDefaults(),
 		mux:           http.NewServeMux(),
 		loginLimiter:  newLoginLimiter(),
 		exportLimiter: ratelimit.New(exportWindow, exportMax),
-		runLimiter:    ratelimit.New(runTokenWindow, runTokenMax),
+		runLimiter:    ratelimit.New(runTokenWindow, runRate),
 	}
 	r.registerPublic()
 	r.registerAuthed()
@@ -241,6 +249,10 @@ func (r *Router) registerAuthed() {
 	r.mux.Handle("/api/v1/pipeline-check", authed(r.handlePipelineCheck))
 	// The IN folders (IMP-172).
 	r.mux.Handle("/api/v1/in/", authed(r.handleIN))
+	// The bots of the notes type: chat (IMP-191).
+	r.mux.Handle("/api/v1/chat/status", authed(r.handleChatStatus))
+	r.mux.Handle("/api/v1/chat/token", authed(r.handleChatToken))
+	r.mux.Handle("/api/v1/chat/configure", authed(r.handleChatConfigure))
 }
 
 // handleHealth confirms the v1 mux is wired and reachable.

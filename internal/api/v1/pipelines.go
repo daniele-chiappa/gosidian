@@ -21,7 +21,9 @@ import (
 //	GET  /api/v1/pipelines?project=          the pipelines the caller reads
 //	GET  /api/v1/pipelines/<path>/runs       the runs of one
 //	POST /api/v1/pipelines/<path>/runs       start it: a session with write
-//	                                         access, or a run token
+//	                                         access, or a run token; with
+//	                                         wait (seconds, or ?wait=), the
+//	                                         answer once the run ended
 //	GET  /api/v1/runs?project=&status=       the runs the caller reads
 //	GET  /api/v1/runs/<id>                   a run with its steps
 //	POST /api/v1/runs/<id>/resume[?key=]     hand data to a waiting step: the
@@ -34,7 +36,8 @@ import (
 
 const (
 	// runTokenWindow, runTokenMax: the starts of one run token, and the
-	// resumes of one run by its key.
+	// resumes of one run by its key; [pipelines] run_token_rate sets the
+	// number when the pipelines are on.
 	runTokenWindow = time.Minute
 	runTokenMax    = 60
 	// maxStepOutputShown caps a step's output in a run's view.
@@ -173,6 +176,9 @@ type startRunRequest struct {
 	Input          any    `json:"input"`
 	IdempotencyKey string `json:"idempotency_key"`
 	CallbackURL    string `json:"callback_url"`
+	// Wait is how many seconds to wait for the run to end, at most
+	// [pipelines] max_sync_wait: the answer comes back with it.
+	Wait float64 `json:"wait"`
 }
 
 func (r *Router) startRun(w http.ResponseWriter, req *http.Request, path, trigger, actor, userID string) {
@@ -206,7 +212,33 @@ func (r *Router) startRun(w http.ResponseWriter, req *http.Request, path, trigge
 		status = http.StatusAccepted
 		_ = r.deps.Audit.Write(audit.Entry{Source: audit.SourceHTTP, Actor: actor, UserID: userID, Action: audit.ActionPipelineRun, Path: path, To: run.ID})
 	}
-	WriteJSON(w, status, map[string]any{"run": pipeline.Brief(run), "existing": existing})
+	wait := body.Wait
+	if q := req.URL.Query().Get("wait"); q != "" {
+		v, err := strconv.ParseFloat(q, 64)
+		if err != nil || v < 0 {
+			WriteError(w, http.StatusBadRequest, CodeValidationFormat, "wait is a number of seconds")
+			return
+		}
+		wait = v
+	}
+	out := map[string]any{"existing": existing}
+	// A start that waits for its run: 200 with the answer once it ended,
+	// or once it waits for a call; 202 as before when the time passed.
+	if d := r.deps.Pipelines.SyncWait(time.Duration(wait * float64(time.Second))); d > 0 {
+		if now, err := r.deps.Pipelines.Wait(req.Context(), run.ID, d); err == nil {
+			run = now
+		}
+		if run.Status.Terminal() || run.Status == jobs.Waiting {
+			status = http.StatusOK
+			if steps, err := r.deps.Pipelines.Runner().Store().Steps(run.ID); err == nil {
+				if answer, ok := pipeline.AnswerOf(run, steps); ok {
+					out["answer"] = answer
+				}
+			}
+		}
+	}
+	out["run"] = pipeline.Brief(run)
+	WriteJSON(w, status, out)
 }
 
 // handleRuns lists the runs of the projects the caller reads.

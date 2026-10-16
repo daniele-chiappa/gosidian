@@ -1582,5 +1582,23 @@
       "no_move": "La sorgente è in sola lettura, o non sa spostare i suoi file.",
       "mixed": "Scegli file di un posto solo: il disco, o una sorgente."
     }
+  },
+  "chat": {
+    "open": "Apri la chat",
+    "close": "Chiudi la chat",
+    "reconfigure": "Riconfigura",
+    "snippet": "Codice per il sito",
+    "code": "Codice",
+    "configured": "Configurato nel plugin {plugin}",
+    "not_configured": "Non configurato: {error}",
+    "pending": "Non ancora configurato nel plugin {plugin}",
+    "block_problem": "Il blocco non si legge: {problem}",
+    "line": "riga {line}:",
+    "load_failed": "Lo stato del bot non si carica",
+    "token_failed": "La chat non si apre",
+    "configure_failed": "Il bot non si configura",
+    "users_off": "Il bot non accetta gli utenti di gosidian (access.users: false): si prova dal sito.",
+    "snippet_hint": "Incolla nella pagina del sito: il widget si apre nel contenitore con quell'id.",
+    "snippet_key": "<valore della chiave {key}>"
   }
 }

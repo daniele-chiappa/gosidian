@@ -36,12 +36,14 @@ type RunBrief struct {
 	Created  time.Time   `json:"created"`
 	Started  time.Time   `json:"started,omitzero"`
 	Finished time.Time   `json:"finished,omitzero"`
+	// Interactive: its steps go first, and to the interactive workers.
+	Interactive bool `json:"interactive,omitempty"`
 }
 
 // Brief is r without its steps.
 func Brief(r jobs.Run) *RunBrief {
 	return &RunBrief{ID: r.ID, Pipeline: r.Ref, Project: r.Project, Status: r.Status, Trigger: r.Trigger, Actor: r.Actor,
-		Error: r.Error, Created: r.Created, Started: r.Started, Finished: r.Finished}
+		Error: r.Error, Created: r.Created, Started: r.Started, Finished: r.Finished, Interactive: r.Priority >= jobs.PriorityInteractive}
 }
 
 // Briefs is runs without their steps.

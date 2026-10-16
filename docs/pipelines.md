@@ -104,6 +104,7 @@ why a pipeline cannot run.
 |---|---|---|
 | `manual` (default) | someone starts it: the Runs window, `memory_pipeline_run`, `POST /api/v1/pipelines/<path>/runs` | the input given |
 | `external` | as manual, and also a service with a run token | the input given |
+| `chat` | a message of a chat, or the rating of an answer, from the chat plugin with a run token (or by hand, to try it): its runs are [interactive](#interactive-runs) | `kind` (`message`, the default, or `rating`); a message: `message`, `history` (`[{role: user or assistant, content}]`), `scopes` (the names the person chose), `session`, `user`; a rating: `turn` (the id of the answer's run), `rating` (-10 to 10), `comment`; other keys as given |
 | `ingest` | a file of one of `kinds` is stored as an attachment of the project (with `folder`: a note made with it in that folder) | `file`, `name`, `stem`, `ext`, `folder`, `note`, `project` |
 | `schedule` | `every: "monday 09:00"`, `"day 18:30"` (the automations' syntax), once per slot; a slot missed by more than 10 minutes is not run late | `slot` |
 | `in` | a batch of files of the project's [IN folder](in.md) closes: one run per file it takes, or one per batch with `batch: true`; `folder` (of the IN folder), `kinds` (none: all) and `match` (a glob on the name) choose the files; `take: false` reads them without taking them (their status stays the other pipelines') | per file: `file`, `name`, `stem`, `ext`, `dir`, `size`, `sha256`, `etag` (a source's file), `source` (`local`, or `<plugin>/<source>`), `project`; per batch: `batch`, `dir`, `count`, `bytes`, `files` (the files, when they fit in the input; else `files_listed` is false and `in.list` reads them), `project` |
@@ -163,6 +164,23 @@ canceled when one of them failed without `on_error: continue`, or was
 canceled. A run ends `done` when every node ended and none failed (but
 those that continue on error), `failed` otherwise.
 
+Beside `trigger` and `nodes`, a pipeline may say:
+
+| Field | |
+|---|---|
+| `answer` | the node whose output is the run's answer: a start that [waits](#starting-waiting-resuming) gets it back, and so does the callback |
+| `priority` | `interactive` for a pipeline whose runs someone waits for ([below](#interactive-runs)); `normal` (the default) otherwise |
+
+#### Interactive runs
+
+A chat's message cannot wait behind a batch of thousands of documents.
+The steps of an interactive run (a pipeline with `priority: interactive`,
+or one that starts on `chat`, and the runs such a run starts with
+`pipeline.run`) are taken before the others', and `[pipelines]
+interactive_workers` (default 1, on top of `workers`) run only them: a
+message gets a worker even while the others are all busy. A long step of
+an interactive pipeline holds that lane while it runs: keep them short.
+
 ### Expressions
 
 `{{ name.field.0 }}` reads `trigger`, `run` (`id`, `pipeline`,
@@ -171,14 +189,16 @@ was made, `2026-10-15T07:30:00Z`), the output of a node
 that runs before, and `item`/`index` inside an `each`. A string that is
 one expression keeps the value's type (a list, a number); text around
 an expression turns it into text. There are no operators: compute in a
-`starlark` node.
+`starlark` node. A key of a map may hold expressions too, written into
+it as text: `ratings: {"{{ trigger.turn }}": "{{ trigger.rating }}"}`
+(two keys that give the same text fail the node).
 
 ### Node types
 
 | Type | `with` | Output |
 |---|---|---|
 | `note.read` | `path` (inside the project; relative to it), `media`: `keep` (default) or `inline`, the images as text ([below](#chunks-for-an-archive-of-vectors)), with `media_words` and `inline_max_side` | `path`, `title`, `frontmatter`, `body`, `etag`; with `media: inline`, `media` (the images counted) |
-| `note.write` | `path`, `body`, `title`, `frontmatter` (a map), `mode`: `upsert` (default), `create`, `replace` | `path`, `etag`, `created` |
+| `note.write` | `path`, `body`, `title`, `frontmatter` (a map), `mode`: `upsert` (default), `create`, `replace`, or `append` (adds `body` after the note's, a blank line between, and merges `frontmatter` into its own; a note it does not find it creates), `frontmatter_merge` (merges `frontmatter` into the note's instead of replacing it, and keeps its body unless `body` is given: a map merges into a map, `null` removes a key) | `path`, `etag`, `created` |
 | `note.list` | `folder` (inside the project, relative to it; empty: all of it), `recursive` (default yes), `where` (memory_query's conditions, `{field, op, value}`), `sort` (default `path`), `fields` (frontmatter fields to give), `limit` (default 500, at most `[pipelines] max_list_items`, 5000), `cursor` | `notes` (`path`, `title`, `fields`), `count` (this page), `total` (all that match), `next` (the cursor of the next page; empty at the last) |
 | `note.sections` | `path`, `version` (ends each chunk's id after an `@`), `levels` (default `[section, paragraph]`; `[paragraph]` still cuts the sections, the paragraphs' parents and paths, but gives the paragraphs only), `max_chars` (default 6000; 200 to `max_output_bytes`), `context`: `heading` (default), `path`, `none`, `text` (default yes), `only` (bases, up to `max_list_items`), `meta` (added to each chunk's, up to `max_chunk_meta` bytes), `media`: `inline` (default) or `keep`, `media_words`, `inline_max_side` | `doc`, `title`, `version`, `sections`, `paragraphs`, `chunks` (as an archive's `upsert` takes them), `count`, `media` — see [below](#chunks-for-an-archive-of-vectors) |
 | `note.mark` | `path`, `set` (a name: `cut`, `review`), `marks` (each `base`, a chunk of `note.sections`, or `section`, the path of its headings, and `block`, its paragraph from 1; `color`: `blue`, `green`, `orange`, `red`, `cyan`, `grey`; `label`, `text`) | `path`, `set`, `count` — see [below](#marks-on-a-note) |
@@ -482,7 +502,8 @@ start: a node should be safe to repeat (note.write with `upsert` is).
 
 **From an agent** — `memory_pipeline_run({path, input, idempotency_key,
 callback_url, wait})` starts a run (write access to the project); `wait`
-(at most 60 s) returns when it ended or waits. `{action: "resume", run,
+(in seconds, at most `[pipelines] max_sync_wait`, 60 by default) returns
+when it ended or waits, with the steps and the pipeline's `answer`. `{action: "resume", run,
 data}` hands data to a waiting step, `{action: "cancel", run}` stops it.
 `memory_pipelines({project, path?, run?})` reads pipelines, runs and steps.
 `memory_bootstrap` says `capabilities.pipelines: true` where they run.
@@ -493,7 +514,7 @@ run that waits and cancels one; the pipeline window does the same beside
 the drawing ([above](#editing-in-the-web-ui)).
 
 **From a service** — a run token starts one pipeline whose trigger is
-`external` or `manual`, and does nothing else:
+`external`, `chat` or `manual`, and does nothing else:
 
 ```bash
 docker exec gosidian gosidian pipeline token create \
@@ -505,7 +526,17 @@ curl -X POST https://vault.example.com/api/v1/pipelines/team/pipelines/arrivals.
 
 The answer is `202` with the run (`200` and the same run for a key
 already used). The token is shown once; `gosidian pipeline token list`
-and `revoke <id>` manage them. A token starts at most 60 runs a minute.
+and `revoke <id>` manage them. A token starts at most `[pipelines]
+run_token_rate` runs a minute, 60 by default: a chat's widget starts one
+per message of everyone who chats.
+
+**Waiting for the answer** — with `"wait": 30` in the body, or `?wait=30`,
+the start waits up to that many seconds (at most `[pipelines]
+max_sync_wait`) for the run to end: `200` with the run and `answer`, the
+output of the node the pipeline names as its answer (none when it names
+none, or the node did not end done). A run that stops at a `wait.call`
+comes back as it waits; one that did not end in time comes back `202`, as
+without `wait`, and `GET /api/v1/runs/<id>` follows it.
 
 **An asynchronous job** — a node hands `{{ run.resume_url }}` to a
 service and a `wait.call` node waits for it: the service POSTs its result
@@ -515,7 +546,8 @@ output. A wait that nobody resumes before its timeout fails.
 
 **A callback** — `callback_url` (in `http_allowlist`) is POSTed the run's
 summary when it ends: `{run, pipeline, project, status, error, started,
-finished, steps: {name: status}}`.
+finished, steps: {name: status}, answer}` (`answer` when the pipeline
+names one).
 
 ### One pipeline starting another
 

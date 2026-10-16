@@ -52,6 +52,9 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_AUTOMATIONS_TIMEZONE` | `automations.timezone` | empty (the server's local zone; an IANA zone such as `Europe/Rome` for the days and times of the rules) |
 | `GOSIDIAN_PIPELINES_ENABLED` | `pipelines.enabled` | `false` (the server runs no [pipelines](pipelines.md); when on, only the projects with `use_pipelines` run theirs) |
 | `GOSIDIAN_PIPELINES_WORKERS` | `pipelines.workers` | `2` (steps run at once) |
+| `GOSIDIAN_PIPELINES_INTERACTIVE_WORKERS` | `pipelines.interactive_workers` | `1` (workers on top of `workers` that run only the steps of [interactive runs](pipelines.md#interactive-runs), a chat's messages, which the others also take first; `0`: none of their own) |
+| `GOSIDIAN_PIPELINES_MAX_SYNC_WAIT` | `pipelines.max_sync_wait` | `60s` (the longest a start [waits](pipelines.md#starting-waiting-resuming) for its run's answer, over HTTP or `memory_pipeline_run`) |
+| `GOSIDIAN_PIPELINES_RUN_TOKEN_RATE` | `pipelines.run_token_rate` | `60` (the runs a run token starts in a minute, and the resumes of a run's key; a chat's widget starts one per message of everyone who chats) |
 | `GOSIDIAN_PIPELINES_STEP_TIMEOUT` | `pipelines.step_timeout` | `15m` (the longest a step may run) |
 | `GOSIDIAN_PIPELINES_RETENTION` | `pipelines.retention` | `720h` (runs kept in `<state-dir>/jobs.db` after they end; `0` keeps them) |
 | `GOSIDIAN_PIPELINES_MAX_WAIT` | `pipelines.max_wait` | `168h` (the longest a `wait.call` may wait) |

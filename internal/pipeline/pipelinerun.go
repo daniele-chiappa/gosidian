@@ -87,7 +87,7 @@ func pipelineRun(_ context.Context, env *Env, with map[string]any) (any, error) 
 	if err := e.roomForChild(env.Run, rel, key); err != nil {
 		return nil, err
 	}
-	child, existing, err := e.Start(StartRequest{Path: rel, Trigger: TriggerPipeline, Input: input, Actor: Actor(env.Run.Ref), IdemKey: key})
+	child, existing, err := e.Start(StartRequest{Path: rel, Trigger: TriggerPipeline, Input: input, Actor: Actor(env.Run.Ref), IdemKey: key, Priority: env.Run.Priority})
 	if err != nil {
 		return nil, err
 	}

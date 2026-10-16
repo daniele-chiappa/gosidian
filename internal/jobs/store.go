@@ -44,6 +44,14 @@ const (
 	Canceled Status = "canceled"
 )
 
+// The priorities of a run: an interactive one (a chat's message, IMP-191)
+// has its steps taken before the others', and the workers of the
+// interactive lane (Options.InteractiveWorkers) take only those.
+const (
+	PriorityNormal      = 0
+	PriorityInteractive = 1
+)
+
 // Terminal says whether s is an end state.
 func (s Status) Terminal() bool {
 	return s == Done || s == Failed || s == Skipped || s == Canceled
@@ -67,11 +75,13 @@ type Run struct {
 	// CallbackURL is called with the run's summary when it ends.
 	CallbackURL string `json:"callback_url,omitempty"`
 	// ResumeKey lets an outside caller resume the run's waiting steps.
-	ResumeKey string    `json:"-"`
-	Error     string    `json:"error,omitempty"`
-	Created   time.Time `json:"created"`
-	Started   time.Time `json:"started,omitzero"`
-	Finished  time.Time `json:"finished,omitzero"`
+	ResumeKey string `json:"-"`
+	// Priority is PriorityNormal or PriorityInteractive.
+	Priority int       `json:"priority,omitempty"`
+	Error    string    `json:"error,omitempty"`
+	Created  time.Time `json:"created"`
+	Started  time.Time `json:"started,omitzero"`
+	Finished time.Time `json:"finished,omitzero"`
 }
 
 // Step is one node of a run.
@@ -114,7 +124,8 @@ CREATE TABLE IF NOT EXISTS runs (
 	error TEXT NOT NULL DEFAULT '',
 	created INTEGER NOT NULL,
 	started INTEGER NOT NULL DEFAULT 0,
-	finished INTEGER NOT NULL DEFAULT 0
+	finished INTEGER NOT NULL DEFAULT 0,
+	priority INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS runs_ref ON runs(ref, created);
 CREATE INDEX IF NOT EXISTS runs_project ON runs(project, created);
@@ -169,7 +180,35 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("jobs: schema: %w", err)
 	}
+	if err := addColumn(db, "runs", "priority", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("jobs: schema: %w", err)
+	}
 	return &Store{db: db}, nil
+}
+
+// addColumn adds a column to a table made before it existed.
+func addColumn(db *sql.DB, table, col, def string) error {
+	rows, err := db.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return err
+		}
+		if name == col {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	rows.Close()
+	_, err = db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + col + ` ` + def)
+	return err
 }
 
 // Close closes the database.
@@ -237,9 +276,9 @@ func (s *Store) CreateRun(r Run, steps []Step) (Run, bool, error) {
 		return Run{}, false, err
 	}
 	defer tx.Rollback()
-	_, err = tx.Exec(`INSERT INTO runs (id, kind, ref, project, trigger, status, input, spec, idem_key, actor, callback_url, resume_key, error, created)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		r.ID, r.Kind, r.Ref, r.Project, r.Trigger, r.Status, string(r.Input), string(r.Spec), r.IdemKey, r.Actor, r.CallbackURL, r.ResumeKey, r.Error, ms(r.Created))
+	_, err = tx.Exec(`INSERT INTO runs (id, kind, ref, project, trigger, status, input, spec, idem_key, actor, callback_url, resume_key, error, created, priority)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		r.ID, r.Kind, r.Ref, r.Project, r.Trigger, r.Status, string(r.Input), string(r.Spec), r.IdemKey, r.Actor, r.CallbackURL, r.ResumeKey, r.Error, ms(r.Created), r.Priority)
 	if err != nil {
 		return Run{}, false, err
 	}
@@ -259,7 +298,7 @@ func (s *Store) CreateRun(r Run, steps []Step) (Run, bool, error) {
 	return r, false, nil
 }
 
-const runCols = `id, kind, ref, project, trigger, status, input, spec, idem_key, actor, callback_url, resume_key, error, created, started, finished`
+const runCols = `id, kind, ref, project, trigger, status, input, spec, idem_key, actor, callback_url, resume_key, error, created, started, finished, priority`
 
 type scanner interface{ Scan(dest ...any) error }
 
@@ -267,7 +306,7 @@ func scanRun(sc scanner) (Run, error) {
 	var r Run
 	var input, spec string
 	var created, started, finished int64
-	err := sc.Scan(&r.ID, &r.Kind, &r.Ref, &r.Project, &r.Trigger, &r.Status, &input, &spec, &r.IdemKey, &r.Actor, &r.CallbackURL, &r.ResumeKey, &r.Error, &created, &started, &finished)
+	err := sc.Scan(&r.ID, &r.Kind, &r.Ref, &r.Project, &r.Trigger, &r.Status, &input, &spec, &r.IdemKey, &r.Actor, &r.CallbackURL, &r.ResumeKey, &r.Error, &created, &started, &finished, &r.Priority)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Run{}, ErrNotFound
 	}
@@ -403,9 +442,10 @@ func (s *Store) Steps(runID string) ([]Step, error) {
 	return out, rows.Err()
 }
 
-// claim takes up to n queued steps whose time has come, marks them
-// running until now+lease, and starts their runs.
-func (s *Store) claim(now time.Time, n int, lease time.Duration) ([]Step, error) {
+// claim takes up to n queued steps whose time has come, those of the
+// interactive runs first (only those with interactive), marks them running
+// until now+lease, and starts their runs.
+func (s *Store) claim(now time.Time, n int, lease time.Duration, interactive bool) ([]Step, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	tx, err := s.db.Begin()
@@ -413,7 +453,13 @@ func (s *Store) claim(now time.Time, n int, lease time.Duration) ([]Step, error)
 		return nil, err
 	}
 	defer tx.Rollback()
-	rows, err := tx.Query(`SELECT `+stepCols+` FROM steps WHERE status = ? AND not_before <= ? ORDER BY not_before, run_id, pos LIMIT ?`, Queued, ms(now), n)
+	cols := "s." + strings.ReplaceAll(stepCols, ", ", ", s.")
+	q := `SELECT ` + cols + ` FROM steps s JOIN runs r ON r.id = s.run_id WHERE s.status = ? AND s.not_before <= ?`
+	if interactive {
+		q += ` AND r.priority >= ` + fmt.Sprint(PriorityInteractive)
+	}
+	q += ` ORDER BY r.priority DESC, s.not_before, s.run_id, s.pos LIMIT ?`
+	rows, err := tx.Query(q, Queued, ms(now), n)
 	if err != nil {
 		return nil, err
 	}

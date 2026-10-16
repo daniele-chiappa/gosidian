@@ -1582,5 +1582,23 @@
       "no_move": "The source is read-only, or cannot move its files.",
       "mixed": "Choose files of one place: the disk, or one source."
     }
+  },
+  "chat": {
+    "open": "Open the chat",
+    "close": "Close the chat",
+    "reconfigure": "Configure again",
+    "snippet": "Code for the site",
+    "code": "Code",
+    "configured": "Configured in the plugin {plugin}",
+    "not_configured": "Not configured: {error}",
+    "pending": "Not configured in the plugin {plugin} yet",
+    "block_problem": "The block does not read: {problem}",
+    "line": "line {line}:",
+    "load_failed": "The bot's state does not load",
+    "token_failed": "The chat does not open",
+    "configure_failed": "The bot does not configure",
+    "users_off": "The bot does not take gosidian's users (access.users: false): try it from the site.",
+    "snippet_hint": "Paste it in the site's page: the widget opens in the container with that id.",
+    "snippet_key": "<value of the key {key}>"
   }
 }

@@ -248,25 +248,31 @@ func (h pipelineHost) DeleteNote(project, rel, actor string) error {
 	if !h.s.vault.IsNoteFile(rel) {
 		return fmt.Errorf("%s is not a note", rel)
 	}
-	unlock := h.s.vault.LockPath(rel)
+	return h.s.discardNote(rel, audit.SourcePipeline, actor)
+}
+
+// discardNote moves a note to the trash (deletes it, without one), as the
+// server writing for source and actor.
+func (s *Server) discardNote(rel string, source audit.Source, actor string) error {
+	unlock := s.vault.LockPath(rel)
 	defer unlock()
-	if h.s.trash != nil {
-		if _, err := h.s.vault.Load(rel); err != nil {
+	if s.trash != nil {
+		if _, err := s.vault.Load(rel); err != nil {
 			return err
 		}
-		if _, err := h.s.trash.DiscardNote(rel); err != nil {
+		if _, err := s.trash.DiscardNote(rel); err != nil {
 			return err
 		}
-	} else if err := h.s.vault.Delete(rel); err != nil {
+	} else if err := s.vault.Delete(rel); err != nil {
 		return err
 	}
-	if err := h.s.index.Delete(rel); err != nil {
+	if err := s.index.Delete(rel); err != nil {
 		return err
 	}
-	if h.s.audit != nil {
-		_ = h.s.audit.Write(audit.Entry{Source: audit.SourcePipeline, Actor: actor, Action: audit.ActionDelete, Path: rel})
+	if s.audit != nil {
+		_ = s.audit.Write(audit.Entry{Source: source, Actor: actor, Action: audit.ActionDelete, Path: rel})
 	}
-	h.s.publishNoteChange("delete", rel, "", true)
+	s.publishNoteChange("delete", rel, "", true)
 	return nil
 }
 
@@ -283,6 +289,28 @@ func (h pipelineHost) WriteNote(project, rel string, content []byte, mode pipeli
 	}
 	out, werr := h.s.writeNote(context.Background(), nil, noteWrite{
 		rel: rel, mode: m, content: fixedContent(content),
+		automation: true, source: audit.SourcePipeline, actor: actor,
+	})
+	if werr != nil {
+		return pipeline.WriteResult{}, errors.New(werr.msg)
+	}
+	return pipeline.WriteResult{Path: out.Path, ETag: out.ETag, Created: out.Created}, nil
+}
+
+// UpdateNote writes a note from its content as it is, under the note's
+// lock (pipeline.NoteUpdater): note.write's append and frontmatter_merge.
+func (h pipelineHost) UpdateNote(project, rel string, build func(existing []byte) ([]byte, error), actor string) (pipeline.WriteResult, error) {
+	if err := inProject(project, rel); err != nil {
+		return pipeline.WriteResult{}, err
+	}
+	out, werr := h.s.writeNote(context.Background(), nil, noteWrite{
+		rel: rel, mode: writeUpsert,
+		content: func(existing *vault.Note) ([]byte, error) {
+			if existing == nil {
+				return build(nil)
+			}
+			return build(existing.Content)
+		},
 		automation: true, source: audit.SourcePipeline, actor: actor,
 	})
 	if werr != nil {

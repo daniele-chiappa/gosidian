@@ -19,6 +19,7 @@ import (
 	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/gosidian/gosidian/internal/authz"
 	"github.com/gosidian/gosidian/internal/automation"
+	"github.com/gosidian/gosidian/internal/chatbot"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/infolder"
 	"github.com/gosidian/gosidian/internal/marks"
@@ -218,6 +219,9 @@ type Server struct {
 	in *infolder.Service
 	// plugins are the MCP servers whose nodes the pipelines use (IMP-168).
 	plugins *plugins.Registry
+	// chat keeps the bots configured in their plugins (IMP-191); nil
+	// while the pipelines are off.
+	chat *chatbot.Service
 	// marks keeps the marks the pipelines put on notes (IMP-188); nil
 	// keeps none.
 	marks *marks.Store
