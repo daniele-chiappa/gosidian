@@ -279,7 +279,9 @@ func (e *Engine) Settled(run jobs.Run) bool {
 
 // waitsForRuns says whether every step the run waits at is a
 // pipeline.run's, which waits for a run it started: one the runner ends
-// by itself, unlike a wait.call's, which waits for a call from outside.
+// by itself, unlike a wait.call's, which waits for a call from outside. A
+// run that waits with no step waiting is between the two: its child ended
+// and the step was taken again, the run's status not yet; it is at work.
 func (e *Engine) waitsForRuns(run jobs.Run) bool {
 	spec, err := SpecOf(run)
 	if err != nil {
@@ -289,17 +291,15 @@ func (e *Engine) waitsForRuns(run jobs.Run) bool {
 	if err != nil {
 		return false
 	}
-	waiting := 0
 	for _, st := range steps {
 		if st.Status != jobs.Waiting {
 			continue
 		}
-		waiting++
 		if n, ok := spec.Node(st.Name); !ok || n.Use != "pipeline.run" {
 			return false
 		}
 	}
-	return waiting > 0
+	return true
 }
 
 // SyncWait is how long a start that asks to wait w waits: w capped by

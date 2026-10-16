@@ -8,6 +8,38 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.93.0] — 2026-10-16 — "handoff"
+
+A person, and a day, for a bot; folders six levels deep; and a start that
+waits no longer comes back early between two writes of its run. Pull the
+image and restart; nothing to migrate. The button for a person, the day
+and the images of an answer show in the chat with `gosidian-chat` 0.3.0
+of [gosidian-plugins](https://github.com/daniele-chiappa/gosidian-plugins);
+0.2.0 keeps working without them.
+
+### Added
+- **A person, and a day, for a bot**: a bot's block takes `handoff`
+  (`label`, the button's text; `contact`, whether the chat asks how to
+  answer: an address, a number), a button that asks for a person, and
+  `dates: true`, a day the chat offers. `chat_configure` gets both. The
+  trigger `chat` takes `kind: handoff` (`message`, `contact`, the
+  conversation in `history`) and, in a message, `as_of`, a day checked as
+  YYYY-MM-DD: the pipeline can answer from the documents as they were
+  then. See `docs/chat.md`.
+
+### Changed
+- `folders.levels` goes up to 6 (it was 3): a documentation four or five
+  folders deep is offered from its root.
+
+### Fixed
+- **A start that waits, between two writes**: when a run's child ended,
+  its step was taken again a moment before the run left `waiting`, and a
+  start that waited came back then, without its answer (a bot answered
+  "the run ended waiting" now and then). A waiting run with no step
+  waiting is now at work.
+- A test of `pipeline.run` wrote the host's notes outside its lock, a data
+  race the race detector caught now and then.
+
 ## [2.92.0] — 2026-10-16 — "folders"
 
 A bot's scopes from a folder's tree, and a start that waits goes on while

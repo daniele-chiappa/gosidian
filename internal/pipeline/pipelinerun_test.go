@@ -143,6 +143,39 @@ nodes:
 	}
 }
 
+// Settled, step by step: a run at its child is at work, and so is one the
+// runner left between two writes (the child ended, the step taken again,
+// the run still waiting); one at a wait.call is settled.
+func TestEngine_SettledStepByStep(t *testing.T) {
+	e, host := newEngine(t, Config{})
+	host.notes["p/hold.md"] = pipelineNote(`
+nodes:
+  - {id: hold, use: wait.call, with: {timeout: 1h}}
+`)
+	host.notes["p/parent.md"] = pipelineNote(`
+nodes:
+  - {id: call, use: pipeline.run, with: {pipeline: hold}}
+`)
+	parent, _, _ := e.Start(StartRequest{Path: "p/parent.md", Trigger: TriggerManual})
+	parent = waitStatus(t, e, parent.ID, jobs.Waiting)
+	kids := childrenOf(t, e, "parent:"+parent.ID+":")
+	if len(kids) != 1 {
+		t.Fatalf("children %+v", kids)
+	}
+	child := waitStatus(t, e, kids[0].ID, jobs.Waiting)
+	if e.Settled(parent) || !e.Settled(child) {
+		t.Fatalf("at the child: parent settled %v, child (at a wait.call) %v", e.Settled(parent), e.Settled(child))
+	}
+	between := jobs.Run{Kind: parent.Kind, Ref: parent.Ref, Project: parent.Project, Trigger: parent.Trigger, Status: jobs.Waiting, Spec: parent.Spec}
+	between, _, err := e.Runner().Store().CreateRun(between, []jobs.Step{{Name: "call", Status: jobs.Running}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if e.Settled(between) {
+		t.Error("a run between two writes: settled")
+	}
+}
+
 // The child's failure fails the step, with the child's outcome for the
 // nodes that continue on error; ending soon or later alike.
 func TestPipelineRunNode_ChildFailureFailsTheStep(t *testing.T) {
@@ -311,7 +344,11 @@ func TestPipelineRunNode_Refusals(t *testing.T) {
 		"input":   `{pipeline: q/echo, input: "a text"}`,
 		"timeout": `{pipeline: q/echo, timeout: soon}`,
 	} {
+		// Under the host's lock: the run before may still be reading the
+		// notes for its summary.
+		host.mu.Lock()
 		host.notes["p/"+name+".md"] = pipelineNote("nodes:\n  - {id: call, use: pipeline.run, with: " + with + "}\n")
+		host.mu.Unlock()
 		run, _, err := e.Start(StartRequest{Path: "p/" + name + ".md", Trigger: TriggerManual})
 		if err != nil {
 			t.Fatal(err)

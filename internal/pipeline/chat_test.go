@@ -118,6 +118,9 @@ func TestCheckChatInput(t *testing.T) {
 			"scopes": []any{"magazzino"}, "session": "s", "user": "mario", "extra": 1},
 		{"kind": "rating", "turn": "abc", "rating": 10.0, "comment": "ottima"},
 		{"kind": "rating", "turn": "abc", "rating": -10},
+		{"message": "com'era?", "as_of": "2026-03-31"},
+		{"kind": "handoff", "session": "s", "message": "vorrei parlare con qualcuno", "contact": "mario@example.com"},
+		{"kind": "handoff", "session": "s"},
 	}
 	for i, in := range good {
 		out, err := CheckChatInput(in)
@@ -142,6 +145,10 @@ func TestCheckChatInput(t *testing.T) {
 		"scopes not texts": map[string]any{"message": "x", "scopes": []any{1}},
 		"session too long": map[string]any{"message": "x", "session": strings.Repeat("s", 300)},
 		"user not a text":  map[string]any{"message": "x", "user": 5},
+		"as_of not a day":  map[string]any{"message": "x", "as_of": "31/03/2026"},
+		"as_of no day":     map[string]any{"message": "x", "as_of": "2026-02-30"},
+		"contact too long": map[string]any{"kind": "handoff", "contact": strings.Repeat("c", 300)},
+		"handoff note":     map[string]any{"kind": "handoff", "message": 7},
 	}
 	for name, in := range bad {
 		if _, err := CheckChatInput(in); err == nil {

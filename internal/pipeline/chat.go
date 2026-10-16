@@ -6,13 +6,14 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 )
 
 // The input of a chat run (IMP-191), as the chat plugin starts one with
 // the run token of the bot's pipeline, or as a test by hand:
 //
-//	kind     message (the default) or rating
-//	message  the question (a message)
+//	kind     message (the default), rating or handoff
+//	message  the question (a message), or what the person adds (a handoff)
 //	history  the turns before, [{role: user|assistant, content}]
 //	scopes   the scopes the person chose among those the bot opens
 //	session  the conversation, an id of the plugin's
@@ -20,11 +21,16 @@ import (
 //	turn     the answer rated (a rating): the id of its run
 //	rating   the rating, -10 to 10 (a rating)
 //	comment  what the person wrote with it (a rating)
+//	contact  how a person may answer: an address, a number (a handoff)
+//	as_of    the day the answer is about, YYYY-MM-DD (a message)
 //
 // Other keys pass as they are: a plugin may add its own.
 const (
 	ChatMessage = "message"
 	ChatRating  = "rating"
+	// ChatHandoff asks for a person: the pipeline hands the conversation
+	// on (a note, a webhook) and says so.
+	ChatHandoff = "handoff"
 )
 
 // Limits of a chat input.
@@ -32,6 +38,8 @@ const (
 	maxChatHistory = 200
 	maxChatScopes  = 100
 	maxChatID      = 200
+	maxChatContact = 200
+	maxChatNote    = 4000
 )
 
 // CheckChatInput checks a chat run's input and gives it with its kind
@@ -49,7 +57,7 @@ func CheckChatInput(input any) (map[string]any, error) {
 	if v, ok := in["kind"]; ok && v != nil {
 		k, ok := v.(string)
 		if !ok {
-			return nil, errors.New("kind: message or rating")
+			return nil, errors.New("kind: message, rating or handoff")
 		}
 		if k != "" {
 			kind = k
@@ -67,6 +75,19 @@ func CheckChatInput(input any) (map[string]any, error) {
 		if strings.TrimSpace(m) == "" {
 			return nil, errors.New("message: the question, a text")
 		}
+		if v, ok := in["as_of"]; ok && v != nil && v != "" {
+			d, _ := v.(string)
+			if _, err := time.Parse("2006-01-02", d); err != nil {
+				return nil, errors.New("as_of: a day, YYYY-MM-DD")
+			}
+		}
+	case ChatHandoff:
+		if err := optionalString(in, "message", maxChatNote); err != nil {
+			return nil, err
+		}
+		if err := optionalString(in, "contact", maxChatContact); err != nil {
+			return nil, err
+		}
 	case ChatRating:
 		turn, _ := in["turn"].(string)
 		if strings.TrimSpace(turn) == "" || len(turn) > maxChatID {
@@ -80,7 +101,7 @@ func CheckChatInput(input any) (map[string]any, error) {
 			return nil, err
 		}
 	default:
-		return nil, fmt.Errorf("kind %q: message or rating", kind)
+		return nil, fmt.Errorf("kind %q: message, rating or handoff", kind)
 	}
 	if v, ok := in["history"]; ok && v != nil {
 		h, ok := v.([]any)

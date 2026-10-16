@@ -53,9 +53,10 @@ func TestParse(t *testing.T) {
 		"pipeline: x\nscopes: [{name: a}, {name: a}]":                                               "twice",
 		"pipeline: x\nfolders: {levels: 2}":                                                         "folders.path names",
 		"pipeline: x\nfolders: {path: ../docs}":                                                     "folders.path",
-		"pipeline: x\nfolders: {path: docs, levels: 4}":                                             "folders.levels",
+		"pipeline: x\nfolders: {path: docs, levels: 7}":                                             "folders.levels",
 		"pipeline: x\nfolders: {path: docs, key: a.b}":                                              "folders.key",
 		"pipeline: x\nfolders: {path: docs, labels: [Area, Topic]}":                                 "folders.labels",
+		"pipeline: x\nhandoff: true":                                                                "does not read",
 		"pipeline: x\nunknown: 1":                                                                   "unknown is no field of a bot",
 		"pipeline: [x":                                                                              "does not read",
 	} {
@@ -77,6 +78,10 @@ func TestParse(t *testing.T) {
 	f, problems := Parse("pipeline: x\nfolders: {path: /documents/manual/}", "p/b.md")
 	if len(problems) > 0 || f.Folders == nil || f.Folders.Path != "documents/manual" || f.Folders.Levels != 1 || f.Folders.Key != "folder" || len(f.Folders.Labels) != 0 {
 		t.Errorf("folders: %+v %v", f.Folders, problems)
+	}
+	h, problems := Parse("pipeline: x\nhandoff: {label: Parla con una persona, contact: true}\ndates: true", "p/b.md")
+	if len(problems) > 0 || h.Handoff == nil || h.Handoff.Label != "Parla con una persona" || !h.Handoff.Contact || !h.Dates {
+		t.Errorf("handoff and dates: %+v %v", h, problems)
 	}
 	for in, want := range map[string]string{"p/a/Il Bot.md": "il-bot", "p/2024.md": "bot-2024", "p/!!.md": "bot-"} {
 		if got := DefaultName(in); got != want {
@@ -486,5 +491,14 @@ func TestService_Folders(t *testing.T) {
 	}
 	if l := c.args["scope_labels"].([]string); len(l) != 2 || l[1] != "Modulo" {
 		t.Errorf("scope_labels: %v", c.args["scope_labels"])
+	}
+	if c.args["handoff"] != nil || c.args["dates"] != false {
+		t.Errorf("no handoff, no dates: %v %v", c.args["handoff"], c.args["dates"])
+	}
+	host.notes["p/bots/assistente.md"] = strings.Replace(bot, "access:\n", "handoff: {contact: true}\ndates: true\naccess:\n", 1)
+	s.Reconcile(context.Background())
+	c = pl.last(ToolConfigure)
+	if h, _ := c.args["handoff"].(map[string]any); h == nil || h["contact"] != true || h["label"] != "" || c.args["dates"] != true {
+		t.Errorf("handoff and dates: %v %v", c.args["handoff"], c.args["dates"])
 	}
 }

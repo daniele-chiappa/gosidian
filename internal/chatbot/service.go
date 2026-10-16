@@ -493,8 +493,12 @@ func (s *Service) configureArgs(n Note, spec Spec, st *State) (map[string]any, e
 	if spec.Conversations.Keep > 0 {
 		conv["keep_seconds"] = int64(spec.Conversations.Keep / time.Second)
 	}
+	var handoff any
+	if h := spec.Handoff; h != nil {
+		handoff = map[string]any{"label": h.Label, "contact": h.Contact}
+	}
 	return map[string]any{
-		"bot": spec.Name, "note": n.Path,
+		"bot": spec.Name, "note": n.Path, "handoff": handoff, "dates": spec.Dates,
 		"title": spec.Title, "welcome": spec.Welcome,
 		"scopes": scopes, "scope_labels": labels, "access": access, "limits": limits, "conversations": conv,
 		"sources":      map[string]any{"base_url": spec.Sources.BaseURL, "gosidian_url": strings.TrimRight(s.opts.GosidianURL, "/")},

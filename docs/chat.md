@@ -34,6 +34,8 @@ scopes:
   - {name: warehouse, label: Warehouse, filter: {meta: {area: warehouse}}}
   - {name: sales, label: Sales, filter: {meta: {area: sales}}}
 folders: {path: documents/manual, levels: 2, labels: [Area, Topic]}
+handoff: {label: "Talk to a person", contact: true}
+dates: true
 access:
   users: true
   keys: [{name: site, secret: chat-site-key, origins: ["https://www.example.com"]}]
@@ -53,6 +55,8 @@ limits: {per_minute: 10, max_tokens: 4000}
 | `title`, `welcome` | what the chat shows |
 | `scopes` | the parts of the archive the bot opens, each a `name`, a `label` and a `filter` (the archive's [filter](plugins.md)): the person chatting chooses among them, and the pipeline gets their filters. A client cannot send a filter of its own |
 | `folders` | more scopes, from the folders under `path`, a folder of the project: [below](#scopes-from-folders) |
+| `handoff` | a button that asks for a person: `label` (the chat's own when empty), `contact` (ask how to answer: an address, a number). A request starts the pipeline with `kind: handoff`, the conversation in `history` |
+| `dates` | `true`: the chat offers a day, and a message carries it as `as_of` (YYYY-MM-DD): the pipeline answers from the documents as they were then |
 | `access` | who may chat, [below](#who-may-chat) |
 | `sources` | `base_url`: the public address of the documents, for the links of an answer's sources; empty, the notes in gosidian |
 | `conversations` | `folder`: where the pipeline writes the conversations (a folder of the project); `keep`: how long they are kept (`90d`, `12h`; none: always). Older ones go to the trash |
@@ -65,14 +69,14 @@ project; a write of the note says so too.
 ## Scopes from folders
 
 `folders` makes a scope of each folder under `path`, down `levels` levels
-(1 to 3, default 1), after the block's own `scopes`. The chat offers one
+(1 to 6, default 1), after the block's own `scopes`. The chat offers one
 choice per level: the folders under `path`, then those of the folder
 chosen.
 
 | `folders` | |
 |---|---|
 | `path` | a folder of the project, whose folders become the scopes |
-| `levels` | how deep the choice goes, 1 to 3 (default 1) |
+| `levels` | how deep the choice goes, 1 to 6 (default 1) |
 | `key` | the key of the chunks' meta that holds their document's folder (default `folder`) |
 | `labels` | what the chat calls each level: `[Area, Topic]` |
 
@@ -189,8 +193,10 @@ nodes:
 ```
 
 - The input of a `chat` run is in [the pipelines](pipelines.md#triggers):
-  a message (`message`, `history`, `scopes`, `session`, `user`), or a
-  rating (`kind: rating`, `turn`, `rating` from -10 to 10, `comment`).
+  a message (`message`, `history`, `scopes`, `session`, `user`, and with
+  `dates` the day `as_of`), a rating (`kind: rating`, `turn`, `rating`
+  from -10 to 10, `comment`), or a request for a person (`kind: handoff`,
+  `message`, `contact`, `history`).
   The plugin adds `bot`, `note` and `filters`, the filters of the scopes
   chosen, in their order.
 - Its runs are [interactive](pipelines.md#interactive-runs): a message
@@ -211,6 +217,8 @@ A chat plugin is a [plugin](plugins.md) with two tools, both `write`:
 | `title`, `welcome` | as the block says |
 | `scopes` | `[{name, label, filter, children}]`: `children`, the scopes of a folder's subfolders, the same form |
 | `scope_labels` | what the chat calls each level of `children`, from `folders.labels` |
+| `handoff` | `{label, contact}` as the block says, or none |
+| `dates` | as the block says |
 | `access` | `users` and `users_secret` (the secret of gosidian's tokens), `keys` (`[{name, key, origins}]`, the values), `signed_secret`, `open` |
 | `run` | `url` (`POST` there to start the pipeline), `token` (the run token, `Authorization: Bearer`), `pipeline` |
 | `sources` | `base_url`, `gosidian_url` (gosidian's public address, for the links to its notes) |

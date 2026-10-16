@@ -48,7 +48,13 @@ type Spec struct {
 	Scopes []Scope `json:"scopes,omitempty"`
 	// Folders makes scopes of the folders under one, at configure time,
 	// after Scopes: the person chatting picks one per level.
-	Folders       *Folders       `json:"folders,omitempty"`
+	Folders *Folders `json:"folders,omitempty"`
+	// Handoff lets the person chatting ask for a person: the chat shows a
+	// button, and a request starts the pipeline with kind handoff.
+	Handoff *Handoff `json:"handoff,omitempty"`
+	// Dates: the chat offers a day, and the pipeline answers from the
+	// documents as they were then (as_of).
+	Dates         bool           `json:"dates,omitempty"`
 	Access        Access         `json:"access"`
 	Sources       Sources        `json:"sources"`
 	Conversations Conversations  `json:"conversations"`
@@ -62,6 +68,13 @@ type Scope struct {
 	Label    string         `json:"label,omitempty"`
 	Filter   map[string]any `json:"filter,omitempty"`
 	Children []Scope        `json:"children,omitempty"`
+}
+
+// Handoff is the chat's button that asks for a person: its Label (the
+// chat's own when empty), and whether it asks how to answer (Contact).
+type Handoff struct {
+	Label   string `json:"label,omitempty"`
+	Contact bool   `json:"contact"`
 }
 
 // Folders are the scopes of a folder's tree: a scope for each folder under
@@ -154,7 +167,7 @@ const (
 	maxScopes = 100
 	maxKeys   = 50
 	maxText   = 2000
-	maxLevels = 3
+	maxLevels = 6
 	maxLabel  = 100
 )
 
@@ -182,6 +195,11 @@ type rawSpec struct {
 		Key    string   `yaml:"key"`
 		Labels []string `yaml:"labels"`
 	} `yaml:"folders"`
+	Handoff *struct {
+		Label   string `yaml:"label"`
+		Contact bool   `yaml:"contact"`
+	} `yaml:"handoff"`
+	Dates  bool `yaml:"dates"`
 	Access *struct {
 		Users *bool `yaml:"users"`
 		Keys  []struct {
@@ -216,7 +234,7 @@ func Parse(src, notePath string) (Spec, []Problem) {
 		msg := err.Error()
 		if m := fieldRe.FindStringSubmatch(msg); m != nil {
 			line, _ := strconv.Atoi(m[1])
-			return s, []Problem{{Line: line, Msg: fmt.Sprintf("%s is no field of a bot: name, plugin, pipeline, title, welcome, scopes, folders, access, sources, conversations, limits", m[2])}}
+			return s, []Problem{{Line: line, Msg: fmt.Sprintf("%s is no field of a bot: name, plugin, pipeline, title, welcome, scopes, folders, handoff, dates, access, sources, conversations, limits", m[2])}}
 		}
 		p := Problem{Msg: "the YAML does not read: " + strings.TrimPrefix(msg, "yaml: ")}
 		if m := lineRe.FindStringSubmatch(msg); m != nil {
@@ -304,6 +322,13 @@ func Parse(src, notePath string) (Spec, []Problem) {
 		}
 		s.Folders = &fs
 	}
+	if h := r.Handoff; h != nil {
+		s.Handoff = &Handoff{Label: strings.TrimSpace(h.Label), Contact: h.Contact}
+		if len(s.Handoff.Label) > maxLabel {
+			bad("handoff.label: at most %d characters", maxLabel)
+		}
+	}
+	s.Dates = r.Dates
 	s.Access.Users = true
 	if a := r.Access; a != nil {
 		if a.Users != nil {
