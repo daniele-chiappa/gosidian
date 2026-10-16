@@ -8,6 +8,51 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.94.0] — 2026-10-17 — "images in place"
+
+Images where they belong in a bot's answer, bots back at once after their
+plugin restarts, and writes that cost the same as the vault grows. The
+index gains two columns: **the first start after the upgrade re-indexes
+the whole vault** (about 85 s for 22,000 notes, answering 503 "starting"
+meanwhile); the starts after it are as quick as before. The images in
+place and the bots back at once need `gosidian-chat` 0.4.0 of
+[gosidian-plugins](https://github.com/daniele-chiappa/gosidian-plugins);
+0.3.0 keeps working, its bots coming back within five minutes.
+
+### Added
+- **Numbered images**: `note.sections` takes `media_numbers`: the images
+  (not the icons) are numbered in the note's order, `[image 3: label]
+  description`, and each chunk lists its own in `media` (`n`, `path`,
+  `note`, `label`). A bot's pipeline can ask the model to mark where an
+  image goes with a line `[img:n]` and show it there.
+- **Every hour** for a schedule: `every: "hour :05"` starts a pipeline
+  (or fires an automation) each hour at five past, `"hour"` on the hour.
+  The night the clocks go back has both its slots at 02:05.
+
+### Fixed
+- **A bot is back at once after its plugin restarted**: every 30 seconds
+  gosidian asks the plugins that have bots which ones they still have
+  (`chat_bots`), and hands them again when one is missing or the plugin
+  started anew; a restarted chat plugin answered 404 for up to five
+  minutes. A bot that could not be handed because its plugin was down, or
+  served a manifest not accepted yet, goes the same way as soon as the
+  plugin answers. A plugin without `chat_bots` waits for the five minutes
+  as before.
+- **Writing many notes whose links do not resolve no longer slows down as
+  the vault grows**: each write retried every unresolved link whose target
+  contained the note's name, and resolving a link read every note, so an
+  import of thousands of notes went quadratic. The index now finds a note
+  by its title or file name, and the links a new note answers by what they
+  name, through indexes: a write costs the same with 500 notes as with
+  10,000, and resolving every link at start is faster too.
+- **A note a pipeline writes from a file of the IN folder names it as
+  text**, in `in_file`, as `in.import` does: `note.write` wrote
+  `source: '[[<file>]]'`, a wikilink no note answers, which the lint
+  flagged as broken. An attachment keeps its `source` wikilink.
+- A plugin node's file setting that its schema does not require may be
+  left out, or be an empty list: the plugin gets none. It failed, and a
+  node whose files are optional could not be called without files.
+
 ## [2.93.0] — 2026-10-16 — "handoff"
 
 A person, and a day, for a bot; folders six levels deep; and a start that

@@ -62,6 +62,60 @@ func TestInlineMedia(t *testing.T) {
 	}
 }
 
+func TestNumberedMedia(t *testing.T) {
+	media := map[string]mediaText{
+		"/vault-files/p/att/icon.png": {label: "Binocolo", side: 16, path: "p/att/icon.png", note: "p/d_img/001.md"},
+		"/vault-files/p/att/shot.png": {label: "Finestra", description: "La griglia.", side: 900, path: "p/att/shot.png", note: "p/d_img/002.md"},
+		"/vault-files/p/att/wide.png": {label: "Barra", description: "Comandi.", side: 700, path: "p/att/wide.png", note: "p/d_img/003.md"},
+	}
+	body := strings.Join([]string{
+		"Premere ![](/vault-files/p/att/icon.png) per cercare.",
+		"![](/vault-files/p/att/shot.png)",
+		"La barra ![](/vault-files/p/att/wide.png) in alto.",
+		"![Schema](/vault-files/p/att/other.png)",
+		"![](https://example.com/x.png)",
+		"![](/vault-files/p/att/shot.png)",
+	}, "\n")
+	got, st, refs := inlineMediaOpt(body, media, italian, 128, false, true)
+	want := strings.Join([]string{
+		"Premere [icona: Binocolo] per cercare.",
+		"",
+		"[immagine 1: Finestra] La griglia.",
+		"",
+		"La barra [immagine 2: Barra (Comandi.)] in alto.",
+		"",
+		"[immagine 3: Schema]",
+		"",
+		"[immagine 4]",
+		"",
+		"[immagine 5: Finestra] La griglia.",
+	}, "\n")
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+	// The icons have no number; an image twice has two; one from outside
+	// has no path.
+	wantRefs := []MediaRef{{N: 1, Path: "p/att/shot.png", Note: "p/d_img/002.md", Label: "Finestra"},
+		{N: 2, Path: "p/att/wide.png", Note: "p/d_img/003.md", Label: "Barra"}, {N: 3, Path: "p/att/other.png"}, {N: 4},
+		{N: 5, Path: "p/att/shot.png", Note: "p/d_img/002.md", Label: "Finestra"}}
+	if b, w := mustJSON(refs), mustJSON(wantRefs); b != w {
+		t.Errorf("refs %s, want %s", b, w)
+	}
+	if st.Images != 6 || st.Icons != 1 {
+		t.Errorf("stats %+v", st)
+	}
+	// A chunk's images: those whose text it holds, not [immagine 10] for 1.
+	refs = append(refs, MediaRef{N: 10})
+	if got := chunkMedia("Testo [immagine 10] e [immagine 2: Barra] qui.", "immagine", refs); mustJSON(got) != mustJSON([]MediaRef{refs[1], refs[5]}) {
+		t.Errorf("chunk media %s", mustJSON(got))
+	}
+	if got := chunkMedia("Niente.", "immagine", refs); got == nil || len(got) != 0 {
+		t.Errorf("no media: %v", got)
+	}
+}
+
+func mustJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
+
 const cutDoc = `# Manuale
 
 Introduzione al manuale.
@@ -241,6 +295,31 @@ func TestNoteSections(t *testing.T) {
 	para := chunks[2].(map[string]any)
 	if para["parent"] != sec["id"] || para["level"] != 2.0 || para["text"] != "## La schermata\n\n[immagine: Elenco delle stampanti] Una griglia con le stampanti." {
 		t.Errorf("paragraph %v", para)
+	}
+
+	// With media_numbers: the images numbered, and each chunk's.
+	out = run(map[string]any{"path": "docs/stampanti", "media_numbers": true, "media_words": map[string]any{"icon": "icona", "image": "immagine"}})
+	nchunks := out["chunks"].([]any)
+	if txt := nchunks[0].(map[string]any)["text"].(string); !strings.Contains(txt, "[immagine 1: Elenco delle stampanti] Una griglia") || !strings.Contains(txt, "[icona: Binocolo: ricerca]") {
+		t.Errorf("numbered section %q", txt)
+	}
+	// The output went through JSON: its keys in order.
+	wantMedia := `[{"label":"Elenco delle stampanti","n":1,"note":"p/docs/stampanti_img/002.md","path":"p/attachments/shot.png"}]`
+	if m := mustJSON(nchunks[0].(map[string]any)["media"]); m != wantMedia {
+		t.Errorf("section media %s", m)
+	}
+	if m := mustJSON(nchunks[1].(map[string]any)["media"]); m != "[]" {
+		t.Errorf("first paragraph media %s", m)
+	}
+	if m := mustJSON(nchunks[2].(map[string]any)["media"]); m != wantMedia {
+		t.Errorf("second paragraph media %s", m)
+	}
+	if _, err := noteSections(ctx, env, map[string]any{"path": "docs/stampanti", "media": "keep", "media_numbers": true}); err == nil {
+		t.Error("media_numbers with media: keep: no error")
+	}
+	// Without media_numbers, no media in a chunk.
+	if _, ok := chunks[0].(map[string]any)["media"]; ok {
+		t.Errorf("media without media_numbers: %v", chunks[0])
 	}
 
 	// Without the text: what tells which changed, small.

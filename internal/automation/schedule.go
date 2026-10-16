@@ -9,12 +9,14 @@ import (
 )
 
 // Schedule is when an every rule fires: each day, or one weekday, at a
-// time of day in the engine's time zone.
+// time of day in the engine's time zone; or each hour, at a minute.
 type Schedule struct {
 	// Weekday is the day of the week, or -1 for every day.
 	Weekday time.Weekday `json:"weekday"`
 	Hour    int          `json:"hour"`
 	Minute  int          `json:"minute"`
+	// Hourly fires each hour at Minute; Weekday and Hour do not count.
+	Hourly bool `json:"hourly,omitempty"`
 }
 
 var weekdays = map[string]time.Weekday{
@@ -26,14 +28,26 @@ var weekdays = map[string]time.Weekday{
 }
 
 // ParseSchedule reads "monday 09:00", "day 18:30" (every day), or a day
-// alone, "monday", at 09:00. Italian day names are read too.
+// alone, "monday", at 09:00; "hour :05" (every hour, at five past), or
+// "hour" alone, on the hour. Italian day names are read too.
 func ParseSchedule(s string) (Schedule, error) {
 	f := strings.Fields(strings.ToLower(strings.TrimSpace(s)))
 	if len(f) == 0 || len(f) > 2 {
-		return Schedule{}, fmt.Errorf("every: %q, want a day and a time, \"monday 09:00\" or \"day 09:00\"", s)
+		return Schedule{}, fmt.Errorf("every: %q, want a day and a time, \"monday 09:00\" or \"day 09:00\", or \"hour :05\"", s)
 	}
 	sc := Schedule{Weekday: -1, Hour: 9}
 	switch f[0] {
+	case "hour", "hourly", "ora":
+		sc = Schedule{Weekday: -1, Hourly: true}
+		if len(f) == 2 {
+			m, ok := strings.CutPrefix(f[1], ":")
+			minute, err := strconv.Atoi(m)
+			if !ok || err != nil || len(m) != 2 || minute < 0 || minute > 59 {
+				return Schedule{}, fmt.Errorf("every: %q is not a minute of the hour, :MM", f[1])
+			}
+			sc.Minute = minute
+		}
+		return sc, nil
 	case "day", "daily", "giorno":
 	default:
 		d, ok := weekdays[f[0]]
@@ -55,6 +69,9 @@ func ParseSchedule(s string) (Schedule, error) {
 }
 
 func (s Schedule) String() string {
+	if s.Hourly {
+		return fmt.Sprintf("hour :%02d", s.Minute)
+	}
 	day := "day"
 	if s.Weekday >= 0 {
 		day = strings.ToLower(s.Weekday.String())
@@ -65,6 +82,16 @@ func (s Schedule) String() string {
 // Last is the latest slot of the schedule at or before now, in loc.
 func (s Schedule) Last(now time.Time, loc *time.Location) time.Time {
 	now = now.In(loc)
+	if s.Hourly {
+		// Back from now to the top of its hour, not time.Date: the night
+		// the clocks go back has two 02:05, and each is a slot.
+		top := now.Add(-time.Duration(now.Minute())*time.Minute - time.Duration(now.Second())*time.Second - time.Duration(now.Nanosecond()))
+		t := top.Add(time.Duration(s.Minute) * time.Minute)
+		if t.After(now) {
+			t = t.Add(-time.Hour)
+		}
+		return t
+	}
 	t := time.Date(now.Year(), now.Month(), now.Day(), s.Hour, s.Minute, 0, 0, loc)
 	for i := 0; i < 8; i++ {
 		if !t.After(now) && (s.Weekday < 0 || t.Weekday() == s.Weekday) {
@@ -78,6 +105,9 @@ func (s Schedule) Last(now time.Time, loc *time.Location) time.Time {
 // Next is the first slot of the schedule after now, in loc.
 func (s Schedule) Next(now time.Time, loc *time.Location) time.Time {
 	now = now.In(loc)
+	if s.Hourly {
+		return s.Last(now, loc).Add(time.Hour)
+	}
 	t := time.Date(now.Year(), now.Month(), now.Day(), s.Hour, s.Minute, 0, 0, loc)
 	for i := 0; i < 9; i++ {
 		if t.After(now) && (s.Weekday < 0 || t.Weekday() == s.Weekday) {

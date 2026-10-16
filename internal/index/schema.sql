@@ -1,12 +1,15 @@
 CREATE TABLE IF NOT EXISTS notes (
     id         INTEGER PRIMARY KEY,
     path       TEXT NOT NULL UNIQUE,
+    name       TEXT, -- file name in lower case (v6), indexed after the migration (index.go)
     title      TEXT NOT NULL,
     mtime      INTEGER NOT NULL,
     size       INTEGER NOT NULL,
     importance INTEGER NOT NULL DEFAULT 3, -- frontmatter importance, 1..5 (v1)
     hash       TEXT  -- ContentHash of what was indexed (v3); NULL = re-index at the next scan
 );
+-- Link resolution matches a target to a title case-insensitively.
+CREATE INDEX IF NOT EXISTS notes_title_lower ON notes(lower(title));
 
 -- Index-wide settings (v3): content_version is the ContentVersion the rows
 -- were extracted with.
@@ -18,6 +21,7 @@ CREATE TABLE IF NOT EXISTS meta (
 CREATE TABLE IF NOT EXISTS links (
     src_id      INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
     target      TEXT NOT NULL,           -- raw target text from [[...]]
+    target_key  TEXT,                    -- target without #fragment, in lower case (v6, index.go)
     target_path TEXT,                    -- resolved vault-relative path (nullable)
     alias       TEXT,
     field       TEXT                     -- frontmatter key of the link (v4); NULL in the body

@@ -92,7 +92,8 @@ var baseSchemas = []NodeSchema{
 	"context": {"type": "string", "enum": ["heading", "path", "none"], "default": "heading", "description": "What a chunk's text starts with: its section's heading, the title and the path of the headings, or nothing"},
 	"text": {"type": "boolean", "default": true, "description": "false: the chunks without their text, with their base and hash, to tell which changed"},
 	"only": {"type": "array", "items": {"type": "string"}, "description": "Only the chunks of these bases"},
-	"meta": {"type": "object", "description": "Keys added to each chunk's meta (status, the dates of a version)"},` + mediaSettings + `}}`),
+	"meta": {"type": "object", "description": "Keys added to each chunk's meta (status, the dates of a version)"},
+	"media_numbers": {"type": "boolean", "default": false, "description": "With media: inline, each image (not an icon) numbered in the note's order, [image 3: label], and each chunk's media"},` + mediaSettings + `}}`),
 		Output: json.RawMessage(`{"type": "object", "properties": {
 	"doc": {"type": "string"}, "title": {"type": "string"}, "version": {"type": "string"},
 	"sections": {"type": "integer", "description": "The sections of the note, parts of a long one each"},
@@ -101,7 +102,10 @@ var baseSchemas = []NodeSchema{
 	  "id": {"type": "string"}, "text": {"type": "string"}, "title": {"type": "string"}, "doc": {"type": "string"},
 	  "parent": {"type": "string"}, "level": {"type": "integer", "description": "1 a section, 2 a paragraph"},
 	  "meta": {"type": "object", "properties": {"base": {"type": "string"}, "hash": {"type": "string"}, "chars": {"type": "integer"},
-	    "section": {"type": "string"}, "position": {"type": "integer"}}}}}},
+	    "section": {"type": "string"}, "position": {"type": "integer"}}},
+	  "media": {"type": "array", "description": "With media_numbers: the images whose text is in the chunk's", "items": {"type": "object", "properties": {
+	    "n": {"type": "integer"}, "path": {"type": "string", "description": "The image in the vault; none for one from outside"},
+	    "note": {"type": "string", "description": "Its image note"}, "label": {"type": "string"}}}}}}},
 	"count": {"type": "integer", "description": "The chunks given"},
 	"media": ` + mediaStatsSchema + `}}`)},
 	{Type: "note.mark", Description: "Puts a set of coloured marks on a note, shown beside it in the web UI, never in its text",

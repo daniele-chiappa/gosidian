@@ -61,10 +61,22 @@ type NoteReader interface {
 	NotesIn(project, folder string) ([]string, error)
 }
 
-// mediaText is what an image note says of its image.
+// mediaText is what an image note says of its image: and the image's path
+// in the vault, and the note's.
 type mediaText struct {
 	label, description string
 	side               int
+	path, note         string
+}
+
+// MediaRef is an image numbered in a note's text, "[image 3: label]":
+// its number, from 1 in the note's order, the image's path in the vault
+// (none for an image from outside), its image note's path and its label.
+type MediaRef struct {
+	N     int    `json:"n"`
+	Path  string `json:"path,omitempty"`
+	Note  string `json:"note,omitempty"`
+	Label string `json:"label,omitempty"`
 }
 
 // markerRe is a line's text that only marks a block: a quote, a list's
@@ -94,7 +106,7 @@ func noteMedia(host NoteReader, project, note string) (map[string]mediaText, err
 			continue
 		}
 		label, _ := n.Frontmatter["label"].(string)
-		out[attach.FileURL(img)] = mediaText{label: flatText(label), description: flatText(n.Body), side: longestSide(n.Frontmatter)}
+		out[attach.FileURL(img)] = mediaText{label: flatText(label), description: flatText(n.Body), side: longestSide(n.Frontmatter), path: img, note: p}
 	}
 	return out, nil
 }
@@ -118,6 +130,17 @@ func InlineNoteMedia(host NoteReader, project, note, body string, words MediaWor
 	return text, st, nil
 }
 
+// NumberedNoteMedia is InlineNoteMedia with the images numbered (not the
+// icons): "[image 3: label]", and the images by their number.
+func NumberedNoteMedia(host NoteReader, project, note, body string, words MediaWords, inlineMax int) (string, MediaStats, []MediaRef, error) {
+	media, err := noteMedia(host, project, note)
+	if err != nil {
+		return "", MediaStats{}, nil, err
+	}
+	text, st, refs := inlineMediaOpt(body, media, words, inlineMax, false, true)
+	return text, st, refs, nil
+}
+
 // inlineMedia is a markdown body with its images as text. An icon (an
 // image inside a sentence, up to inlineMax pixels on its longest side; any
 // size when inlineMax is 0; any image without a note, whose size is not
@@ -135,9 +158,31 @@ func inlineMedia(body string, media map[string]mediaText, words MediaWords, inli
 // shows it: each image of the vault, small, before its text, and the text
 // of one without a description marked. Its blocks are the same.
 func inlineMediaAs(body string, media map[string]mediaText, words MediaWords, inlineMax int, show bool) (string, MediaStats) {
-	var st MediaStats
+	text, st, _ := inlineMediaOpt(body, media, words, inlineMax, show, false)
+	return text, st
+}
+
+// inlineMediaOpt is inlineMediaAs, and with number the images (not the
+// icons) numbered in the order of the body, which it gives.
+func inlineMediaOpt(body string, media map[string]mediaText, words MediaWords, inlineMax int, show, number bool) (string, MediaStats, []MediaRef) {
+	var (
+		st   MediaStats
+		refs []MediaRef
+	)
 	text := func(url, alt string, inline bool) string {
-		t := mediaPhrase(&st, media, words, inlineMax, url, alt, inline)
+		n := 0
+		if number {
+			n = len(refs) + 1
+		}
+		t, icon := mediaPhrase(&st, media, words, inlineMax, url, alt, inline, n)
+		if number && !icon {
+			m := media[url]
+			ref := MediaRef{N: n, Path: m.path, Note: m.note, Label: m.label}
+			if ref.Path == "" && strings.HasPrefix(url, "/vault-files/") {
+				ref.Path = strings.TrimPrefix(url, "/vault-files/")
+			}
+			refs = append(refs, ref)
+		}
 		if !show {
 			return t
 		}
@@ -197,11 +242,13 @@ func inlineMediaAs(body string, media map[string]mediaText, words MediaWords, in
 		blank = false
 		out = append(out, strings.Join(parts, "`"))
 	}
-	return strings.Join(out, "\n"), st
+	return strings.Join(out, "\n"), st, refs
 }
 
-// mediaPhrase is the text of an image (inlineMedia), counted in st.
-func mediaPhrase(st *MediaStats, media map[string]mediaText, words MediaWords, inlineMax int, url, alt string, inline bool) string {
+// mediaPhrase is the text of an image (inlineMedia), counted in st, and
+// whether it is an icon. With n, an image's word has its number: "[image
+// 3: label]"; an icon has none.
+func mediaPhrase(st *MediaStats, media map[string]mediaText, words MediaWords, inlineMax int, url, alt string, inline bool, n int) (string, bool) {
 	st.Images++
 	m, ok := media[url]
 	icon := inline && (inlineMax <= 0 || !ok || m.side <= inlineMax)
@@ -220,15 +267,18 @@ func mediaPhrase(st *MediaStats, media map[string]mediaText, words MediaWords, i
 	} else {
 		st.Described++
 	}
+	if !icon && n > 0 {
+		word += " " + strconv.Itoa(n)
+	}
 	switch {
 	case icon:
 		if label == "" {
 			label = clipHead(desc, 80)
 		}
 		if label == "" {
-			return "[" + word + "]"
+			return "[" + word + "]", true
 		}
-		return "[" + word + ": " + label + "]"
+		return "[" + word + ": " + label + "]", true
 	case inline:
 		if label == "" {
 			label, desc = desc, ""
@@ -237,9 +287,9 @@ func mediaPhrase(st *MediaStats, media map[string]mediaText, words MediaWords, i
 			label += " (" + desc + ")"
 		}
 		if label == "" {
-			return "[" + word + "]"
+			return "[" + word + "]", false
 		}
-		return "[" + word + ": " + label + "]"
+		return "[" + word + ": " + label + "]", false
 	}
 	head := "[" + word + "]"
 	if label != "" {
@@ -248,7 +298,28 @@ func mediaPhrase(st *MediaStats, media map[string]mediaText, words MediaWords, i
 	if desc != "" {
 		head += " " + desc
 	}
-	return head
+	return head, false
+}
+
+// chunkMedia are the numbered images whose text is in a chunk's, in their
+// order: "[image 3: label]", or "[image 3]" without a label.
+func chunkMedia(text, word string, refs []MediaRef) []MediaRef {
+	out := []MediaRef{}
+	for _, r := range refs {
+		mark := "[" + word + " " + strconv.Itoa(r.N)
+		for i := 0; ; {
+			j := strings.Index(text[i:], mark)
+			if j < 0 {
+				break
+			}
+			i += j + len(mark)
+			if i < len(text) && (text[i] == ':' || text[i] == ']') {
+				out = append(out, r)
+				break
+			}
+		}
+	}
+	return out
 }
 
 // cutOptions are the rules of a cut.
@@ -508,18 +579,30 @@ func noteSections(_ context.Context, env *Env, with map[string]any) (any, error)
 		title = t
 	}
 	body := note.Body
-	var st MediaStats
+	var (
+		st   MediaStats
+		refs []MediaRef
+	)
+	numbers, _ := with["media_numbers"].(bool)
 	switch str(with, "media") {
 	case "", "inline":
 		reader, ok := env.Engine.host.(NoteReader)
 		if !ok {
 			return nil, errors.New("this server does not read the image notes of a note: media: keep")
 		}
-		body, st, err = InlineNoteMedia(reader, env.Project, rel, body, words, int(number(with, "inline_max_side", DefaultInlineMaxSide)))
+		inlineMax := int(number(with, "inline_max_side", DefaultInlineMaxSide))
+		if numbers {
+			body, st, refs, err = NumberedNoteMedia(reader, env.Project, rel, body, words, inlineMax)
+		} else {
+			body, st, err = InlineNoteMedia(reader, env.Project, rel, body, words, inlineMax)
+		}
 		if err != nil {
 			return nil, err
 		}
 	case "keep":
+		if numbers {
+			return nil, errors.New("with.media_numbers: with media: inline, the images as text")
+		}
 	default:
 		return nil, fmt.Errorf("with.media %q: inline or keep", str(with, "media"))
 	}
@@ -561,6 +644,9 @@ func noteSections(_ context.Context, env *Env, with map[string]any) (any, error)
 		}
 		if withText {
 			ch["text"], ch["title"], ch["doc"] = pc.text, pc.title, rel
+			if numbers {
+				ch["media"] = chunkMedia(pc.text, words.Image, refs)
+			}
 		}
 		chunks = append(chunks, ch)
 	}

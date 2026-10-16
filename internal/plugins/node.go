@@ -63,7 +63,19 @@ func (n node) Run(ctx context.Context, env *pipeline.Env, with map[string]any) (
 	if base == "" && spec.FileRefs {
 		base = env.Engine.Config().PublicURL
 	}
+	optional := optionalFiles(spec)
 	for _, f := range spec.Files {
+		// A file field the node's schema does not require may be left out,
+		// or be an empty list: the plugin then gets none.
+		if optional[f] {
+			if v, ok := args[f]; !ok || v == nil {
+				delete(args, f)
+				continue
+			} else if list, ok := v.([]any); ok && len(list) == 0 {
+				delete(args, f)
+				continue
+			}
+		}
 		if list, ok := args[f].([]any); ok {
 			refs, err := n.fileList(env, spec, f, list, base)
 			if err != nil {
@@ -282,4 +294,27 @@ func extOf(mime string) string {
 		}
 	}
 	return ""
+}
+
+// optionalFiles are the file fields of a node its input schema declares
+// and does not require. A node without a schema has none: each of its file
+// fields names a file.
+func optionalFiles(spec NodeSpec) map[string]bool {
+	var schema struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+		Required   []string                   `json:"required"`
+	}
+	if len(spec.Input) == 0 || json.Unmarshal(spec.Input, &schema) != nil {
+		return nil
+	}
+	out := map[string]bool{}
+	for _, f := range spec.Files {
+		if _, ok := schema.Properties[f]; ok {
+			out[f] = true
+		}
+	}
+	for _, r := range schema.Required {
+		delete(out, r)
+	}
+	return out
 }

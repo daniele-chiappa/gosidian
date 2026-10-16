@@ -325,6 +325,36 @@ nodes:
 	}
 }
 
+// A document that arrived is named by note.write: an attachment by a
+// wikilink in source, a file of the IN folder, which no wikilink reaches,
+// by its path as text in in_file (ADR-035 addendum, BUG-121).
+func TestEngine_WriteNamesTheFileItCameFrom(t *testing.T) {
+	e, host := newEngine(t, Config{})
+	host.notes["p/pipelines/arrive.md"] = pipelineNote(`
+trigger: {on: external}
+nodes:
+  - id: write
+    use: note.write
+    with: {path: "out/{{ trigger.name }}.md", body: "x"}
+`)
+	for name, c := range map[string]struct{ file, want, not string }{
+		"attachment": {"p/attachments/a.pdf", "source: '[[p/attachments/a.pdf]]'", "in_file"},
+		"in":         {"p/IN/fatture/b.pdf", "in_file: p/IN/fatture/b.pdf", "source"},
+		"in short":   {"IN/c.pdf", "in_file: p/IN/c.pdf", "source"},
+	} {
+		run, _, err := e.Start(StartRequest{Path: "p/pipelines/arrive.md", Trigger: TriggerExternal,
+			Input: map[string]any{"file": c.file, "name": strings.ReplaceAll(name, " ", "-")}, Actor: "alice"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		waitStatus(t, e, run.ID, jobs.Done)
+		out := host.note("p/out/" + strings.ReplaceAll(name, " ", "-") + ".md")
+		if !strings.Contains(out, c.want) || strings.Contains(out, c.not+":") {
+			t.Errorf("%s: want %q and no %s:\n%s", name, c.want, c.not, out)
+		}
+	}
+}
+
 func TestEngine_StartRefusals(t *testing.T) {
 	e, host := newEngine(t, Config{MaxInputBytes: 64})
 	host.notes["p/pl.md"] = pipelineNote("trigger: {on: manual}\nnodes: [{id: a, use: note.read, with: {path: x.md}}]")

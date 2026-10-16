@@ -81,8 +81,10 @@ func Open(path string) (*Index, error) {
 // like every other table; v3 (IMP-104) adds notes.hash and the meta table, so
 // the boot scan can skip the notes whose content has not changed; v4
 // (IMP-127 iteration 2) adds links.field, the frontmatter key of a link; v5
-// (IMP-127 iteration 3) adds the authors table.
-const schemaVersion = 5
+// (IMP-127 iteration 3) adds the authors table; v6 (BUG-121) adds notes.name
+// and links.target_key, the keys link resolution looks notes and unresolved
+// links up by (see noteKeys).
+const schemaVersion = 6
 
 // ContentVersion identifies what an upsert extracts from a note: links,
 // tags, title, importance, note_fields and the FTS columns. Bump it whenever
@@ -120,11 +122,77 @@ func migrate(db *sql.DB) (bool, error) {
 			return false, err
 		}
 	}
-	// After the columns exist: the trigger reads notes.hash.
+	// After the columns exist: the trigger reads notes.hash, the key
+	// indexes and fillKeys the v6 columns.
 	if _, err := db.Exec(hashGuardSQL); err != nil {
 		return false, err
 	}
+	if _, err := db.Exec(keyIndexesSQL); err != nil {
+		return false, err
+	}
+	if err := fillKeys(db); err != nil {
+		return false, err
+	}
 	return migrated, nil
+}
+
+// keyIndexesSQL indexes the v6 keys. Not in schema.sql, which runs before
+// addMissingColumns adds the columns to an older index.
+const keyIndexesSQL = `CREATE INDEX IF NOT EXISTS notes_name ON notes(name);
+CREATE INDEX IF NOT EXISTS links_target_key ON links(target_key);`
+
+// fillKeys computes the v6 keys of the rows that have none: every row of an
+// index just migrated, and those a release from before v6 wrote after a
+// rollback, whose notes the boot scan skips because their hash still holds.
+// On an index whose rows all have their keys both queries find nothing,
+// through the key indexes.
+func fillKeys(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := fillKey(tx, `SELECT id, path FROM notes WHERE name IS NULL`,
+		`UPDATE notes SET name = ? WHERE id = ?`, noteName); err != nil {
+		return err
+	}
+	if err := fillKey(tx, `SELECT rowid, target FROM links WHERE target_key IS NULL`,
+		`UPDATE links SET target_key = ? WHERE rowid = ?`, targetKey); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// fillKey sets, through update, key(text) on each row (id, text) the query
+// selects.
+func fillKey(tx *sql.Tx, query, update string, key func(string) string) error {
+	rows, err := tx.Query(query)
+	if err != nil {
+		return err
+	}
+	type row struct {
+		id   int64
+		text string
+	}
+	var todo []row
+	for rows.Next() {
+		var r row
+		if err := rows.Scan(&r.id, &r.text); err != nil {
+			rows.Close()
+			return err
+		}
+		todo = append(todo, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, r := range todo {
+		if _, err := tx.Exec(update, key(r.text), r.id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // hashGuardSQL covers a rollback. A release from before v3 rewrites a
@@ -149,6 +217,8 @@ func addMissingColumns(db *sql.DB) error {
 		{"notes", "importance", "INTEGER NOT NULL DEFAULT 3"},
 		{"notes", "hash", "TEXT"},
 		{"links", "field", "TEXT"},
+		{"notes", "name", "TEXT"},
+		{"links", "target_key", "TEXT"},
 	} {
 		var n int
 		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, col.table, col.name).Scan(&n); err != nil {
@@ -256,10 +326,9 @@ func (i *Index) Upsert(n NoteDoc) error {
 }
 
 // UpsertUnresolved stores the note like Upsert but leaves link resolution to
-// a ResolveAll once the batch is in. For bulk loads: per-note resolution
-// rescans the links table (inbound resolution matches on lower(target),
-// which no index serves), so a full scan resolving note by note grows with
-// notes × links, while one ResolveAll at the end reaches the same result.
+// a ResolveAll once the batch is in. For bulk loads: resolving each link once
+// at the end reaches the same result as resolving note by note, the links of
+// each note and then the links elsewhere it answers, with fewer queries.
 func (i *Index) UpsertUnresolved(n NoteDoc) error {
 	_, err := i.upsertLocked(n, false)
 	return err
@@ -308,56 +377,109 @@ func (i *Index) Touch(path string, modTime, size int64) error {
 // characters there (used with ESCAPE '\').
 var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
-// resolveInbound resolves the unresolved links elsewhere that the note now
-// answers: every unresolved link whose target contains the note's basename
-// or one of its titles goes through resolveTarget again, so
-// [[plans/<base>]], [[<base>#heading]] and [[<frontmatter title>]] resolve
-// as if the note had existed first. Matching the exact target only left
-// those unresolved until the next boot. It runs inside the Upsert
-// transaction.
-func resolveInbound(tx *sql.Tx, notePath string, titles ...string) error {
-	base := notePath
-	if idx := strings.LastIndex(base, "/"); idx >= 0 {
-		base = base[idx+1:]
+// linkTarget is the part of a link target resolveTarget matches to a note:
+// the text before any #fragment, trimmed.
+func linkTarget(target string) string {
+	t := strings.TrimSpace(target)
+	if idx := strings.IndexByte(t, '#'); idx >= 0 {
+		t = strings.TrimSpace(t[:idx])
 	}
-	var conds []string
-	var args []any
+	return t
+}
+
+// targetKey is the links.target_key of a target: its linkTarget in lower
+// case. resolveTarget compares a target to a note case-insensitively but
+// for the exact path, so a target can reach a note only if its key is one
+// of the note's noteKeys.
+func targetKey(target string) string { return strings.ToLower(linkTarget(target)) }
+
+// noteName is the notes.name of a note: its file name in lower case.
+func noteName(p string) string {
+	return strings.ToLower(p[strings.LastIndexByte(p, '/')+1:])
+}
+
+// noteKeys are the targetKeys that can reach the note at p with the given
+// titles, one per way resolveTarget matches a target: the path as written
+// or without its extension (step 1), a title (step 2), the path without its
+// extension from any of its folders down, "c", "b/c" and "a/b/c" for
+// a/b/c.md (step 3).
+//
+// Go's strings.ToLower lowers every letter SQLite's lower() and LIKE fold
+// (ASCII), and more: two texts SQLite finds equal have the same key.
+func noteKeys(p string, titles ...string) []string {
+	var keys []string
 	seen := map[string]bool{}
-	for _, s := range append([]string{stripNoteExt(base)}, titles...) {
-		s = strings.ToLower(strings.TrimSpace(s))
-		if s == "" || seen[s] {
-			continue
+	add := func(k string) {
+		if k != "" && !seen[k] {
+			seen[k] = true
+			keys = append(keys, k)
 		}
-		seen[s] = true
-		conds = append(conds, `lower(target) LIKE ? ESCAPE '\'`)
-		args = append(args, "%"+likeEscaper.Replace(s)+"%")
 	}
-	// A name that is nothing once trimmed (p/.md) and no title: no link can
-	// name the note, and "AND ()" failed the whole Upsert (IMP-162, S4-12).
-	if len(conds) == 0 {
+	low := strings.ToLower(p)
+	add(low)
+	base := stripNoteExt(low)
+	add(base)
+	for i := 0; i < len(base); i++ {
+		if base[i] == '/' {
+			add(base[i+1:])
+		}
+	}
+	for _, t := range titles {
+		add(strings.ToLower(strings.TrimSpace(t)))
+	}
+	return keys
+}
+
+// resolveInbound resolves the unresolved links elsewhere that the note now
+// answers, inside the Upsert transaction, so [[plans/<base>]],
+// [[<base>#heading]] and [[<frontmatter title>]] resolve as if the note had
+// existed first (matching the exact target only left those unresolved until
+// the next boot). Only the links whose target_key is one of the note's keys
+// can, and links_target_key finds them. Selecting every unresolved link
+// whose target contained the note's name, a scan whose matches grew with
+// the vault (every 001.md retried every link with 001 in it), made writing
+// thousands of notes with links that never resolve quadratic (BUG-121).
+func resolveInbound(tx *sql.Tx, notePath string, titles ...string) error {
+	keys := noteKeys(notePath, titles...)
+	// A note always has its path as a key, but an empty IN () would fail
+	// the whole Upsert, as an empty OR list did for p/.md (IMP-162, S4-12).
+	if len(keys) == 0 {
 		return nil
 	}
-	return reresolveLinks(tx,
-		`SELECT rowid, target FROM links WHERE (target_path IS NULL OR target_path = '') AND (`+strings.Join(conds, " OR ")+`)`,
-		args...)
+	args := make([]any, len(keys))
+	for k, key := range keys {
+		args[k] = key
+	}
+	return reresolveLinks(tx, inboundQuery(len(keys)), args...)
+}
+
+// inboundQuery selects, for reresolveLinks, the unresolved links whose
+// target_key is one of n keys. The test on target_path is written so that
+// no index serves it: with a few keys the planner went for links_target_path
+// instead, and read every unresolved link of the vault.
+func inboundQuery(n int) string {
+	return `SELECT rowid, target, COALESCE(target_path, '') FROM links
+		WHERE target_key IN (` + strings.TrimSuffix(strings.Repeat("?,", n), ",") + `)
+		AND COALESCE(target_path, '') = ''`
 }
 
 // reresolveLinks runs resolveTarget again, through tx, on the links the
-// query selects (rowid, target) and stores the result, NULL when the target
-// reaches no note.
+// query selects (rowid, target, and target_path, empty for none) and stores
+// the result, NULL when the target reaches no note, where it differs from
+// what the link had: an unresolved link that stays so costs no write.
 func reresolveLinks(tx *sql.Tx, query string, args ...any) error {
 	rows, err := tx.Query(query, args...)
 	if err != nil {
 		return err
 	}
 	type link struct {
-		rowid  int64
-		target string
+		rowid       int64
+		target, was string
 	}
 	var links []link
 	for rows.Next() {
 		var l link
-		if err := rows.Scan(&l.rowid, &l.target); err != nil {
+		if err := rows.Scan(&l.rowid, &l.target, &l.was); err != nil {
 			rows.Close()
 			return err
 		}
@@ -368,7 +490,11 @@ func reresolveLinks(tx *sql.Tx, query string, args ...any) error {
 		return err
 	}
 	for _, l := range links {
-		if _, err := tx.Exec(`UPDATE links SET target_path = ? WHERE rowid = ?`, nullable(resolveTarget(tx, l.target)), l.rowid); err != nil {
+		now := resolveTarget(tx, l.target)
+		if now == l.was {
+			continue
+		}
+		if _, err := tx.Exec(`UPDATE links SET target_path = ? WHERE rowid = ?`, nullable(now), l.rowid); err != nil {
 			return err
 		}
 	}
@@ -407,10 +533,10 @@ func (i *Index) upsertLocked(n NoteDoc, resolve bool) (int64, error) {
 	}
 
 	if _, err := tx.Exec(`
-        INSERT INTO notes(path, title, mtime, size, importance, hash) VALUES(?, ?, ?, ?, ?, ?)
-        ON CONFLICT(path) DO UPDATE SET title=excluded.title, mtime=excluded.mtime,
+        INSERT INTO notes(path, name, title, mtime, size, importance, hash) VALUES(?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(path) DO UPDATE SET name=excluded.name, title=excluded.title, mtime=excluded.mtime,
             size=excluded.size, importance=excluded.importance, hash=excluded.hash
-    `, n.Path, title, n.ModTime, n.Size, parser.Importance(meta), ContentHash(n)); err != nil {
+    `, n.Path, noteName(n.Path), title, n.ModTime, n.Size, parser.Importance(meta), ContentHash(n)); err != nil {
 		return 0, err
 	}
 
@@ -436,8 +562,8 @@ func (i *Index) upsertLocked(n NoteDoc, resolve bool) (int64, error) {
 			// the note itself (by path, title or basename) resolves too.
 			targetPath = nullable(resolveTarget(tx, l.Target))
 		}
-		if _, err := tx.Exec(`INSERT INTO links(src_id, target, target_path, alias, field) VALUES(?,?,?,?,?)`,
-			id, l.Target, targetPath, l.Alias, nullable(l.Field)); err != nil {
+		if _, err := tx.Exec(`INSERT INTO links(src_id, target, target_key, target_path, alias, field) VALUES(?,?,?,?,?,?)`,
+			id, l.Target, targetKey(l.Target), targetPath, l.Alias, nullable(l.Field)); err != nil {
 			return 0, err
 		}
 	}
@@ -508,7 +634,7 @@ func (i *Index) Delete(path string) error {
 	// note may answer them, as the note's new path does in a rename, which
 	// indexes the new path before deleting the old one. Clearing them left
 	// them unresolved until the next boot (BUG-081).
-	if err := reresolveLinks(tx, `SELECT rowid, target FROM links WHERE target_path = ?`, path); err != nil {
+	if err := reresolveLinks(tx, `SELECT rowid, target, target_path FROM links WHERE target_path = ?`, path); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -576,18 +702,26 @@ type rowQuerier interface {
 	QueryRow(query string, args ...any) *sql.Row
 }
 
+// The queries of resolveTarget, one per step. Each one is served by an
+// index (TestResolveQueriesUseIndexes): they run for the links of every
+// write, and a scan of notes there made each write cost more as the vault
+// grew (BUG-121). notes_title_lower serves the title, notes_name the file
+// name, which the basename match needs before its LIKE.
+const (
+	qNoteByPath  = `SELECT path FROM notes WHERE path = ?`
+	qNoteByTitle = `SELECT path FROM notes WHERE lower(title) = lower(?) LIMIT 1`
+	qNoteByName  = `SELECT path FROM notes WHERE name = ? AND (lower(path) LIKE ? ESCAPE '\' OR lower(path) = ?) ORDER BY path LIMIT 1`
+)
+
 // resolveTarget maps a [[wiki-link]] target to a note path.
 // Matches by exact path, title (case-insensitive), or basename (case-insensitive).
 func resolveTarget(q rowQuerier, target string) string {
-	t := strings.TrimSpace(target)
 	// [[note#heading]] links to a heading INSIDE the note (Obsidian
 	// semantics): resolve the path part, the fragment is presentation-level.
 	// Without this strip every fragment link stayed unresolved — invisible to
 	// backlinks/graph and flagged broken by lint (BUG-025). The markdown
 	// renderer already strips it independently (parser/markdown.go).
-	if idx := strings.IndexByte(t, '#'); idx >= 0 {
-		t = strings.TrimSpace(t[:idx])
-	}
+	t := linkTarget(target)
 	if t == "" {
 		// pure [[#heading]] self-link: no cross-note edge to record.
 		return ""
@@ -600,25 +734,26 @@ func resolveTarget(q rowQuerier, target string) string {
 	}
 	for _, p := range tryPaths {
 		var got string
-		if err := q.QueryRow(`SELECT path FROM notes WHERE path = ?`, p).Scan(&got); err == nil {
+		if err := q.QueryRow(qNoteByPath, p).Scan(&got); err == nil {
 			return got
 		}
 	}
 	// 2. title match
 	var got string
-	if err := q.QueryRow(`SELECT path FROM notes WHERE lower(title) = lower(?) LIMIT 1`, t).Scan(&got); err == nil {
+	if err := q.QueryRow(qNoteByTitle, t).Scan(&got); err == nil {
 		return got
 	}
 	// 3. basename match across note extensions (.md before .html). "_" and
 	// "%" are literal characters in a link target, so they are escaped for
-	// LIKE; ORDER BY keeps a multi-match deterministic.
+	// LIKE; ORDER BY keeps a multi-match deterministic. A path the LIKE
+	// matches ends with the target's last segment and the extension, so its
+	// name is that, in lower case: the index on name finds the few notes
+	// the LIKE has to read.
 	lowerT := strings.ToLower(t)
 	likeT := likeEscaper.Replace(lowerT)
+	lastT := lowerT[strings.LastIndexByte(lowerT, '/')+1:]
 	for _, e := range noteExts {
-		if err := q.QueryRow(
-			`SELECT path FROM notes WHERE lower(path) LIKE ? ESCAPE '\' OR lower(path) = ? ORDER BY path LIMIT 1`,
-			"%/"+likeT+e, lowerT+e,
-		).Scan(&got); err == nil {
+		if err := q.QueryRow(qNoteByName, lastT+e, "%/"+likeT+e, lowerT+e).Scan(&got); err == nil {
 			return got
 		}
 	}

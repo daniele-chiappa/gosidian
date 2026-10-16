@@ -10,7 +10,7 @@
 //	      - status in [open, in-progress]
 //	    handoff: myproject-dev   # a handoff to this agent, listing the rows
 //	  - name: Monday backlog
-//	    every: monday 09:00      # or "day 09:00"
+//	    every: monday 09:00      # or "day 09:00", or "hour :05"
 //	    snapshot: myproject/hot.md
 //
 // A due rule fires once for each row whose date comes within `before` days
@@ -180,7 +180,7 @@ func parseRule(project string, n *yaml.Node) (Rule, error) {
 	every := strings.TrimSpace(raw.Every)
 	switch {
 	case r.Due == "" && every == "":
-		return r, errors.New("say when: due (a date field of the rows) or every (\"monday 09:00\", \"day 09:00\")")
+		return r, errors.New("say when: due (a date field of the rows) or every (\"monday 09:00\", \"day 09:00\", \"hour :05\")")
 	case r.Due != "" && every != "":
 		return r, errors.New("due and every: one or the other")
 	case every != "":

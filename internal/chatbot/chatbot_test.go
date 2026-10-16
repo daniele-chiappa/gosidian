@@ -165,12 +165,28 @@ type fakePlugins struct {
 	mu     sync.Mutex
 	calls  []call
 	refuse bool
+	// What chat_bots says; noBots: a plugin without it.
+	bots    []string
+	started string
+	noBots  bool
+	// down: the plugin does not answer.
+	down bool
 }
 
 func (f *fakePlugins) CallTool(_ context.Context, plugin, tool string, args, meta map[string]any) (*mcp.CallToolResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, call{plugin, tool, args, meta})
+	if f.down {
+		return nil, errors.New("connection refused")
+	}
+	if tool == ToolBots {
+		if f.noBots {
+			return mcp.NewToolResultError("unknown tool chat_bots"), nil
+		}
+		b, _ := json.Marshal(map[string]any{"bots": f.bots, "started": f.started})
+		return mcp.NewToolResultStructured(json.RawMessage(b), string(b)), nil
+	}
 	if f.refuse {
 		return mcp.NewToolResultError("no such scope filter"), nil
 	}
@@ -363,6 +379,98 @@ func TestService_Reconcile(t *testing.T) {
 		if strings.HasPrefix(n, "chat.") {
 			t.Errorf("a secret left: %s", n)
 		}
+	}
+}
+
+func TestService_Lost(t *testing.T) {
+	s, _, pl, _, _ := newService(t)
+	ctx := context.Background()
+	if s.Lost(ctx) {
+		t.Error("no bot configured, yet lost")
+	}
+	s.Reconcile(ctx)
+	set := func(bots []string, started string) {
+		pl.mu.Lock()
+		pl.bots, pl.started = bots, started
+		pl.mu.Unlock()
+	}
+	set([]string{"assistente"}, "2026-10-16T20:00:00Z")
+	if s.Lost(ctx) {
+		t.Error("the plugin has the bot: lost")
+	}
+	if c := pl.last(ToolBots); c.plugin != "chat" || c.meta["gosidian/project"] != "p" {
+		t.Errorf("chat_bots: %+v", c)
+	}
+	// Restarted: it says another start (and here has the bot already: still handed again).
+	set([]string{"assistente"}, "2026-10-16T20:05:00Z")
+	if !s.Lost(ctx) {
+		t.Error("restarted, not lost")
+	}
+	// The bot missing.
+	set(nil, "2026-10-16T20:05:00Z")
+	if !s.Lost(ctx) {
+		t.Error("the bot missing, not lost")
+	}
+	// A plugin without chat_bots: asked once, then left to Every.
+	pl.mu.Lock()
+	pl.noBots = true
+	pl.mu.Unlock()
+	if s.Lost(ctx) || s.Lost(ctx) {
+		t.Error("a plugin without chat_bots: lost")
+	}
+	n := 0
+	pl.mu.Lock()
+	for _, c := range pl.calls {
+		if c.tool == ToolBots {
+			n++
+		}
+	}
+	pl.mu.Unlock()
+	// Three answers, then the old plugin once.
+	if n != 4 {
+		t.Errorf("chat_bots called %d times, want 4 (the old plugin once)", n)
+	}
+}
+
+// A bot not configured because its plugin was down waits for it: it is
+// handed again as soon as the plugin answers chat_bots, not at the next
+// reconcile. One the plugin refused does not come back by itself.
+func TestService_LostWaitingBot(t *testing.T) {
+	s, _, pl, _, _ := newService(t)
+	ctx := context.Background()
+	setDown := func(v bool) {
+		pl.mu.Lock()
+		pl.down = v
+		pl.mu.Unlock()
+	}
+	setDown(true)
+	s.Reconcile(ctx)
+	st, ok := s.Status("p/bots/assistente.md")
+	if !ok || st.Configured || !st.NotReady {
+		t.Fatalf("a bot whose plugin is down: %+v", st)
+	}
+	if s.Lost(ctx) {
+		t.Error("the plugin still down: lost")
+	}
+	setDown(false)
+	if !s.Lost(ctx) {
+		t.Error("the plugin answers again: the waiting bot not handed")
+	}
+	s.Reconcile(ctx)
+	if st, _ := s.Status("p/bots/assistente.md"); !st.Configured || st.NotReady {
+		t.Fatalf("handed again: %+v", st)
+	}
+
+	s2, _, pl2, _, _ := newService(t)
+	pl2.mu.Lock()
+	pl2.refuse = true
+	pl2.mu.Unlock()
+	s2.Reconcile(ctx)
+	if st, _ := s2.Status("p/bots/assistente.md"); st.Configured || st.NotReady {
+		t.Fatalf("a bot the plugin refused: %+v", st)
+	}
+	if s2.Lost(ctx) {
+		t.Error("a bot the plugin refused: lost, it would be handed every 30 seconds")
 	}
 }
 

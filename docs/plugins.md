@@ -124,7 +124,10 @@ When a pipeline runs `docling.convert`, gosidian:
    [IN folder](in.md), and is replaced by
    `{"name": "1f3c….pdf", "mime": "application/pdf", "data": "<base64>"}`
    (20 MiB at most), or, for a node with `file_refs`, by
-   `{"name": "fattura.pdf", "mime": "application/pdf", "size": 1048576, "sha256": "…", "url": "…/api/v1/run-files/<ticket>"}`;
+   `{"name": "fattura.pdf", "mime": "application/pdf", "size": 1048576, "sha256": "…", "url": "…/api/v1/run-files/<ticket>"}`.
+   A file setting the node's `input_schema` declares and does not require
+   may be left out, or be an empty list: the plugin then gets none (a
+   node without a schema needs each of its files);
 3. takes the tool's **structured content** (else its text, read as JSON,
    else `{"text": …}`) as the node's output;
 4. stores every **file** in the result as an attachment of the project,

@@ -14,6 +14,7 @@ import (
 
 	"github.com/gosidian/gosidian/internal/jobs"
 	"github.com/gosidian/gosidian/internal/parser"
+	"github.com/gosidian/gosidian/internal/vault"
 )
 
 // Env is what a node sees while it runs.
@@ -189,6 +190,22 @@ func number(with map[string]any, key string, def float64) float64 {
 // path that does not start with the project is relative to it.
 func (env *Env) projectPath(p string) (string, error) { return projectRel(env.Project, p) }
 
+// inFile is the vault path of f when f is a file of the project's IN folder
+// (its vault path, or "IN/…"), "" otherwise. A file of the IN folder is no
+// note and no attachment: a wikilink to it would never resolve, so a note
+// names it as text, in in_file (ADR-035 addendum, BUG-121).
+func (env *Env) inFile(f string) string {
+	f = strings.Trim(strings.TrimSpace(f), "/")
+	root := vault.INRoot(env.Project)
+	switch {
+	case strings.HasPrefix(f, root+"/"):
+		return f
+	case strings.HasPrefix(f, vault.INFolder+"/"):
+		return env.Project + "/" + f
+	}
+	return ""
+}
+
 // projectRel is p as a vault path inside project: a path that does not
 // start with the project is relative to it.
 func projectRel(project, p string) (string, error) {
@@ -340,7 +357,11 @@ func noteWrite(_ context.Context, env *Env, with map[string]any) (any, error) {
 	fm["pipeline_run"] = env.Run.ID
 	if src, _ := env.Scope["trigger"].(map[string]any); src != nil {
 		if f, _ := src["file"].(string); f != "" {
-			fm["source"] = "[[" + f + "]]"
+			if in := env.inFile(f); in != "" {
+				fm["in_file"] = in
+			} else {
+				fm["source"] = "[[" + f + "]]"
+			}
 		}
 	}
 	if mode != WriteAppend && !merge {

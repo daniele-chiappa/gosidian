@@ -216,7 +216,7 @@ automations:
     handoff: myproject-dev
     message: Look at these before the end of the week.
   - name: Monday backlog
-    every: monday 09:00   # a day of the week, or "day 09:00" for each day
+    every: monday 09:00   # a day of the week, "day 09:00" for each day, or "hour :05" for each hour
     snapshot: hot         # a note of the project
   - name: Weekly review
     every: friday 16:00

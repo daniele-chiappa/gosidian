@@ -537,7 +537,10 @@ func listPlugin(t *testing.T) *httptest.Server {
 	s.AddTool(mcp.NewTool(ManifestTool), func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		b, _ := json.Marshal(map[string]any{
 			"name": "agent", "version": "1.0", "gosidian": 1,
-			"nodes":       []any{map[string]any{"name": "look", "tool": "look", "files": []string{"docs"}, "file_refs": true}},
+			"nodes": []any{map[string]any{"name": "look", "tool": "look", "files": []string{"docs"}, "file_refs": true},
+				// peek's schema does not require its files.
+				map[string]any{"name": "peek", "tool": "look", "files": []string{"docs"}, "file_refs": true,
+					"input_schema": json.RawMessage(`{"type": "object", "required": ["q"], "properties": {"q": {"type": "string"}, "docs": {"type": "array"}}}`)}},
 			"permissions": map[string]any{"files": true, "network": []string{"gosidian"}},
 		})
 		return mcp.NewToolResultText(string(b)), nil
@@ -608,6 +611,40 @@ func TestNode_FileListAndTokensLeft(t *testing.T) {
 	// b sees the 500 tokens a reported.
 	if fmt.Sprint(outs["b"]["names"]) != "[b.pdf]" || outs["b"]["left"] != float64(1500) {
 		t.Errorf("b = %v", outs["b"])
+	}
+}
+
+func TestNode_OptionalFiles(t *testing.T) {
+	ts := listPlugin(t)
+	reg, err := New([]Config{{Name: "agent", URL: ts.URL + "/mcp", FilesURL: "http://files.test"}}, t.TempDir(), nil, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	reg.Check(ctx)
+	st, _ := reg.State("agent")
+	if _, err := reg.Accept(ctx, "agent", st.SHA, "test"); err != nil {
+		t.Fatal(err)
+	}
+	// A file field the node's schema does not require: left out, or an empty list.
+	for name, body := range map[string]string{
+		"left out":   "{id: c, use: agent.peek, with: {q: x}}",
+		"empty list": "{id: c, use: agent.peek, with: {q: x, docs: []}}",
+	} {
+		t.Run(name, func(t *testing.T) {
+			e, host := newEngine(t, reg)
+			host.mu.Lock()
+			host.notes["p/pipelines/x.md"] = "---\ntype: pipeline\n---\n\n```pipeline\nnodes:\n  - " + body + "\n```\n"
+			host.mu.Unlock()
+			run, _, err := e.Start(pipeline.StartRequest{Path: "p/pipelines/x.md", Trigger: pipeline.TriggerManual})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if run = waitEnd(t, e, run.ID); run.Status != jobs.Done {
+				steps, _ := e.Runner().Store().Steps(run.ID)
+				t.Fatalf("run %s %q, steps %+v", run.Status, run.Error, steps)
+			}
+		})
 	}
 }
 

@@ -118,8 +118,13 @@ own with the secret of `signed`; its `iss` is its own.
 ## What gosidian does
 
 - **It hands the bot to its plugin** when the note is saved, at the
-  server's start and every five minutes (a plugin that restarted gets it
-  back), with the tool `chat_configure`. The state shows in the note: the
+  server's start and every five minutes, with the tool `chat_configure`;
+  and at once when the plugin lost it: every 30 seconds it asks the
+  plugins that have bots which ones they still have (`chat_bots`), and a
+  plugin that restarted, or misses a bot, gets them all again; so does a
+  plugin that was down, or whose manifest was not accepted yet, when it
+  answers again. A plugin without `chat_bots` waits for the five minutes.
+  The state shows in the note: the
   plugin took the bot, or why not (a block that does not read, a pipeline
   that does not start on chat, a secret that is not set, a plugin that is
   down).
@@ -231,6 +236,10 @@ the page of the bot's chat (it takes a token in its fragment,
 `#token=…`), and the widget's script.
 
 **`chat_remove`** takes `{bot}`: the bot is gone.
+
+**`chat_bots`** (read, optional) takes nothing and answers
+`{bots: [names], started}`: the bots the plugin has, and when it started
+(RFC 3339). A plugin keeps its bots in memory: one restarted has none.
 
 A message starts the pipeline with `{"input": {...}, "wait": 60}` and
 the run token: the answer is `200` with `answer` once the run ended

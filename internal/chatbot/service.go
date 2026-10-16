@@ -29,6 +29,9 @@ import (
 const (
 	ToolConfigure = "chat_configure"
 	ToolRemove    = "chat_remove"
+	// ToolBots names the bots a plugin has, and since when it runs: a
+	// plugin keeps them in memory, and one restarted has none (BUG-130).
+	ToolBots = "chat_bots"
 )
 
 // Note is a note of the vault as the bots read it.
@@ -99,7 +102,17 @@ type State struct {
 	// Keys are the names of the sites' keys.
 	Keys    []string `json:"keys,omitempty"`
 	TokenID string   `json:"token_id,omitempty"`
+	// NotReady: the bot is not configured because its plugin did not answer
+	// or served a manifest not accepted yet. Lost hands it again as soon as
+	// the plugin answers, not at the next reconcile.
+	NotReady bool `json:"not_ready,omitempty"`
 }
+
+// notReady is an error of a plugin that is down or not accepted: the bot
+// waits for it (State.NotReady).
+type notReady struct{ error }
+
+func (e notReady) Unwrap() error { return e.error }
 
 func (s State) key() string { return s.Plugin + "/" + s.Bot }
 
@@ -112,6 +125,11 @@ type Options struct {
 	// plugin keeps them in memory) and the old conversations go; default
 	// 5 minutes.
 	Every time.Duration
+	// Watch is how often the plugins that have bots are asked which ones
+	// they still have (chat_bots): one restarted gets them again at once,
+	// not at the next Every. Default 30 seconds; a plugin without
+	// chat_bots waits for Every.
+	Watch time.Duration
 	// CallTimeout caps a call of a plugin's tool; default 30 seconds.
 	CallTimeout time.Duration
 	// TokenTTL is how long a token gosidian signs for a user is good;
@@ -136,6 +154,11 @@ type Service struct {
 	// reconcile runs one at a time.
 	run     sync.Mutex
 	changed chan string
+
+	// started is when each plugin said it started (chat_bots); noBots the
+	// plugins without chat_bots. Under mu.
+	started map[string]string
+	noBots  map[string]bool
 }
 
 // New is the service of the bots, its state in stateDir/chatbots.json.
@@ -143,6 +166,9 @@ type Service struct {
 func New(host Host, pl Plugins, tokens Tokens, secrets Secrets, stateDir string, opts Options) (*Service, error) {
 	if opts.Every <= 0 {
 		opts.Every = 5 * time.Minute
+	}
+	if opts.Watch <= 0 {
+		opts.Watch = 30 * time.Second
 	}
 	if opts.CallTimeout <= 0 {
 		opts.CallTimeout = 30 * time.Second
@@ -157,7 +183,8 @@ func New(host Host, pl Plugins, tokens Tokens, secrets Secrets, stateDir string,
 		opts.Now = func() time.Time { return time.Now().UTC() }
 	}
 	s := &Service{host: host, plugins: pl, tokens: tokens, secrets: secrets, opts: opts,
-		file: filepath.Join(stateDir, "chatbots.json"), states: map[string]State{}, changed: make(chan string, 64)}
+		file: filepath.Join(stateDir, "chatbots.json"), states: map[string]State{}, changed: make(chan string, 64),
+		started: map[string]string{}, noBots: map[string]bool{}}
 	b, err := os.ReadFile(s.file)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
@@ -201,11 +228,14 @@ func (s *Service) Changed(path string) {
 	}
 }
 
-// Start hands the bots to their plugins now, again every Options.Every
-// and soon after a bot's note changed, until ctx ends.
+// Start hands the bots to their plugins now, again every Options.Every,
+// soon after a bot's note changed and as soon as a plugin lost them, until
+// ctx ends.
 func (s *Service) Start(ctx context.Context) {
 	tick := time.NewTicker(s.opts.Every)
 	defer tick.Stop()
+	watch := time.NewTicker(s.opts.Watch)
+	defer watch.Stop()
 	// The plugins are checked at the server's start: give them a moment.
 	first := time.NewTimer(10 * time.Second)
 	defer first.Stop()
@@ -218,6 +248,10 @@ func (s *Service) Start(ctx context.Context) {
 			s.Reconcile(ctx)
 		case <-tick.C:
 			s.Reconcile(ctx)
+		case <-watch.C:
+			if s.Lost(ctx) {
+				s.Reconcile(ctx)
+			}
 		case p := <-s.changed:
 			if s.concerns(p) {
 				debounce = time.After(2 * time.Second)
@@ -227,6 +261,86 @@ func (s *Service) Start(ctx context.Context) {
 			s.Reconcile(ctx)
 		}
 	}
+}
+
+// Lost asks each plugin that has bots which ones it still has
+// (chat_bots), and says whether one lost any, or started again since it
+// last said: a plugin keeps its bots in memory, and until they are handed
+// again they answer 404 (BUG-130). A plugin that does not answer is asked
+// again next time; one without chat_bots waits for Options.Every.
+func (s *Service) Lost(ctx context.Context) bool {
+	want := map[string][]string{}
+	project := map[string]string{}
+	// waiting are the plugins with a bot that waits for them (NotReady):
+	// once one answers, its bots are handed again.
+	waiting := map[string]int{}
+	s.mu.Lock()
+	for _, st := range s.states {
+		if s.noBots[st.Plugin] {
+			continue
+		}
+		switch {
+		case st.Configured:
+			want[st.Plugin] = append(want[st.Plugin], st.Bot)
+		case st.NotReady:
+			waiting[st.Plugin]++
+			if _, ok := want[st.Plugin]; !ok {
+				want[st.Plugin] = nil
+			}
+		default:
+			continue
+		}
+		project[st.Plugin] = st.Project
+	}
+	s.mu.Unlock()
+	lost := false
+	for pl, bots := range want {
+		cctx, cancel := context.WithTimeout(ctx, s.opts.CallTimeout)
+		res, err := s.plugins.CallTool(cctx, pl, ToolBots, map[string]any{},
+			map[string]any{plugins.MetaProject: project[pl], plugins.MetaCaller: "gosidian", plugins.MetaAccess: plugins.AccessRead})
+		cancel()
+		if err != nil {
+			continue
+		}
+		if res.IsError {
+			s.mu.Lock()
+			s.noBots[pl] = true
+			s.mu.Unlock()
+			s.opts.Logger.Info("chat: the plugin does not say its bots: they are handed again every "+s.opts.Every.String(), "plugin", pl)
+			continue
+		}
+		var out struct {
+			Bots    []string `json:"bots"`
+			Started string   `json:"started"`
+		}
+		if json.Unmarshal(plugins.ResultJSON(res), &out) != nil {
+			continue
+		}
+		has := map[string]bool{}
+		for _, b := range out.Bots {
+			has[b] = true
+		}
+		s.mu.Lock()
+		prev := s.started[pl]
+		s.started[pl] = out.Started
+		s.mu.Unlock()
+		restarted := prev != "" && out.Started != "" && prev != out.Started
+		missing := 0
+		for _, b := range bots {
+			if !has[b] {
+				missing++
+			}
+		}
+		if restarted || missing > 0 {
+			s.opts.Logger.Info("chat: a plugin lost its bots: handing them again", "plugin", pl, "restarted", restarted, "missing", missing)
+			lost = true
+		}
+		if waiting[pl] > 0 {
+			s.opts.Logger.Info("chat: a plugin answers now: handing it the bots that waited for it", "plugin", pl, "waiting", waiting[pl])
+			lost = true
+		}
+	}
+	return lost
 }
 
 // concerns says whether a change of the note at p may change a bot: it
@@ -381,7 +495,8 @@ func (s *Service) configure(ctx context.Context, n Note, spec Spec) {
 	}
 	args, err := s.configureArgs(n, spec, &st)
 	if err != nil {
-		st.Configured, st.Error = false, err.Error()
+		var nr notReady
+		st.Configured, st.Error, st.NotReady = false, err.Error(), errors.As(err, &nr)
 		s.put(st)
 		return
 	}
@@ -391,7 +506,7 @@ func (s *Service) configure(ctx context.Context, n Note, spec Spec) {
 		map[string]any{plugins.MetaProject: n.Project, plugins.MetaCaller: "gosidian", plugins.MetaAccess: plugins.AccessWrite})
 	switch {
 	case err != nil:
-		st.Error = fmt.Sprintf("plugin %s: %v", spec.Plugin, err)
+		st.Error, st.NotReady = fmt.Sprintf("plugin %s: %v", spec.Plugin, err), true
 	case res.IsError:
 		st.Error = fmt.Sprintf("plugin %s refused the bot: %s", spec.Plugin, resultText(res))
 	default:
@@ -428,7 +543,7 @@ func (s *Service) configureArgs(n Note, spec Spec, st *State) (map[string]any, e
 	case !ok:
 		return nil, fmt.Errorf("plugin %s is not registered ([[pipelines.plugins]], GOSIDIAN_PIPELINES_PLUGINS)", spec.Plugin)
 	case ps.Status != plugins.StatusOK:
-		return nil, fmt.Errorf("plugin %s is %s (gosidian plugin list; accept its manifest with gosidian plugin accept)", spec.Plugin, ps.Status)
+		return nil, notReady{fmt.Errorf("plugin %s is %s (gosidian plugin list; accept its manifest with gosidian plugin accept)", spec.Plugin, ps.Status)}
 	}
 	base := strings.TrimRight(s.plugins.FilesURL(spec.Plugin), "/")
 	if base == "" {

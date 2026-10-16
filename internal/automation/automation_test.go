@@ -104,6 +104,39 @@ func TestSchedule(t *testing.T) {
 	if got := d.Last(at("2026-10-05 08:00"), rome).Format("2006-01-02 15:04"); got != "2026-10-04 18:30" {
 		t.Errorf("daily Last = %s", got)
 	}
+	h, err := ParseSchedule("hour :05")
+	if err != nil || !h.Hourly || h.Minute != 5 || h.String() != "hour :05" {
+		t.Fatalf("hour :05 = %+v, %v", h, err)
+	}
+	for now, want := range map[string]string{
+		"2026-10-05 08:04": "2026-10-05 07:05",
+		"2026-10-05 08:05": "2026-10-05 08:05",
+		"2026-10-05 00:01": "2026-10-04 23:05", // the hour before midnight
+	} {
+		if got := h.Last(at(now), rome).Format("2006-01-02 15:04"); got != want {
+			t.Errorf("hourly Last(%s) = %s, want %s", now, got, want)
+		}
+	}
+	if got := h.Next(at("2026-10-05 08:05"), rome).Format("2006-01-02 15:04"); got != "2026-10-05 09:05" {
+		t.Errorf("hourly Next = %s", got)
+	}
+	// The night the clocks go back, 02:05 comes twice: each is a slot.
+	first := h.Last(time.Date(2026, 10, 25, 0, 30, 0, 0, time.UTC), rome)  // 02:30 CEST
+	second := h.Last(time.Date(2026, 10, 25, 1, 30, 0, 0, time.UTC), rome) // 02:30 CET
+	if second.Sub(first) != time.Hour || first.In(rome).Format("15:04") != "02:05" || second.In(rome).Format("15:04") != "02:05" {
+		t.Errorf("clocks back: %s then %s", first, second)
+	}
+	if next := h.Next(first, rome); !next.Equal(second) {
+		t.Errorf("clocks back: Next = %s, want %s", next, second)
+	}
+	if o, err := ParseSchedule("hour"); err != nil || !o.Hourly || o.Minute != 0 {
+		t.Errorf("hour = %+v, %v", o, err)
+	}
+	for _, bad := range []string{"hour 5", "hour :5", "hour :60", "hour 09:00"} {
+		if _, err := ParseSchedule(bad); err == nil {
+			t.Errorf("%q parsed", bad)
+		}
+	}
 }
 
 // fakeHost records what the engine asks of it.

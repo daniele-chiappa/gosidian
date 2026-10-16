@@ -80,7 +80,7 @@ type Trigger struct {
 	// a run that reads them (counts, summaries, notices) does not take
 	// them, nor mark them working, then done (IMP-174).
 	Leave bool `json:"leave,omitempty"`
-	// Every, for schedule: "monday 09:00", "day 18:30".
+	// Every, for schedule: "monday 09:00", "day 18:30", "hour :05".
 	Every    string               `json:"every,omitempty"`
 	Schedule *automation.Schedule `json:"-"`
 }

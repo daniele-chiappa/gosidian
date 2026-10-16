@@ -106,7 +106,7 @@ why a pipeline cannot run.
 | `external` | as manual, and also a service with a run token | the input given |
 | `chat` | a message of a chat, the rating of an answer, or a request for a person, from the chat plugin with a run token (or by hand, to try it): its runs are [interactive](#interactive-runs) | `kind` (`message`, the default, `rating` or `handoff`); a message: `message`, `history` (`[{role: user or assistant, content}]`), `scopes` (the names the person chose), `session`, `user`, `as_of` (a day, YYYY-MM-DD); a rating: `turn` (the id of the answer's run), `rating` (-10 to 10), `comment`; a request for a person: `message`, `contact`, `history`, `session`; other keys as given |
 | `ingest` | a file of one of `kinds` is stored as an attachment of the project (with `folder`: a note made with it in that folder) | `file`, `name`, `stem`, `ext`, `folder`, `note`, `project` |
-| `schedule` | `every: "monday 09:00"`, `"day 18:30"` (the automations' syntax), once per slot; a slot missed by more than 10 minutes is not run late | `slot` |
+| `schedule` | `every: "monday 09:00"`, `"day 18:30"`, `"hour :05"` (every hour, at five past; `"hour"` on the hour) — the automations' syntax — once per slot; a slot missed by more than 10 minutes is not run late | `slot` |
 | `in` | a batch of files of the project's [IN folder](in.md) closes: one run per file it takes, or one per batch with `batch: true`; `folder` (of the IN folder), `kinds` (none: all) and `match` (a glob on the name) choose the files; `take: false` reads them without taking them (their status stays the other pipelines') | per file: `file`, `name`, `stem`, `ext`, `dir`, `size`, `sha256`, `etag` (a source's file), `source` (`local`, or `<plugin>/<source>`), `project`; per batch: `batch`, `dir`, `count`, `bytes`, `files` (the files, when they fit in the input; else `files_listed` is false and `in.list` reads them), `project` |
 | `commit` | a commit of the vault's [git sync](configuration.md#environment-variables) changes files under `folder` (of the project; empty: all of it) whose name matches `match` (a glob, `*.md`): one run per commit | `commit` (its SHA), `date` (in seconds), `project`, `folder`, `count`, `files` (`path`, `change`: `added`, `modified`, `deleted`, `renamed`, and `from` for a renamed file; when they fit in the input, else `files_listed` is false), `files_listed` |
 
@@ -200,7 +200,7 @@ it as text: `ratings: {"{{ trigger.turn }}": "{{ trigger.rating }}"}`
 | `note.read` | `path` (inside the project; relative to it), `media`: `keep` (default) or `inline`, the images as text ([below](#chunks-for-an-archive-of-vectors)), with `media_words` and `inline_max_side` | `path`, `title`, `frontmatter`, `body`, `etag`; with `media: inline`, `media` (the images counted) |
 | `note.write` | `path`, `body`, `title`, `frontmatter` (a map), `mode`: `upsert` (default), `create`, `replace`, or `append` (adds `body` after the note's, a blank line between, and merges `frontmatter` into its own; a note it does not find it creates), `frontmatter_merge` (merges `frontmatter` into the note's instead of replacing it, and keeps its body unless `body` is given: a map merges into a map, `null` removes a key) | `path`, `etag`, `created` |
 | `note.list` | `folder` (inside the project, relative to it; empty: all of it), `recursive` (default yes), `where` (memory_query's conditions, `{field, op, value}`), `sort` (default `path`), `fields` (frontmatter fields to give), `limit` (default 500, at most `[pipelines] max_list_items`, 5000), `cursor` | `notes` (`path`, `title`, `fields`), `count` (this page), `total` (all that match), `next` (the cursor of the next page; empty at the last) |
-| `note.sections` | `path`, `version` (ends each chunk's id after an `@`), `levels` (default `[section, paragraph]`; `[paragraph]` still cuts the sections, the paragraphs' parents and paths, but gives the paragraphs only), `max_chars` (default 6000; 200 to `max_output_bytes`), `context`: `heading` (default), `path`, `none`, `text` (default yes), `only` (bases, up to `max_list_items`), `meta` (added to each chunk's, up to `max_chunk_meta` bytes), `media`: `inline` (default) or `keep`, `media_words`, `inline_max_side` | `doc`, `title`, `version`, `sections`, `paragraphs`, `chunks` (as an archive's `upsert` takes them), `count`, `media` — see [below](#chunks-for-an-archive-of-vectors) |
+| `note.sections` | `path`, `version` (ends each chunk's id after an `@`), `levels` (default `[section, paragraph]`; `[paragraph]` still cuts the sections, the paragraphs' parents and paths, but gives the paragraphs only), `max_chars` (default 6000; 200 to `max_output_bytes`), `context`: `heading` (default), `path`, `none`, `text` (default yes), `only` (bases, up to `max_list_items`), `meta` (added to each chunk's, up to `max_chunk_meta` bytes), `media`: `inline` (default) or `keep`, `media_words`, `inline_max_side`, `media_numbers` | `doc`, `title`, `version`, `sections`, `paragraphs`, `chunks` (as an archive's `upsert` takes them; with `media_numbers`, each with its `media`), `count`, `media` — see [below](#chunks-for-an-archive-of-vectors) |
 | `note.mark` | `path`, `set` (a name: `cut`, `review`), `marks` (each `base`, a chunk of `note.sections`, or `section`, the path of its headings, and `block`, its paragraph from 1; `color`: `blue`, `green`, `orange`, `red`, `cyan`, `grey`; `label`, `text`) | `path`, `set`, `count` — see [below](#marks-on-a-note) |
 | `wait.call` | `timeout` (default `24h`, at most `max_wait`) | the data the resume hands it |
 | `pipeline.run` | `pipeline` (a pipeline note of the project, relative to it), `input` (a map, the started run's `trigger`), `wait` (default yes), `timeout` (of the wait: default `24h`, at most `max_wait`), `key` | with `wait`: `run`, `pipeline`, `status`, `error`, `steps` (each node's status), `outputs` (each node's output, when they fit); without: `run`, `pipeline`, `status`, `existing` — see [below](#one-pipeline-starting-another) |
@@ -400,6 +400,15 @@ its alt text, unless Word wrote it (`… Descrizione generata
 automaticamente`). `media` counts the images, the icons, those described,
 those without (`missing`) and the alt texts left out (`word_alt`).
 
+With **`media_numbers: true`** `note.sections` numbers the images (not the
+icons) in the note's order, `[image 3: label] description`, and gives each
+chunk its `media`: the images whose text it holds, each with its number
+`n`, its `path` in the vault (none for an image from outside), its image
+`note` and its `label`. A pipeline that answers from the sections can then
+ask the model to mark where an image goes, `[image 3]`, and put the image
+there: the chunks of an archive keep the words without numbers, which
+would change from one version of a note to the next.
+
 ### Marks on a note
 
 **`note.mark`** puts a set of coloured marks on a note (IMP-188): spans of
@@ -488,7 +497,10 @@ The node types and the schemas of their settings and outputs:
 - **The notes it writes**, as the pipeline: the audit says source
   `pipeline`, actor `pipeline:<note path>`. Each carries its origin in the
   frontmatter: `pipeline: '[[team/pipelines/arrivals]]'`, `pipeline_run`,
-  and `source: '[[<file>]]'` for an arrival.
+  and, for an arrival, the file it came from (`trigger.file`): an
+  attachment as `source: '[[<file>]]'`, a file of the IN folder as its
+  path, as text, in `in_file` (a file of the IN folder is no note, and a
+  wikilink to it would never resolve).
 - **One line a day** in `<pipeline>-runs.md` beside the pipeline: how many
   runs ended, how many failed, the last one with its time and error.
 - **The run itself**, in `jobs.db`: every step with its status, attempts,
