@@ -4,8 +4,41 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"net/http"
+	"net/url"
 	"strings"
+	"sync/atomic"
 )
+
+// frameSources gives the origins, besides the SPA's own, whose pages a note
+// shows in a frame: the chat plugins' pages of the bots (IMP-191). Nil: none.
+var frameSources atomic.Pointer[func() []string]
+
+// SetFrameSources sets what gives the origins the SPA may frame.
+func SetFrameSources(fn func() []string) { frameSources.Store(&fn) }
+
+// frameSrc is the CSP's frame-src: 'self' and the origins frameSources
+// gives, each checked to be a bare http(s) origin, so that nothing a plugin
+// answered can add a directive.
+func frameSrc() string {
+	out := "frame-src 'self'"
+	p := frameSources.Load()
+	if p == nil || *p == nil {
+		return out
+	}
+	seen := map[string]bool{}
+	for _, o := range (*p)() {
+		u, err := url.Parse(o)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || strings.ContainsAny(u.Host, " ;,'\"") {
+			continue
+		}
+		origin := u.Scheme + "://" + u.Host
+		if !seen[origin] {
+			seen[origin] = true
+			out += " " + origin
+		}
+	}
+	return out
+}
 
 // cspHeader builds the Content-Security-Policy applied to the SPA shell
 // (index.html). Strict script-src 'self' (no inline, no eval), with
@@ -42,8 +75,9 @@ func cspHeader(nonce string) string {
 		// frame-src 'self' admits the sandboxed srcdoc iframe that renders HTML
 		// notes (ADR-011). The iframe runs with sandbox="allow-scripts" WITHOUT
 		// allow-same-origin (opaque origin) plus its own injected restrictive CSP,
-		// so this does not widen the SPA's own execution surface.
-		"frame-src 'self'",
+		// so this does not widen the SPA's own execution surface. The origins
+		// of the chat plugins follow: a bot's note shows its chat (IMP-191).
+		frameSrc(),
 		"frame-ancestors 'none'",
 		"form-action 'self'",
 		"base-uri 'self'",

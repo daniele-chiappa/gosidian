@@ -8,6 +8,22 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.91.1] — 2026-10-16 — "bots"
+
+A bot's note opens its chat. Pull the image and restart; nothing to
+migrate. Goes with the chat plugin, `gosidian-chat` 0.1.0, of
+[gosidian-plugins](https://github.com/daniele-chiappa/gosidian-plugins).
+
+### Fixed
+- **A bot's note opens its chat**: the web UI's Content-Security-Policy
+  allowed frames of its own origin only, and the chat of a bot's note, the
+  chat plugin's page, did not load. `frame-src` admits the origin of each
+  configured bot's page, checked to be a bare http(s) origin; the frame is
+  sandboxed.
+- `chat_configure` gets the project in the call's `_meta`, as every call of
+  gosidian's: an argument `project` made a chat plugin's manifest one
+  gosidian refuses.
+
 ## [2.91.0] — 2026-10-16 — "bots"
 
 Runs someone waits for, and bots: a note `type: chat` that a chat plugin

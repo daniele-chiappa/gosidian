@@ -479,7 +479,7 @@ func (s *Service) configureArgs(n Note, spec Spec, st *State) (map[string]any, e
 		conv["keep_seconds"] = int64(spec.Conversations.Keep / time.Second)
 	}
 	return map[string]any{
-		"bot": spec.Name, "note": n.Path, "project": n.Project,
+		"bot": spec.Name, "note": n.Path,
 		"title": spec.Title, "welcome": spec.Welcome,
 		"scopes": scopes, "access": access, "limits": limits, "conversations": conv,
 		"sources":      map[string]any{"base_url": spec.Sources.BaseURL, "gosidian_url": strings.TrimRight(s.opts.GosidianURL, "/")},
@@ -575,6 +575,20 @@ func (s *Service) prune(n Note, spec Spec) {
 	if len(old) > 0 {
 		s.opts.Logger.Info("chat: old conversations to the trash", "bot", spec.Name, "count", len(old))
 	}
+}
+
+// FrameOrigins are the addresses of the bots' pages, which their notes
+// show in a frame: the SPA's Content-Security-Policy admits them.
+func (s *Service) FrameOrigins() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []string
+	for _, st := range s.states {
+		if st.Configured && st.EmbedURL != "" {
+			out = append(out, st.EmbedURL)
+		}
+	}
+	return out
 }
 
 // UserToken signs a token for a user of gosidian to chat with the bot of a

@@ -639,6 +639,7 @@ func main() {
 		stopPipelines, pluginReg = startPipelines(ctx, cfg, sdir, mcpServer, inFolders, syncer)
 		if c := mcpServer.Chat(); c != nil {
 			wireChat(c, auditLog)
+			apiv1.SetFrameSources(c.FrameOrigins)
 		}
 	}
 	// A token owned by a web account is narrowed on every request to what

@@ -138,6 +138,8 @@ const snippet = computed(() => {
       v-if="frameSrc"
       :src="frameSrc"
       :title="status?.title || status?.bot"
+      sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+      referrerpolicy="no-referrer"
       class="w-full rounded border border-border"
       style="height: 32rem"
       data-chat-frame

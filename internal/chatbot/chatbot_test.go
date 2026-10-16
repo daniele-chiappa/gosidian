@@ -263,6 +263,12 @@ func TestService_Reconcile(t *testing.T) {
 	if conv := c.args["conversations"].(map[string]any); conv["keep_seconds"] != int64(30*24*3600) {
 		t.Errorf("conversations: %v", conv)
 	}
+	if _, ok := c.args["project"]; ok {
+		t.Error("project in the arguments: it is in _meta")
+	}
+	if fo := s.FrameOrigins(); len(fo) != 1 || fo[0] != "https://chat.example.com/embed/assistente" {
+		t.Errorf("frame origins: %v", fo)
+	}
 	// Again: the same run token, handed again.
 	s.Reconcile(ctx)
 	if tok.created != 1 || pl.last(ToolConfigure).args["run"].(map[string]any)["token"] != run["token"] {

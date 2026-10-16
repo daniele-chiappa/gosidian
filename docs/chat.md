@@ -96,6 +96,8 @@ own with the secret of `signed`; its `iss` is its own.
 - **The bots need** the pipelines (`[pipelines] enabled`), gosidian's
   secrets (`GOSIDIAN_SECRETS_KEY`), and the address the plugins reach
   gosidian at (`[pipelines] files_url`).
+- **The web UI frames the bots' pages**: its Content-Security-Policy
+  admits, in `frame-src`, the origin of each configured bot's page.
 
 | Endpoint | |
 |---|---|
@@ -173,7 +175,7 @@ A chat plugin is a [plugin](plugins.md) with two tools, both `write`:
 
 | Argument | |
 |---|---|
-| `bot`, `note`, `project` | the bot's name, its note, its project |
+| `bot`, `note` | the bot's name, its note (its project is in the call's `_meta`, `gosidian/project`, as in every call of gosidian's) |
 | `title`, `welcome` | as the block says |
 | `scopes` | `[{name, label, filter}]` |
 | `access` | `users` and `users_secret` (the secret of gosidian's tokens), `keys` (`[{name, key, origins}]`, the values), `signed_secret`, `open` |

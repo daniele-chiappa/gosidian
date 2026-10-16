@@ -232,3 +232,26 @@ func TestLoginRateLimit_SpoofedXFFDoesNotBypass(t *testing.T) {
 		t.Fatalf("spoofed XFF bypassed the limiter: status=%d", w.Code)
 	}
 }
+
+// TestCSPFrameSources: the origins of the bots' pages join frame-src, and
+// nothing but a bare http(s) origin gets in (IMP-191).
+func TestCSPFrameSources(t *testing.T) {
+	t.Cleanup(func() { SetFrameSources(nil) })
+	SetFrameSources(func() []string {
+		return []string{"https://chat.example.com/embed/docs", "https://chat.example.com/embed/other", "http://192.0.2.9:8095/embed/x",
+			"javascript:alert(1)", "https://evil.example; script-src *", "ftp://files.example/x", "not a url"}
+	})
+	h := cspHeader("n")
+	if !strings.Contains(h, "frame-src 'self' https://chat.example.com http://192.0.2.9:8095;") {
+		t.Errorf("frame-src: %q", h)
+	}
+	for _, bad := range []string{"javascript", "evil", "ftp", "script-src *"} {
+		if strings.Contains(h, bad) {
+			t.Errorf("%q got into the policy: %q", bad, h)
+		}
+	}
+	SetFrameSources(nil)
+	if cspHeader("") != CSPHeader {
+		t.Errorf("without sources the policy is the canonical one: %q", cspHeader(""))
+	}
+}
