@@ -8,6 +8,42 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.96.0] — 2026-10-17 — "typed frontmatter"
+
+A pipeline now reads a note's frontmatter with its types, and pipeline
+runs no longer wait behind newer ones in the queue. Pull the image and
+restart; nothing to migrate. **A pipeline that compares a frontmatter value
+read by `note.read` or `note.list` with `"true"`, or calls a string method
+on a number, must change** (see Changed).
+
+### Changed
+- **`note.read` and `note.list` give the frontmatter with its types**: a
+  bool is `true`, not `"true"`, a number a number, and a map a map, nested
+  as written. Until now every value came as text and the maps were left
+  out, so a pipeline that kept a map such as `revisions: {V1: …}` in a note
+  lost it at the next read and write. `title` stays its text, `tags` the
+  note's tags, an unquoted `[[wikilink]]` the link, a date and a code with
+  leading zeros (`007`) their text. Compare with `True` (or
+  `in [True, "true"]` for servers of both versions); `int()` and `float()`
+  read a number as they read its text. In `note.list`, a field that a tag
+  gives, the audit's fields and `tags` come as the index has them. See
+  "Frontmatter values" in `docs/pipelines.md`.
+
+### Fixed
+- **Pipeline runs no longer starve in the queue**: the runner took the
+  queued steps ordered by their delay and then by the run's id, which is
+  random, and a step queued with no delay has none. With the workers always
+  busy, a run whose id sorted last waited behind every newer one: in a test
+  with long chains of runs, ten of them stayed queued for over three hours.
+  Within a priority the oldest run now goes first.
+- **`note.write` writes a whole number as one**: a number that came from
+  JSON (a run's input, a step's output, a starlark int) was a float, and
+  from a million up YAML wrote it in exponent form, so an epoch second
+  `1792237963` became `1.792237963e+09`, which starlark's `int()` does not
+  read. Every write of a pipeline's frontmatter, `frontmatter_merge` and
+  `append` included, now writes `1792237963`; a number that is not whole
+  stays as it was.
+
 ## [2.95.0] — 2026-10-17 — "revisions"
 
 Revisions of a document as git history: a pipeline can now commit the

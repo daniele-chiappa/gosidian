@@ -472,6 +472,35 @@ func TestStore_ClaimTakesInteractiveFirst(t *testing.T) {
 	}
 }
 
+// TestStore_ClaimTakesTheOldestRunFirst: with no delay the steps have no
+// not_before, and the run's random id must not decide: a run whose id sorts
+// last, created first, is taken before the newer ones.
+func TestStore_ClaimTakesTheOldestRunFirst(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "jobs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	t0 := time.Now().Add(-time.Hour)
+	for i, id := range []string{"ffffffffffffffff", "0000000000000000", "8888888888888888"} {
+		if _, _, err := st.CreateRun(Run{ID: id, Kind: "test", Ref: "a.md", Project: "p", Created: t0.Add(time.Duration(i) * time.Minute)},
+			[]Step{{Name: "x", Status: Queued}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var order []string
+	for range 3 {
+		got, err := st.claim(time.Now(), 1, time.Minute, false)
+		if err != nil || len(got) != 1 {
+			t.Fatalf("claim: %+v %v", got, err)
+		}
+		order = append(order, got[0].RunID[:1])
+	}
+	if strings.Join(order, "") != "f08" {
+		t.Errorf("claimed in the order %v, want the oldest run first (f, 0, 8)", order)
+	}
+}
+
 // TestStore_OpensADatabaseWithoutPriority: a jobs.db made before the
 // runs had a priority gets the column, and its runs are normal.
 func TestStore_OpensADatabaseWithoutPriority(t *testing.T) {

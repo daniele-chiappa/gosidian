@@ -202,9 +202,9 @@ it as text: `ratings: {"{{ trigger.turn }}": "{{ trigger.rating }}"}`
 
 | Type | `with` | Output |
 |---|---|---|
-| `note.read` | `path` (inside the project; relative to it), `media`: `keep` (default) or `inline`, the images as text ([below](#chunks-for-an-archive-of-vectors)), with `media_words` and `inline_max_side` | `path`, `title`, `frontmatter`, `body`, `etag`; with `media: inline`, `media` (the images counted) |
+| `note.read` | `path` (inside the project; relative to it), `media`: `keep` (default) or `inline`, the images as text ([below](#chunks-for-an-archive-of-vectors)), with `media_words` and `inline_max_side` | `path`, `title`, `frontmatter` (its values with their types, [below](#frontmatter-values)), `body`, `etag`; with `media: inline`, `media` (the images counted) |
 | `note.write` | `path`, `body`, `title`, `frontmatter` (a map), `mode`: `upsert` (default), `create`, `replace`, or `append` (adds `body` after the note's, a blank line between, and merges `frontmatter` into its own; a note it does not find it creates), `frontmatter_merge` (merges `frontmatter` into the note's instead of replacing it, and keeps its body unless `body` is given: a map merges into a map, `null` removes a key) | `path`, `etag`, `created` |
-| `note.list` | `folder` (inside the project, relative to it; empty: all of it), `recursive` (default yes), `where` (memory_query's conditions, `{field, op, value}`), `sort` (default `path`), `fields` (frontmatter fields to give), `limit` (default 500, at most `[pipelines] max_list_items`, 5000), `cursor` | `notes` (`path`, `title`, `fields`), `count` (this page), `total` (all that match), `next` (the cursor of the next page; empty at the last) |
+| `note.list` | `folder` (inside the project, relative to it; empty: all of it), `recursive` (default yes), `where` (memory_query's conditions, `{field, op, value}`), `sort` (default `path`), `fields` (frontmatter fields to give, with their types as `note.read` gives them), `limit` (default 500, at most `[pipelines] max_list_items`, 5000), `cursor` | `notes` (`path`, `title`, `fields`), `count` (this page), `total` (all that match), `next` (the cursor of the next page; empty at the last) |
 | `note.sections` | `path`, `version` (ends each chunk's id after an `@`), `levels` (default `[section, paragraph]`; `[paragraph]` still cuts the sections, the paragraphs' parents and paths, but gives the paragraphs only), `max_chars` (default 6000; 200 to `max_output_bytes`), `context`: `heading` (default), `path`, `none`, `text` (default yes), `only` (bases, up to `max_list_items`), `meta` (added to each chunk's, up to `max_chunk_meta` bytes), `media`: `inline` (default) or `keep`, `media_words`, `inline_max_side`, `media_numbers` | `doc`, `title`, `version`, `sections`, `paragraphs`, `chunks` (as an archive's `upsert` takes them; with `media_numbers`, each with its `media`), `count`, `media` — see [below](#chunks-for-an-archive-of-vectors) |
 | `note.mark` | `path`, `set` (a name: `cut`, `review`), `marks` (each `base`, a chunk of `note.sections`, or `section`, the path of its headings, and `block`, its paragraph from 1; `color`: `blue`, `green`, `orange`, `red`, `cyan`, `grey`; `label`, `text`) | `path`, `set`, `count` — see [below](#marks-on-a-note) |
 | `wait.call` | `timeout` (default `24h`, at most `max_wait`) | the data the resume hands it |
@@ -223,6 +223,40 @@ it as text: `ratings: {"{{ trigger.turn }}": "{{ trigger.rating }}"}`
 A plugin's nodes exist once the owner accepted its manifest
 (`gosidian plugin accept`, [plugins](plugins.md)); `memory_pipelines`
 and the Runs window list them.
+
+#### Frontmatter values
+
+`note.read` gives a note's frontmatter, and `note.list` the `fields` it
+is asked for, with the types YAML gives them (IMP-198): `draft: true` is a
+bool, `count: 3` a number, a list a list, and a map a map, nested as
+written. What `note.write` wrote comes back as it wrote it: a pipeline
+that keeps `revisioni: {V1: 1792237963}` in a note reads the map back,
+adds a revision and writes it again. A few values keep the meaning the
+rest of the vault gives them:
+
+- `title` is its text (`title: 2026` is `"2026"`), `tags` the note's tags
+  (a list, without `#`);
+- an unquoted `[[wikilink]]`, which YAML reads as a list in a list, is
+  the link as written, `"[[target]]"`, in a list or a map too;
+- a date stays its text (`2026-10-17`), and so does a number written with
+  a leading zero (`007`, a code);
+- a key without a value is left out;
+- a frontmatter that is not valid YAML gives its values as text.
+
+In `note.list`, a field the frontmatter does not hold (a `status` that a
+`status:done` tag gives, `created_by` from the audit) and `tags` (which
+count the body's `#tags` too) come as the index has them.
+
+Up to v2.95 every value came as text: a `starlark` node compared
+`f.get("inline") != "true"` and converted with `int(…)`. Compare with
+`True`, or with both (`f.get("inline") in [True, "true"]`) while a
+pipeline runs on servers of both kinds; `int()` and `float()` take a
+number as they took its text, but a string method (`.lstrip()`,
+`.split()`) on a number fails.
+
+`note.write` writes a whole number as one: a number reaches it from JSON
+(a run's input, a step's output, a `starlark` int) as a float, which YAML
+wrote from a million up as `1.792237963e+09`; now it is `1792237963`.
 
 A node's output is at most 1 MiB (`max_output_bytes`): write a large text
 into a note and pass its path. A run's input is at most 256 KiB

@@ -52,7 +52,8 @@ var baseSchemas = []NodeSchema{
 		Input: json.RawMessage(`{"type": "object", "required": ["path"], "properties": {
 	"path": {"type": "string", "format": "path", "description": "The note, inside the project (relative to it)"},` + mediaSettings + `}}`),
 		Output: json.RawMessage(`{"type": "object", "properties": {
-	"path": {"type": "string"}, "title": {"type": "string"}, "frontmatter": {"type": "object"},
+	"path": {"type": "string"}, "title": {"type": "string"},
+	"frontmatter": {"type": "object", "description": "The frontmatter's values with their types: a bool, a number, a list, a map; title and dates as text"},
 	"body": {"type": "string"}, "etag": {"type": "string"},
 	"media": ` + mediaStatsSchema + `}}`)},
 	{Type: "note.write", Description: "Writes a note of the project",
@@ -74,7 +75,7 @@ var baseSchemas = []NodeSchema{
 	"where": {"type": "array", "description": "Conditions on the frontmatter, as memory_query: {field, op, value}",
 	  "items": {"type": "object", "properties": {"field": {"type": "string"}, "op": {"type": "string"}, "value": {}}}},
 	"sort": {"type": "string", "default": "path", "description": "A field, path, title or modified, with asc or desc; keys separated by commas"},
-	"fields": {"type": "array", "items": {"type": "string"}, "description": "Frontmatter fields to give with each note"},
+	"fields": {"type": "array", "items": {"type": "string"}, "description": "Frontmatter fields to give with each note, with their types as note.read gives them"},
 	"limit": {"type": "integer", "default": 500, "description": "At most 5000 a page"},
 	"cursor": {"type": "string", "description": "The next of the page before"}}}`),
 		Output: json.RawMessage(`{"type": "object", "properties": {

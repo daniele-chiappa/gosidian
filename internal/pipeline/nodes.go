@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"path"
 	"sort"
 	"strings"
@@ -246,8 +247,12 @@ func (env *Env) StoreAttachment(name string, data []byte) (string, error) {
 
 // NoteData is a note as note.read returns it.
 type NoteData struct {
-	Path        string         `json:"path"`
-	Title       string         `json:"title"`
+	Path  string `json:"path"`
+	Title string `json:"title"`
+	// Frontmatter is, as the host reads it, every value as its text
+	// (parser.ParseFrontmatterFields), what the nodes that look at image
+	// notes compare; note.read gives it with its types instead
+	// (typedFrontmatter, IMP-198).
 	Frontmatter map[string]any `json:"frontmatter,omitempty"`
 	Body        string         `json:"body"`
 	ETag        string         `json:"etag"`
@@ -272,8 +277,12 @@ func noteRead(_ context.Context, env *Env, with map[string]any) (any, error) {
 		return nil, fmt.Errorf("with.media %q: keep or inline", media)
 	}
 	note, err := env.Engine.host.ReadNote(env.Project, rel)
-	if err != nil || media != "inline" {
+	if err != nil {
 		return note, err
+	}
+	note.Frontmatter = typedFrontmatter(note)
+	if media != "inline" {
+		return note, nil
 	}
 	// The body with its images as text, from their image notes (IMP-170).
 	reader, ok := env.Engine.host.(NoteReader)
@@ -290,6 +299,22 @@ func noteRead(_ context.Context, env *Env, with map[string]any) (any, error) {
 	}
 	note.Body, note.Media = body, &st
 	return note, nil
+}
+
+// typedFrontmatter is the frontmatter of a note the host read, with the
+// types YAML gives its values (parser.TypedFrontmatter, IMP-198): what a
+// pipeline reads with note.read and note.list, so that a number, a bool
+// or a map comes back as note.write wrote it. Without the note as stored,
+// the host's.
+func typedFrontmatter(note NoteData) map[string]any {
+	if note.Raw == nil {
+		return note.Frontmatter
+	}
+	fm := parser.TypedFrontmatter(parser.FrontmatterRawForPath(note.Path, note.Raw))
+	if len(fm) == 0 {
+		return nil
+	}
+	return fm
 }
 
 // WriteMode is how note.write treats an existing note.
@@ -426,9 +451,10 @@ func mergeFrontmatter(fm, set map[string]any) map[string]any {
 	return fm
 }
 
-// withFrontmatter is a note: the frontmatter as YAML, then the body.
+// withFrontmatter is a note: the frontmatter as YAML, then the body. A
+// whole number is written as one (wholeNumbers).
 func withFrontmatter(fm map[string]any, body string) ([]byte, error) {
-	y, err := yaml.Marshal(fm)
+	y, err := yaml.Marshal(wholeNumbers(fm))
 	if err != nil {
 		return nil, fmt.Errorf("frontmatter: %w", err)
 	}
@@ -441,6 +467,41 @@ func withFrontmatter(fm map[string]any, body string) ([]byte, error) {
 		b.WriteString("\n")
 	}
 	return []byte(b.String()), nil
+}
+
+// wholeNumbers is v, through its maps and lists, with every whole float64
+// that fits an int64 as an int64. A number reaches note.write from JSON (a
+// run's input, a step's output, a starlark int) as a float64, and yaml.v3
+// writes a float64 from a million up in exponent form: an epoch second
+// 1792237963 became 1.792237963e+09, which starlark's int() does not read
+// back (IMP-198, the revisions of IMP-201). The maps and lists are copied:
+// v may share them with the run's values.
+func wholeNumbers(v any) any {
+	switch t := v.(type) {
+	case float64:
+		if t == math.Trunc(t) && t >= -(1<<63) && t < 1<<63 {
+			return int64(t)
+		}
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, e := range t {
+			out[k] = wholeNumbers(e)
+		}
+		return out
+	case map[any]any:
+		out := make(map[any]any, len(t))
+		for k, e := range t {
+			out[k] = wholeNumbers(e)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, e := range t {
+			out[i] = wholeNumbers(e)
+		}
+		return out
+	}
+	return v
 }
 
 // Actor is who a pipeline writes as, in the audit.

@@ -444,7 +444,10 @@ func (s *Store) Steps(runID string) ([]Step, error) {
 
 // claim takes up to n queued steps whose time has come, those of the
 // interactive runs first (only those with interactive), marks them running
-// until now+lease, and starts their runs.
+// until now+lease, and starts their runs. Within a priority the oldest run
+// goes first: a step queued without a delay has no not_before, and ordering
+// by it and the run's random id left, under a full queue, the runs whose id
+// sorts last waiting for hours behind newer ones.
 func (s *Store) claim(now time.Time, n int, lease time.Duration, interactive bool) ([]Step, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -458,7 +461,7 @@ func (s *Store) claim(now time.Time, n int, lease time.Duration, interactive boo
 	if interactive {
 		q += ` AND r.priority >= ` + fmt.Sprint(PriorityInteractive)
 	}
-	q += ` ORDER BY r.priority DESC, s.not_before, s.run_id, s.pos LIMIT ?`
+	q += ` ORDER BY r.priority DESC, r.created, s.run_id, s.pos LIMIT ?`
 	rows, err := tx.Query(q, Queued, ms(now), n)
 	if err != nil {
 		return nil, err

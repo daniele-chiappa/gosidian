@@ -7,10 +7,12 @@ import (
 	"testing"
 
 	"github.com/gosidian/gosidian/internal/jobs"
+	"github.com/gosidian/gosidian/internal/parser"
 )
 
 // ListNotes makes the fake a NoteLister: the notes under the folder (or
-// directly in it), by path, a page of them. It keeps the last query.
+// directly in it), by path, a page of them, with the fields asked as the
+// index keeps them, as text. It keeps the last query.
 func (h *fakeHost) ListNotes(project string, q NoteQuery) ([]NoteRow, int, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -31,7 +33,17 @@ func (h *fakeHost) ListNotes(project string, q NoteQuery) ([]NoteRow, int, error
 	paths = paths[:min(q.Limit, len(paths))]
 	rows := make([]NoteRow, 0, len(paths))
 	for _, p := range paths {
-		rows = append(rows, NoteRow{Path: p, Title: p})
+		row := NoteRow{Path: p, Title: p}
+		fm := parser.ParseFrontmatterFields(parser.ExtractFrontmatterRaw([]byte(h.notes[p])))
+		for _, k := range q.Fields {
+			if v, ok := fm[k]; ok {
+				if row.Fields == nil {
+					row.Fields = map[string]any{}
+				}
+				row.Fields[k] = v
+			}
+		}
+		rows = append(rows, row)
 	}
 	return rows, total, nil
 }

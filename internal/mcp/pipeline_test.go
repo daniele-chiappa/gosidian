@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -491,5 +492,84 @@ nodes:
 	}
 	if strings.Index(c, "eco: prima") > strings.Index(c, "eco: seconda") {
 		t.Errorf("the turns out of order:\n%s", c)
+	}
+}
+
+// Through the server, note.read and note.list give a note's frontmatter
+// with its types, an unquoted wikilink as the link and a field a tag gives
+// as the index has it; a map note.write wrote comes back as a map, and a
+// whole number that came as a float64 is written as one (IMP-198, the
+// revisions of IMP-201).
+func TestPipelineHost_TypedFrontmatter(t *testing.T) {
+	s, e := pipelineServer(t)
+	ctx := context.Background()
+	const rev = "---\ntitle: Rev\ntype: pipeline\n---\n\n```pipeline\n" + `trigger: {on: external}
+nodes:
+  - id: first
+    use: note.write
+    with: {path: docs/rev, body: x, frontmatter: {revisioni: {V1: "{{ trigger.at }}"}, draft: true}}
+  - {id: read, use: note.read, after: [first], with: {path: docs/rev.md}}
+  - id: add
+    use: starlark
+    with:
+      input: "{{ read.frontmatter }}"
+      code: |
+        r = dict(input["revisioni"])
+        r["V2"] = int(r["V1"]) + 3600
+        output = {"revisioni": r}
+  - id: second
+    use: note.write
+    with: {path: docs/rev, frontmatter_merge: true, frontmatter: {revisioni: "{{ add.revisioni }}"}}
+  - {id: again, use: note.read, after: [second], with: {path: docs/rev.md}}
+  - {id: list, use: note.list, after: [second], with: {folder: docs, fields: [revisioni, draft, related, count, type]}}
+` + "```\n"
+	for path, content := range map[string]string{
+		"p/pipelines/rev.md": rev,
+		"p/docs/hand.md":     "---\ntitle: Hand\ntags: [type:doc]\ndraft: false\ncount: 3\nrelated: [[p/plain]]\n---\n\nText.\n",
+	} {
+		if res, err := s.handleCreate(ctx, call(map[string]any{"path": path, "content": content})); err != nil || res.IsError {
+			t.Fatalf("create %s: %v %+v", path, err, res)
+		}
+	}
+	res, err := s.handlePipelineRun(ctx, call(map[string]any{"path": "p/pipelines/rev.md", "input": map[string]any{"at": 1792237963}, "wait": 5}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := resultText(t, res)
+	if !strings.Contains(text, `"status":"done"`) {
+		t.Fatalf("run: %s", text)
+	}
+	steps, err := e.Runner().Store().Steps(runID(t, text))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]map[string]any{}
+	for _, st := range steps {
+		var m map[string]any
+		_ = json.Unmarshal(st.Output, &m)
+		out[st.Name] = m
+	}
+	fm, _ := out["again"]["frontmatter"].(map[string]any)
+	if want := map[string]any{"V1": 1792237963.0, "V2": 1792241563.0}; !reflect.DeepEqual(fm["revisioni"], want) || fm["draft"] != true {
+		t.Errorf("read back %#v", fm)
+	}
+	note, err := s.vault.Load("p/docs/rev.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := string(note.Content); !strings.Contains(c, "V1: 1792237963\n") || !strings.Contains(c, "V2: 1792241563\n") || strings.Contains(c, "e+09") {
+		t.Errorf("the note:\n%s", c)
+	}
+	fields := map[string]any{}
+	for _, n := range out["list"]["notes"].([]any) {
+		row := n.(map[string]any)
+		fields[row["path"].(string)] = row["fields"]
+	}
+	want := map[string]any{
+		"p/docs/hand.md": map[string]any{"draft": false, "count": 3.0, "related": "[[p/plain]]", "type": "doc"},
+		"p/docs/rev.md":  map[string]any{"draft": true, "revisioni": map[string]any{"V1": 1792237963.0, "V2": 1792241563.0}},
+	}
+	if !reflect.DeepEqual(fields, want) {
+		t.Errorf("note.list fields:\n got %#v\nwant %#v", fields, want)
 	}
 }

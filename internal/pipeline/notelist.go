@@ -89,9 +89,37 @@ func noteList(_ context.Context, env *Env, with map[string]any) (any, error) {
 	if rows == nil {
 		rows = []NoteRow{}
 	}
+	if len(q.Fields) > 0 {
+		typedFields(env, rows, q.Fields)
+	}
 	next := ""
 	if end := q.Offset + len(rows); len(rows) > 0 && end < total {
 		next = strconv.Itoa(end)
 	}
 	return map[string]any{"notes": rows, "count": len(rows), "total": total, "next": next}, nil
+}
+
+// typedFields gives the rows' fields the notes' frontmatter holds with their
+// types, as note.read does (IMP-198): the index keeps each value as text,
+// and no map. A field the frontmatter does not hold (a status a tag gives,
+// created_by from the audit) stays the index's, and so do tags, which count
+// the body's #tags too.
+func typedFields(env *Env, rows []NoteRow, fields []string) {
+	for i := range rows {
+		note, err := env.Engine.host.ReadNote(env.Project, rows[i].Path)
+		if err != nil {
+			continue // gone since the index listed it: the index's values
+		}
+		fm := typedFrontmatter(note)
+		for _, k := range fields {
+			v, ok := fm[k]
+			if !ok || k == "tags" {
+				continue
+			}
+			if rows[i].Fields == nil {
+				rows[i].Fields = map[string]any{}
+			}
+			rows[i].Fields[k] = v
+		}
+	}
 }

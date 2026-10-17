@@ -102,17 +102,10 @@ func FrontmatterEntries(raw string) []FMEntry {
 // yamlEntries reads raw with yaml.Node; ok is false when it is not valid
 // YAML, or not a mapping, and the caller falls back to the line reader.
 func yamlEntries(raw string) ([]FMEntry, bool) {
-	if strings.TrimSpace(raw) == "" {
-		return nil, true
+	m, ok := yamlMapping(raw)
+	if !ok || m == nil {
+		return nil, ok
 	}
-	var doc yaml.Node
-	if err := yaml.Unmarshal([]byte(raw), &doc); err != nil {
-		return nil, false
-	}
-	if doc.Kind != yaml.DocumentNode || len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
-		return nil, false
-	}
-	m := doc.Content[0]
 	var out []FMEntry
 	seen := map[string]bool{}
 	for i := 0; i+1 < len(m.Content); i += 2 {
@@ -124,6 +117,22 @@ func yamlEntries(raw string) ([]FMEntry, bool) {
 		out = append(out, nodeEntry(k.Value, v))
 	}
 	return out, true
+}
+
+// yamlMapping parses raw with yaml.Node: the top-level mapping, nil for an
+// empty raw; ok is false when raw is not valid YAML, or not a mapping.
+func yamlMapping(raw string) (*yaml.Node, bool) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, true
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(raw), &doc); err != nil {
+		return nil, false
+	}
+	if doc.Kind != yaml.DocumentNode || len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
+		return nil, false
+	}
+	return doc.Content[0], true
 }
 
 func resolveAlias(n *yaml.Node) *yaml.Node {
