@@ -77,6 +77,29 @@ func TestProjectFlags_UseTagVocabularyPersist(t *testing.T) {
 	}
 }
 
+// pipeline_tags lets a project's pipelines tag the vault's commits
+// (IMP-201): off by default, set and shown like the other flags.
+func TestProjectFlags_PipelineTags(t *testing.T) {
+	f := newAdminFixture(t)
+	f.seedNote(t, "Alpha/a.md", "x")
+	w := f.doAuthRecorder(http.MethodGet, "/api/v1/projects", "", nil)
+	if w.code != http.StatusOK || !strings.Contains(w.body, `"pipeline_tags":false`) {
+		t.Fatalf("list: %d %s", w.code, w.body)
+	}
+	w = f.doAuthRecorder(http.MethodPut, "/api/v1/projects/Alpha", `{"pipeline_tags":true}`, nil)
+	if w.code != http.StatusOK || !strings.Contains(w.body, `"pipeline_tags":true`) || !f.projects.PipelineTags("Alpha") {
+		t.Fatalf("on: %d %s", w.code, w.body)
+	}
+	w = f.doAuthRecorder(http.MethodPut, "/api/v1/projects/Alpha", `{"use_pipelines":true}`, nil)
+	if w.code != http.StatusOK || !f.projects.PipelineTags("Alpha") {
+		t.Fatalf("another flag cleared it: %d %s", w.code, w.body)
+	}
+	w = f.doAuthRecorder(http.MethodPut, "/api/v1/projects/Alpha", `{"pipeline_tags":false}`, nil)
+	if w.code != http.StatusOK || f.projects.PipelineTags("Alpha") {
+		t.Fatalf("off: %d %s", w.code, w.body)
+	}
+}
+
 // TestSettings_ExposesMasterSwitches asserts the read-only master switches
 // (GOSIDIAN_ANCHORS_ENABLED / GOSIDIAN_GLOBAL_ENABLED) reach the SPA so it can
 // tell whether a project's use_anchors/use_globals flag has any effect.

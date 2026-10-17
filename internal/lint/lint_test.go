@@ -322,8 +322,8 @@ func TestLint_FrontmatterTagUnknown_TopicOpen(t *testing.T) {
 }
 
 func TestLint_FrontmatterTagUnknown_ExtraAllowedWildcard(t *testing.T) {
-	// "cm:*" accepts any well-formed value in the cm namespace — the
-	// panthera-app case (IMP-075). Other unknowns still flag, and a
+	// "cm:*" accepts any well-formed value in the cm namespace — a project
+	// whose tags name its own modules (IMP-075). Other unknowns still flag, and a
 	// malformed value in the wildcarded namespace still flags.
 	l, v, idx := newTestLinter(t)
 

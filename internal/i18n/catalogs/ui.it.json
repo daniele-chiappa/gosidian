@@ -967,7 +967,9 @@
       "in_git_on": "IN in git: la cartella IN entra nella storia del vault, tranne i file sopra i 50 MiB. Clic per lasciarla fuori.",
       "in_git_off": "La cartella IN è fuori da git (può pesare GB). Clic per versionarla, tranne i file sopra i 50 MiB.",
       "in_git_confirm": "Mettere in git la cartella IN di {name}? Tutto quello che contiene, fino a 50 MiB a file, entra nella storia del vault e ci resta anche dopo.",
-      "in_git_confirm_ok": "Metti in git"
+      "in_git_confirm_ok": "Metti in git",
+      "tags_on": "Tag git accesi: le pipeline del progetto possono mettere tag sui commit del vault (vault.commit con tag), un tag per revisione di un documento; i tag vanno al remoto con il push. Clic per spegnere.",
+      "tags_off": "Clic per lasciare alle pipeline del progetto mettere tag sui commit del vault (vault.commit con tag): un tag per revisione di un documento, che va al remoto con il push e non si sposta più."
     },
     "legend": {
       "title": "Cosa fanno i flag",
@@ -979,6 +981,7 @@
       "lean_read": "dà un bootstrap più corto ai token che non possono scrivere.",
       "mirror": "lascia a chi legge una copia in sola lettura del progetto: le note escono dal server, e ogni sincronizzazione è registrata.",
       "pipelines": "lascia al server eseguire le pipeline del progetto, che scrivono note a loro nome; serve il suo interruttore sul server, ed è sbiadito finché è spento.",
+      "git_tags": "lascia alle pipeline del progetto mettere tag sui commit del vault (vault.commit), un tag per revisione di un documento; i tag sono del vault, comuni a tutti i progetti, e vanno al remoto con il push.",
       "IN": "dà al progetto la cartella IN, con i file da lavorare sotto il loro nome: le pipeline li prendono, non sono note. Si accende anche con le pipeline, e resta.",
       "IN_git": "mette la cartella IN nella storia git del vault, tranne i file sopra i 50 MiB; di solito resta fuori, perché può pesare GB."
     }

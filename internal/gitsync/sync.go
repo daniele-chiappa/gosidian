@@ -392,21 +392,34 @@ func (s *Sync) flush() {
 	s.mu.Unlock()
 
 	if err := s.commitAndPush(); err != nil {
-		metrics.GitSyncCommits.WithLabelValues("failure").Inc()
-		switch classifyGitFailure(err) {
-		case failureLocalCorruption:
-			err = fmt.Errorf("repository corruption detected — manual repair "+
-				"required (run `git fsck --full` in the vault; see BUG-015): %w", err)
-		case failureRemoteCorruption:
-			err = fmt.Errorf("the remote repository is corrupt — the vault here "+
-				"is fine: repair the remote (`git fsck --full` in its bare "+
-				"repository), or recreate it empty and the next push fills it "+
-				"(IMP-056): %w", err)
-		}
-		s.recordError(err)
-		log.Printf("gitsync: %v", err)
+		s.failed(err)
 		return
 	}
+	s.succeeded()
+}
+
+// failed records a failed commit or push: the metric, the status, with
+// the hint of a corrupt repository, and the log. It returns the error as
+// recorded.
+func (s *Sync) failed(err error) error {
+	metrics.GitSyncCommits.WithLabelValues("failure").Inc()
+	switch classifyGitFailure(err) {
+	case failureLocalCorruption:
+		err = fmt.Errorf("repository corruption detected — manual repair "+
+			"required (run `git fsck --full` in the vault; see BUG-015): %w", err)
+	case failureRemoteCorruption:
+		err = fmt.Errorf("the remote repository is corrupt — the vault here "+
+			"is fine: repair the remote (`git fsck --full` in its bare "+
+			"repository), or recreate it empty and the next push fills it "+
+			"(IMP-056): %w", err)
+	}
+	s.recordError(err)
+	log.Printf("gitsync: %v", err)
+	return err
+}
+
+// succeeded records a commit, or a flush with nothing to commit.
+func (s *Sync) succeeded() {
 	metrics.GitSyncCommits.WithLabelValues("success").Inc()
 	s.recordCommitSuccess()
 }
@@ -687,42 +700,54 @@ func (s *Sync) ensureConfig() error {
 }
 
 func (s *Sync) commitAndPush() error {
+	committed, err := s.commit("")
+	if err != nil || !committed || !s.cfg.Push {
+		return err
+	}
+	return s.push(context.Background())
+}
+
+// commit stages what changed in the vault and commits it with msg (""
+// gives the auto message), then tells the listeners. false: there was
+// nothing to commit. The caller holds workMu.
+func (s *Sync) commit(msg string) (bool, error) {
 	// Refresh the managed block of .gitignore from the current projects state
 	// before staging, so newly skipped projects are excluded from the next
-	// commit (and ones unchecked become trackable again). Caller already
-	// holds Sync.mu.
+	// commit (and ones unchecked become trackable again).
 	if err := s.refreshGitignore(); err != nil {
-		return fmt.Errorf("refresh gitignore: %w", err)
+		return false, fmt.Errorf("refresh gitignore: %w", err)
 	}
 	if err := s.untrackIgnored(); err != nil {
-		return err
+		return false, err
 	}
 
 	// Detect whether there is anything to commit.
 	out, err := s.capture("git", "status", "--porcelain")
 	if err != nil {
-		return fmt.Errorf("git status: %w", err)
+		return false, fmt.Errorf("git status: %w", err)
 	}
 	if strings.TrimSpace(out) == "" {
-		return nil
+		return false, nil
 	}
 
 	if err := s.run("git", "add", "-A"); err != nil {
-		return fmt.Errorf("git add: %w", err)
+		return false, fmt.Errorf("git add: %w", err)
 	}
 	if err := s.unstageBigIN(); err != nil {
-		return err
+		return false, err
 	}
 	if s.run("git", "diff", "--cached", "--quiet") == nil {
-		return nil // all it staged was left out
+		return false, nil // all it staged was left out
 	}
 
-	msg := "auto: " + time.Now().UTC().Format(time.RFC3339)
+	if msg == "" {
+		msg = "auto: " + time.Now().UTC().Format(time.RFC3339)
+	}
 	author := fmt.Sprintf("%s <%s>", s.cfg.AuthorName, s.cfg.AuthorEmail)
 	if err := s.run("git", "commit", "-q", "--author", author, "-m", msg); err != nil {
-		return fmt.Errorf("git commit: %w", err)
+		return false, fmt.Errorf("git commit: %w", err)
 	}
-	log.Printf("gitsync: committed %q", msg)
+	log.Printf("gitsync: committed %q", firstLine(msg))
 	s.mu.Lock()
 	listeners := s.onCommit
 	s.mu.Unlock()
@@ -735,11 +760,12 @@ func (s *Sync) commitAndPush() error {
 			}
 		}
 	}
+	return true, nil
+}
 
-	if !s.cfg.Push {
-		return nil
-	}
-	return s.push()
+func firstLine(s string) string {
+	line, _, _ := strings.Cut(s, "\n")
+	return line
 }
 
 // untrackIgnored takes out of git's index, once per folder and process,
@@ -782,7 +808,10 @@ func (s *Sync) untrackIgnored() error {
 	return nil
 }
 
-func (s *Sync) push() error {
+// push pushes the branch and refs besides it (a tag of CommitNow). With
+// --follow-tags it takes along the annotated tags of the branch that the
+// remote lacks: a tag whose push failed goes with the next one.
+func (s *Sync) push(ctx context.Context, refs ...string) error {
 	var env []string
 	if tok := s.authToken(); tok != "" {
 		// A per-invocation header, so the token never lands in git config,
@@ -790,7 +819,8 @@ func (s *Sync) push() error {
 		// host read it in ps and /proc/<pid>/cmdline (BUG-115, S5-7).
 		env = []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http.extraheader", "GIT_CONFIG_VALUE_0=Authorization: token " + tok}
 	}
-	if err := s.runEnv(env, "git", "push", "-q", "origin", s.cfg.Branch); err != nil {
+	args := append([]string{"push", "-q", "--follow-tags", "origin", s.cfg.Branch}, refs...)
+	if err := s.runEnv(ctx, env, "git", args...); err != nil {
 		return fmt.Errorf("git push: %w", err)
 	}
 	return nil
@@ -821,12 +851,13 @@ func (s *Sync) authToken() string {
 // run executes a git command in the vault dir, propagating stdout/stderr
 // to the server log via errors when it fails.
 func (s *Sync) run(cmd string, args ...string) error {
-	return s.runEnv(nil, cmd, args...)
+	return s.runEnv(context.Background(), nil, cmd, args...)
 }
 
-// runEnv is run with env added to the process environment.
-func (s *Sync) runEnv(env []string, cmd string, args ...string) error {
-	c := exec.Command(cmd, args...)
+// runEnv is run with env added to the process environment, killed when
+// ctx ends: only for a push, which leaves no lock behind.
+func (s *Sync) runEnv(ctx context.Context, env []string, cmd string, args ...string) error {
+	c := exec.CommandContext(ctx, cmd, args...)
 	c.Dir = s.vaultDir
 	if len(env) > 0 {
 		c.Env = append(os.Environ(), env...)

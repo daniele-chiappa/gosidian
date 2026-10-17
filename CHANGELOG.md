@@ -8,6 +8,32 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.95.0] — 2026-10-17 — "revisions"
+
+Revisions of a document as git history: a pipeline can now commit the
+vault at once and tag the commit. Pull the image and restart; nothing to
+migrate. With git sync's push on, the push now takes along the annotated
+tags of the branch (`--follow-tags`).
+
+### Added
+- **`vault.commit`**, a pipeline node: it commits the vault at once, as
+  git sync would after its debounce (the same author, the same files left
+  out, the commit pipelines started the same way), with a `message`, and
+  may put an annotated `tag` on the commit (on HEAD when nothing was
+  pending). One commit and one tag per revision of a document, say
+  `doc/<code>/<revision>`, and `git show <tag>:<path>` gives that revision
+  back. A tag needs the new project flag **`pipeline_tags`** (off by
+  default: the chip `git tags` in the Projects window, or the API), at
+  least one `/`, and a first part that is neither a release tag (`v2…`)
+  nor one of git's own names; it never moves: on another commit the step
+  fails. Without git sync the node fails and says so. See "Revisions as
+  git history" in `docs/pipelines.md`.
+
+### Changed
+- git sync pushes with `--follow-tags`: a tag whose push failed goes with
+  the next push. An annotated tag made by hand in the vault's repository
+  goes too.
+
 ## [2.94.0] — 2026-10-17 — "images in place"
 
 Images where they belong in a bot's answer, bots back at once after their

@@ -24,7 +24,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_GIT_AUTHOR_NAME` | `git.author_name` | `Gosidian` |
 | `GOSIDIAN_GIT_AUTHOR_EMAIL` | `git.author_email` | `gosidian@localhost` |
 | `GOSIDIAN_GIT_DEBOUNCE` | `git.commit_debounce` | `30s` |
-| `GOSIDIAN_GIT_PUSH` | `git.push` | `false` |
+| `GOSIDIAN_GIT_PUSH` | `git.push` | `false` (when on, each commit is pushed, with the annotated tags of the branch the remote lacks: those of [`vault.commit`](pipelines.md#revisions-as-git-history)) |
 | `GOSIDIAN_GIT_TOKEN_ENV` | `git.token_env` | empty |
 | `GOSIDIAN_MCP_WRITE_PER_MINUTE` | `mcp.write_per_minute` | `60` (writes per minute of one MCP session, rolling window; all the sessions of a token together get 5× that, IMP-141) |
 | `GOSIDIAN_MCP_MAX_NOTE_BYTES` | `mcp.max_note_bytes` | `1048576` (1 MiB) |

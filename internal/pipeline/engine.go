@@ -142,6 +142,9 @@ type Engine struct {
 	// commits says whether the vault's git sync makes commits, which start
 	// the commit pipelines (SetCommits); nil: it does not.
 	commits func() bool
+	// committer makes vault.commit's commits (SetCommitter); nil: git
+	// sync is off.
+	committer Committer
 	// waits are the callers waiting for a run to change (Wait).
 	waits waiters
 }

@@ -90,6 +90,11 @@ type Flags struct {
 	// history, but its files over 50 MiB. Off, the managed .gitignore
 	// leaves the folder out: the default, as it can hold gigabytes.
 	TrackINInGit bool `json:"track_in_git,omitempty"`
+	// PipelineTags lets the project's pipelines put git tags on the
+	// vault's commits (vault.commit, IMP-201). The tags are the vault's,
+	// shared by every project, and go to the remote with the push, so a
+	// project admin opts in; off by default.
+	PipelineTags bool `json:"pipeline_tags,omitempty"`
 	// Since is when the project took its name, in unix nanoseconds: set by
 	// projectops.Create, by a rename (Store.Rename) and, from the saved
 	// access, by RestoreProject. A note trashed under the name before it
@@ -609,6 +614,12 @@ func (s *Store) AllowsLocalMirror(name string) bool {
 // Unknown projects default to false.
 func (s *Store) UsesPipelines(name string) bool {
 	return s.Get(name).UsePipelines
+}
+
+// PipelineTags reports whether the project's pipelines may tag the
+// vault's commits (IMP-201). Unknown projects default to false.
+func (s *Store) PipelineTags(name string) bool {
+	return s.Get(name).PipelineTags
 }
 
 // UsesIN reports whether the project has its IN folder (IMP-172). Unknown

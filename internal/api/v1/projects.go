@@ -54,6 +54,8 @@ type projectView struct {
 	// in the vault's git history.
 	UseIN        bool `json:"use_in"`
 	TrackINInGit bool `json:"track_in_git"`
+	// PipelineTags lets its pipelines tag the vault's commits (IMP-201).
+	PipelineTags bool `json:"pipeline_tags"`
 	// ModTime drives "most recent" sorting in the SPA's project
 	// pickers (graph filter, switcher). RFC 3339 UTC. Empty when
 	// the vault entry hasn't been stat-able.
@@ -84,6 +86,7 @@ type updateProjectRequest struct {
 	UsePipelines      *bool `json:"use_pipelines,omitempty"`
 	UseIN             *bool `json:"use_in,omitempty"`
 	TrackINInGit      *bool `json:"track_in_git,omitempty"`
+	PipelineTags      *bool `json:"pipeline_tags,omitempty"`
 }
 
 // handleProjects dispatches GET (list) / POST (create) on /projects.
@@ -204,6 +207,7 @@ func (r *Router) projectViewFor(name string, lvl authz.Level, noteCount int) pro
 		UsePipelines:      flags.UsePipelines,
 		UseIN:             flags.UseIN,
 		TrackINInGit:      flags.TrackINInGit,
+		PipelineTags:      flags.PipelineTags,
 	}
 }
 
@@ -344,7 +348,7 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 	// Apply flags first (cheap, no fs movement) so a failing rename
 	// still leaves the flags durable.
 	flagsChanged := false
-	if body.HiddenFromMCP != nil || body.SkipGitSync != nil || newVisibility != "" || body.UseGlobals != nil || body.UseAnchors != nil || body.UseTagVocabulary != nil || body.LeanReadBootstrap != nil || body.AllowLocalMirror != nil || body.UsePipelines != nil || body.UseIN != nil || body.TrackINInGit != nil {
+	if body.HiddenFromMCP != nil || body.SkipGitSync != nil || newVisibility != "" || body.UseGlobals != nil || body.UseAnchors != nil || body.UseTagVocabulary != nil || body.LeanReadBootstrap != nil || body.AllowLocalMirror != nil || body.UsePipelines != nil || body.UseIN != nil || body.TrackINInGit != nil || body.PipelineTags != nil {
 		current := r.projectFlag(name)
 		prev := current
 		if body.HiddenFromMCP != nil {
@@ -385,6 +389,9 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 		}
 		if body.TrackINInGit != nil {
 			current.TrackINInGit = *body.TrackINInGit
+		}
+		if body.PipelineTags != nil {
+			current.PipelineTags = *body.PipelineTags
 		}
 		if current.UseIN && !prev.UseIN {
 			if code, msg := r.openIN(name); code != 0 {

@@ -15,6 +15,11 @@ Pipelines are **off by default**, twice over:
   `use_pipelines` flag (Projects window, chip `pipelines`, or
   `PUT /api/v1/projects/<name>` with `{"use_pipelines": true}`).
 
+A project's pipelines put git tags on the vault's commits
+([`vault.commit`](#revisions-as-git-history)) only with a second flag,
+`pipeline_tags`, off by default too (chip `git tags`, shown once the
+pipelines are on, or `{"pipeline_tags": true}`).
+
 ## Turning them on
 
 ```toml
@@ -212,6 +217,7 @@ it as text: `ratings: {"{{ trigger.turn }}": "{{ trigger.rating }}"}`
 | `in.list` | `folder` (of the IN folder; empty: all), `recursive` (default yes), `match` (a glob on the name), `kinds`, `status`, `batch` (`{{ trigger.batch }}`), `limit` (default 500, at most 5000), `cursor` | `files` (`path`, `name`, `stem`, `ext`, `dir`, `size`, `sha256`, `etag`, `status`, `modified`, `batch`, `source`), `count`, `next` (the cursor of the next page; empty at the last) |
 | `in.move` | `file` (in the IN folder), `to` (a folder, `done/`, or a path, in the IN folder; empty, or where it is already: it stays; for a file of a [source](in.md#sources), inside the source: `done/` is its `done/`), `status` (`done`, `error`, `ignored`, `new`) | `path`, `from`, `status` |
 | `in.import` | `file` (a `.md` in the IN folder), `dest` (a folder of the project), `base` (the folder of the IN folder whose tree is kept under `dest`; empty: all of it), `media_notes` (default yes), `list_images` (default yes; no keeps only their count, for an `each` over many files), `convert` (a node that converts the images, `images.convert`), `convert_with` (its settings) and `convert_batch` (the images of one call, default 25) | `path`, `created`, `attachments`, `image_count`, `images` (`note`, `attachment`, `src`, `position`, `inline`), `removed`, `unresolved`, `skipped` (`src`, `reason`), with `convert` `converted` and `convert_errors` — see [below](#documents-from-the-in-folder) |
+| `vault.commit` | `message` (default `pipeline <path>: run <id>`), `tag` (a git tag on the commit, with at least one `/`; the project needs `pipeline_tags`) | `commit` (the SHA; HEAD's when nothing was pending), `short`, `committed` (false when nothing was pending), `tag`, `pushed`, `push_error` — see [below](#revisions-as-git-history) |
 | `<plugin>.<node>` | what the plugin's manifest says; a setting it lists in `files` names an attachment of the project or a file of its IN folder (or a list of them, for a plugin that takes files by reference: `{{ trigger.files }}`) | the plugin tool's result, plus `files` (`name`, `path`, `mime`, `markdown`): the files it gave back, stored as attachments |
 
 A plugin's nodes exist once the owner accepted its manifest
@@ -444,6 +450,80 @@ rules that made them.
         - {section: "Setup > Requirements", block: 2, color: orange, label: long}
 ```
 
+## Revisions as git history
+
+A document that comes in revisions (V1, V2, V3…, each replacing the one
+before) keeps one note, at the same path, and its revisions in the vault's
+git history: one commit per revision, and a tag that names it
+(IMP-201). Git sync commits after `commit_debounce` (30 s), so revisions
+written one after another would end in one commit; **`vault.commit`**
+commits at once:
+
+````markdown
+---
+title: Revision
+type: pipeline
+---
+
+```pipeline
+trigger: {on: manual}
+nodes:
+  - id: convert
+    use: docling.convert
+    with: {file: "{{ trigger.file }}"}
+    timeout: 14m
+  - id: write
+    use: note.write
+    with:
+      path: "manuals/{{ trigger.codice }}"
+      title: "{{ convert.title }}"
+      body: "{{ convert.markdown }}"
+      frontmatter: {codice: "{{ trigger.codice }}", revisione: "{{ trigger.revisione }}"}
+  - id: commit
+    use: vault.commit
+    with:
+      message: "{{ trigger.codice }}: revision {{ trigger.revisione }}"
+      tag: "doc/{{ trigger.codice }}/{{ trigger.revisione }}"
+```
+````
+
+Started with `{"file": "IN/manuals/manual-A-en-V2.docx", "codice":
+"manual-A-en", "revisione": "V2"}`, it writes the revision over the note
+and makes the commit `manual-A-en: revision V2`, tagged
+`doc/manual-A-en/V2`. Then `git show doc/manual-A-en/V2:team/manuals/manual-A-en.md`
+gives that revision back, `git tag -l 'doc/manual-A-en/*'` lists them, and
+the note's history shows one entry per revision.
+
+- **The commit** is git sync's: everything pending in the vault, not only
+  what the run wrote, with git sync's author and the same files left out
+  (the projects with `skip_git_sync`, the IN folders). The commit pipelines
+  start on it as on any commit, without the files their own pipeline wrote
+  last. With nothing pending (a debounced commit took the run's writes a
+  moment before), `committed` is false and the tag goes on HEAD, the
+  commit that holds them.
+- **The tag** needs the project's `pipeline_tags`. It is annotated, with
+  the message. Besides git's rules for a ref name (no space, `..`, `~^:?*[\`,
+  part starting with `.` or ending with `.lock`, leading `-`…; at most 200
+  bytes), it must have at least one `/`, and its first part must be
+  neither `v` and a digit (`v2.71.3` is a release tag, should the vault and
+  the code ever share a remote) nor one of git's own names (`refs`,
+  `heads`, `tags`, `remotes`, `origin`, `HEAD`). The tags are the vault's,
+  shared by every project: two projects that name theirs alike collide.
+- **A tag never moves**: the same tag already on the same commit is fine
+  (a step tried again), on another commit the step fails. A revision
+  committed again needs a new name.
+- **The push**: with `GOSIDIAN_GIT_PUSH`, the branch and the tag go at
+  once. A failed push does not fail the step: `pushed` is false,
+  `push_error` says why, and git sync's next push takes the tag along (it
+  pushes with `--follow-tags`).
+- **Without git sync** (`GOSIDIAN_GIT_ENABLED` off) the node fails: «this
+  server keeps no git history».
+- **In order**: start the revisions one after the other, each waiting for
+  the one before (`memory_pipeline_run` with `wait`, or `"wait"` in the
+  start's body). Runs started together, an `each` without `wait`, end in
+  any order: the tags still name the right revisions, but the history no
+  longer reads V1, V2, V3.
+
 ## Editing in the web UI
 
 A pipeline note's block is drawn where it stands: the trigger, the nodes
@@ -633,6 +713,8 @@ REST reference: `internal/api/v1/spec/openapi.yaml`, tag `pipelines`.
   the audit.
 - Start **only pipelines of its own project** (`pipeline.run`), in a chain
   at most four runs deep, at most 1000 from one run (both settings).
+- Commit the vault as git sync does (`vault.commit`), and tag a commit
+  only with the project's `pipeline_tags`; a tag never moves.
 - Call **only the registered plugins**, and only through the nodes of the
   manifest the owner accepted. A plugin gets the files the node names,
   nothing else of the vault; the files it gives back become attachments

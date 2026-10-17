@@ -76,7 +76,14 @@ var (
 	_ pipeline.NoteLister = pipelineHost{}
 	_ pipeline.Authors    = pipelineHost{}
 	_ pipeline.Marker     = pipelineHost{}
+	_ pipeline.TagPolicy  = pipelineHost{}
 )
+
+// PipelineTags says whether the project's pipelines may tag commits
+// (pipeline_tags, IMP-201).
+func (h pipelineHost) PipelineTags(project string) bool {
+	return h.s.projects != nil && h.s.projects.PipelineTags(project)
+}
 
 // LastWriter is who wrote a note last, as the index keeps it from the
 // audit: pipeline:<path> for a run of that pipeline (pipeline.Authors).

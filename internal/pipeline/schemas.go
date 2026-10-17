@@ -230,6 +230,17 @@ var baseSchemas = []NodeSchema{
 	"removed": {"type": "array", "items": {"type": "string"}, "description": "Image notes of images no longer in the file, into the trash"},
 	"unresolved": {"type": "array", "items": {"type": "string"}, "description": "Links left as written"},
 	"skipped": {"type": "array", "items": {"type": "object", "properties": {"src": {"type": "string"}, "reason": {"type": "string"}}}}}}`)},
+	{Type: "vault.commit", Description: "Commits the vault now, as git sync would, with a message and a tag: one commit per revision of a document",
+		Input: json.RawMessage(`{"type": "object", "properties": {
+	"message": {"type": "string", "format": "multiline", "description": "The commit message; default: pipeline <path>: run <id>"},
+	"tag": {"type": "string", "description": "A tag on the commit (on HEAD when nothing was pending), with at least one /: doc/{{ trigger.code }}/{{ trigger.revision }}. The project needs pipeline_tags; a tag never moves"}}}`),
+		Output: json.RawMessage(`{"type": "object", "properties": {
+	"commit": {"type": "string", "description": "The commit's SHA, HEAD's when nothing was pending"},
+	"short": {"type": "string"},
+	"committed": {"type": "boolean", "description": "false when nothing was pending"},
+	"tag": {"type": "string"},
+	"pushed": {"type": "boolean", "description": "The branch and the tag pushed, with git sync's push on"},
+	"push_error": {"type": "string", "description": "Why the push failed: the next push of git sync takes the tag along"}}}`)},
 }
 
 // inFilesOutput is the files an in.list gives.

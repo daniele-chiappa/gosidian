@@ -967,7 +967,9 @@
       "in_git_on": "IN in git: the IN folder goes into the vault's history, but its files over 50 MiB. Click to leave it out.",
       "in_git_off": "The IN folder is out of git (it can weigh gigabytes). Click to track it, but its files over 50 MiB.",
       "in_git_confirm": "Put the IN folder of {name} in git? All it holds, up to 50 MiB a file, goes into the vault's history and stays there.",
-      "in_git_confirm_ok": "Put in git"
+      "in_git_confirm_ok": "Put in git",
+      "tags_on": "Git tags on: the project's pipelines may tag the vault's commits (vault.commit with tag), a tag per revision of a document; the tags go to the remote with the push. Click to turn off.",
+      "tags_off": "Click to let this project's pipelines tag the vault's commits (vault.commit with tag): a tag per revision of a document, which goes to the remote with the push and never moves."
     },
     "legend": {
       "title": "What the flags do",
@@ -979,6 +981,7 @@
       "lean_read": "gives tokens that cannot write a shorter bootstrap.",
       "mirror": "lets readers keep a read-only copy of the project: the notes leave the server, and every sync is audited.",
       "pipelines": "lets the server run the project's pipelines, which write notes as themselves; it needs its switch on the server, and is dimmed while that is off.",
+      "git_tags": "lets the project's pipelines tag the vault's commits (vault.commit), a tag per revision of a document; the tags are the vault's, shared by every project, and go to the remote with the push.",
       "IN": "gives the project its IN folder, with the files to work on under their own names: the pipelines take them, they are not notes. It comes with the pipelines too, and stays.",
       "IN_git": "puts the IN folder in the vault's git history, but its files over 50 MiB; it usually stays out, as it can weigh gigabytes."
     }

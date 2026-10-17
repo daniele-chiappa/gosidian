@@ -129,6 +129,10 @@ function pipelinesTitle(p: Project): string {
   return p.use_pipelines ? t('projects.flag.pipelines_on') : t('projects.flag.pipelines_off')
 }
 
+function tagsTitle(p: Project): string {
+  return p.pipeline_tags ? t('projects.flag.tags_on') : t('projects.flag.tags_off')
+}
+
 function inTitle(p: Project): string {
   return p.use_in ? t('projects.flag.in_on') : t('projects.flag.in_off')
 }
@@ -201,7 +205,7 @@ async function destroy(p: Project) {
 }
 
 /** The flag chips, in the order of the row, for the legend. */
-const FLAG_NAMES = ['skip-git', 'hidden', 'globals', 'anchors', 'tag-vocab', 'lean-read', 'mirror', 'pipelines', 'IN', 'IN git'] as const
+const FLAG_NAMES = ['skip-git', 'hidden', 'globals', 'anchors', 'tag-vocab', 'lean-read', 'mirror', 'pipelines', 'git tags', 'IN', 'IN git'] as const
 
 onMounted(() => {
   load()
@@ -398,6 +402,16 @@ onMounted(() => {
             :aria-pressed="!!p.use_pipelines"
             @click="apply(p, { use_pipelines: !p.use_pipelines }, 'pipelines')"
           >pipelines</button>
+          <button
+            v-if="p.use_pipelines"
+            type="button"
+            class="h-control-sm text-xs px-2 rounded"
+            :class="p.pipeline_tags ? 'bg-accent/20 text-accent' : 'border border-border'"
+            :title="tagsTitle(p)"
+            :aria-pressed="!!p.pipeline_tags"
+            data-flag="pipeline_tags"
+            @click="apply(p, { pipeline_tags: !p.pipeline_tags }, 'git tags')"
+          >git tags</button>
           <button
             type="button"
             class="h-control-sm text-xs px-2 rounded"

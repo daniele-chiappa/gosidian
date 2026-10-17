@@ -131,6 +131,10 @@ func startPipelines(ctx context.Context, cfg *config.Config, sdir string, mcpSer
 		}
 		engine.Committed(pipeline.Commit{SHA: c.SHA, Date: c.Date, Files: files})
 	})
+	// vault.commit commits through git sync (IMP-201); off, it says so.
+	if cfg.Git.Enabled {
+		engine.SetCommitter(gitCommitter{syncer})
+	}
 	mcpServer.SetPipelines(engine)
 	mcpServer.SetPlugins(reg)
 	// The bots (IMP-191): the notes type: chat, handed to their chat
@@ -169,6 +173,14 @@ func startPipelines(ctx context.Context, cfg *config.Config, sdir string, mcpSer
 		before()
 		_ = store.Close()
 	}, reg
+}
+
+// gitCommitter is git sync as the committer of vault.commit.
+type gitCommitter struct{ s *gitsync.Sync }
+
+func (g gitCommitter) CommitNow(ctx context.Context, message, tag string) (pipeline.CommitDone, error) {
+	r, err := g.s.CommitNow(ctx, message, tag)
+	return pipeline.CommitDone{SHA: r.SHA, Short: r.Short, Committed: r.Committed, Tag: r.Tag, Pushed: r.Pushed, PushError: r.PushError}, err
 }
 
 // --- gosidian secret ---

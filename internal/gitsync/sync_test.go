@@ -257,6 +257,10 @@ func TestSync_GracefulDegradeOnInitFailure(t *testing.T) {
 	if st2.Healthy {
 		t.Errorf("no-op calls should not flip Healthy, got %+v", st2)
 	}
+	// A commit asked by a pipeline says why it cannot be made.
+	if _, err := s.CommitNow(ctx, "m", "doc/a/V1"); err == nil || !strings.Contains(err.Error(), "git sync did not start") {
+		t.Errorf("CommitNow after a failed start: %v", err)
+	}
 }
 
 func TestSync_RefreshGitignore_ManagedBlock(t *testing.T) {
@@ -585,7 +589,7 @@ func TestSync_PushTokenNotInArgs(t *testing.T) {
 	cfg := testCfg()
 	cfg.Push, cfg.TokenEnv = true, "TEST_PUSH_TOKEN"
 	s := New(t.TempDir(), cfg)
-	if err := s.push(); err != nil {
+	if err := s.push(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(rec)
@@ -593,7 +597,7 @@ func TestSync_PushTokenNotInArgs(t *testing.T) {
 		t.Fatal(err)
 	}
 	args, envs, _ := strings.Cut(string(got), "\n")
-	if strings.Contains(args, "secret-push-token") || !strings.Contains(args, "push -q origin main") {
+	if strings.Contains(args, "secret-push-token") || !strings.Contains(args, "push -q --follow-tags origin main") {
 		t.Errorf("git args = %q", args)
 	}
 	if !strings.Contains(envs, "GIT_CONFIG_VALUE_0=Authorization: token secret-push-token") {

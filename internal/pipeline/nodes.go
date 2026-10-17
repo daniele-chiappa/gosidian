@@ -89,6 +89,7 @@ func NewRegistry() *Registry {
 	r.Register("in.list", TypeFunc(inList))
 	r.Register("in.move", TypeFunc(inMove))
 	r.Register("in.import", TypeFunc(inImport))
+	r.Register("vault.commit", TypeFunc(vaultCommit))
 	return r
 }
 

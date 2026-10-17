@@ -47,6 +47,9 @@ export interface Project {
   /** The IN folder goes in the vault's git history (but its files over
    *  50 MiB); off by default. */
   track_in_git?: boolean
+  /** Let the project's pipelines tag the vault's commits (vault.commit,
+   *  IMP-201); off by default. */
+  pipeline_tags?: boolean
   /** RFC 3339 UTC string of the directory's mtime — proxy for
    *  "last activity" (fs birth time isn't preserved by rsync /
    *  git checkout / container layer copy). Empty when stat failed. */
@@ -72,6 +75,7 @@ export interface UpdateProjectRequest {
   use_pipelines?: boolean
   use_in?: boolean
   track_in_git?: boolean
+  pipeline_tags?: boolean
 }
 
 export async function listProjects(): Promise<Project[]> {

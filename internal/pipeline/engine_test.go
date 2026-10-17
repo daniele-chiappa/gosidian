@@ -40,6 +40,8 @@ type fakeHost struct {
 	writers map[string]string
 	// marks are the sets note.mark put, by path#set (marknode_test.go).
 	marks map[string]marks.Set
+	// tagging are the projects with pipeline_tags (vaultcommit_test.go).
+	tagging map[string]bool
 }
 
 func newFakeHost() *fakeHost {
