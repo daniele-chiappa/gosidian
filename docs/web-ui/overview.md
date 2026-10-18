@@ -74,9 +74,10 @@ A right-click on a row of the sidebar tree (or the Menu key, or
 `Shift+F10`, on the focused row) opens gosidian's own menu in place of
 the browser's:
 
-- **note**: *Download* saves the same self-contained copy as the note
-  window's download button; *Delete* moves it to the trash, after a
-  confirmation. Obsidian bases and canvases, which are read-only, only
+- **note**: *Download* saves the same copy as the note window's download
+  button: the note as it is, or, when it shows images or links to other
+  files of the vault, a zip of the note and those files (see below);
+  *Delete* moves it to the trash, after a confirmation. Obsidian bases and canvases, which are read-only, only
   download.
 - **folder**: *Download* saves a zip of the folder; *Delete* moves the
   whole folder to the trash as one entry, restored in one go. It needs
@@ -103,6 +104,23 @@ endpoints are `GET /api/v1/projects/{name}/export.zip`,
 `GET /api/v1/folders/{path}/export.zip` (any folder, from the tree's
 context menu, names starting at the folder) and
 `GET /api/v1/admin/export.zip`, with the usual Bearer.
+
+**The notes keep their images.** A note shows an image or links a file of
+the vault by a `/vault-files/…` address, an `![[embed]]`, or the `src` or
+`href` of an HTML note; outside gosidian that address leads nowhere. In
+every zip (folder, project, vault) those references become paths relative
+to the note, `![photo](../attachments/x.png)`, and the files they name come
+along: where the zip holds them already (a project's `attachments/`), else
+in an `attachments/` folder at the top of the zip, once each. A file of
+another project is added only when the account can read it; a reference
+the account may not follow, or that names no file, stays as written. The
+notes in the vault do not change, and the image notes (`<note>_img/`, with
+the descriptions) are in the zip of their folder as before.
+
+A note downloads the same way: `GET /api/v1/notes/{path}?export=zip` gives
+a zip of the note and the files it shows (`attachments/…`), or the note as
+it is when it shows none. It is a read like any other, without the export
+limit or the audit.
 
 ## Rendering stack
 

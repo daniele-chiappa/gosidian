@@ -1,4 +1,4 @@
-import { saveBlob } from './download'
+import { downloadFile, saveBlob } from './download'
 import { getNote, type Note } from './notes'
 
 /** An Obsidian base or canvas: shown read-only, downloaded as the file it is. */
@@ -7,26 +7,25 @@ export function isReadOnlyNotePath(path: string): boolean {
 }
 
 /**
- * Saves a note as a file. A note downloads as a SELF-CONTAINED copy, its
- * image references inlined as data: URIs (server ?inline), while the stored
- * note keeps the lightweight reference for MCP reads and editing. A base or
- * a canvas downloads as the file it is (YAML, JSON), not as what gosidian
- * shows of it. `loaded` is the note already in memory, if any: its content
- * stands in when the fetch fails.
+ * Saves a note as a file. The server decides the form (IMP-204): a note
+ * that names attachments comes as a zip, the note with its references made
+ * relative and the files under attachments/; one that names none comes as
+ * the file it is. A base or a canvas downloads as the file it is (YAML,
+ * JSON), not as what gosidian shows of it. `loaded` is the note already in
+ * memory, if any: its content stands in when the download fails.
  */
 export async function downloadNote(path: string, loaded?: Note): Promise<void> {
   const filename = path.split('/').pop() || loaded?.title || 'note'
-  const mime = filename.toLowerCase().endsWith('.html') ? 'text/html' : 'text/markdown'
-  let content: string
   if (isReadOnlyNotePath(path) || loaded?.kind === 'base' || loaded?.kind === 'canvas') {
-    content = (loaded ?? (await getNote(path))).source ?? ''
-  } else {
-    try {
-      content = (await getNote(path, { inline: true })).content
-    } catch (e) {
-      if (!loaded) throw e
-      content = loaded.content
-    }
+    const content = (loaded ?? (await getNote(path))).source ?? ''
+    saveBlob(new Blob([content], { type: 'text/plain;charset=utf-8' }), filename)
+    return
   }
-  saveBlob(new Blob([content], { type: `${mime};charset=utf-8` }), filename)
+  try {
+    await downloadFile(`/notes/${encodeURIComponent(path)}?export=zip`, filename)
+  } catch (e) {
+    if (!loaded) throw e
+    const mime = filename.toLowerCase().endsWith('.html') ? 'text/html' : 'text/markdown'
+    saveBlob(new Blob([loaded.content], { type: `${mime};charset=utf-8` }), filename)
+  }
 }

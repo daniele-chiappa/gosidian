@@ -114,6 +114,13 @@ func (r *Router) streamExport(w http.ResponseWriter, req *http.Request, user *Re
 	cw := &countingWriter{w: w}
 	zw := zip.NewWriter(cw)
 	files, skipped := 0, 0
+	// The notes' references to attachments become relative, and those from
+	// outside the folder go into <top>attachments/ (IMP-204).
+	top := ""
+	if dir != "" {
+		top = strings.TrimPrefix(dir, strip) + "/"
+	}
+	x := newExportFiles(r, user.principal(), dir, strip, top)
 	err := r.deps.Vault.WalkExport(dir, func(rel string, info fs.FileInfo) error {
 		if err := req.Context().Err(); err != nil {
 			return err // the client went away: stop reading the vault
@@ -127,8 +134,23 @@ func (r *Router) streamExport(w http.ResponseWriter, req *http.Request, user *Re
 			return nil
 		}
 		files++
-		return addZipFile(zw, filepath.Join(r.deps.Vault.Root, filepath.FromSlash(rel)), strings.TrimPrefix(rel, strip), info)
+		abs := filepath.Join(r.deps.Vault.Root, filepath.FromSlash(rel))
+		name := strings.TrimPrefix(rel, strip)
+		if format, ok := isExportNote(rel); ok {
+			data, err := exportRead(abs)
+			if err != nil {
+				return err
+			}
+			if out, n := x.rewrite(name, string(data), format); n > 0 {
+				return addZipBytes(zw, name, info, []byte(out))
+			}
+		}
+		return addZipFile(zw, abs, name, info)
 	})
+	added := 0
+	if err == nil {
+		added, err = x.addExtras(zw)
+	}
 	if err == nil {
 		err = zw.Close()
 	}
@@ -138,7 +160,7 @@ func (r *Router) streamExport(w http.ResponseWriter, req *http.Request, user *Re
 	// dir comes from the URL. It names an existing project, but the newline
 	// strip is the sanitizer CodeQL's go/log-injection model recognizes.
 	logDir := strings.ReplaceAll(strings.ReplaceAll(dir, "\n", ""), "\r", "")
-	slog.Default().Info("api/v1: export", "dir", logDir, "user", user.Username, "files", files, "skipped", skipped, "bytes", cw.n, "ok", err == nil)
+	slog.Default().Info("api/v1: export", "dir", logDir, "user", user.Username, "files", files, "attachments_added", added, "skipped", skipped, "bytes", cw.n, "ok", err == nil)
 	if err != nil {
 		slog.Default().Warn("api/v1: export failed", "dir", logDir, "user", user.Username, "err", err)
 		// The 200 is already out. Returning would end the chunked body
@@ -151,6 +173,17 @@ func (r *Router) streamExport(w http.ResponseWriter, req *http.Request, user *Re
 // exportOpen opens a file to copy into an archive; tests swap it to make a
 // file unreadable (they run as root, where a chmod does not).
 var exportOpen = os.Open
+
+// exportRead reads a note of an export whole, to rewrite its references,
+// through exportOpen.
+func exportRead(abs string) ([]byte, error) {
+	f, err := exportOpen(abs)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(f)
+}
 
 func addZipFile(zw *zip.Writer, abs, rel string, info fs.FileInfo) error {
 	fh, err := zip.FileInfoHeader(info)

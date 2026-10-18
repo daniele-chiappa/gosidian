@@ -8,6 +8,32 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.98.0] — 2026-10-18 — "downloads"
+
+Downloads keep their images: a zip of a folder, a project or the vault,
+and a single note, now open in Obsidian or any markdown viewer with the
+images and files their notes show. Pull the image and restart; nothing to
+migrate.
+
+### Added
+- **Downloads keep their images**: the zip of a folder, of a project and
+  of the vault brings along the files the notes show or link
+  (`/vault-files/…`, an `![[embed]]`, the `src` or `href` of an HTML note)
+  and rewrites those references as paths relative to the note,
+  `![photo](../attachments/x.png)`. Files the zip holds already are
+  pointed at where they are; the others go into `attachments/` at the top
+  of the zip, once each, with the project's name in front when the name is
+  taken. A file of another project comes only when the account can read
+  it; a reference the account may not follow, or that names no file,
+  stays as written. The stored notes do not change. Until now the zip of a
+  folder held its notes without the images, which live in the project's
+  `attachments/`.
+- **A note downloads with its files**
+  (`GET /api/v1/notes/{path}?export=zip`, used by the web UI's download):
+  a zip with the note and its files when it shows any, the note as it is
+  otherwise. It used to come as a markdown file with its images inlined as
+  `data:` URIs.
+
 ## [2.97.1] — 2026-10-18 — "chroma"
 
 A dependency update: the highlighter of the code blocks. Pull the image

@@ -317,6 +317,11 @@ func (r *Router) readNote(w http.ResponseWriter, req *http.Request, rel string) 
 		writeLoadError(w, err)
 		return
 	}
+	// ?export=zip is the download of the note with its attachments (IMP-204).
+	if req.URL.Query().Get("export") == "zip" {
+		r.exportNote(w, req, rel, note.Content)
+		return
+	}
 	// ?inline returns the content with image references inlined as data: URIs,
 	// for a self-contained download. The stored note is untouched; this is the
 	// only place the bytes are embedded into the markup. No 304 fast-path here:
