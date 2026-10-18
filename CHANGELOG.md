@@ -8,6 +8,20 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.97.1] — 2026-10-18 — "chroma"
+
+A dependency update: the highlighter of the code blocks. Pull the image
+and restart; nothing to migrate.
+
+### Changed
+- **`github.com/alecthomas/chroma/v2`** 2.2.0 → 2.27.0 (closes #89), with
+  `github.com/dlclark/regexp2/v2` 2.2.1 in place of `regexp2` 1.11.0. The
+  tokens of a code block and their classes are the same; the spaces
+  between them now come in `<span class="w">`, which the SPA's code styles
+  leave alone. chroma no longer puts `tabindex="0"` on a block's `<pre>`:
+  the renderer now writes it itself, so a code block too wide for the page
+  still scrolls with the keyboard.
+
 ## [2.97.0] — 2026-10-18 — "arrivals"
 
 A pipeline can now start runs one after another and wait for each, and a

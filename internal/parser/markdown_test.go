@@ -152,6 +152,10 @@ func TestRenderer_SyntaxHighlighting(t *testing.T) {
 	if strings.Contains(out, "style=") {
 		t.Errorf("highlighted code carries inline colours: %s", out)
 	}
+	// A block too wide for the page scrolls, and the keyboard reaches it.
+	if !strings.Contains(out, `<pre tabindex="0" class="chroma"><code>`) || !strings.Contains(out, `</code></pre>`) {
+		t.Errorf("the code block's <pre> takes no focus: %s", out)
+	}
 }
 
 func TestRenderer_CodeBlockPreserved(t *testing.T) {

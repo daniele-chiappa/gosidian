@@ -55,7 +55,7 @@ func NewRenderer() *Renderer {
 			// them from the preset's tokens, so code follows every theme,
 			// the light ones included (IMP-154).
 			highlighting.NewHighlighting(
-				highlighting.WithFormatOptions(chromahtml.WithClasses(true)),
+				highlighting.WithFormatOptions(chromahtml.WithClasses(true), chromahtml.WithPreWrapper(codePre{})),
 			),
 		),
 		goldmark.WithParserOptions(parser.WithAutoHeadingID()),
@@ -66,6 +66,25 @@ func NewRenderer() *Renderer {
 		goldmark.WithRendererOptions(gmhtml.WithUnsafe()),
 	)
 	return &Renderer{md: md}
+}
+
+// codePre wraps a highlighted block as chroma did until v2.2: the <pre>
+// takes tabindex="0", so a block too wide for the page scrolls with the
+// keyboard too. chroma's own wrapper no longer sets it.
+type codePre struct{}
+
+func (codePre) Start(code bool, styleAttr string) string {
+	if code {
+		return `<pre tabindex="0"` + styleAttr + `><code>`
+	}
+	return `<pre tabindex="0"` + styleAttr + `>`
+}
+
+func (codePre) End(code bool) string {
+	if code {
+		return `</code></pre>`
+	}
+	return `</pre>`
 }
 
 // Render converts the body to HTML after pre-processing wiki-links and tags.
