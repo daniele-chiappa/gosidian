@@ -113,7 +113,7 @@ why a pipeline cannot run.
 | `ingest` | a file of one of `kinds` is stored as an attachment of the project (with `folder`: a note made with it in that folder) | `file`, `name`, `stem`, `ext`, `folder`, `note`, `project` |
 | `schedule` | `every: "monday 09:00"`, `"day 18:30"`, `"hour :05"` (every hour, at five past; `"hour"` on the hour) — the automations' syntax — once per slot; a slot missed by more than 10 minutes is not run late | `slot` |
 | `in` | a batch of files of the project's [IN folder](in.md) closes: one run per file it takes, or one per batch with `batch: true`; `folder` (of the IN folder), `kinds` (none: all) and `match` (a glob on the name) choose the files; `take: false` reads them without taking them (their status stays the other pipelines') | per file: `file`, `name`, `stem`, `ext`, `dir`, `size`, `sha256`, `etag` (a source's file), `source` (`local`, or `<plugin>/<source>`), `project`; per batch: `batch`, `dir`, `count`, `bytes`, `files` (the files, when they fit in the input; else `files_listed` is false and `in.list` reads them), `project` |
-| `commit` | a commit of the vault's [git sync](configuration.md#environment-variables) changes files under `folder` (of the project; empty: all of it) whose name matches `match` (a glob, `*.md`): one run per commit | `commit` (its SHA), `date` (in seconds), `project`, `folder`, `count`, `files` (`path`, `change`: `added`, `modified`, `deleted`, `renamed`, and `from` for a renamed file; when they fit in the input, else `files_listed` is false), `files_listed` |
+| `commit` | a commit of the vault's [git sync](configuration.md#environment-variables) changes files under `folder` (of the project; empty: all of it) whose name matches `match` (a glob, `*.md`): one run per commit; `skip` lists pipelines whose writes do not start it | `commit` (its SHA), `date` (in seconds), `project`, `folder`, `count`, `files` (`path`, `change`: `added`, `modified`, `deleted`, `renamed`, and `from` for a renamed file; when they fit in the input, else `files_listed` is false), `files_listed` |
 
 Every file store counts as an arrival: `memory_ingest`,
 `memory_upload_attachment`, `memory_upload_resource`, the media and table
@@ -141,6 +141,13 @@ none. Git sync commits the whole vault, some seconds after the last change
 (`commit_debounce`): a run reads the notes as they are when it runs, maybe
 newer than the commit. With git sync off a commit pipeline starts only by
 hand, and the Runs window says so.
+
+`skip` names other pipelines of the project whose writes leave a file out
+as well, as `pipeline.run` names them: `skip: [pipelines/arrival]`. It is
+for an import that commits and cuts its own notes, one revision after the
+other: the commit pipeline would cut them again, reading a note that may
+already hold the next revision. Only the pipelines named: what the ones
+they start write still starts it.
 
 Any pipeline also starts by hand, whatever its trigger: an ingest pipeline
 run with `{"file": "team/attachments/….pdf", …}` as input works on that
@@ -708,8 +715,17 @@ nodes:
   is canceled or fails while it waits (its wait expired) cancels the run it
   waited for.
 - **Without `wait`** the step gives the run it started and goes on: in an
-  `each`, one run per element, each with its own step timeout and its own
-  `max_llm_tokens`. An `each` that waits is refused.
+  `each`, one run per element, all at once, each with its own step timeout
+  and its own `max_llm_tokens`.
+- **In an `each` that waits**, the elements go one after another: the run
+  of an element starts when the one before ended, and the step gives
+  their outcomes in order, a list. A run that fails fails the step at its
+  element, and the elements after it start nothing. This is how the
+  revisions of a document are imported oldest first, each with its commit
+  and its index, without a pipeline that starts itself. Each time a run
+  ends the step reads again the runs of the elements before it, so it is
+  meant for tens or hundreds of elements, not thousands; `timeout` is
+  each run's wait.
 - **A chain** of runs starting each other stops at four below the first
   (`[pipelines] max_run_depth`): the fifth fails. A pipeline that starts
   itself does not run forever.

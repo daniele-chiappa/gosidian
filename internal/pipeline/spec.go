@@ -80,6 +80,12 @@ type Trigger struct {
 	// a run that reads them (counts, summaries, notices) does not take
 	// them, nor mark them working, then done (IMP-174).
 	Leave bool `json:"leave,omitempty"`
+	// Skip, for commit, are pipelines of the project (named as
+	// pipeline.run names them) whose writes do not start it: the files a
+	// run of one of them wrote last are left out, as its own runs' are.
+	// Only those pipelines, not the ones they start (IMP-201: an import
+	// that cuts its own notes).
+	Skip []string `json:"skip,omitempty"`
 	// Every, for schedule: "monday 09:00", "day 18:30", "hour :05".
 	Every    string               `json:"every,omitempty"`
 	Schedule *automation.Schedule `json:"-"`
@@ -181,6 +187,7 @@ type rawSpec struct {
 		Match  string   `yaml:"match"`
 		Batch  bool     `yaml:"batch"`
 		Take   *bool    `yaml:"take"`
+		Skip   []string `yaml:"skip"`
 	} `yaml:"trigger"`
 	Nodes    yaml.Node `yaml:"nodes"`
 	Answer   string    `yaml:"answer"`
@@ -249,6 +256,16 @@ func Parse(src string, types Types) (*Spec, error) {
 	}
 	if r.Trigger.Take != nil && s.Trigger.On != TriggerIN {
 		return nil, fmt.Errorf("trigger %s: take is for the in trigger (take: false leaves the files' status alone)", s.Trigger.On)
+	}
+	for _, p := range r.Trigger.Skip {
+		p = strings.TrimSpace(p)
+		if s.Trigger.On != TriggerCommit {
+			return nil, fmt.Errorf("trigger %s: skip is for the commit trigger (the pipelines whose writes do not start it)", s.Trigger.On)
+		}
+		if p == "" || strings.Contains(p, "{{") || strings.Contains(p, "..") {
+			return nil, fmt.Errorf("trigger commit: skip %q is a pipeline of the project, as pipeline.run names it", p)
+		}
+		s.Trigger.Skip = append(s.Trigger.Skip, p)
 	}
 	switch s.Priority {
 	case "", "normal":

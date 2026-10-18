@@ -63,7 +63,8 @@ func (e *Engine) Infos(ps []Pipeline) []Info {
 
 // Committed starts the commit pipelines of the projects that run
 // pipelines whose folder c changed: each with the files under it (match
-// narrows them by name), but those a run of the pipeline wrote last. The
+// narrows them by name), but those a run of the pipeline, of the ones it
+// starts or of the ones its skip names wrote last. The
 // commit is the run's idempotency key. When the files do not fit in the
 // run's input, files_listed is false, and count says how many they are.
 func (e *Engine) Committed(c Commit) {
@@ -92,6 +93,14 @@ func (e *Engine) Committed(c Commit) {
 			under += tr.Folder + "/"
 		}
 		chain := chainOf(p, byPath)
+		for _, name := range tr.Skip {
+			if rel, err := projectRel(p.Project, name); err == nil {
+				if !strings.HasSuffix(rel, ".md") {
+					rel += ".md"
+				}
+				chain[Actor(rel)] = true
+			}
+		}
 		files := []CommitFile{}
 		for _, f := range c.Files {
 			in := strings.HasPrefix(f.Path, under) || (f.From != "" && strings.HasPrefix(f.From, under))

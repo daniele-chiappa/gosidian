@@ -556,6 +556,21 @@ func (s *Store) recoverRunning(now time.Time) (int, error) {
 	return int(n), nil
 }
 
+// requeueWaiting puts a waiting step back in the queue, in the attempt it
+// is in (the claim counts it again): its node runs again where it waited.
+// It says whether the step waited.
+func (s *Store) requeueWaiting(runID, name string, now time.Time) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	res, err := s.db.Exec(`UPDATE steps SET status = ?, attempt = MAX(attempt - 1, 0), not_before = ?, wait_until = 0, lease_until = 0
+		WHERE run_id = ? AND name = ? AND status = ?`, Queued, ms(now), runID, name, Waiting)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
 // expiredWaits returns the waiting steps whose time is up.
 func (s *Store) expiredWaits(now time.Time) ([]Step, error) {
 	rows, err := s.db.Query(`SELECT `+stepCols+` FROM steps WHERE status = ? AND wait_until > 0 AND wait_until <= ?`, Waiting, ms(now))

@@ -118,7 +118,12 @@ func TestParse_CommitTrigger(t *testing.T) {
 	if err != nil || s.Trigger.On != TriggerCommit || s.Trigger.Folder != "docs" || s.Trigger.Match != "*.md" {
 		t.Fatalf("%+v %v", s, err)
 	}
-	for _, bad := range []string{"trigger: {on: commit, match: \"[\"}", "trigger: {on: commit, folder: ../x}", "trigger: {on: commit, take: false}"} {
+	s, err = Parse("trigger: {on: commit, skip: [pipelines/import, ' x.md ']}\nnodes:\n  - {id: a, use: starlark, with: {code: \"output = 1\"}}", nil)
+	if err != nil || strings.Join(s.Trigger.Skip, ",") != "pipelines/import,x.md" {
+		t.Fatalf("skip %+v %v", s.Trigger, err)
+	}
+	for _, bad := range []string{"trigger: {on: commit, match: \"[\"}", "trigger: {on: commit, folder: ../x}", "trigger: {on: commit, take: false}",
+		"trigger: {on: manual, skip: [a]}", "trigger: {on: commit, skip: [\"\"]}", "trigger: {on: commit, skip: [../q/a]}", "trigger: {on: commit, skip: [\"{{ x }}\"]}"} {
 		if _, err := Parse(bad+"\nnodes:\n  - {id: a, use: starlark, with: {code: \"output = 1\"}}", nil); err == nil {
 			t.Errorf("%s: no error", bad)
 		}
@@ -156,5 +161,44 @@ nodes:
 	runs, _ := e.Runner().Store().Runs(jobs.RunFilter{})
 	if len(runs) != 1 || runs[0].Ref != "p/pipelines/a.md" {
 		t.Fatalf("what the child wrote: runs %+v, want a's only", runs)
+	}
+}
+
+// skip leaves out what the pipelines it names wrote, and only those: what
+// a pipeline they start wrote still starts it (IMP-201: the import cuts its
+// own notes, the OCR's second round leaves its notes to the commit).
+func TestEngine_CommitTriggerSkip(t *testing.T) {
+	e, host := newEngine(t, Config{})
+	host.notes["p/pipelines/cut.md"] = pipelineNote(`
+trigger: {on: commit, folder: docs, skip: [pipelines/import]}
+nodes:
+  - {id: a, use: starlark, with: {input: "{{ trigger.files }}", code: "output = [f['path'] for f in input]"}}
+`)
+	host.notes["p/pipelines/import.md"] = pipelineNote(`
+nodes:
+  - {id: convert, use: pipeline.run, with: {pipeline: pipelines/convert}}
+`)
+	host.notes["p/pipelines/convert.md"] = pipelineNote("nodes:\n  - {id: a, use: starlark, with: {code: \"output = 1\"}}\n")
+	host.writers = map[string]string{
+		"p/docs/imported.md":  Actor("p/pipelines/import.md"),
+		"p/docs/converted.md": Actor("p/pipelines/convert.md"),
+		"p/docs/by-hand.md":   "admin",
+	}
+	e.Committed(Commit{SHA: "c1", Date: time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC), Files: []CommitFile{
+		{Path: "p/docs/imported.md", Change: "added"},
+		{Path: "p/docs/converted.md", Change: "modified"},
+		{Path: "p/docs/by-hand.md", Change: "modified"},
+	}})
+	runs, _ := e.Runner().Store().Runs(jobs.RunFilter{Ref: "p/pipelines/cut.md"})
+	if len(runs) != 1 {
+		t.Fatalf("runs %+v", runs)
+	}
+	waitStatus(t, e, runs[0].ID, jobs.Done)
+	if out := string(stepOf(t, e, runs[0].ID, "a").Output); out != `["p/docs/converted.md","p/docs/by-hand.md"]` {
+		t.Fatalf("files %s", out)
+	}
+	e.Committed(Commit{SHA: "c2", Date: time.Date(2026, 10, 18, 12, 1, 0, 0, time.UTC), Files: []CommitFile{{Path: "p/docs/imported.md", Change: "modified"}}})
+	if runs, _ := e.Runner().Store().Runs(jobs.RunFilter{Ref: "p/pipelines/cut.md"}); len(runs) != 1 {
+		t.Fatalf("a commit of the skipped pipeline's notes alone started %d runs", len(runs)-1)
 	}
 }

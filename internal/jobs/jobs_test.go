@@ -268,6 +268,35 @@ func TestRunner_AWaitingStepGoesOnWhenResumed(t *testing.T) {
 	}
 }
 
+// A waiting step run again goes back to its node, in the same attempt.
+func TestRunner_AWaitingStepRunsAgain(t *testing.T) {
+	var calls atomic.Int32
+	exec := &fakeExec{fns: map[string]func(context.Context, Step) Outcome{
+		"wait": func(context.Context, Step) Outcome {
+			if calls.Add(1) < 3 {
+				return Outcome{Status: Waiting, WaitUntil: time.Now().Add(time.Hour)}
+			}
+			return Outcome{Status: Done, Output: json.RawMessage(`"third"`)}
+		},
+	}}
+	r, _, _ := newRunner(t, "", exec)
+	run, _, _ := r.Submit(Run{Kind: "test", Ref: "p/x.md", Project: "p"}, chain("wait", "c"))
+	for i := 0; i < 2; i++ {
+		waitRun(t, r, run.ID, Waiting)
+		if err := r.RunAgain(run.ID, "wait"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	waitRun(t, r, run.ID, Done)
+	st := stepByName(t, r, run.ID, "wait")
+	if string(st.Output) != `"third"` || st.Attempt != 1 || calls.Load() != 3 {
+		t.Fatalf("step %+v after %d calls", st, calls.Load())
+	}
+	if err := r.RunAgain(run.ID, "wait"); !errors.Is(err, ErrState) {
+		t.Fatalf("a step that does not wait, run again: %v", err)
+	}
+}
+
 func TestRunner_AWaitThatExpiresFails(t *testing.T) {
 	exec := &fakeExec{fns: map[string]func(context.Context, Step) Outcome{
 		"wait": func(context.Context, Step) Outcome {

@@ -130,7 +130,7 @@ var baseSchemas = []NodeSchema{
 		Input: json.RawMessage(`{"type": "object", "required": ["pipeline"], "properties": {
 	"pipeline": {"type": "string", "format": "path", "description": "A pipeline note of the project (relative to it)"},
 	"input": {"type": "object", "description": "What the pipeline reads as its trigger"},
-	"wait": {"type": "boolean", "default": true, "description": "Wait for its run to end; false in an each, one run per element"},
+	"wait": {"type": "boolean", "default": true, "description": "Wait for its run to end; in an each, one element after another (false: all at once)"},
 	"timeout": {"type": "string", "format": "duration", "default": "24h", "description": "The longest wait, at most the server's max_wait"},
 	"key": {"type": "string", "description": "Tells apart the runs one node starts of the same pipeline"}}}`),
 		Output: json.RawMessage(`{"type": "object", "properties": {

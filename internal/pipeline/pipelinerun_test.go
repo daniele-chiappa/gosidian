@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -223,8 +224,7 @@ nodes:
 	}
 }
 
-// Without wait, one run per element of an each; with wait, an each is
-// refused before any run starts.
+// Without wait, one run per element of an each.
 func TestPipelineRunNode_EachStartsRunsWithoutWaiting(t *testing.T) {
 	e, host := newEngine(t, Config{})
 	host.notes["p/echo.md"] = pipelineNote(childEcho)
@@ -232,11 +232,6 @@ func TestPipelineRunNode_EachStartsRunsWithoutWaiting(t *testing.T) {
 nodes:
   - {id: list, use: starlark, with: {code: "output = ['a', 'b', 'c']"}}
   - {id: fan, use: pipeline.run, each: "{{ list }}", with: {pipeline: echo, input: {word: "{{ item }}"}, wait: false}}
-`)
-	host.notes["p/fan-wait.md"] = pipelineNote(`
-nodes:
-  - {id: list, use: starlark, with: {code: "output = ['a']"}}
-  - {id: fan, use: pipeline.run, each: "{{ list }}", with: {pipeline: echo, input: {word: "{{ item }}"}}}
 `)
 	run, _, _ := e.Start(StartRequest{Path: "p/fan.md", Trigger: TriggerManual})
 	waitStatus(t, e, run.ID, jobs.Done)
@@ -262,14 +257,132 @@ nodes:
 	if strings.Join(words, " ") != "a! b! c!" || path.Base(strings.ReplaceAll(keys[2], ":", "/")) != "2" {
 		t.Fatalf("words %v keys %v", words, keys)
 	}
+}
 
-	refused, _, _ := e.Start(StartRequest{Path: "p/fan-wait.md", Trigger: TriggerManual})
-	got := waitStatus(t, e, refused.ID, jobs.Failed)
-	if !strings.Contains(got.Error, "wait: false") {
-		t.Errorf("error %q", got.Error)
+// With wait, an each starts one run per element, each after the one
+// before ended, and gives their outcomes in order (IMP-201: the revisions
+// of a document, oldest first).
+func TestPipelineRunNode_EachWaitsOneAfterAnother(t *testing.T) {
+	e, host := newEngine(t, Config{})
+	host.notes["p/echo.md"] = pipelineNote(childEcho)
+	host.notes["p/fan.md"] = pipelineNote(`
+nodes:
+  - {id: list, use: starlark, with: {code: "output = ['a', 'b', 'c']"}}
+  - {id: fan, use: pipeline.run, each: "{{ list }}", with: {pipeline: echo, input: {word: "{{ item }}"}}}
+  - {id: after, use: starlark, with: {input: "{{ fan }}", code: "output = [r['outputs']['say'] for r in input]"}}
+`)
+	run, _, _ := e.Start(StartRequest{Path: "p/fan.md", Trigger: TriggerManual})
+	waitStatus(t, e, run.ID, jobs.Done)
+	if out := string(stepOf(t, e, run.ID, "after").Output); out != `["a!","b!","c!"]` {
+		t.Fatalf("after %s", out)
 	}
-	if kids := childrenOf(t, e, "parent:"+refused.ID+":"); len(kids) != 0 {
-		t.Errorf("a waited run started in an each: %+v", kids)
+	kids := childrenOf(t, e, "parent:"+run.ID+":fan:")
+	if len(kids) != 3 {
+		t.Fatalf("children %+v", kids)
+	}
+	sort.Slice(kids, func(i, j int) bool { return kids[i].IdemKey < kids[j].IdemKey })
+	for i := 1; i < len(kids); i++ {
+		if kids[i].Created.Before(kids[i-1].Finished) {
+			t.Errorf("element %d started at %s, before the one before ended at %s", i, kids[i].Created, kids[i-1].Finished)
+		}
+	}
+	if st := stepOf(t, e, run.ID, "fan"); st.Attempt != 1 {
+		t.Errorf("the step ran again in attempt %d, want 1", st.Attempt)
+	}
+}
+
+// An element whose run waits holds the next one back until it ends; the
+// step waits at work, not settled; a parent canceled meanwhile cancels the
+// run it waits for, and starts no other.
+func TestPipelineRunNode_EachWaitsForTheRunOfEachElement(t *testing.T) {
+	e, host := newEngine(t, Config{})
+	host.notes["p/hold.md"] = pipelineNote(`
+nodes:
+  - {id: hold, use: wait.call, with: {timeout: 1h}}
+  - {id: say, use: starlark, with: {input: "{{ hold.word }}", code: "output = input"}}
+`)
+	host.notes["p/fan.md"] = pipelineNote(`
+nodes:
+  - {id: list, use: starlark, with: {code: "output = ['a', 'b', 'c']"}}
+  - {id: fan, use: pipeline.run, each: "{{ list }}", with: {pipeline: hold}}
+`)
+	run, _, _ := e.Start(StartRequest{Path: "p/fan.md", Trigger: TriggerManual})
+	resume := func(i int, word string) {
+		t.Helper()
+		var kid jobs.Run
+		eventually(t, func() bool {
+			kids := childrenOf(t, e, "parent:"+run.ID+":fan:")
+			if len(kids) != i+1 {
+				return false
+			}
+			for _, k := range kids {
+				if strings.HasSuffix(k.IdemKey, ":"+strconv.Itoa(i)) && k.Status == jobs.Waiting {
+					kid = k
+					return true
+				}
+			}
+			return false
+		}, "the run of element "+strconv.Itoa(i)+" waits, alone")
+		if got := waitStatus(t, e, run.ID, jobs.Waiting); e.Settled(got) {
+			t.Errorf("a run waiting for element %d: settled", i)
+		}
+		if err := e.Runner().Resume(kid.ID, "", json.RawMessage(`{"word":"`+word+`"}`)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resume(0, "uno")
+	resume(1, "due")
+	resume(2, "tre")
+	waitStatus(t, e, run.ID, jobs.Done)
+	var fan []map[string]any
+	if err := json.Unmarshal(stepOf(t, e, run.ID, "fan").Output, &fan); err != nil || len(fan) != 3 {
+		t.Fatalf("fan %s %v", stepOf(t, e, run.ID, "fan").Output, err)
+	}
+	if say := fan[2]["outputs"].(map[string]any)["say"]; say != "tre" {
+		t.Errorf("element 2 %v", fan[2])
+	}
+
+	canceled, _, _ := e.Start(StartRequest{Path: "p/fan.md", Trigger: TriggerManual})
+	eventually(t, func() bool {
+		kids := childrenOf(t, e, "parent:"+canceled.ID+":fan:")
+		return len(kids) == 1 && kids[0].Status == jobs.Waiting
+	}, "the first element's run waits")
+	if err := e.Runner().Cancel(canceled.ID); err != nil {
+		t.Fatal(err)
+	}
+	kids := childrenOf(t, e, "parent:"+canceled.ID+":fan:")
+	waitStatus(t, e, kids[0].ID, jobs.Canceled)
+	time.Sleep(100 * time.Millisecond)
+	if kids := childrenOf(t, e, "parent:"+canceled.ID+":fan:"); len(kids) != 1 {
+		t.Errorf("%d runs after the cancel, want 1", len(kids))
+	}
+}
+
+// An element whose run fails fails the step there: the elements after it
+// start nothing, and a node that continues on error goes on.
+func TestPipelineRunNode_EachStopsAtAFailedElement(t *testing.T) {
+	e, host := newEngine(t, Config{})
+	host.notes["p/maybe.md"] = pipelineNote(`
+nodes:
+  - {id: check, use: starlark, with: {input: "{{ trigger.word }}", code: "if input == 'b':\n    fail('no b')\noutput = input"}}
+`)
+	host.notes["p/fan.md"] = pipelineNote(`
+nodes:
+  - {id: list, use: starlark, with: {code: "output = ['a', 'b', 'c']"}}
+  - {id: fan, use: pipeline.run, each: "{{ list }}", with: {pipeline: maybe, input: {word: "{{ item }}"}}, on_error: continue}
+  - {id: report, use: starlark, with: {input: "{{ fan }}", code: "output = input['status']"}}
+`)
+	run, _, _ := e.Start(StartRequest{Path: "p/fan.md", Trigger: TriggerManual})
+	waitStatus(t, e, run.ID, jobs.Done)
+	st := stepOf(t, e, run.ID, "fan")
+	if st.Status != jobs.Failed || !strings.Contains(st.Error, "element 1") || !strings.Contains(st.Error, "of p/maybe.md failed") {
+		t.Errorf("fan %s %q", st.Status, st.Error)
+	}
+	if out := string(stepOf(t, e, run.ID, "report").Output); out != `"failed"` {
+		t.Errorf("report %s", out)
+	}
+	if kids := childrenOf(t, e, "parent:"+run.ID+":fan:"); len(kids) != 2 {
+		t.Errorf("%d runs, want 2: the element after the failed one started", len(kids))
 	}
 }
 

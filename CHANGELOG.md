@@ -8,6 +8,33 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.97.0] — 2026-10-18 — "arrivals"
+
+A pipeline can now start runs one after another and wait for each, and a
+commit pipeline can ignore what an import already handles. Pull the image
+and restart; nothing to migrate.
+
+### Added
+- **`pipeline.run` waits in an `each`**: the elements go one after
+  another, the run of each starting when the one before ended, and the
+  step gives their outcomes in order, a list. A run that fails fails the
+  step at its element, and the elements after it start nothing. Until now
+  an `each` had to start its runs with `wait: false`, all at once, and a
+  pipeline that needed an order (the revisions of a document, oldest
+  first, each with its commit and its index) started itself once per
+  element: a chain that `max_run_depth` stopped at the fourth. Each time a
+  run ends the step reads again the runs of the elements before it, so it
+  is meant for tens or hundreds of elements, not thousands; `timeout` is
+  each run's wait. See "One pipeline starting another" in
+  `docs/pipelines.md`.
+- **`skip` for the commit trigger**: `skip: [pipelines/arrival]` leaves
+  out of a commit run the files a run of those pipelines wrote last, as
+  its own runs' are. An import that commits and cuts its own notes, one
+  revision after the other, is then not cut a second time by the commit
+  pipeline, which would read a note that may already hold the next
+  revision. Only the pipelines named: what the ones they start write still
+  starts it.
+
 ## [2.96.0] — 2026-10-17 — "typed frontmatter"
 
 A pipeline now reads a note's frontmatter with its types, and pipeline

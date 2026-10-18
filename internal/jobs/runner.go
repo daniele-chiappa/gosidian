@@ -221,6 +221,28 @@ func (r *Runner) EndWait(runID, step string, status Status, output json.RawMessa
 	return nil
 }
 
+// RunAgain puts a waiting step back in the queue, in the same attempt: its
+// node runs again from the start and finds done what it waited for (a
+// pipeline.run in an each, IMP-201: the run of one element ended, the
+// next element's starts). ErrState when the step does not wait.
+func (r *Runner) RunAgain(runID, step string) error {
+	l := r.runLock(runID)
+	l.Lock()
+	ok, err := r.store.requeueWaiting(runID, step, r.opts.Now())
+	l.Unlock()
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("%w: the step %s does not wait", ErrState, step)
+	}
+	if err := r.advance(runID); err != nil {
+		return err
+	}
+	r.Wake()
+	return nil
+}
+
 // Cancel stops a run: the steps not ended yet are canceled, the running
 // ones see their context end.
 func (r *Runner) Cancel(runID string) error {

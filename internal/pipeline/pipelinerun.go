@@ -22,6 +22,11 @@ import (
 // again finds the same child, and the child knows whom to resume when it
 // ends (Ended). A parent waits as wait.call does; the child's end resumes
 // it, or fails it when the child did not end well.
+//
+// In an each that waits (IMP-201) the elements go one after another: the
+// step waits for an element's child, and that child's end runs the node
+// again, which finds the children of the elements before ended (by their
+// keys) and starts the next one's.
 
 // The prefixes of a child's idempotency key: a child its parent waits for,
 // and one it does not.
@@ -55,9 +60,6 @@ func pipelineRun(_ context.Context, env *Env, with map[string]any) (any, error) 
 		wait = w
 	}
 	index, inEach := env.Scope["index"]
-	if wait && inEach {
-		return nil, errors.New("in an each, pipeline.run starts its runs with wait: false")
-	}
 	e := env.Engine
 	var until time.Time
 	if wait {
@@ -218,27 +220,36 @@ func (e *Engine) endedChild(run jobs.Run, steps []jobs.Step) {
 	}
 	// Start gives these keys to pipeline.run alone, which starts a pipeline
 	// of its own project: a parent elsewhere is no parent.
-	if p, err := e.runner.Store().Run(parent); err != nil || p.Project != run.Project {
+	p, err := e.runner.Store().Run(parent)
+	if err != nil || p.Project != run.Project {
 		e.log.Warn("pipeline: a child run whose parent is not a run of its project", "run", run.ID, "parent", parent)
 		return
 	}
-	out, err := json.Marshal(childResult(run, steps, e.cfg.MaxOutputBytes))
-	if err != nil {
-		e.log.Warn("pipeline: the outcome of a child run", "run", run.ID, "err", err)
-		return
+	var resume func() error
+	if inEach(p, node) {
+		// The node runs again: it reads this child's outcome by its key,
+		// and starts the next element's.
+		resume = func() error { return e.runner.RunAgain(parent, node) }
+	} else {
+		out, err := json.Marshal(childResult(run, steps, e.cfg.MaxOutputBytes))
+		if err != nil {
+			e.log.Warn("pipeline: the outcome of a child run", "run", run.ID, "err", err)
+			return
+		}
+		status, msg := jobs.Done, ""
+		if run.Status != jobs.Done {
+			status, msg = jobs.Failed, childError(run).Error()
+		}
+		resume = func() error { return e.runner.EndWait(parent, node, status, out, msg) }
 	}
-	status, msg := jobs.Done, ""
-	if run.Status != jobs.Done {
-		status, msg = jobs.Failed, childError(run).Error()
-	}
-	if e.resumeParent(parent, node, status, out, msg) {
+	if e.resumeParent(parent, node, resume) {
 		return
 	}
 	go func() {
 		delay := 20 * time.Millisecond
 		for deadline := time.Now().Add(2 * time.Minute); time.Now().Before(deadline); {
 			time.Sleep(delay)
-			if e.resumeParent(parent, node, status, out, msg) {
+			if e.resumeParent(parent, node, resume) {
 				return
 			}
 			delay = min(delay*2, 5*time.Second)
@@ -247,10 +258,22 @@ func (e *Engine) endedChild(run jobs.Run, steps []jobs.Step) {
 	}()
 }
 
-// resumeParent ends the parent's waiting step; it says whether there is
-// nothing more to do: the step ended, or it ended some other way already.
-func (e *Engine) resumeParent(parent, node string, status jobs.Status, out json.RawMessage, msg string) bool {
-	err := e.runner.EndWait(parent, node, status, out, msg)
+// inEach says whether the node of the run's pipeline runs once per
+// element of an each.
+func inEach(run jobs.Run, node string) bool {
+	spec, err := SpecOf(run)
+	if err != nil {
+		return false
+	}
+	n, ok := spec.Node(node)
+	return ok && n.Each != ""
+}
+
+// resumeParent ends the parent's waiting step, or runs it again (resume);
+// it says whether there is nothing more to do: the step went on, or it
+// ended some other way already.
+func (e *Engine) resumeParent(parent, node string, resume func() error) bool {
+	err := resume()
 	if err == nil {
 		return true
 	}

@@ -596,6 +596,11 @@ func (e *Engine) runEach(ctx context.Context, env *Env, t Type, node *Node, sc s
 		if err != nil {
 			var wait WaitFor
 			if errors.As(err, &wait) {
+				if node.Use == "pipeline.run" {
+					// It waits for this element's run, whose end runs the
+					// node again from the first element (IMP-201).
+					return nil, err
+				}
 				return nil, errors.New("a wait.call cannot run in an each")
 			}
 			return nil, fmt.Errorf("element %d: %w", i, err)
