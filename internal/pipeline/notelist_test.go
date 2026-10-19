@@ -93,14 +93,14 @@ func TestNoteList_Refusals(t *testing.T) {
 		"outside": `{folder: ../q}`,
 		"cursor":  `{cursor: page-two}`,
 	} {
-		host.notes["p/"+name+".md"] = pipelineNote("nodes:\n  - {id: list, use: note.list, with: " + with + "}\n")
+		host.put("p/"+name+".md", pipelineNote("nodes:\n  - {id: list, use: note.list, with: "+with+"}\n"))
 		run, _, _ := e.Start(StartRequest{Path: "p/" + name + ".md", Trigger: TriggerManual})
 		if got := waitStatus(t, e, run.ID, jobs.Failed); got.Error == "" {
 			t.Errorf("%s: no error", name)
 		}
 	}
 	// The whole project, and the limit capped.
-	host.notes["p/all.md"] = pipelineNote("nodes:\n  - {id: list, use: note.list, with: {limit: 100000}}\n")
+	host.put("p/all.md", pipelineNote("nodes:\n  - {id: list, use: note.list, with: {limit: 100000}}\n"))
 	run, _, _ := e.Start(StartRequest{Path: "p/all.md", Trigger: TriggerManual})
 	waitStatus(t, e, run.ID, jobs.Done)
 	var out struct{ Notes []NoteRow }

@@ -62,6 +62,35 @@ func TestInlineMedia(t *testing.T) {
 	}
 }
 
+// icon_descriptions (IMP-200): after an icon's label, its description's
+// first sentence, the first time the icon is in the note or every time; an
+// icon without a label has its description already, an image as before.
+func TestInlineMedia_IconDescriptions(t *testing.T) {
+	media := map[string]mediaText{
+		"/vault-files/p/att/lens.png":  {label: "Ricerca", description: "Una lente d'ingrandimento nera. Apre la ricerca.", side: 40},
+		"/vault-files/p/att/nolab.png": {description: "Solo una descrizione.", side: 20},
+		"/vault-files/p/att/shot.png":  {label: "Finestra", description: "La griglia. Con i dati.", side: 900},
+	}
+	body := "Il simbolo ![](/vault-files/p/att/lens.png) e ![](/vault-files/p/att/nolab.png).\n\nDi nuovo ![](/vault-files/p/att/lens.png) qui.\n\n![](/vault-files/p/att/shot.png)"
+	lens := "[icona: Ricerca (Una lente d'ingrandimento nera.)]"
+	for icons, want := range map[string][2]string{"": {"[icona: Ricerca]", "[icona: Ricerca]"}, "first": {lens, "[icona: Ricerca]"}, "all": {lens, lens}} {
+		got, _, _ := inlineMediaOpt(body, media, italian, 128, icons, false, false)
+		w := "Il simbolo " + want[0] + " e [icona: Solo una descrizione.].\n\nDi nuovo " + want[1] + " qui.\n\n[immagine: Finestra] La griglia. Con i dati."
+		if got != w {
+			t.Errorf("%q:\n%s\nwant:\n%s", icons, got, w)
+		}
+	}
+	for in, want := range map[string]string{
+		"Misura 1.5 mm. Poi altro.":         "Misura 1.5 mm.",
+		"Senza punto":                       "Senza punto",
+		strings.Repeat("parola ", 30) + ".": strings.TrimSuffix(strings.Repeat("parola ", 22), " ") + "…",
+	} {
+		if got := firstSentence(in, iconShortChars); got != want {
+			t.Errorf("first sentence of %q: %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestNumberedMedia(t *testing.T) {
 	media := map[string]mediaText{
 		"/vault-files/p/att/icon.png": {label: "Binocolo", side: 16, path: "p/att/icon.png", note: "p/d_img/001.md"},
@@ -76,7 +105,7 @@ func TestNumberedMedia(t *testing.T) {
 		"![](https://example.com/x.png)",
 		"![](/vault-files/p/att/shot.png)",
 	}, "\n")
-	got, st, refs := inlineMediaOpt(body, media, italian, 128, false, true)
+	got, st, refs := inlineMediaOpt(body, media, italian, 128, "", false, true)
 	want := strings.Join([]string{
 		"Premere [icona: Binocolo] per cercare.",
 		"",
@@ -261,6 +290,85 @@ func sectionsFixture(t *testing.T) *Env {
 	return &Env{Project: "p", Engine: e}
 }
 
+// media_paragraphs: join (IMP-200): an image on a line of its own goes
+// with the paragraph before it, or the images opening a section with the
+// paragraph after them, up to maxChars; past that it starts a paragraph,
+// which the images after it join.
+func TestJoinMedia(t *testing.T) {
+	img := "[immagine: Pompa] Una pompa vista di lato."
+	long := "[immagine: Tavola] " + strings.Repeat("parola ", 60) // 439 characters
+	text := strings.Repeat("Testo lungo. ", 8)                    // 104
+	cases := []struct {
+		name string
+		in   []string
+		max  int
+		want []string
+	}{
+		{"after its text", []string{"Testo.", img, "Altro testo."}, 6000, []string{"Testo.\n\n" + img, "Altro testo."}},
+		{"opening the section", []string{img, "[immagine 2]", "Testo.", "Altro."}, 6000, []string{img + "\n\n[immagine 2]\n\nTesto.", "Altro."}},
+		{"several after a text", []string{"Testo.", img, "[immagine 3: Filtro] Il filtro."}, 6000, []string{"Testo.\n\n" + img + "\n\n[immagine 3: Filtro] Il filtro."}},
+		{"past max_chars", []string{text, long, img, "Altro."}, 500, []string{text, long + "\n\n" + img, "Altro."}},
+		{"images only", []string{img, img}, 6000, []string{img + "\n\n" + img}},
+		{"no images", []string{"Uno.", "Due."}, 6000, []string{"Uno.", "Due."}},
+	}
+	for _, c := range cases {
+		if got := joinMedia(c.in, "immagine", c.max); strings.Join(got, "|") != strings.Join(c.want, "|") {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
+	}
+	for block, want := range map[string]bool{
+		img:                            true,
+		"[immagine]":                   true,
+		"[immagine 12: Leva] La leva.": true,
+		`<img class="gosidian-cut-thumb" src="/vault-files/p/attachments/x.png" alt="">[immagine: X] Y`: true,
+		`<span class="gosidian-cut-missing">[immagine]</span>`:                                          true,
+		"[immagine: X] Y\nuna seconda riga":                                                             false,
+		"Premere [immagine: X] per avviare.":                                                            false,
+		"[immagini: X] Y":                                                                               false,
+		"[icona: Binocolo]":                                                                             false,
+		"[immagine 3a: X]":                                                                              false,
+	} {
+		if got := mediaParagraph(block, "immagine"); got != want {
+			t.Errorf("mediaParagraph(%q) = %v", block, got)
+		}
+	}
+}
+
+// With media_paragraphs: join a long section keeps its parts: the images
+// join their text within a part, never across, so the sections and parts
+// of a cut with the rule are those of a cut without it.
+func TestCutNote_JoinKeepsTheParts(t *testing.T) {
+	text := strings.Repeat("Testo del passo. ", 20) // 340 characters
+	img := "[immagine: Passo] " + strings.Repeat("descrizione ", 20)
+	body := "# Manuale\n\n## Montaggio\n\n" + strings.Join([]string{text, img, text, img, text, img, text}, "\n\n")
+	apart := cutNote("p/m.md", "Manuale", body, cutOptions{maxChars: 800, paragraphs: true, context: "heading"})
+	joined := cutNote("p/m.md", "Manuale", body, cutOptions{maxChars: 800, paragraphs: true, context: "heading", joinMedia: "immagine"})
+	sections := func(ps []piece) (out []string) {
+		for _, p := range ps {
+			if p.level == levelSection {
+				out = append(out, p.base+"|"+p.text)
+			}
+		}
+		return out
+	}
+	if a, j := sections(apart), sections(joined); len(a) < 2 || strings.Join(a, "\n") != strings.Join(j, "\n") {
+		t.Fatalf("the parts changed with join:\n%q\n%q", a, j)
+	}
+	parents := map[string]bool{}
+	for _, p := range joined {
+		if p.level == levelSection {
+			parents[p.base] = true
+			continue
+		}
+		if !parents[p.parent] {
+			t.Errorf("paragraph %q of parent %s", p.body, p.parent)
+		}
+	}
+	if len(joined) >= len(apart) {
+		t.Errorf("no paragraph joined: %d pieces, %d apart", len(joined), len(apart))
+	}
+}
+
 func TestNoteSections(t *testing.T) {
 	env := sectionsFixture(t)
 	ctx := context.Background()
@@ -351,15 +459,37 @@ func TestNoteSections(t *testing.T) {
 	if out["count"] != out["paragraphs"] || out["sections"] != 1.0 {
 		t.Errorf("paragraphs only: %d chunks, %v paragraphs, %v sections", len(out["chunks"].([]any)), out["paragraphs"], out["sections"])
 	}
+	// media_paragraphs: join: the screenshot goes with the sentence before
+	// it; the section and its hash stay as they were.
+	out = run(map[string]any{"path": "docs/stampanti.md", "media_paragraphs": "join", "media_words": map[string]any{"icon": "icona", "image": "immagine"}})
+	joined := out["chunks"].([]any)
+	if out["paragraphs"] != 2.0 || len(joined) != 3 ||
+		joined[1].(map[string]any)["text"] != "## La schermata\n\nPremere [icona: Binocolo: ricerca] per cercare.\n\n[immagine: Elenco delle stampanti] Una griglia con le stampanti." ||
+		joined[2].(map[string]any)["text"] != "## La schermata\n\nFine." ||
+		joined[0].(map[string]any)["meta"].(map[string]any)["hash"] != meta["hash"] {
+		t.Errorf("media_paragraphs join: %v", joined)
+	}
+	// icon_descriptions: first: the icon's description after its label, in
+	// the section and in its paragraph.
+	out = run(map[string]any{"path": "docs/stampanti.md", "icon_descriptions": "first", "media_words": map[string]any{"icon": "icona", "image": "immagine"}})
+	described := out["chunks"].([]any)
+	if !strings.Contains(described[0].(map[string]any)["text"].(string), "[icona: Binocolo: ricerca (Apre la ricerca.)] per cercare.") ||
+		described[1].(map[string]any)["text"] != "## La schermata\n\nPremere [icona: Binocolo: ricerca (Apre la ricerca.)] per cercare." {
+		t.Errorf("icon_descriptions first: %v", described)
+	}
 	for name, with := range map[string]map[string]any{
-		"levels":    {"path": "docs/stampanti.md", "levels": []any{"page"}},
-		"context":   {"path": "docs/stampanti.md", "context": "all"},
-		"max_chars": {"path": "docs/stampanti.md", "max_chars": 10},
-		"version":   {"path": "docs/stampanti.md", "version": "a b"},
-		"media":     {"path": "docs/stampanti.md", "media": "drop"},
-		"words":     {"path": "docs/stampanti.md", "media_words": map[string]any{"icon": "[x]"}},
-		"outside":   {"path": "../q/x.md"},
-		"missing":   {"path": "docs/nessuna.md"},
+		"icon_descriptions":      {"path": "docs/stampanti.md", "icon_descriptions": "some"},
+		"icon_descriptions keep": {"path": "docs/stampanti.md", "icon_descriptions": "all", "media": "keep"},
+		"media_paragraphs":       {"path": "docs/stampanti.md", "media_paragraphs": "drop"},
+		"media_paragraphs keep":  {"path": "docs/stampanti.md", "media_paragraphs": "join", "media": "keep"},
+		"levels":                 {"path": "docs/stampanti.md", "levels": []any{"page"}},
+		"context":                {"path": "docs/stampanti.md", "context": "all"},
+		"max_chars":              {"path": "docs/stampanti.md", "max_chars": 10},
+		"version":                {"path": "docs/stampanti.md", "version": "a b"},
+		"media":                  {"path": "docs/stampanti.md", "media": "drop"},
+		"words":                  {"path": "docs/stampanti.md", "media_words": map[string]any{"icon": "[x]"}},
+		"outside":                {"path": "../q/x.md"},
+		"missing":                {"path": "docs/nessuna.md"},
 	} {
 		if _, err := noteSections(ctx, env, with); err == nil {
 			t.Errorf("%s: no error", name)

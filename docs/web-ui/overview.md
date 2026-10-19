@@ -188,8 +188,10 @@ image small beside its label and description, and one without a
 description in red. The note is never written.
 
 - **Rules of the cut** — the collection, the words of the images, the
-  longest side of an icon, what a chunk's text starts with, the longest
-  section — are kept per project in the browser. They must be those of the pipeline's `note.sections`, or no
+  longest side of an icon, whether an image on a line of its own is a
+  paragraph or goes with the text beside it, whether an icon's label is
+  followed by its description's first sentence, what a chunk's text starts
+  with, the longest section — are kept per project in the browser. They must be those of the pipeline's `note.sections`, or no
   block matches the archive, and the view says so.
 - Given a **collection** of an archive exposed in the project (a plugin
   whose `list` and `collections` are read tools; one that does not answer

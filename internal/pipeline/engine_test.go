@@ -214,6 +214,14 @@ func (h *fakeHost) note(path string) string {
 	return h.notes[path]
 }
 
+// put writes a note once runs may be reading the host: a run that ended may
+// still be reading its pipeline for the summary.
+func (h *fakeHost) put(path, content string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.notes[path] = content
+}
+
 type fakeSecrets map[string]string
 
 func (f fakeSecrets) Get(name string) (string, error) {

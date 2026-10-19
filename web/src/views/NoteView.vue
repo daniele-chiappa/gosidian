@@ -231,6 +231,8 @@ interface CutSettings {
   context: 'heading' | 'path' | 'none'
   max_chars: number
   inline_max_side: number
+  media_paragraphs: 'apart' | 'join'
+  icon_descriptions: 'none' | 'first' | 'all'
 }
 // The number fields: their default (the node's) and the range the server
 // takes, which an emptied or out-of-range field falls back into.
@@ -269,6 +271,8 @@ function defaultCutSettings(): CutSettings {
     context: 'heading',
     max_chars: CUT_NUMBERS.max_chars.def,
     inline_max_side: CUT_NUMBERS.inline_max_side.def,
+    media_paragraphs: 'apart',
+    icon_descriptions: 'none',
   }
 }
 /** A whole number in the field's range; an empty or broken one is the default. */
@@ -306,6 +310,11 @@ function loadCutSettings(): CutSettings {
     context: saved.context === 'path' || saved.context === 'none' ? saved.context : d.context,
     max_chars: cutNumber('max_chars', saved.max_chars),
     inline_max_side: cutNumber('inline_max_side', saved.inline_max_side),
+    media_paragraphs: saved.media_paragraphs === 'join' ? 'join' : d.media_paragraphs,
+    icon_descriptions:
+      saved.icon_descriptions === 'first' || saved.icon_descriptions === 'all'
+        ? saved.icon_descriptions
+        : d.icon_descriptions,
   }
 }
 // The rules as last loaded or saved: the watcher below acts on a change of
@@ -319,6 +328,8 @@ function cutRequest(): CutRequest {
   const s = cutSettings.value
   const req: CutRequest = { context: s.context, max_chars: s.max_chars, inline_max_side: s.inline_max_side }
   if (s.collection) req.collection = s.collection
+  if (s.media_paragraphs === 'join') req.media_paragraphs = 'join'
+  if (s.icon_descriptions !== 'none') req.icon_descriptions = s.icon_descriptions
   if (s.icon.trim() || s.image.trim())
     req.media_words = { icon: s.icon.trim() || 'icon', image: s.image.trim() || 'image' }
   return req
@@ -1161,6 +1172,29 @@ onBeforeUnmount(() => {
               <label class="flex flex-col gap-1">
                 {{ t('cut.word_image') }}
                 <input v-model="cutSettings.image" class="h-control-sm rounded border border-border bg-bg px-1" placeholder="image" />
+              </label>
+              <label class="flex flex-col gap-1" :title="t('cut.media_paragraphs_hint')">
+                {{ t('cut.media_paragraphs') }}
+                <select
+                  v-model="cutSettings.media_paragraphs"
+                  class="h-control-sm rounded border border-border bg-bg px-1"
+                  data-cut-media-paragraphs
+                >
+                  <option value="apart">{{ t('cut.media_paragraphs_apart') }}</option>
+                  <option value="join">{{ t('cut.media_paragraphs_join') }}</option>
+                </select>
+              </label>
+              <label class="flex flex-col gap-1" :title="t('cut.icon_descriptions_hint')">
+                {{ t('cut.icon_descriptions') }}
+                <select
+                  v-model="cutSettings.icon_descriptions"
+                  class="h-control-sm rounded border border-border bg-bg px-1"
+                  data-cut-icon-descriptions
+                >
+                  <option value="none">{{ t('cut.icon_descriptions_none') }}</option>
+                  <option value="first">{{ t('cut.icon_descriptions_first') }}</option>
+                  <option value="all">{{ t('cut.icon_descriptions_all') }}</option>
+                </select>
               </label>
               <label class="flex flex-col gap-1">
                 {{ t('cut.max_chars') }}

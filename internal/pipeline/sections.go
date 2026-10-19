@@ -122,23 +122,65 @@ const DefaultInlineMaxSide = defaultInlineMaxSide
 // notes: note.read and memory_get with media: inline. inlineMax is the
 // longest side of an icon (0: any image in a sentence is one).
 func InlineNoteMedia(host NoteReader, project, note, body string, words MediaWords, inlineMax int) (string, MediaStats, error) {
-	media, err := noteMedia(host, project, note)
-	if err != nil {
-		return "", MediaStats{}, err
-	}
-	text, st := inlineMedia(body, media, words, inlineMax)
-	return text, st, nil
+	text, st, _, err := noteMediaText(host, project, note, body, words, inlineMax, "", false)
+	return text, st, err
 }
 
 // NumberedNoteMedia is InlineNoteMedia with the images numbered (not the
 // icons): "[image 3: label]", and the images by their number.
 func NumberedNoteMedia(host NoteReader, project, note, body string, words MediaWords, inlineMax int) (string, MediaStats, []MediaRef, error) {
+	return noteMediaText(host, project, note, body, words, inlineMax, "", true)
+}
+
+// noteMediaText is a note's body with its images as text, the icons
+// described as icons says (iconDescriptions), the images numbered with
+// number.
+func noteMediaText(host NoteReader, project, note, body string, words MediaWords, inlineMax int, icons string, number bool) (string, MediaStats, []MediaRef, error) {
 	media, err := noteMedia(host, project, note)
 	if err != nil {
 		return "", MediaStats{}, nil, err
 	}
-	text, st, refs := inlineMediaOpt(body, media, words, inlineMax, false, true)
+	text, st, refs := inlineMediaOpt(body, media, words, inlineMax, icons, false, number)
 	return text, st, refs, nil
+}
+
+// The icons with a short description after their label (note.sections
+// icon_descriptions): "[icon: label (short description)]", the first
+// sentence of the description, so that a question that says what an icon
+// looks like finds the text it stands in. None ("" or none), the first
+// time each is in the note, or all of them.
+const (
+	iconsFirst = "first"
+	iconsAll   = "all"
+)
+
+// iconShortChars is the longest short description of an icon, in bytes.
+const iconShortChars = 160
+
+// iconDescriptions reads with.icon_descriptions: "", first or all.
+func iconDescriptions(with map[string]any) (string, error) {
+	switch v := str(with, "icon_descriptions"); v {
+	case "", "none":
+		return "", nil
+	case iconsFirst, iconsAll:
+		if str(with, "media") == "keep" {
+			return "", errors.New("with.icon_descriptions: with media: inline, the images as text")
+		}
+		return v, nil
+	default:
+		return "", fmt.Errorf("with.icon_descriptions %q: none, first or all", v)
+	}
+}
+
+// firstSentence is a description's first sentence, clipped at chars bytes.
+func firstSentence(s string, chars int) string {
+	for i := 0; i < len(s); i++ {
+		if (s[i] == '.' || s[i] == '!' || s[i] == '?') && (i+1 == len(s) || s[i+1] == ' ') {
+			s = s[:i+1]
+			break
+		}
+	}
+	return clipHead(s, chars)
 }
 
 // inlineMedia is a markdown body with its images as text. An icon (an
@@ -151,30 +193,39 @@ func NumberedNoteMedia(host NoteReader, project, note, body string, words MediaW
 // description, the alt text stands for them, unless Word wrote it. Code is
 // left as it is.
 func inlineMedia(body string, media map[string]mediaText, words MediaWords, inlineMax int) (string, MediaStats) {
-	return inlineMediaAs(body, media, words, inlineMax, false)
+	return inlineMediaAs(body, media, words, inlineMax, "", false)
 }
 
 // inlineMediaAs is inlineMedia, and with show the text as the cut view
 // shows it: each image of the vault, small, before its text, and the text
 // of one without a description marked. Its blocks are the same.
-func inlineMediaAs(body string, media map[string]mediaText, words MediaWords, inlineMax int, show bool) (string, MediaStats) {
-	text, st, _ := inlineMediaOpt(body, media, words, inlineMax, show, false)
+func inlineMediaAs(body string, media map[string]mediaText, words MediaWords, inlineMax int, icons string, show bool) (string, MediaStats) {
+	text, st, _ := inlineMediaOpt(body, media, words, inlineMax, icons, show, false)
 	return text, st
 }
 
 // inlineMediaOpt is inlineMediaAs, and with number the images (not the
-// icons) numbered in the order of the body, which it gives.
-func inlineMediaOpt(body string, media map[string]mediaText, words MediaWords, inlineMax int, show, number bool) (string, MediaStats, []MediaRef) {
+// icons) numbered in the order of the body, which it gives. icons is which
+// icons have a short description (iconDescriptions).
+func inlineMediaOpt(body string, media map[string]mediaText, words MediaWords, inlineMax int, icons string, show, number bool) (string, MediaStats, []MediaRef) {
 	var (
 		st   MediaStats
 		refs []MediaRef
 	)
+	described := map[string]bool{}
+	describe := func(url string) bool {
+		if icons == iconsFirst && described[url] {
+			return false
+		}
+		described[url] = true
+		return icons == iconsFirst || icons == iconsAll
+	}
 	text := func(url, alt string, inline bool) string {
 		n := 0
 		if number {
 			n = len(refs) + 1
 		}
-		t, icon := mediaPhrase(&st, media, words, inlineMax, url, alt, inline, n)
+		t, icon := mediaPhrase(&st, media, words, inlineMax, url, alt, inline, n, describe)
 		if number && !icon {
 			m := media[url]
 			ref := MediaRef{N: n, Path: m.path, Note: m.note, Label: m.label}
@@ -247,8 +298,9 @@ func inlineMediaOpt(body string, media map[string]mediaText, words MediaWords, i
 
 // mediaPhrase is the text of an image (inlineMedia), counted in st, and
 // whether it is an icon. With n, an image's word has its number: "[image
-// 3: label]"; an icon has none.
-func mediaPhrase(st *MediaStats, media map[string]mediaText, words MediaWords, inlineMax int, url, alt string, inline bool, n int) (string, bool) {
+// 3: label]"; an icon has none. An icon with a label and a description has
+// its description's first sentence after the label when describe says so.
+func mediaPhrase(st *MediaStats, media map[string]mediaText, words MediaWords, inlineMax int, url, alt string, inline bool, n int, describe func(url string) bool) (string, bool) {
 	st.Images++
 	m, ok := media[url]
 	icon := inline && (inlineMax <= 0 || !ok || m.side <= inlineMax)
@@ -274,6 +326,8 @@ func mediaPhrase(st *MediaStats, media map[string]mediaText, words MediaWords, i
 	case icon:
 		if label == "" {
 			label = clipHead(desc, 80)
+		} else if short := firstSentence(desc, iconShortChars); short != "" && describe(url) {
+			label += " (" + short + ")"
 		}
 		if label == "" {
 			return "[" + word + "]", true
@@ -329,6 +383,9 @@ type cutOptions struct {
 	// context is what a piece's text starts with: heading (its section's
 	// heading), path (the title and the path of the headings), none.
 	context string
+	// joinMedia is the word of the images whose paragraphs join the text
+	// beside them (media_paragraphs: join); "" keeps them apart.
+	joinMedia string
 }
 
 // piece is a section, or a part of a long one, or a paragraph of a note.
@@ -426,6 +483,12 @@ func cutNote(doc, title, body string, opt cutOptions) []piece {
 			if !opt.paragraphs {
 				continue
 			}
+			// The images join their text within the part: the sections and
+			// their parts are the same either way, so a cut without the rule
+			// (rispondi's sections) finds the parents of the paragraphs.
+			if opt.joinMedia != "" {
+				part = joinMedia(part, opt.joinMedia, opt.maxChars)
+			}
 			for i, p := range part {
 				out = append(out, piece{base: pb + ".p" + strconv.Itoa(i+1), parent: pb, level: levelParagraph, section: s.path, title: full, text: prefix + p, prefix: prefix, body: p, part: pn})
 			}
@@ -457,6 +520,55 @@ func splitBlocks(lines []string) []string {
 	}
 	flush()
 	return out
+}
+
+// joinMedia puts each image on a line of its own (mediaParagraph) in the
+// paragraph before it, or, when images open the section, in the paragraph
+// after them, as long as the paragraph stays within maxChars; past that the
+// image starts a paragraph, which the images after it join. A description
+// then counts with the text it illustrates, not as a paragraph alone that a
+// search finds in place of the text (IMP-200: in the manuals of scope C the
+// paragraphs of the descriptions pushed the technical tables out of the
+// reranker's candidates).
+func joinMedia(blocks []string, word string, maxChars int) []string {
+	var out []string
+	lead := false // out holds the section's images only: its first text joins them
+	for _, b := range blocks {
+		media := mediaParagraph(b, word)
+		n := len(out)
+		if n > 0 && (media || lead) && utf8.RuneCountInString(out[n-1])+2+utf8.RuneCountInString(b) <= maxChars {
+			out[n-1] += "\n\n" + b
+			lead = lead && media
+			continue
+		}
+		out = append(out, b)
+		lead = n == 0 && media
+	}
+	return out
+}
+
+// mediaParagraph says whether a block is an image on a line of its own as
+// inlineMedia writes it, "[image: label] description", "[image 3]", "[image]";
+// in the cut view after its thumbnail and inside its mark.
+func mediaParagraph(block, word string) bool {
+	if strings.Contains(block, "\n") {
+		return false
+	}
+	for strings.HasPrefix(block, "<img ") || strings.HasPrefix(block, "<span ") {
+		i := strings.IndexByte(block, '>')
+		if i < 0 {
+			return false
+		}
+		block = block[i+1:]
+	}
+	rest, ok := strings.CutPrefix(block, "["+word)
+	if !ok {
+		return false
+	}
+	if digits := strings.TrimLeft(strings.TrimPrefix(rest, " "), "0123456789"); strings.HasPrefix(rest, " ") && len(digits) < len(rest)-1 {
+		rest = digits
+	}
+	return strings.HasPrefix(rest, "]") || strings.HasPrefix(rest, ": ")
 }
 
 // groupBlocks puts blocks in parts of up to maxChars characters each, in
@@ -569,6 +681,20 @@ func noteSections(_ context.Context, env *Env, with map[string]any) (any, error)
 	if err != nil {
 		return nil, err
 	}
+	switch str(with, "media_paragraphs") {
+	case "", "apart":
+	case "join":
+		if str(with, "media") == "keep" {
+			return nil, errors.New("with.media_paragraphs: join takes media: inline, the images as text")
+		}
+		opt.joinMedia = words.Image
+	default:
+		return nil, fmt.Errorf("with.media_paragraphs %q: apart or join", str(with, "media_paragraphs"))
+	}
+	icons, err := iconDescriptions(with)
+	if err != nil {
+		return nil, err
+	}
 
 	note, err := env.Engine.host.ReadNote(env.Project, rel)
 	if err != nil {
@@ -591,11 +717,7 @@ func noteSections(_ context.Context, env *Env, with map[string]any) (any, error)
 			return nil, errors.New("this server does not read the image notes of a note: media: keep")
 		}
 		inlineMax := int(number(with, "inline_max_side", DefaultInlineMaxSide))
-		if numbers {
-			body, st, refs, err = NumberedNoteMedia(reader, env.Project, rel, body, words, inlineMax)
-		} else {
-			body, st, err = InlineNoteMedia(reader, env.Project, rel, body, words, inlineMax)
-		}
+		body, st, refs, err = noteMediaText(reader, env.Project, rel, body, words, inlineMax, icons, numbers)
 		if err != nil {
 			return nil, err
 		}
@@ -690,6 +812,12 @@ type CutOptions struct {
 	Context   string // heading (default), path, none
 	Words     MediaWords
 	InlineMax int // the longest side of an icon; 0: any image in a sentence
+	// JoinMedia joins an image's paragraph to the text beside it
+	// (media_paragraphs: join).
+	JoinMedia bool
+	// Icons is which icons have a short description after their label
+	// (icon_descriptions): first, all; "" none.
+	Icons string
 }
 
 // CutBlock is a section, a part of a long one, or a paragraph of a note,
@@ -728,9 +856,12 @@ func CutView(host NoteReader, project, note, title, body string, opt CutOptions)
 	if err != nil {
 		return nil, MediaStats{}, err
 	}
-	text, st := inlineMediaAs(body, media, opt.Words, opt.InlineMax, false)
-	shown, _ := inlineMediaAs(body, media, opt.Words, opt.InlineMax, true)
+	text, st := inlineMediaAs(body, media, opt.Words, opt.InlineMax, opt.Icons, false)
+	shown, _ := inlineMediaAs(body, media, opt.Words, opt.InlineMax, opt.Icons, true)
 	co := cutOptions{maxChars: opt.MaxChars, paragraphs: true, context: opt.Context}
+	if opt.JoinMedia {
+		co.joinMedia = opt.Words.Image
+	}
 	pieces := cutNote(note, title, text, co)
 	view := cutNote(note, title, shown, co)
 	if len(view) != len(pieces) {

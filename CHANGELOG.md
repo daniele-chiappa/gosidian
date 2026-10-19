@@ -8,6 +8,47 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.99.0] — 2026-10-19 — "images"
+
+Two rules for how `note.sections` writes the images of a document as
+text, for a search over manuals and other documents full of figures and
+symbols. Both are off by default: the pieces of an existing pipeline do
+not change until it asks for them. Pull the image and restart; nothing to
+migrate.
+
+### Added
+- **`note.sections` joins an image to its text**:
+  `media_paragraphs: join` puts an image on a line of its own, which
+  until now was a paragraph of its own (`[image: label] description`),
+  in the paragraph before it, or in the one after it when images open the
+  section, as long as the paragraph stays within `max_chars`; past that
+  the image starts a paragraph, which the images after it join. The
+  sections and the parts of a long one do not change: an image joins
+  only a paragraph of its part, so a pipeline that cuts the sections
+  again to answer still finds the parents of the paragraphs. In manuals
+  with their figures described, the paragraphs of the descriptions alone
+  filled the reranker's candidates and pushed out the technical tables
+  that answered; joined, a description weighs with the text it
+  illustrates.
+- **`note.sections` describes the icons**: `icon_descriptions: first`
+  writes an icon as `[icon: label (short description)]`, the first
+  sentence of its description after its label, the first time the icon
+  is in the note; `all` every time; `none`, the default, the label alone
+  as before. A label says what a symbol means, not what it looks like: a
+  question that described a safety pictogram found no word of its own in
+  the table of symbols, and the model answered that the manual did not
+  say. On the questions about figures of a multilingual set of manuals,
+  the answers went from 4.8 to 8.1 out of 10, and those on pictograms
+  from 4.2 to 9.96, with the same score on the other questions.
+- The **cut view** of a note has both rules among the rules of the cut
+  ("Images on a line of their own", "Icons"), and `POST /api/v1/preview`
+  takes them in `cut` (`media_paragraphs`, `icon_descriptions`).
+
+### Fixed
+- A test of `note.list` wrote the notes of its fake host without the lock
+  while a run that had ended was still reading them: a data race that
+  could fail the tests under `-race`.
+
 ## [2.98.0] — 2026-10-18 — "downloads"
 
 Downloads keep their images: a zip of a folder, a project or the vault,

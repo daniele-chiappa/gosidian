@@ -681,7 +681,7 @@ paths:
       tags: [notes]
       summary: Render markdown to sanitized HTML (Phase 1 follow-up).
       description: |
-        With `cut` (`{collection?, max_chars?, context?, media_words?, inline_max_side?}`)
+        With `cut` (`{collection?, max_chars?, context?, media_words?, inline_max_side?, media_paragraphs?, icon_descriptions?}`)
         it answers the cut view instead (IMP-170, docs/web-ui/overview.md): the
         note as the `note.sections` node cuts it, `{cut: {blocks: [{id, parent,
         level, section, chars, hash, part, over, state, head, html}], sections,

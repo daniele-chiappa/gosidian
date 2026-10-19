@@ -94,7 +94,9 @@ var baseSchemas = []NodeSchema{
 	"text": {"type": "boolean", "default": true, "description": "false: the chunks without their text, with their base and hash, to tell which changed"},
 	"only": {"type": "array", "items": {"type": "string"}, "description": "Only the chunks of these bases"},
 	"meta": {"type": "object", "description": "Keys added to each chunk's meta (status, the dates of a version)"},
-	"media_numbers": {"type": "boolean", "default": false, "description": "With media: inline, each image (not an icon) numbered in the note's order, [image 3: label], and each chunk's media"},` + mediaSettings + `}}`),
+	"media_numbers": {"type": "boolean", "default": false, "description": "With media: inline, each image (not an icon) numbered in the note's order, [image 3: label], and each chunk's media"},
+	"media_paragraphs": {"type": "string", "enum": ["apart", "join"], "default": "apart", "description": "With media: inline, join: an image on a line of its own goes in the paragraph before it (the one after it when images open the section), up to max_chars, instead of a paragraph alone"},
+	"icon_descriptions": {"type": "string", "enum": ["none", "first", "all"], "default": "none", "description": "With media: inline, an icon's label followed by its description's first sentence, [icon: label (short description)], so a question that says what the icon looks like finds it: the first time the icon is in the note, or every time"},` + mediaSettings + `}}`),
 		Output: json.RawMessage(`{"type": "object", "properties": {
 	"doc": {"type": "string"}, "title": {"type": "string"}, "version": {"type": "string"},
 	"sections": {"type": "integer", "description": "The sections of the note, parts of a long one each"},

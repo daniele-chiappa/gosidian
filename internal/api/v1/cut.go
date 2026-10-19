@@ -32,6 +32,12 @@ type cutRequest struct {
 	Words      *pipeline.MediaWords `json:"media_words,omitempty"`
 	// InlineMaxSide is note.sections' inline_max_side: unset, its default.
 	InlineMaxSide *int `json:"inline_max_side,omitempty"`
+	// MediaParagraphs is note.sections' media_paragraphs: apart (default)
+	// or join.
+	MediaParagraphs string `json:"media_paragraphs,omitempty"`
+	// IconDescriptions is note.sections' icon_descriptions: none (default),
+	// first or all.
+	IconDescriptions string `json:"icon_descriptions,omitempty"`
 }
 
 // cutRequestError is a cut request the reader fixes (400); any other error
@@ -85,6 +91,20 @@ func (r *Router) previewCut(ctx context.Context, p authz.Principal, caller, note
 			return nil, badCut("inline_max_side: 0 to 10000")
 		}
 		opt.InlineMax = *c.InlineMaxSide
+	}
+	switch c.MediaParagraphs {
+	case "", "apart":
+	case "join":
+		opt.JoinMedia = true
+	default:
+		return nil, badCut("media_paragraphs: apart or join")
+	}
+	switch c.IconDescriptions {
+	case "", "none":
+	case "first", "all":
+		opt.Icons = c.IconDescriptions
+	default:
+		return nil, badCut("icon_descriptions: none, first or all")
 	}
 	// The rules are note.sections': a section up to a step's output.
 	maxChars := 1 << 20

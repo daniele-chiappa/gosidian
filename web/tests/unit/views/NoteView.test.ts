@@ -181,6 +181,14 @@ describe('NoteView, the cut view (IMP-170)', () => {
     await flushPromises()
     expect(vi.mocked(renderCut).mock.lastCall![2]).toMatchObject({ inline_max_side: 0 })
 
+    // The images with the text beside them: sent only when chosen.
+    await w.find('[data-cut-media-paragraphs]').setValue('join')
+    await flushPromises()
+    expect(vi.mocked(renderCut).mock.lastCall![2]).toMatchObject({ media_paragraphs: 'join' })
+    await w.find('[data-cut-icon-descriptions]').setValue('first')
+    await flushPromises()
+    expect(vi.mocked(renderCut).mock.lastCall![2]).toMatchObject({ icon_descriptions: 'first' })
+
     const max = w.find('[data-cut-max-chars]')
     ;(max.element as HTMLInputElement).value = '50'
     await max.trigger('change')
@@ -196,6 +204,8 @@ describe('NoteView, the cut view (IMP-170)', () => {
       collection: 'vec/docs',
       max_chars: 6000,
       inline_max_side: 0,
+      media_paragraphs: 'join',
+      icon_descriptions: 'first',
     })
 
     // A note of another project: its own rules, the defaults here.

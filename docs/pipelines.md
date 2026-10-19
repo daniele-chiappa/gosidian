@@ -212,7 +212,7 @@ it as text: `ratings: {"{{ trigger.turn }}": "{{ trigger.rating }}"}`
 | `note.read` | `path` (inside the project; relative to it), `media`: `keep` (default) or `inline`, the images as text ([below](#chunks-for-an-archive-of-vectors)), with `media_words` and `inline_max_side` | `path`, `title`, `frontmatter` (its values with their types, [below](#frontmatter-values)), `body`, `etag`; with `media: inline`, `media` (the images counted) |
 | `note.write` | `path`, `body`, `title`, `frontmatter` (a map), `mode`: `upsert` (default), `create`, `replace`, or `append` (adds `body` after the note's, a blank line between, and merges `frontmatter` into its own; a note it does not find it creates), `frontmatter_merge` (merges `frontmatter` into the note's instead of replacing it, and keeps its body unless `body` is given: a map merges into a map, `null` removes a key) | `path`, `etag`, `created` |
 | `note.list` | `folder` (inside the project, relative to it; empty: all of it), `recursive` (default yes), `where` (memory_query's conditions, `{field, op, value}`), `sort` (default `path`), `fields` (frontmatter fields to give, with their types as `note.read` gives them), `limit` (default 500, at most `[pipelines] max_list_items`, 5000), `cursor` | `notes` (`path`, `title`, `fields`), `count` (this page), `total` (all that match), `next` (the cursor of the next page; empty at the last) |
-| `note.sections` | `path`, `version` (ends each chunk's id after an `@`), `levels` (default `[section, paragraph]`; `[paragraph]` still cuts the sections, the paragraphs' parents and paths, but gives the paragraphs only), `max_chars` (default 6000; 200 to `max_output_bytes`), `context`: `heading` (default), `path`, `none`, `text` (default yes), `only` (bases, up to `max_list_items`), `meta` (added to each chunk's, up to `max_chunk_meta` bytes), `media`: `inline` (default) or `keep`, `media_words`, `inline_max_side`, `media_numbers` | `doc`, `title`, `version`, `sections`, `paragraphs`, `chunks` (as an archive's `upsert` takes them; with `media_numbers`, each with its `media`), `count`, `media` — see [below](#chunks-for-an-archive-of-vectors) |
+| `note.sections` | `path`, `version` (ends each chunk's id after an `@`), `levels` (default `[section, paragraph]`; `[paragraph]` still cuts the sections, the paragraphs' parents and paths, but gives the paragraphs only), `max_chars` (default 6000; 200 to `max_output_bytes`), `context`: `heading` (default), `path`, `none`, `text` (default yes), `only` (bases, up to `max_list_items`), `meta` (added to each chunk's, up to `max_chunk_meta` bytes), `media`: `inline` (default) or `keep`, `media_words`, `inline_max_side`, `media_numbers`, `media_paragraphs`: `apart` (default) or `join`, `icon_descriptions`: `none` (default), `first` or `all` | `doc`, `title`, `version`, `sections`, `paragraphs`, `chunks` (as an archive's `upsert` takes them; with `media_numbers`, each with its `media`), `count`, `media` — see [below](#chunks-for-an-archive-of-vectors) |
 | `note.mark` | `path`, `set` (a name: `cut`, `review`), `marks` (each `base`, a chunk of `note.sections`, or `section`, the path of its headings, and `block`, its paragraph from 1; `color`: `blue`, `green`, `orange`, `red`, `cyan`, `grey`; `label`, `text`) | `path`, `set`, `count` — see [below](#marks-on-a-note) |
 | `wait.call` | `timeout` (default `24h`, at most `max_wait`) | the data the resume hands it |
 | `pipeline.run` | `pipeline` (a pipeline note of the project, relative to it), `input` (a map, the started run's `trigger`), `wait` (default yes), `timeout` (of the wait: default `24h`, at most `max_wait`), `key` | with `wait`: `run`, `pipeline`, `status`, `error`, `steps` (each node's status), `outputs` (each node's output, when they fit); without: `run`, `pipeline`, `status`, `existing` — see [below](#one-pipeline-starting-another) |
@@ -455,6 +455,34 @@ chunk its `media`: the images whose text it holds, each with its number
 ask the model to mark where an image goes, `[image 3]`, and put the image
 there: the chunks of an archive keep the words without numbers, which
 would change from one version of a note to the next.
+
+With **`media_paragraphs: join`** an image on a line of its own is no
+paragraph of its own: it goes in the paragraph before it, with the text
+it illustrates, and the images that open a section go in the paragraph
+after them. A paragraph grows only up to `max_chars`; past that the image
+starts a paragraph, and the images after it join that one. The sections,
+and the parts of a long one, are the same either way: an image joins only
+a paragraph of its part, so a cut of the sections without the rule finds
+the parents of the paragraphs cut with it. With images described at length (a manual's
+figures, tables, exploded views), the paragraphs of the descriptions
+alone can fill the candidates of a search and push out the text that
+answers; joined, a description weighs with its text instead. The cut
+view takes it too.
+
+With **`icon_descriptions: first`** an icon is
+`[icon: label (short description)]`: after its label, the first sentence
+of its description (up to 160 bytes), the first time the icon is in the
+note; the next times it is `[icon: label]` again. With `all` every time.
+A label says what an icon means ("Search"), not what it looks like: a
+question that describes the symbol ("the button with a magnifying
+glass") finds no word of it in the text, and the model, given the
+paragraph, answers that the documents do not say. The first time
+is, in a manual, the table that explains the symbols; an icon repeated
+next to every warning keeps its label alone after it. An icon without a
+label already has the start of its description. A pipeline that cuts the
+sections again to answer (`only`) gives the same rule, or a long
+section's parts may differ from those of the archive. The cut view takes
+it too.
 
 ### Marks on a note
 

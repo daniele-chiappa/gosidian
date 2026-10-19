@@ -89,6 +89,13 @@ export interface CutRequest {
   /** The longest side, in pixels, of an image in a sentence that is an
    *  icon (0: every one); omitted, 128, as in the pipeline's node. */
   inline_max_side?: number
+  /** join: an image on a line of its own goes in the paragraph beside it;
+   *  omitted, apart, as in the pipeline's node. */
+  media_paragraphs?: 'apart' | 'join'
+  /** first, all: an icon's label followed by its description's first
+   *  sentence, the first time it is in the note or every time; omitted,
+   *  none, as in the pipeline's node. */
+  icon_descriptions?: 'none' | 'first' | 'all'
 }
 
 /** A section, a part of a long one, or a paragraph, as note.sections cuts it. */

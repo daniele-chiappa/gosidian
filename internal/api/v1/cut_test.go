@@ -55,11 +55,24 @@ func TestPreview_Cut(t *testing.T) {
 	if p := c.Blocks[3]; !strings.Contains(p.HTML, `class="gosidian-cut-missing"`) {
 		t.Errorf("an image without description %+v", p)
 	}
+	// media_paragraphs: join, as note.sections: the screenshot and the
+	// image without a description go with the sentence before them, shown
+	// with their thumbnails.
+	c = ask(map[string]any{"media_words": map[string]any{"icon": "icona", "image": "immagine"}, "media_paragraphs": "join"})
+	if c.Paragraphs != 1 || len(c.Blocks) != 2 || c.Blocks[0].Hash != sec.Hash || !strings.Contains(c.Blocks[1].HTML, "[immagine: Elenco] Una griglia.") ||
+		!strings.Contains(c.Blocks[1].HTML, "per cercare.") || !strings.Contains(c.Blocks[1].HTML, `class="gosidian-cut-missing"`) {
+		t.Errorf("cut with media_paragraphs join %+v", c)
+	}
+	// icon_descriptions: first: the icon's description after its label.
+	c = ask(map[string]any{"media_words": map[string]any{"icon": "icona", "image": "immagine"}, "icon_descriptions": "first"})
+	if len(c.Blocks) != 4 || !strings.Contains(c.Blocks[1].HTML, "[icona: Binocolo (Apre la ricerca.)]") || c.Blocks[0].Hash == sec.Hash {
+		t.Errorf("cut with icon_descriptions first %+v", c)
+	}
 	c = ask(map[string]any{"collection": "vec-pg/pezzi"})
 	if c.Error == "" || c.States != nil || len(c.Blocks) != 4 {
 		t.Errorf("a collection that cannot be read %+v", c)
 	}
-	for _, bad := range []map[string]any{{"max_chars": 10}, {"context": "all"}} {
+	for _, bad := range []map[string]any{{"max_chars": 10}, {"context": "all"}, {"media_paragraphs": "drop"}, {"icon_descriptions": "some"}} {
 		body, _ := json.Marshal(map[string]any{"markdown": article, "path": "p/docs/stampanti.md", "cut": bad})
 		if w := f.doAuthRecorder(http.MethodPost, "/api/v1/preview", string(body), nil); w.code != http.StatusBadRequest {
 			t.Errorf("%v: status %d", bad, w.code)
