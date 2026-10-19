@@ -5,6 +5,10 @@ servers publish recall figures measured on conversational memory
 (LongMemEval); gosidian is a wiki of notes, so we measure on a vault of
 notes instead. Everything needed to rerun it is in [`bench/`](../bench/README.md).
 
+This page measures the agents' memory. The answers a bot gives on a
+project's documents (the RAG pipelines and plugins) have their own page:
+[RAG benchmarks](rag-benchmarks.md).
+
 ## Setup
 
 - **Vault** — 87 notes of a fictional team: `tidewater`, an event

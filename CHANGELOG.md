@@ -8,6 +8,30 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.99.1] — 2026-10-19 — "benchmarks"
+
+Documentation only: the benchmarks behind the defaults of the RAG
+pipelines. The code is that of 2.99.0. Pull the image and restart;
+nothing to migrate.
+
+### Added
+- **RAG benchmarks page**: [`docs/rag-benchmarks.md`](docs/rag-benchmarks.md)
+  gives the reference results of the RAG pipelines measured in the
+  maintainers' lab, with the configuration and the hardware that produced
+  them (one RTX 4060 Ti 16 GB for every model): answers scored by local
+  judges, search recall, timings, VRAM. Three private corpora have answers
+  judged: the wiki of a management software (8.17 out of 10), the
+  security procedures of a company (8.89) and a family of machine manuals
+  in eight languages (7.86). The corpora are described only by
+  statistics. A second part has the benchmark behind each default:
+  embedding model, chunk level and index, reranker, image descriptions
+  and how they go into the chunks, answer context and model, document
+  converter, OCR.
+- **The numbers as JSON**: `bench/results/rag-*.json`, one file per
+  benchmark or configuration, with versions, hardware, settings and
+  date; `bench/rag/render.py` writes the page's tables from them, and
+  `--check` says when a table is out of date.
+
 ## [2.99.0] — 2026-10-19 — "images"
 
 Two rules for how `note.sections` writes the images of a document as

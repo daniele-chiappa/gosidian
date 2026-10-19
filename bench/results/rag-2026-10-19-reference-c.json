@@ -1,0 +1,149 @@
+{
+  "format": "gosidian-rag-bench/1",
+  "id": "rag-2026-10-19-reference-c",
+  "kind": "reference",
+  "title": "Reference configuration, scope C",
+  "date": "2026-10-19",
+  "corpus": {
+    "label": "scope C",
+    "description": "use and maintenance manuals of a family of machines (Word)",
+    "documents": 29,
+    "files": 97,
+    "models": 7,
+    "languages": [
+      "IT",
+      "EN",
+      "ES",
+      "FR",
+      "PT",
+      "HR",
+      "SL",
+      "ZH"
+    ],
+    "revisions": "up to 4 per document, kept as its git history",
+    "paragraphs": 7507,
+    "images": 2360,
+    "icons": 940
+  },
+  "hardware": {
+    "gpu_host": {
+      "gpu": "NVIDIA GeForce RTX 4060 Ti, 16 GB",
+      "cpu": "AMD Ryzen 7 5700G, 8 cores / 16 threads",
+      "ram_gb": 64,
+      "use": "every model: embeddings, reranker, answers, judges, image descriptions, OCR models",
+      "rule": "everything stays in the 16 GB of VRAM, nothing offloaded to the CPU"
+    },
+    "cpu_host": {
+      "cpu": "AMD Ryzen 7 5700G, 8 cores / 16 threads",
+      "ram_gb": 32,
+      "use": "gosidian, the plugins, Qdrant and PostgreSQL, the converters that run on the CPU"
+    }
+  },
+  "software": {
+    "gosidian": "development build released as v2.99.0 (the cut rules media_paragraphs and icon_descriptions)",
+    "plugins": {
+      "database": "0.5.0",
+      "docling": "0.5.0 (conversion of the manuals)",
+      "claude": "0.1.1 (question generation)"
+    },
+    "engines": {
+      "ollama": "0.40.3",
+      "llama.cpp": "b11540 (llama-server --reranking)",
+      "vllm": "0.31.0 (image descriptions)",
+      "qdrant": "1.19.1"
+    }
+  },
+  "config": [
+    {
+      "setting": "Documents",
+      "value": "the docling plugin 0.5.0; each manual a document per model and language, its revisions kept as the git history of the note"
+    },
+    {
+      "setting": "Image descriptions",
+      "value": "figures: Qwen3-VL-8B-Instruct FP8 on vLLM, at least 1 MP; icons: Gemma 4 12B QAT w4a16; in the language of the manual. A figure's description in the paragraph of its text (media_paragraphs: join); an icon's label followed by the first sentence of its description, the first time (icon_descriptions: first)"
+    },
+    {
+      "setting": "Language and revision",
+      "value": "gemma4:12b reads them from the question; the search keeps the paragraphs of that language and of the bot's scopes (a model or the family), of the revision asked for; Italian and English when the language has no manual"
+    },
+    {
+      "setting": "Cut, embedding, store",
+      "value": "as scope A"
+    },
+    {
+      "setting": "Reranker",
+      "value": "bge-reranker-v2-m3 on 40 candidates"
+    },
+    {
+      "setting": "Context and answer",
+      "value": "as scope A: k 5, the section of each paragraph, images in place, gemma4:12b with 12,288 tokens; the same text in several manuals given once; the answer in the language of the question"
+    },
+    {
+      "setting": "Judges",
+      "value": "gemma4:12b and qwen3:14b"
+    },
+    {
+      "setting": "Versions",
+      "value": "gosidian development build released as v2.99.0 (the cut rules media_paragraphs and icon_descriptions), database plugin 0.5.0, docling 0.5.0; Ollama 0.40.3, llama.cpp b11540, vLLM 0.31.0"
+    },
+    {
+      "setting": "Hardware",
+      "value": "as scope A"
+    }
+  ],
+  "results": [
+    {
+      "measure": "Answers: score (2 local judges)",
+      "value": "7.86",
+      "note": "gemma4 8.06, qwen3 7.66; 277 questions"
+    },
+    {
+      "measure": "Answers: good / wrong / not found",
+      "value": "80% / 5% / 5%",
+      "note": ""
+    },
+    {
+      "measure": "Answers: precise / broad / no answer",
+      "value": "8.47 / 6.56 / 2.50",
+      "note": "no answer: 4 questions, whose manual does not hold the answer"
+    },
+    {
+      "measure": "By language (30 questions each, 29 in Croatian)",
+      "value": "7.10 to 8.58",
+      "note": "HR lowest, FR highest"
+    },
+    {
+      "measure": "Revisions: the first / the latest",
+      "value": "6.88 / 8.92",
+      "note": "12 questions each, asked for the first revision and without one"
+    },
+    {
+      "measure": "Models / no manual / family",
+      "value": "8.56 / 7.00 / 8.30",
+      "note": "24 questions on data that differ between models; 10 in German, from the Italian and English manuals; 10 without a model"
+    },
+    {
+      "measure": "Figures (20 questions)",
+      "value": "8.12",
+      "note": "details the text leaves to the drawing 5.38, pictograms 9.96"
+    },
+    {
+      "measure": "Understood: language / revision",
+      "value": "97% / 100%",
+      "note": "German falls back to the Italian and English manuals in 90% of its questions"
+    },
+    {
+      "measure": "Sources: expected document given / section cited",
+      "value": "93% / 81%",
+      "note": ""
+    },
+    {
+      "measure": "Time",
+      "value": "about 4-5 s per answer",
+      "note": "277 answers in 20-23 minutes with the queue full; one at a time not measured"
+    }
+  ],
+  "sources": [
+    "rag-2026-10-19-answers-c (and the icons described)"
+  ]
+}

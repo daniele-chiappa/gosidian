@@ -1,0 +1,304 @@
+{
+  "format": "gosidian-rag-bench/1",
+  "id": "rag-2026-10-19-answers-c",
+  "kind": "answers",
+  "title": "Answers of the bot on a multilingual corpus of manuals, scope C: the image descriptions in the chunks",
+  "date": "2026-10-19",
+  "corpus": {
+    "label": "scope C",
+    "description": "use and maintenance manuals of a family of machines (Word)",
+    "documents": 29,
+    "files": 97,
+    "models": 7,
+    "languages": [
+      "IT",
+      "EN",
+      "ES",
+      "FR",
+      "PT",
+      "HR",
+      "SL",
+      "ZH"
+    ],
+    "revisions": "up to 4 per document, kept as its git history",
+    "paragraphs": 7507,
+    "images": 2360,
+    "icons": 940
+  },
+  "sample": {
+    "questions": 277,
+    "figures": 20,
+    "how": "30 questions (20 precise, 10 broad) written by Claude Sonnet from the Italian manual of one model and translated into six languages with the sections found in each manual (209: one dropped, its answer is not in that language's manual); 24 on revisions (6 passages changed between the first and the latest revision of a model, in two languages, asked for the first revision and without one); 24 on data that differ between 4 models, asked with the scope of 3 models; 10 in German, a language without manuals; 10 on the whole family, without a model. 4 of the 277 have no answer in the manuals",
+    "figures_how": "10 questions in Italian and English written by Claude Opus 5.5 looking at the images of one model: 4 on details that the text leaves to the drawing, 6 on safety pictograms described by sight, whose meaning is in the manual's table of symbols"
+  },
+  "judges": [
+    {
+      "model": "gemma4:12b (Ollama, Q4_K_M, context 12,288)"
+    },
+    {
+      "model": "qwen3:14b (Ollama, Q4_K_M, context 12,288)"
+    }
+  ],
+  "judge_rules": [
+    "score from -10 to +10 with a reason; the judge reads the question, the expected answer, the bot's answer and the sources given to the bot (up to 18,000 characters)",
+    "\"I don't know\" scores 0; information taken from the sources is not invented; leaving something out is not an error",
+    "good: score of 7 or more; wrong: below 0; the score of an answer is the mean of gemma4 and qwen3"
+  ],
+  "hardware": {
+    "gpu_host": {
+      "gpu": "NVIDIA GeForce RTX 4060 Ti, 16 GB",
+      "cpu": "AMD Ryzen 7 5700G, 8 cores / 16 threads",
+      "ram_gb": 64,
+      "use": "every model: embeddings, reranker, answers, judges, image descriptions, OCR models",
+      "rule": "everything stays in the 16 GB of VRAM, nothing offloaded to the CPU"
+    },
+    "cpu_host": {
+      "cpu": "AMD Ryzen 7 5700G, 8 cores / 16 threads",
+      "ram_gb": 32,
+      "use": "gosidian, the plugins, Qdrant and PostgreSQL, the converters that run on the CPU"
+    }
+  },
+  "software": {
+    "gosidian": "development build released as v2.99.0 (the cut rules media_paragraphs and icon_descriptions)",
+    "plugins": {
+      "database": "0.5.0",
+      "docling": "0.5.0 (conversion of the manuals)",
+      "claude": "0.1.1 (question generation)"
+    },
+    "engines": {
+      "ollama": "0.40.3",
+      "llama.cpp": "b11540 (llama-server --reranking)",
+      "vllm": "0.31.0 (image descriptions)",
+      "qdrant": "1.19.1"
+    }
+  },
+  "config": "the bot of scope C: a local model (gemma4:12b) reads the language and the revision a question asks for; the search filters the paragraphs by language and by the scope (a model or the family), falling back to Italian and English when the question's language has no manual; paragraphs in Qdrant, Qwen3-Embedding-8B at 2048, ef 128, bge-reranker-v2-m3, k 5, the same text in several manuals given once, the section as context, images in place, gemma4:12b with 12,288 tokens, the answer in the language of the question",
+  "results": {
+    "variants": [
+      {
+        "label": "no image descriptions, 20 candidates",
+        "change": "the manuals as converted, images as links; 20 candidates",
+        "score": 7.8,
+        "score_gemma": 7.88,
+        "score_qwen": 7.71,
+        "good": 0.79,
+        "wrong": 0.06,
+        "dont_know": 0.03,
+        "source": 0.94,
+        "section": 0.8,
+        "precise": 8.23,
+        "broad": 7.03,
+        "models": 7.6,
+        "models_section": 0.95,
+        "missing_language": 9.0,
+        "family": 8.05,
+        "revision_old": 6.17,
+        "revision_latest": 8.46,
+        "fallback": 1.0
+      },
+      {
+        "label": "descriptions as paragraphs of their own, 20 candidates",
+        "change": "every image described in the manual's language; an image on a line of its own is a paragraph",
+        "score": 7.28,
+        "score_gemma": 7.46,
+        "score_qwen": 7.11,
+        "good": 0.75,
+        "wrong": 0.06,
+        "dont_know": 0.08,
+        "source": 0.92,
+        "section": 0.77,
+        "precise": 7.72,
+        "broad": 6.39,
+        "models": 4.4,
+        "models_section": 0.64,
+        "missing_language": 7.3,
+        "family": 7.6,
+        "revision_old": 6.08,
+        "revision_latest": 8.92,
+        "fallback": 0.9
+      },
+      {
+        "label": "descriptions as paragraphs of their own, 40 candidates",
+        "change": "the reranker reads 40 candidates instead of 20",
+        "score": 7.67,
+        "score_gemma": 7.94,
+        "score_qwen": 7.4,
+        "good": 0.78,
+        "wrong": 0.05,
+        "dont_know": 0.05,
+        "source": 0.93,
+        "section": 0.81,
+        "precise": 8.35,
+        "broad": 6.19,
+        "models": 8.52,
+        "models_section": 1.0,
+        "missing_language": 7.3,
+        "family": 7.15,
+        "revision_old": 5.75,
+        "revision_latest": 8.96,
+        "fallback": 0.9
+      },
+      {
+        "label": "descriptions in their text's paragraph",
+        "change": "media_paragraphs: join; 40 candidates",
+        "score": 7.85,
+        "score_gemma": 8.06,
+        "score_qwen": 7.64,
+        "good": 0.79,
+        "wrong": 0.05,
+        "dont_know": 0.05,
+        "source": 0.93,
+        "section": 0.81,
+        "precise": 8.4,
+        "broad": 6.7,
+        "models": 8.56,
+        "models_section": 1.0,
+        "missing_language": 8.65,
+        "family": 8.0,
+        "revision_old": 5.71,
+        "revision_latest": 8.83,
+        "fallback": 1.0
+      },
+      {
+        "label": "and the icons described",
+        "change": "icon_descriptions: first; join, 40 candidates",
+        "score": 7.86,
+        "score_gemma": 8.06,
+        "score_qwen": 7.66,
+        "good": 0.8,
+        "wrong": 0.05,
+        "dont_know": 0.05,
+        "source": 0.93,
+        "section": 0.81,
+        "precise": 8.47,
+        "broad": 6.56,
+        "models": 8.56,
+        "models_section": 1.0,
+        "missing_language": 7.0,
+        "family": 8.3,
+        "revision_old": 6.88,
+        "revision_latest": 8.92,
+        "fallback": 0.9,
+        "chosen": true
+      }
+    ],
+    "by_language": [
+      {
+        "language": "IT",
+        "questions": 30,
+        "none": 7.98,
+        "own_20": 7.48,
+        "own_40": 7.83,
+        "joined": 7.67,
+        "icons": 7.88,
+        "judges_gap": 0.83
+      },
+      {
+        "language": "EN",
+        "questions": 30,
+        "none": 8.05,
+        "own_20": 8.0,
+        "own_40": 7.62,
+        "joined": 8.02,
+        "icons": 8.08,
+        "judges_gap": 0.83
+      },
+      {
+        "language": "ES",
+        "questions": 30,
+        "none": 8.05,
+        "own_20": 7.93,
+        "own_40": 8.17,
+        "joined": 7.7,
+        "icons": 7.68,
+        "judges_gap": 1.7
+      },
+      {
+        "language": "FR",
+        "questions": 30,
+        "none": 7.92,
+        "own_20": 7.6,
+        "own_40": 8.12,
+        "joined": 8.37,
+        "icons": 8.58,
+        "judges_gap": 0.9
+      },
+      {
+        "language": "PT",
+        "questions": 30,
+        "none": 7.57,
+        "own_20": 8.07,
+        "own_40": 8.03,
+        "joined": 8.4,
+        "icons": 7.85,
+        "judges_gap": 1.23
+      },
+      {
+        "language": "HR",
+        "questions": 29,
+        "none": 7.88,
+        "own_20": 6.97,
+        "own_40": 7.14,
+        "joined": 7.17,
+        "icons": 7.1,
+        "judges_gap": 3.17
+      },
+      {
+        "language": "SL",
+        "questions": 30,
+        "none": 7.18,
+        "own_20": 6.95,
+        "own_40": 6.67,
+        "joined": 7.18,
+        "icons": 7.38,
+        "judges_gap": 1.7
+      }
+    ],
+    "figures": [
+      {
+        "label": "no image descriptions, 40 candidates",
+        "score": 3.75,
+        "details": 2.5,
+        "pictograms": 4.58,
+        "dont_know": 0.1,
+        "wrong": 0.2
+      },
+      {
+        "label": "descriptions as paragraphs of their own, 40 candidates",
+        "score": 4.12,
+        "details": 4.06,
+        "pictograms": 4.17,
+        "dont_know": 0.25,
+        "wrong": 0.2
+      },
+      {
+        "label": "descriptions in their text's paragraph",
+        "score": 4.8,
+        "details": 5.75,
+        "pictograms": 4.17,
+        "dont_know": 0.25,
+        "wrong": 0.1
+      },
+      {
+        "label": "and the icons described",
+        "score": 8.12,
+        "details": 5.38,
+        "pictograms": 9.96,
+        "dont_know": 0.0,
+        "wrong": 0.05,
+        "chosen": true
+      }
+    ],
+    "understood": {
+      "language": 0.97,
+      "revision": 1.0,
+      "fallback_german": 0.9,
+      "fallback_other": 0.04
+    },
+    "times": {
+      "answers": "277 in 20-23 minutes with the queue full, about 4-5 s each",
+      "judges": "gemma4 16-18 minutes, qwen3 22-25 minutes"
+    }
+  },
+  "notes": []
+}

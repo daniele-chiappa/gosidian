@@ -75,6 +75,10 @@ trial, read the [root README](../README.md) first.
 
 - [Architecture](architecture.md) — package layout, data flow, ADRs
 - [Benchmark](benchmark.md) — how well agents find notes: retrieval figures on a public test vault, method, how to rerun
+- [RAG benchmarks](rag-benchmarks.md) — answers on a project's documents:
+  reference results with configuration and hardware, and the benchmarks
+  behind each default (embeddings, chunks, reranker, image descriptions,
+  answer model, converter)
 - [Development](development.md) — build, test, release cadence
 
 ## FAQ

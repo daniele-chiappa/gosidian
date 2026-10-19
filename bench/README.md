@@ -12,7 +12,23 @@ vault. Results and method: [docs/benchmark.md](../docs/benchmark.md).
 | `queries.jsonl` | The search each question gets at level R: a `query` and up to four `any_of` phrasings. Written by an agent that saw only the question text, never the vault. |
 | `retrieval/` | Level R runner and the consistency tests (run by `go test ./...`). |
 | `scale/` | Builds a larger copy of the vault: noise notes (plans, meetings, support articles, research) added to `tidewater`, deterministic for a seed, never touching what the questions depend on. |
-| `results/` | Raw results, one file per run, kept as a history. |
+| `results/` | Raw results, one file per run, kept as a history. `rag-*.json`: the RAG benchmarks, one file per benchmark or configuration. |
+| `rag/` | `render.py` writes the tables of [docs/rag-benchmarks.md](../docs/rag-benchmarks.md) from `results/rag-*.json` (Python, standard library). |
+
+## RAG benchmarks
+
+The benchmarks of the RAG pipelines (embeddings, chunks, reranker, image
+descriptions, answers, document conversion) ran in the maintainers' lab
+on private corpora, so only their numbers are here: one JSON per
+benchmark or configuration in `results/rag-*.json`, with versions,
+hardware, settings and date. The page that reads them is
+[docs/rag-benchmarks.md](../docs/rag-benchmarks.md); after changing a
+JSON, rewrite its tables with
+
+```bash
+python3 bench/rag/render.py           # rewrite the tables in place
+python3 bench/rag/render.py --check   # exit 1 if a table is out of date
+```
 
 ## Levels
 

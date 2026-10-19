@@ -1,0 +1,133 @@
+{
+  "format": "gosidian-rag-bench/1",
+  "id": "rag-2026-10-17-answers-b",
+  "kind": "answers",
+  "title": "Answers of the bot on a second corpus, scope B",
+  "date": "2026-10-17",
+  "corpus": {
+    "label": "scope B",
+    "description": "security procedures of a manufacturing company (PDF, scans, Office)",
+    "language": "it",
+    "documents": 41,
+    "formats": "text PDFs, scanned PDFs, Word, Excel, slide decks of training courses with speaker notes",
+    "paragraphs": 1115,
+    "images_described": 7
+  },
+  "sample": {
+    "questions": 119,
+    "how": "59 questions written by Claude Sonnet from the documents, 40 from the quizzes of the company's training courses, 20 with no answer in the documents"
+  },
+  "judges": [
+    {
+      "model": "gemma4:12b (Ollama, Q4_K_M, context 12,288)"
+    },
+    {
+      "model": "qwen3:14b (Ollama, Q4_K_M, context 12,288)"
+    },
+    {
+      "model": "Claude Opus, through the claude plugin (reference variant only)"
+    }
+  ],
+  "judge_rules": [
+    "score from -10 to +10 with a reason; the judge reads the question, the expected answer, the bot's answer and the sources given to the bot (up to 18,000 characters)",
+    "\"I don't know\" scores 0; information taken from the sources is not invented; leaving something out is not an error",
+    "good: score of 7 or more; wrong: below 0; the score of an answer is the mean of gemma4 and qwen3; Claude's scores are reported apart"
+  ],
+  "hardware": {
+    "gpu_host": {
+      "gpu": "NVIDIA GeForce RTX 4060 Ti, 16 GB",
+      "cpu": "AMD Ryzen 7 5700G, 8 cores / 16 threads",
+      "ram_gb": 64,
+      "use": "every model: embeddings, reranker, answers, judges, image descriptions, OCR models",
+      "rule": "everything stays in the 16 GB of VRAM, nothing offloaded to the CPU"
+    },
+    "cpu_host": {
+      "cpu": "AMD Ryzen 7 5700G, 8 cores / 16 threads",
+      "ram_gb": 32,
+      "use": "gosidian, the plugins, Qdrant and PostgreSQL, the converters that run on the CPU"
+    }
+  },
+  "software": {
+    "gosidian": "development build released as v2.94.0",
+    "plugins": {
+      "database": "0.5.0",
+      "claude": "0.1.0 (development build)"
+    },
+    "engines": {
+      "ollama": "0.40.3",
+      "llama.cpp": "b11540 (llama-server --reranking)",
+      "qdrant": "1.19.1"
+    }
+  },
+  "config": "the reference configuration of scope A: paragraphs in Qdrant, Qwen3-Embedding-8B at 2048, ef 128, bge-reranker-v2-m3 on 20 candidates, k 5, the section as context, images in place, gemma4:12b with 12,288 tokens",
+  "results": {
+    "variants": [
+      {
+        "label": "with the courses",
+        "change": "all documents",
+        "score": 8.83,
+        "score_gemma": 8.68,
+        "score_qwen": 8.98,
+        "score_claude": 8.06,
+        "good": 0.92,
+        "wrong": 0.03,
+        "invented": 0,
+        "precise": 8.86,
+        "broad": 7.72,
+        "out_of_scope": 10,
+        "dont_know_out": 1.0,
+        "chosen": true
+      },
+      {
+        "label": "without the courses",
+        "change": "the five slide decks of the training courses left out",
+        "score": 7.98,
+        "score_gemma": 7.81,
+        "score_qwen": 8.16,
+        "score_claude": null,
+        "good": 0.83,
+        "wrong": 0.06,
+        "invented": 0,
+        "precise": 7.64,
+        "broad": 7.37,
+        "out_of_scope": 10,
+        "dont_know_out": 1.0
+      }
+    ],
+    "by_origin": [
+      {
+        "origin": "quizzes of the training courses",
+        "questions": 40,
+        "with_courses": 8.84,
+        "without_courses": 6.71
+      },
+      {
+        "origin": "written by Claude Sonnet",
+        "questions": 59,
+        "with_courses": 8.43,
+        "without_courses": 8.16
+      }
+    ],
+    "judges": [
+      {
+        "pair": "Claude and gemma4",
+        "correlation": 0.83
+      },
+      {
+        "pair": "Claude and qwen3",
+        "correlation": 0.63
+      },
+      {
+        "pair": "gemma4 and qwen3",
+        "correlation": 0.82
+      }
+    ]
+  },
+  "notes": [
+    "score, good, wrong, precise, broad: from the mean of gemma4 and qwen3 per answer; Claude's score is reported apart. With Claude as a third judge the reference variant scores 8.57 (precise 8.62, broad 7.17, wrong 2%)",
+    "documents converted with the docling plugin; the five slide decks with a script that keeps one section per slide with the speaker notes, the output docling 0.4.0 has since adopted",
+    "the training courses matter: the questions from their quizzes drop from 8.84 to 6.71 without them",
+    "by topic (with the courses, mean of the local judges) six groups score 8.1-9.7; the lowest, risk assessment, scores 4.9: 5 of its 8 questions are answered by data in the tables and charts of one PDF, a case for the conversion benchmark",
+    "Claude is stricter on broad questions (6.09 against 7.72 of the local judges); 119 scores took 10 minutes and about 28% of a five-hour usage window of a Claude subscription"
+  ]
+}

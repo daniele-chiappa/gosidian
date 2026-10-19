@@ -1,0 +1,216 @@
+{
+  "format": "gosidian-rag-bench/1",
+  "id": "rag-2026-10-14-image-descriptions-a",
+  "kind": "image-descriptions",
+  "title": "Image descriptions: which vision model writes the text of a screenshot or an icon, scope A",
+  "date": "2026-10-14",
+  "corpus": {
+    "label": "scope A",
+    "description": "the wiki of a management software (Italian, screenshots)",
+    "language": "it",
+    "source": "a markdown export of the wiki, imported as it is",
+    "documents": 262,
+    "images": 16875,
+    "images_detail": "15,044 screenshots and 1,808 icons described by a vision model; 23 SVG not described",
+    "sections": 12010,
+    "paragraphs": 62357,
+    "paragraph_median_chars": 255,
+    "section_median_chars": 924,
+    "longest_piece_chars": 33773
+  },
+  "samples": {
+    "images": "31 images from 4 articles: 4 icons, 3 screenshots inside a sentence, 11 large and 13 medium screenshots",
+    "icons": "29 different icons from 8 articles, each with the sentence around it"
+  },
+  "judge": {
+    "model": "Claude Opus 5.5, three blind judge sessions (the images split in three groups), the key applied afterwards",
+    "asks": "the best description of each image, the descriptions with errors, a score from 1 to 5",
+    "caveat": "the judges were strict (typos in labels, O and 0 in codes) and flagged nine of their own verdicts as debatable"
+  },
+  "hardware": {
+    "gpu_host": {
+      "gpu": "NVIDIA GeForce RTX 4060 Ti, 16 GB",
+      "cpu": "AMD Ryzen 7 5700G, 8 cores / 16 threads",
+      "ram_gb": 64,
+      "use": "every model: embeddings, reranker, answers, judges, image descriptions, OCR models",
+      "rule": "everything stays in the 16 GB of VRAM, nothing offloaded to the CPU"
+    },
+    "cpu_host": {
+      "cpu": "AMD Ryzen 7 5700G, 8 cores / 16 threads",
+      "ram_gb": 32,
+      "use": "gosidian, the plugins, Qdrant and PostgreSQL, the converters that run on the CPU"
+    }
+  },
+  "software": {
+    "vllm": "0.31.0",
+    "ollama": "0.40"
+  },
+  "settings": "vLLM with --max-model-len 4096, one image per prompt, 8 requests at a time; Ollama 2 at a time",
+  "results": {
+    "models": [
+      {
+        "config": "Ollama, Qwen3-VL-8B-Instruct",
+        "quant": "Q4_K_M",
+        "resolution": "scaled to about 1 MP or more (Ollama's default)",
+        "s_per_image": 3.84,
+        "tokens": 49864,
+        "vram_gb": null,
+        "best": 6,
+        "errors": 9,
+        "score": 3.1,
+        "score_icons": 2.5,
+        "score_screens": 3.19,
+        "full_run_h": 17.9,
+        "chosen": false
+      },
+      {
+        "config": "vLLM, Qwen3-VL-8B-Instruct",
+        "quant": "FP8",
+        "resolution": "original resolution",
+        "s_per_image": 1.03,
+        "tokens": 29282,
+        "vram_gb": 12.9,
+        "best": null,
+        "errors": null,
+        "score": null,
+        "score_icons": null,
+        "score_screens": null,
+        "full_run_h": 4.8,
+        "chosen": false
+      },
+      {
+        "config": "vLLM, Qwen3-VL-8B-Instruct",
+        "quant": "FP8",
+        "resolution": "at least 1 MP",
+        "s_per_image": 1.52,
+        "tokens": 49891,
+        "vram_gb": 12.9,
+        "best": 6,
+        "errors": 11,
+        "score": 3.16,
+        "score_icons": 2.75,
+        "score_screens": 3.22,
+        "full_run_h": 7.1,
+        "chosen": true
+      },
+      {
+        "config": "vLLM, Qwen3.5-9B",
+        "quant": "AWQ",
+        "resolution": "original resolution",
+        "s_per_image": 1.13,
+        "tokens": 27963,
+        "vram_gb": 13.4,
+        "best": null,
+        "errors": null,
+        "score": null,
+        "score_icons": null,
+        "score_screens": null,
+        "full_run_h": 5.3,
+        "chosen": false
+      },
+      {
+        "config": "vLLM, Qwen3.5-9B",
+        "quant": "AWQ",
+        "resolution": "at least 1 MP",
+        "s_per_image": 1.42,
+        "tokens": 48583,
+        "vram_gb": 13.4,
+        "best": 7,
+        "errors": 18,
+        "score": 3.03,
+        "score_icons": 1.75,
+        "score_screens": 3.22,
+        "full_run_h": 6.6,
+        "chosen": false
+      },
+      {
+        "config": "vLLM, Gemma 4 12B",
+        "quant": "QAT w4a16",
+        "resolution": "original resolution",
+        "s_per_image": 1.32,
+        "tokens": 22922,
+        "vram_gb": 15.0,
+        "best": 12,
+        "errors": 17,
+        "score": 3.19,
+        "score_icons": 4.75,
+        "score_screens": 2.96,
+        "full_run_h": 6.1,
+        "chosen": false
+      }
+    ],
+    "icons": [
+      {
+        "config": "vLLM, Gemma 4 12B",
+        "best": 19,
+        "errors": 1,
+        "score": 3.9,
+        "s_per_icon": 0.69,
+        "chosen": true
+      },
+      {
+        "config": "vLLM, Qwen3-VL-8B, default minimum resolution",
+        "best": 6,
+        "errors": 3,
+        "score": 3.48,
+        "s_per_icon": 0.38,
+        "chosen": false
+      },
+      {
+        "config": "vLLM, Qwen3-VL-8B, at least 1 MP",
+        "best": 4,
+        "errors": 4,
+        "score": 3.41,
+        "s_per_icon": 0.9,
+        "chosen": false
+      }
+    ],
+    "prompts": [
+      {
+        "prompt": "v2: what the icon does in the sentence",
+        "best": null,
+        "errors": 2,
+        "score": 3.34
+      },
+      {
+        "prompt": "v3: what it shows (shapes, symbols, colours), the text on the button, what it does",
+        "best": 23,
+        "errors": 9,
+        "score": 3.9,
+        "chosen": true
+      }
+    ],
+    "full_run": [
+      {
+        "pass": "screenshots",
+        "model": "Qwen3-VL-8B-Instruct FP8, at least 1 MP",
+        "described": 14903,
+        "failed": 0,
+        "time": "6 h 01 min",
+        "rate": "0.69 a second",
+        "vram_gb": 12.9
+      },
+      {
+        "pass": "icons",
+        "model": "Gemma 4 12B QAT w4a16, prompt v3",
+        "described": 1808,
+        "failed": 0,
+        "time": "20 min",
+        "rate": "1.6 a second",
+        "vram_gb": 15.0
+      }
+    ]
+  },
+  "notes": [
+    "best and errors count images (out of 31, or out of 29 icons); the icon and screenshot scores are the means on those images",
+    "full_run_h: estimated hours for the 16,736 images still to describe at that speed",
+    "Ollama scales every image to about 1 MP or more (a 16x16 icon costs 1,031 tokens); vLLM at the original resolution uses about a third of the tokens, and its descriptions leave out values Ollama reads (names, ports, dates, codes). At equal resolution vLLM gives Ollama's result 2.5 times faster",
+    "prompt v3 against v2 on Gemma 4: better in 23 icons of 29, but more errors, nearly all in naming the shape; a more cautious v3.1 removed some errors and made the descriptions vague (v3 preferred in 20 of 29)",
+    "236 screenshots larger than 2 MP were scaled down for the model (max_pixels)"
+  ],
+  "choice": {
+    "date": "2026-10-14",
+    "what": "two passes on vLLM: screenshots with Qwen3-VL-8B-Instruct FP8 at a minimum of 1 MP, icons with Gemma 4 12B QAT and prompt v3",
+    "why": "no model is clearly best on screenshots; Gemma 4 wins on icons and makes more errors on screenshots; Qwen3-VL on vLLM at 1 MP equals Ollama in 40% of the time"
+  }
+}

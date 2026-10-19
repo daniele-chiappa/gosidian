@@ -1,0 +1,255 @@
+{
+  "format": "gosidian-rag-bench/1",
+  "id": "rag-2026-10-12-embedding-models",
+  "kind": "embedding",
+  "title": "Embedding models: does the right chunk come first?",
+  "date": "2026-10-12",
+  "corpora": [
+    {
+      "label": "scope D",
+      "description": "operating procedures of a machine maker, private (Italian)",
+      "chunks": 47,
+      "questions": 141,
+      "how": "47 chunks cut at the headings; three questions per chunk written by a model: a precise one, a paraphrase, one in an operator's words. The procedures are nearly identical across machine models and revisions: a hard set"
+    },
+    {
+      "label": "Belebele ita_Latn",
+      "description": "public: the BelebeleRetrieval task of MTEB, Italian, CC BY-SA 4.0",
+      "chunks": 488,
+      "questions": 900
+    }
+  ],
+  "metric": "MRR: mean of 1/rank of the right chunk",
+  "hardware": {
+    "gpu_host": {
+      "gpu": "NVIDIA GeForce RTX 4060 Ti, 16 GB",
+      "cpu": "AMD Ryzen 7 5700G, 8 cores / 16 threads",
+      "ram_gb": 64,
+      "use": "every model: embeddings, reranker, answers, judges, image descriptions, OCR models",
+      "rule": "everything stays in the 16 GB of VRAM, nothing offloaded to the CPU"
+    },
+    "cpu_host": {
+      "cpu": "AMD Ryzen 7 5700G, 8 cores / 16 threads",
+      "ram_gb": 32,
+      "use": "gosidian, the plugins, Qdrant and PostgreSQL, the converters that run on the CPU"
+    }
+  },
+  "software": {
+    "ollama": "0.40.2",
+    "llama.cpp": "b11540"
+  },
+  "settings": "each model with its own query prefix or instruction (the official one); seconds: the 488 Belebele passages in batches of 32",
+  "results": [
+    {
+      "model": "Qwen3-Embedding-8B",
+      "where": "Ollama, Q4_K_M, 4.7 GB",
+      "local": true,
+      "dims": 4096,
+      "mrr_d": 0.903,
+      "mrr_belebele": 0.983,
+      "seconds_488": 40.6,
+      "chosen": true
+    },
+    {
+      "model": "Nemotron-3-Embed-1B",
+      "where": "llama.cpp, Q4_K_M, 749 MB",
+      "local": true,
+      "dims": 2048,
+      "mrr_d": 0.874,
+      "mrr_belebele": 0.968,
+      "seconds_488": 11.9,
+      "chosen": false
+    },
+    {
+      "model": "Harrier-OSS-v1 0.6B",
+      "where": "llama.cpp, Q8_0, 639 MB",
+      "local": true,
+      "dims": 1024,
+      "mrr_d": 0.866,
+      "mrr_belebele": 0.931,
+      "seconds_488": 13.0,
+      "chosen": false
+    },
+    {
+      "model": "Qwen3-Embedding-4B",
+      "where": "Ollama, Q4_K_M, 2.5 GB",
+      "local": true,
+      "dims": 2560,
+      "mrr_d": 0.861,
+      "mrr_belebele": 0.949,
+      "seconds_488": 27.6,
+      "chosen": false
+    },
+    {
+      "model": "EmbeddingGemma 2",
+      "where": "llama.cpp, Q8_0, 309 MB",
+      "local": true,
+      "dims": 768,
+      "mrr_d": 0.858,
+      "mrr_belebele": 0.932,
+      "seconds_488": 3.6,
+      "chosen": false
+    },
+    {
+      "model": "EmbeddingGemma 300M",
+      "where": "Ollama, 622 MB",
+      "local": true,
+      "dims": 768,
+      "mrr_d": 0.856,
+      "mrr_belebele": 0.937,
+      "seconds_488": 4.9,
+      "chosen": false
+    },
+    {
+      "model": "snowflake-arctic-embed2",
+      "where": "Ollama, 1.2 GB",
+      "local": true,
+      "dims": 1024,
+      "mrr_d": 0.849,
+      "mrr_belebele": 0.925,
+      "seconds_488": 5.7,
+      "chosen": false
+    },
+    {
+      "model": "bge-m3",
+      "where": "Ollama, 1.2 GB",
+      "local": true,
+      "dims": 1024,
+      "mrr_d": 0.841,
+      "mrr_belebele": 0.923,
+      "seconds_488": 4.2,
+      "chosen": false
+    },
+    {
+      "model": "Qwen3-Embedding-0.6B",
+      "where": "Ollama, 639 MB",
+      "local": true,
+      "dims": 1024,
+      "mrr_d": 0.833,
+      "mrr_belebele": 0.92,
+      "seconds_488": 14.3,
+      "chosen": false
+    },
+    {
+      "model": "Granite Embedding R2 311M",
+      "where": "llama.cpp, Q8_0, 347 MB",
+      "local": true,
+      "dims": 768,
+      "mrr_d": 0.816,
+      "mrr_belebele": 0.911,
+      "seconds_488": 2.4,
+      "chosen": false
+    },
+    {
+      "model": "BM25, no vectors",
+      "where": "—",
+      "local": true,
+      "dims": null,
+      "mrr_d": 0.792,
+      "mrr_belebele": 0.854,
+      "seconds_488": null,
+      "chosen": false
+    },
+    {
+      "model": "granite-embedding 278M",
+      "where": "Ollama, 563 MB",
+      "local": true,
+      "dims": 768,
+      "mrr_d": 0.783,
+      "mrr_belebele": 0.849,
+      "seconds_488": 3.2,
+      "chosen": false
+    },
+    {
+      "model": "nomic-embed-text v1.5",
+      "where": "Ollama, 274 MB",
+      "local": true,
+      "dims": 768,
+      "mrr_d": 0.739,
+      "mrr_belebele": 0.721,
+      "seconds_488": 2.7,
+      "chosen": false
+    },
+    {
+      "model": "all-minilm 33M",
+      "where": "Ollama, 67 MB",
+      "local": true,
+      "dims": 384,
+      "mrr_d": 0.467,
+      "mrr_belebele": 0.577,
+      "seconds_488": 1.9,
+      "chosen": false
+    },
+    {
+      "model": "gemini-embedding-2",
+      "where": "API",
+      "local": false,
+      "dims": 3072,
+      "mrr_d": 0.907,
+      "mrr_belebele": 0.961,
+      "seconds_488": null,
+      "chosen": false
+    },
+    {
+      "model": "Qwen3-Embedding-8B",
+      "where": "API, FP8",
+      "local": false,
+      "dims": 4096,
+      "mrr_d": 0.891,
+      "mrr_belebele": 0.986,
+      "seconds_488": null,
+      "chosen": false
+    },
+    {
+      "model": "voyage-4-large",
+      "where": "API",
+      "local": false,
+      "dims": 1024,
+      "mrr_d": 0.888,
+      "mrr_belebele": 0.965,
+      "seconds_488": null,
+      "chosen": false
+    },
+    {
+      "model": "text-embedding-3-large",
+      "where": "API",
+      "local": false,
+      "dims": 3072,
+      "mrr_d": 0.871,
+      "mrr_belebele": 0.934,
+      "seconds_488": null,
+      "chosen": false
+    },
+    {
+      "model": "text-embedding-3-small",
+      "where": "API",
+      "local": false,
+      "dims": 1536,
+      "mrr_d": 0.839,
+      "mrr_belebele": 0.914,
+      "seconds_488": null,
+      "chosen": false
+    },
+    {
+      "model": "mistral-embed-2312",
+      "where": "API",
+      "local": false,
+      "dims": 1024,
+      "mrr_d": 0.782,
+      "mrr_belebele": 0.916,
+      "seconds_488": null,
+      "chosen": false
+    }
+  ],
+  "findings": [
+    "Qwen3-Embedding-8B is the best local model, level with the best API model; Ollama's Q4_K_M scores as the FP8 served by an API",
+    "the prefix matters, model by model: Qwen3-Embedding-8B scores 0.903 with the official instruction, 0.883 without one, 0.823 with one of ours; EmbeddingGemma drops from 0.856 to 0.809 without its prefix",
+    "cutting the vector (Matryoshka) costs little: Qwen3-Embedding-8B from 4096 to 1024 numbers, 0.903 to 0.894 on scope D, 0.983 to 0.985 on Belebele",
+    "a plain hybrid (BM25 and vectors with RRF, k = 60) lowers the strong models: Qwen3-Embedding-8B 0.983 to 0.932 on Belebele; it lifts only the weak ones"
+  ],
+  "choice": {
+    "date": "2026-10-14",
+    "what": "Qwen3-Embedding-8B on Ollama (Q4_K_M)",
+    "why": "the best local model; it is about 8 times slower than EmbeddingGemma (an article of 256 chunks: about 28 s against 5 s), a cost paid once when documents are loaded"
+  }
+}
