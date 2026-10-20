@@ -1,0 +1,1724 @@
+{
+  "format": "gosidian-rag-bench/1",
+  "id": "rag-2026-10-20-vidore-v3",
+  "kind": "reference",
+  "title": "Reference results on a public corpus: ViDoRe V3",
+  "date": "2026-10-20",
+  "corpus": {
+    "label": "ViDoRe V3",
+    "public": true,
+    "license": "CC-BY 4.0",
+    "source": "https://huggingface.co/collections/vidore/vidore-benchmark-v3",
+    "paper": "https://arxiv.org/abs/2601.08620",
+    "corpora": [
+      "computer_science",
+      "energy",
+      "pharmaceuticals",
+      "hr",
+      "finance_en",
+      "physics",
+      "industrial",
+      "finance_fr"
+    ],
+    "revisions": {
+      "computer_science": "d5cc75883d92e294f0c0fc2662551c9708a06ebc",
+      "energy": "caec06d3c73434d635f710f93bcd898331c59f20",
+      "finance_en": "7f432c176d82e27546501ad8064a713ac3071809",
+      "finance_fr": "1d808daa08032ffecdf62da151a7f7a8fe2bd0c9",
+      "hr": "0cdf0979f2c5a0fd3e335e6373b9da48a9fe3bc3",
+      "industrial": "e26c864724f5dd71a3d7d739272d95637764cee9",
+      "pharmaceuticals": "3abd4aa8a9445fb5538a78a19ba50bd57bd22b5c",
+      "physics": "a0de276f515acc044b72cae8de53a44bb5a8f1f5"
+    },
+    "documents": 189,
+    "pages": 19252,
+    "pages_without_text": 264,
+    "questions": 14514,
+    "question_languages": [
+      "English",
+      "French",
+      "Spanish",
+      "German",
+      "Italian",
+      "Portuguese"
+    ],
+    "document_languages": [
+      "English",
+      "French"
+    ]
+  },
+  "sample": {
+    "answers": 1200,
+    "how": "per corpus, 25 questions drawn with a fixed seed (2026) among those whose six translations are all there, each asked in its six languages"
+  },
+  "judges": [
+    {
+      "model": "gemma4:12b (Ollama, Q4_K_M, context 12,288)"
+    },
+    {
+      "model": "qwen3:14b (Ollama, Q4_K_M, context 12,288)"
+    }
+  ],
+  "judge_rules": [
+    "score from -10 to +10 with a reason; the judge reads the question, the reference answer, the relevant pages (up to 8,000 characters), the sources given to the bot (up to 18,000) and the answer",
+    "\"I don't know\" scores 0; information taken from the sources is not invented; leaving something out is not an error",
+    "good: score of 7 or more; wrong: below 0; the score of an answer is the mean of gemma4 and qwen3"
+  ],
+  "hardware": {
+    "gpu_host": {
+      "gpu": "NVIDIA GeForce RTX 4060 Ti, 16 GB",
+      "cpu": "AMD Ryzen 7 5700G, 8 cores / 16 threads",
+      "ram_gb": 64,
+      "use": "every model: embeddings, reranker, answers, judges, image descriptions, OCR models",
+      "rule": "everything stays in the 16 GB of VRAM, nothing offloaded to the CPU"
+    },
+    "cpu_host": {
+      "cpu": "AMD Ryzen 7 5700G, 8 cores / 16 threads",
+      "ram_gb": 32,
+      "use": "gosidian, the plugins, Qdrant and PostgreSQL, the converters that run on the CPU"
+    }
+  },
+  "software": {
+    "gosidian": "v2.99.1",
+    "plugins": {
+      "database": "0.5.0 (limits.max_items 5000)"
+    },
+    "engines": {
+      "ollama": "0.40.3",
+      "llama.cpp": "b11540 (llama-server --reranking)",
+      "qdrant": "1.19.1 (service.max_request_size_mb 256)"
+    },
+    "tools": "bench/rag/vidore (download.py, convert.py, cut.py, search.py, answers.py, report.py; pyarrow 25.0.1)"
+  },
+  "config": [
+    {
+      "setting": "Documents",
+      "value": "the dataset's markdown of each page (the benchmark authors' OCR), one note per document, a section per page; the page's lines joined into paragraphs of at least 600 characters"
+    },
+    {
+      "setting": "Indexes",
+      "value": "paragraphs (note.sections, levels paragraph); whole pages (levels section, max_chars 20,000)"
+    },
+    {
+      "setting": "Embedding, store",
+      "value": "Qwen3-Embedding-8B (Ollama, Q4_K_M) cut to 2048 numbers; Qdrant 1.19.1, HNSW, ef 128"
+    },
+    {
+      "setting": "Search",
+      "value": "filtered by corpus; paragraphs k 40 and 40 candidates, pages k 20 and 20 candidates; the chunks become pages in the order each first appears"
+    },
+    {
+      "setting": "Reranker",
+      "value": "bge-reranker-v2-m3 Q8_0 on llama-server, max_chars 4000"
+    },
+    {
+      "setting": "Answer",
+      "value": "the reference configuration: 20 candidates, k 5 paragraphs, the page of each as context (budget 24,000 characters), gemma4:12b with 12,288 tokens, max_tokens 1000, the answer in the question's language"
+    },
+    {
+      "setting": "Judges",
+      "value": "gemma4:12b and qwen3:14b, the rules of this page"
+    },
+    {
+      "setting": "Versions",
+      "value": "gosidian v2.99.1, database plugin 0.5.0; Ollama 0.40.3, llama.cpp b11540, Qdrant 1.19.1"
+    },
+    {
+      "setting": "Hardware",
+      "value": "as scope A"
+    }
+  ],
+  "results": {
+    "summary": [
+      {
+        "measure": "Search, paragraphs: NDCG@10 cosine / with the reranker",
+        "value": "52.7 / 53.4",
+        "note": "the page of each paragraph; recall@10 58.4 / 58.6, MRR@10 63.6 / 63.7; 14,514 questions"
+      },
+      {
+        "measure": "Search, whole pages: NDCG@10 cosine / with the reranker",
+        "value": "51.9 / 51.6",
+        "note": "the paper's set-up; the paper's Qwen3-Embedding-8B 51.1, Jina-v4 with zerank-2 63.8 (mean of the 8 public corpora)"
+      },
+      {
+        "measure": "Answers: score (2 local judges)",
+        "value": "5.24",
+        "note": "gemma4 5.28, qwen3 5.21; 1,200 answers (200 questions in 6 languages)"
+      },
+      {
+        "measure": "Answers: good / wrong / not found",
+        "value": "57% / 16% / 9%",
+        "note": "something invented in 13%; the judges 1.95 points apart on average"
+      },
+      {
+        "measure": "Time per answer, one at a time",
+        "value": "5.5 s median, 9.4 s p95",
+        "note": "100 answers, from the question to the answer note; the longest 12.6 s"
+      },
+      {
+        "measure": "Indexing",
+        "value": "18,988 pages, 67,134 paragraphs",
+        "note": "about 3 h 30 min on the GPU host, 5-9 chunks a second; 264 pages without text in the dataset"
+      }
+    ],
+    "search": [
+      {
+        "corpus": "computer_science",
+        "questions": 1290,
+        "par_cos": 75.3,
+        "par_rr": 70.8,
+        "page_cos": 72.1,
+        "page_rr": 68.3,
+        "paper_qwen": 71.7,
+        "paper_rerank": 82.1
+      },
+      {
+        "corpus": "energy",
+        "questions": 1848,
+        "par_cos": 60.8,
+        "par_rr": 62.1,
+        "page_cos": 58.7,
+        "page_rr": 60.3,
+        "paper_qwen": 58.9,
+        "paper_rerank": 71.5
+      },
+      {
+        "corpus": "pharmaceuticals",
+        "questions": 2184,
+        "par_cos": 61.4,
+        "par_rr": 61.6,
+        "page_cos": 61.6,
+        "page_rr": 62.1,
+        "paper_qwen": 59.2,
+        "paper_rerank": 66.2
+      },
+      {
+        "corpus": "hr",
+        "questions": 1908,
+        "par_cos": 54.2,
+        "par_rr": 57.3,
+        "page_cos": 51.4,
+        "page_rr": 52.2,
+        "paper_qwen": 47.6,
+        "paper_rerank": 66.5
+      },
+      {
+        "corpus": "finance_en",
+        "questions": 1854,
+        "par_cos": 50.2,
+        "par_rr": 50.8,
+        "page_cos": 52.2,
+        "page_rr": 50.3,
+        "paper_qwen": 49.4,
+        "paper_rerank": 69.2
+      },
+      {
+        "corpus": "physics",
+        "questions": 1812,
+        "par_cos": 46.9,
+        "par_rr": 45.8,
+        "page_cos": 46.3,
+        "page_rr": 45.5,
+        "paper_qwen": 45.6,
+        "paper_rerank": 48.2
+      },
+      {
+        "corpus": "industrial",
+        "questions": 1698,
+        "par_cos": 43.2,
+        "par_rr": 46.2,
+        "page_cos": 40.0,
+        "page_rr": 39.3,
+        "paper_qwen": 40.4,
+        "paper_rerank": 53.2
+      },
+      {
+        "corpus": "finance_fr",
+        "questions": 1920,
+        "par_cos": 34.5,
+        "par_rr": 36.2,
+        "page_cos": 36.7,
+        "page_rr": 37.2,
+        "paper_qwen": 35.8,
+        "paper_rerank": 53.7
+      },
+      {
+        "corpus": "mean of the 8",
+        "questions": 14514,
+        "par_cos": 52.7,
+        "par_rr": 53.4,
+        "page_cos": 51.9,
+        "page_rr": 51.6,
+        "paper_qwen": 51.1,
+        "paper_rerank": 63.8,
+        "chosen": true
+      }
+    ],
+    "search_recall10": {
+      "paragraphs": {
+        "cosine": 58.4,
+        "rerank": 58.6
+      },
+      "pages": {
+        "cosine": 57.5,
+        "rerank": 57.1
+      }
+    },
+    "search_mrr10": {
+      "paragraphs": {
+        "cosine": 63.6,
+        "rerank": 63.7
+      },
+      "pages": {
+        "cosine": 62.7,
+        "rerank": 61.6
+      }
+    },
+    "by_language": [
+      {
+        "language": "English",
+        "par_cos": 54.6,
+        "par_rr": 56.0,
+        "page_cos": 53.6,
+        "page_rr": 55.3,
+        "answer_score": 5.01,
+        "answer_good": 0.54
+      },
+      {
+        "language": "French",
+        "par_cos": 52.7,
+        "par_rr": 53.3,
+        "page_cos": 51.9,
+        "page_rr": 51.5,
+        "answer_score": 5.4,
+        "answer_good": 0.575
+      },
+      {
+        "language": "Spanish",
+        "par_cos": 52.7,
+        "par_rr": 53.4,
+        "page_cos": 51.9,
+        "page_rr": 51.9,
+        "answer_score": 5.31,
+        "answer_good": 0.575
+      },
+      {
+        "language": "German",
+        "par_cos": 51.5,
+        "par_rr": 51.5,
+        "page_cos": 50.6,
+        "page_rr": 49.1,
+        "answer_score": 5.03,
+        "answer_good": 0.57
+      },
+      {
+        "language": "Italian",
+        "par_cos": 52.3,
+        "par_rr": 52.7,
+        "page_cos": 51.7,
+        "page_rr": 50.5,
+        "answer_score": 5.47,
+        "answer_good": 0.6
+      },
+      {
+        "language": "Portuguese",
+        "par_cos": 52.3,
+        "par_rr": 53.4,
+        "page_cos": 51.6,
+        "page_rr": 51.1,
+        "answer_score": 5.24,
+        "answer_good": 0.545
+      }
+    ],
+    "by_content": [
+      {
+        "content": "Text",
+        "questions": 13344,
+        "par_cos": 52.8,
+        "page_cos": 51.7
+      },
+      {
+        "content": "Chart",
+        "questions": 2046,
+        "par_cos": 51.8,
+        "page_cos": 52.3
+      },
+      {
+        "content": "Infographic",
+        "questions": 2346,
+        "par_cos": 47.3,
+        "page_cos": 48.4
+      },
+      {
+        "content": "Table",
+        "questions": 5388,
+        "par_cos": 47.2,
+        "page_cos": 48.1
+      },
+      {
+        "content": "Other",
+        "questions": 360,
+        "par_cos": 45.8,
+        "page_cos": 44.7
+      },
+      {
+        "content": "Mixed",
+        "questions": 1164,
+        "par_cos": 45.1,
+        "page_cos": 45.2
+      },
+      {
+        "content": "Image",
+        "questions": 1110,
+        "par_cos": 44.4,
+        "page_cos": 44.6
+      }
+    ],
+    "by_type": [
+      {
+        "type": "boolean",
+        "questions": 1632,
+        "par_cos": 61.1,
+        "page_cos": 59.5,
+        "answers": 102,
+        "score": 4.43,
+        "good": 0.569,
+        "wrong": 0.235
+      },
+      {
+        "type": "numerical",
+        "questions": 3054,
+        "par_cos": 59.0,
+        "page_cos": 58.2,
+        "answers": 258,
+        "score": 3.68,
+        "good": 0.516,
+        "wrong": 0.26
+      },
+      {
+        "type": "extractive",
+        "questions": 5184,
+        "par_cos": 57.2,
+        "page_cos": 54.9,
+        "answers": 498,
+        "score": 4.68,
+        "good": 0.546,
+        "wrong": 0.205
+      },
+      {
+        "type": "compare-contrast",
+        "questions": 2598,
+        "par_cos": 55.5,
+        "page_cos": 56.5,
+        "answers": 204,
+        "score": 6.55,
+        "good": 0.642,
+        "wrong": 0.083
+      },
+      {
+        "type": "enumerative",
+        "questions": 2202,
+        "par_cos": 52.2,
+        "page_cos": 51.0,
+        "answers": 174,
+        "score": 4.84,
+        "good": 0.494,
+        "wrong": 0.213
+      },
+      {
+        "type": "multi-hop",
+        "questions": 1218,
+        "par_cos": 47.1,
+        "page_cos": 47.2,
+        "answers": 96,
+        "score": 6.31,
+        "good": 0.625,
+        "wrong": 0.031
+      },
+      {
+        "type": "open-ended",
+        "questions": 4410,
+        "par_cos": 44.1,
+        "page_cos": 44.8,
+        "answers": 354,
+        "score": 5.69,
+        "good": 0.562,
+        "wrong": 0.113
+      }
+    ],
+    "answers": [
+      {
+        "corpus": "computer_science",
+        "answers": 150,
+        "score": 7.87,
+        "score_gemma": 7.86,
+        "score_qwen": 7.87,
+        "good": 0.787,
+        "wrong": 0.02,
+        "not_found": 0.08,
+        "invented": 0.007,
+        "judges_gap": 0.89
+      },
+      {
+        "corpus": "energy",
+        "answers": 150,
+        "score": 5.62,
+        "score_gemma": 6.33,
+        "score_qwen": 4.91,
+        "good": 0.64,
+        "wrong": 0.153,
+        "not_found": 0.1,
+        "invented": 0.153,
+        "judges_gap": 2.33
+      },
+      {
+        "corpus": "pharmaceuticals",
+        "answers": 150,
+        "score": 4.61,
+        "score_gemma": 4.3,
+        "score_qwen": 4.93,
+        "good": 0.533,
+        "wrong": 0.227,
+        "not_found": 0.027,
+        "invented": 0.153,
+        "judges_gap": 1.77
+      },
+      {
+        "corpus": "hr",
+        "answers": 150,
+        "score": 5.7,
+        "score_gemma": 5.41,
+        "score_qwen": 6,
+        "good": 0.593,
+        "wrong": 0.127,
+        "not_found": 0.08,
+        "invented": 0.14,
+        "judges_gap": 2.07
+      },
+      {
+        "corpus": "finance_en",
+        "answers": 150,
+        "score": 5.26,
+        "score_gemma": 5.09,
+        "score_qwen": 5.43,
+        "good": 0.627,
+        "wrong": 0.207,
+        "not_found": 0.073,
+        "invented": 0.18,
+        "judges_gap": 1.93
+      },
+      {
+        "corpus": "physics",
+        "answers": 150,
+        "score": 6.27,
+        "score_gemma": 7.01,
+        "score_qwen": 5.54,
+        "good": 0.56,
+        "wrong": 0.087,
+        "not_found": 0.053,
+        "invented": 0.087,
+        "judges_gap": 2.29
+      },
+      {
+        "corpus": "industrial",
+        "answers": 150,
+        "score": 4.46,
+        "score_gemma": 4.29,
+        "score_qwen": 4.64,
+        "good": 0.447,
+        "wrong": 0.133,
+        "not_found": 0.153,
+        "invented": 0.093,
+        "judges_gap": 1.83
+      },
+      {
+        "corpus": "finance_fr",
+        "answers": 150,
+        "score": 2.15,
+        "score_gemma": 1.97,
+        "score_qwen": 2.33,
+        "good": 0.353,
+        "wrong": 0.327,
+        "not_found": 0.133,
+        "invented": 0.24,
+        "judges_gap": 2.45
+      },
+      {
+        "corpus": "all",
+        "answers": 1200,
+        "score": 5.24,
+        "score_gemma": 5.28,
+        "score_qwen": 5.21,
+        "good": 0.568,
+        "wrong": 0.16,
+        "not_found": 0.087,
+        "invented": 0.132,
+        "judges_gap": 1.95,
+        "chosen": true
+      }
+    ],
+    "times": {
+      "answers": 100,
+      "median_s": 5.52,
+      "p95_s": 9.37,
+      "max_s": 12.64
+    },
+    "computed": {
+      "search": {
+        "paragraphs": {
+          "all": {
+            "cosine": {
+              "ndcg10": 0.5269,
+              "recall10": 0.5836,
+              "mrr10": 0.6356,
+              "questions": 14514
+            },
+            "rerank": {
+              "ndcg10": 0.534,
+              "recall10": 0.5858,
+              "mrr10": 0.6368,
+              "questions": 14514
+            }
+          },
+          "corpus": {
+            "computer_science": {
+              "cosine": {
+                "ndcg10": 0.7531,
+                "recall10": 0.7894,
+                "mrr10": 0.8764,
+                "questions": 1290
+              },
+              "rerank": {
+                "ndcg10": 0.7075,
+                "recall10": 0.7465,
+                "mrr10": 0.8327,
+                "questions": 1290
+              }
+            },
+            "energy": {
+              "cosine": {
+                "ndcg10": 0.6082,
+                "recall10": 0.72,
+                "mrr10": 0.665,
+                "questions": 1848
+              },
+              "rerank": {
+                "ndcg10": 0.621,
+                "recall10": 0.7208,
+                "mrr10": 0.6825,
+                "questions": 1848
+              }
+            },
+            "finance_en": {
+              "cosine": {
+                "ndcg10": 0.5019,
+                "recall10": 0.5506,
+                "mrr10": 0.6403,
+                "questions": 1854
+              },
+              "rerank": {
+                "ndcg10": 0.5084,
+                "recall10": 0.5737,
+                "mrr10": 0.6199,
+                "questions": 1854
+              }
+            },
+            "finance_fr": {
+              "cosine": {
+                "ndcg10": 0.3453,
+                "recall10": 0.4133,
+                "mrr10": 0.4619,
+                "questions": 1920
+              },
+              "rerank": {
+                "ndcg10": 0.3617,
+                "recall10": 0.4233,
+                "mrr10": 0.4722,
+                "questions": 1920
+              }
+            },
+            "hr": {
+              "cosine": {
+                "ndcg10": 0.5418,
+                "recall10": 0.5915,
+                "mrr10": 0.6646,
+                "questions": 1908
+              },
+              "rerank": {
+                "ndcg10": 0.5727,
+                "recall10": 0.6154,
+                "mrr10": 0.6952,
+                "questions": 1908
+              }
+            },
+            "industrial": {
+              "cosine": {
+                "ndcg10": 0.4318,
+                "recall10": 0.4749,
+                "mrr10": 0.523,
+                "questions": 1698
+              },
+              "rerank": {
+                "ndcg10": 0.4624,
+                "recall10": 0.4913,
+                "mrr10": 0.5572,
+                "questions": 1698
+              }
+            },
+            "pharmaceuticals": {
+              "cosine": {
+                "ndcg10": 0.6144,
+                "recall10": 0.6619,
+                "mrr10": 0.7224,
+                "questions": 2184
+              },
+              "rerank": {
+                "ndcg10": 0.6161,
+                "recall10": 0.6614,
+                "mrr10": 0.7103,
+                "questions": 2184
+              }
+            },
+            "physics": {
+              "cosine": {
+                "ndcg10": 0.4691,
+                "recall10": 0.5115,
+                "mrr10": 0.5841,
+                "questions": 1812
+              },
+              "rerank": {
+                "ndcg10": 0.4576,
+                "recall10": 0.4846,
+                "mrr10": 0.5666,
+                "questions": 1812
+              }
+            }
+          },
+          "language": {
+            "english": {
+              "cosine": {
+                "ndcg10": 0.546,
+                "recall10": 0.601,
+                "mrr10": 0.6568,
+                "questions": 2419
+              },
+              "rerank": {
+                "ndcg10": 0.5598,
+                "recall10": 0.6077,
+                "mrr10": 0.665,
+                "questions": 2419
+              }
+            },
+            "french": {
+              "cosine": {
+                "ndcg10": 0.5272,
+                "recall10": 0.5836,
+                "mrr10": 0.6347,
+                "questions": 2419
+              },
+              "rerank": {
+                "ndcg10": 0.533,
+                "recall10": 0.5861,
+                "mrr10": 0.6328,
+                "questions": 2419
+              }
+            },
+            "german": {
+              "cosine": {
+                "ndcg10": 0.5151,
+                "recall10": 0.5725,
+                "mrr10": 0.6235,
+                "questions": 2419
+              },
+              "rerank": {
+                "ndcg10": 0.5152,
+                "recall10": 0.5706,
+                "mrr10": 0.6157,
+                "questions": 2419
+              }
+            },
+            "italian": {
+              "cosine": {
+                "ndcg10": 0.5232,
+                "recall10": 0.5808,
+                "mrr10": 0.6303,
+                "questions": 2419
+              },
+              "rerank": {
+                "ndcg10": 0.5274,
+                "recall10": 0.5792,
+                "mrr10": 0.629,
+                "questions": 2419
+              }
+            },
+            "portuguese": {
+              "cosine": {
+                "ndcg10": 0.5228,
+                "recall10": 0.5791,
+                "mrr10": 0.6313,
+                "questions": 2419
+              },
+              "rerank": {
+                "ndcg10": 0.5344,
+                "recall10": 0.5851,
+                "mrr10": 0.6383,
+                "questions": 2419
+              }
+            },
+            "spanish": {
+              "cosine": {
+                "ndcg10": 0.5273,
+                "recall10": 0.5846,
+                "mrr10": 0.6373,
+                "questions": 2419
+              },
+              "rerank": {
+                "ndcg10": 0.534,
+                "recall10": 0.5861,
+                "mrr10": 0.6397,
+                "questions": 2419
+              }
+            }
+          },
+          "type": {
+            "boolean": {
+              "cosine": {
+                "ndcg10": 0.6106,
+                "recall10": 0.6698,
+                "mrr10": 0.708,
+                "questions": 1632
+              },
+              "rerank": {
+                "ndcg10": 0.6342,
+                "recall10": 0.6719,
+                "mrr10": 0.7355,
+                "questions": 1632
+              }
+            },
+            "compare-contrast": {
+              "cosine": {
+                "ndcg10": 0.5545,
+                "recall10": 0.6375,
+                "mrr10": 0.6349,
+                "questions": 2598
+              },
+              "rerank": {
+                "ndcg10": 0.533,
+                "recall10": 0.6255,
+                "mrr10": 0.6088,
+                "questions": 2598
+              }
+            },
+            "enumerative": {
+              "cosine": {
+                "ndcg10": 0.522,
+                "recall10": 0.5675,
+                "mrr10": 0.6438,
+                "questions": 2202
+              },
+              "rerank": {
+                "ndcg10": 0.5404,
+                "recall10": 0.5714,
+                "mrr10": 0.6559,
+                "questions": 2202
+              }
+            },
+            "extractive": {
+              "cosine": {
+                "ndcg10": 0.5717,
+                "recall10": 0.6476,
+                "mrr10": 0.6639,
+                "questions": 5184
+              },
+              "rerank": {
+                "ndcg10": 0.5862,
+                "recall10": 0.6562,
+                "mrr10": 0.6739,
+                "questions": 5184
+              }
+            },
+            "multi-hop": {
+              "cosine": {
+                "ndcg10": 0.471,
+                "recall10": 0.5088,
+                "mrr10": 0.6407,
+                "questions": 1218
+              },
+              "rerank": {
+                "ndcg10": 0.4881,
+                "recall10": 0.5257,
+                "mrr10": 0.6337,
+                "questions": 1218
+              }
+            },
+            "numerical": {
+              "cosine": {
+                "ndcg10": 0.5896,
+                "recall10": 0.6835,
+                "mrr10": 0.6672,
+                "questions": 3054
+              },
+              "rerank": {
+                "ndcg10": 0.5994,
+                "recall10": 0.6866,
+                "mrr10": 0.6754,
+                "questions": 3054
+              }
+            },
+            "open-ended": {
+              "cosine": {
+                "ndcg10": 0.4415,
+                "recall10": 0.4586,
+                "mrr10": 0.5852,
+                "questions": 4410
+              },
+              "rerank": {
+                "ndcg10": 0.4368,
+                "recall10": 0.4525,
+                "mrr10": 0.5694,
+                "questions": 4410
+              }
+            }
+          },
+          "content": {
+            "Chart": {
+              "cosine": {
+                "ndcg10": 0.5181,
+                "recall10": 0.5411,
+                "mrr10": 0.6624,
+                "questions": 2046
+              },
+              "rerank": {
+                "ndcg10": 0.5089,
+                "recall10": 0.5224,
+                "mrr10": 0.6597,
+                "questions": 2046
+              }
+            },
+            "Image": {
+              "cosine": {
+                "ndcg10": 0.4444,
+                "recall10": 0.4223,
+                "mrr10": 0.6055,
+                "questions": 1110
+              },
+              "rerank": {
+                "ndcg10": 0.46,
+                "recall10": 0.4244,
+                "mrr10": 0.6234,
+                "questions": 1110
+              }
+            },
+            "Infographic": {
+              "cosine": {
+                "ndcg10": 0.4735,
+                "recall10": 0.4627,
+                "mrr10": 0.6455,
+                "questions": 2346
+              },
+              "rerank": {
+                "ndcg10": 0.4765,
+                "recall10": 0.4591,
+                "mrr10": 0.6368,
+                "questions": 2346
+              }
+            },
+            "Mixed": {
+              "cosine": {
+                "ndcg10": 0.451,
+                "recall10": 0.457,
+                "mrr10": 0.5875,
+                "questions": 1164
+              },
+              "rerank": {
+                "ndcg10": 0.433,
+                "recall10": 0.4219,
+                "mrr10": 0.5752,
+                "questions": 1164
+              }
+            },
+            "N/A (If relevance score=0)": {
+              "cosine": {
+                "ndcg10": 0.402,
+                "recall10": 0.3052,
+                "mrr10": 0.6662,
+                "questions": 96
+              },
+              "rerank": {
+                "ndcg10": 0.4694,
+                "recall10": 0.3407,
+                "mrr10": 0.705,
+                "questions": 96
+              }
+            },
+            "Other": {
+              "cosine": {
+                "ndcg10": 0.4581,
+                "recall10": 0.4128,
+                "mrr10": 0.6748,
+                "questions": 360
+              },
+              "rerank": {
+                "ndcg10": 0.4557,
+                "recall10": 0.399,
+                "mrr10": 0.6802,
+                "questions": 360
+              }
+            },
+            "Table": {
+              "cosine": {
+                "ndcg10": 0.4722,
+                "recall10": 0.5073,
+                "mrr10": 0.6193,
+                "questions": 5388
+              },
+              "rerank": {
+                "ndcg10": 0.4704,
+                "recall10": 0.4996,
+                "mrr10": 0.6146,
+                "questions": 5388
+              }
+            },
+            "Text": {
+              "cosine": {
+                "ndcg10": 0.5281,
+                "recall10": 0.5769,
+                "mrr10": 0.6479,
+                "questions": 13344
+              },
+              "rerank": {
+                "ndcg10": 0.5378,
+                "recall10": 0.5821,
+                "mrr10": 0.6508,
+                "questions": 13344
+              }
+            }
+          },
+          "errors": 0,
+          "ms_median": 1755.0
+        },
+        "pages": {
+          "all": {
+            "cosine": {
+              "ndcg10": 0.519,
+              "recall10": 0.5754,
+              "mrr10": 0.6269,
+              "questions": 14514
+            },
+            "rerank": {
+              "ndcg10": 0.5157,
+              "recall10": 0.5706,
+              "mrr10": 0.6155,
+              "questions": 14514
+            }
+          },
+          "corpus": {
+            "computer_science": {
+              "cosine": {
+                "ndcg10": 0.7212,
+                "recall10": 0.7545,
+                "mrr10": 0.8674,
+                "questions": 1290
+              },
+              "rerank": {
+                "ndcg10": 0.6829,
+                "recall10": 0.725,
+                "mrr10": 0.8146,
+                "questions": 1290
+              }
+            },
+            "energy": {
+              "cosine": {
+                "ndcg10": 0.5874,
+                "recall10": 0.6839,
+                "mrr10": 0.6464,
+                "questions": 1848
+              },
+              "rerank": {
+                "ndcg10": 0.6026,
+                "recall10": 0.6924,
+                "mrr10": 0.6725,
+                "questions": 1848
+              }
+            },
+            "finance_en": {
+              "cosine": {
+                "ndcg10": 0.5222,
+                "recall10": 0.5871,
+                "mrr10": 0.6459,
+                "questions": 1854
+              },
+              "rerank": {
+                "ndcg10": 0.503,
+                "recall10": 0.5716,
+                "mrr10": 0.6167,
+                "questions": 1854
+              }
+            },
+            "finance_fr": {
+              "cosine": {
+                "ndcg10": 0.3666,
+                "recall10": 0.4421,
+                "mrr10": 0.4593,
+                "questions": 1920
+              },
+              "rerank": {
+                "ndcg10": 0.3723,
+                "recall10": 0.4375,
+                "mrr10": 0.4617,
+                "questions": 1920
+              }
+            },
+            "hr": {
+              "cosine": {
+                "ndcg10": 0.5143,
+                "recall10": 0.5586,
+                "mrr10": 0.6465,
+                "questions": 1908
+              },
+              "rerank": {
+                "ndcg10": 0.5221,
+                "recall10": 0.5743,
+                "mrr10": 0.6367,
+                "questions": 1908
+              }
+            },
+            "industrial": {
+              "cosine": {
+                "ndcg10": 0.4003,
+                "recall10": 0.4399,
+                "mrr10": 0.499,
+                "questions": 1698
+              },
+              "rerank": {
+                "ndcg10": 0.393,
+                "recall10": 0.4326,
+                "mrr10": 0.479,
+                "questions": 1698
+              }
+            },
+            "pharmaceuticals": {
+              "cosine": {
+                "ndcg10": 0.6158,
+                "recall10": 0.6649,
+                "mrr10": 0.7216,
+                "questions": 2184
+              },
+              "rerank": {
+                "ndcg10": 0.6206,
+                "recall10": 0.6699,
+                "mrr10": 0.7148,
+                "questions": 2184
+              }
+            },
+            "physics": {
+              "cosine": {
+                "ndcg10": 0.4633,
+                "recall10": 0.503,
+                "mrr10": 0.5793,
+                "questions": 1812
+              },
+              "rerank": {
+                "ndcg10": 0.455,
+                "recall10": 0.4823,
+                "mrr10": 0.563,
+                "questions": 1812
+              }
+            }
+          },
+          "language": {
+            "english": {
+              "cosine": {
+                "ndcg10": 0.5362,
+                "recall10": 0.594,
+                "mrr10": 0.6435,
+                "questions": 2419
+              },
+              "rerank": {
+                "ndcg10": 0.5528,
+                "recall10": 0.5981,
+                "mrr10": 0.6572,
+                "questions": 2419
+              }
+            },
+            "french": {
+              "cosine": {
+                "ndcg10": 0.5195,
+                "recall10": 0.5716,
+                "mrr10": 0.6292,
+                "questions": 2419
+              },
+              "rerank": {
+                "ndcg10": 0.5155,
+                "recall10": 0.5714,
+                "mrr10": 0.6129,
+                "questions": 2419
+              }
+            },
+            "german": {
+              "cosine": {
+                "ndcg10": 0.5064,
+                "recall10": 0.5657,
+                "mrr10": 0.6117,
+                "questions": 2419
+              },
+              "rerank": {
+                "ndcg10": 0.4912,
+                "recall10": 0.5538,
+                "mrr10": 0.5819,
+                "questions": 2419
+              }
+            },
+            "italian": {
+              "cosine": {
+                "ndcg10": 0.5171,
+                "recall10": 0.5725,
+                "mrr10": 0.6253,
+                "questions": 2419
+              },
+              "rerank": {
+                "ndcg10": 0.5046,
+                "recall10": 0.5619,
+                "mrr10": 0.6034,
+                "questions": 2419
+              }
+            },
+            "portuguese": {
+              "cosine": {
+                "ndcg10": 0.5161,
+                "recall10": 0.5724,
+                "mrr10": 0.6243,
+                "questions": 2419
+              },
+              "rerank": {
+                "ndcg10": 0.511,
+                "recall10": 0.5655,
+                "mrr10": 0.6133,
+                "questions": 2419
+              }
+            },
+            "spanish": {
+              "cosine": {
+                "ndcg10": 0.5188,
+                "recall10": 0.5761,
+                "mrr10": 0.6277,
+                "questions": 2419
+              },
+              "rerank": {
+                "ndcg10": 0.5194,
+                "recall10": 0.573,
+                "mrr10": 0.6241,
+                "questions": 2419
+              }
+            }
+          },
+          "type": {
+            "boolean": {
+              "cosine": {
+                "ndcg10": 0.5949,
+                "recall10": 0.6625,
+                "mrr10": 0.6936,
+                "questions": 1632
+              },
+              "rerank": {
+                "ndcg10": 0.6144,
+                "recall10": 0.6627,
+                "mrr10": 0.7138,
+                "questions": 1632
+              }
+            },
+            "compare-contrast": {
+              "cosine": {
+                "ndcg10": 0.5648,
+                "recall10": 0.6303,
+                "mrr10": 0.6572,
+                "questions": 2598
+              },
+              "rerank": {
+                "ndcg10": 0.521,
+                "recall10": 0.6148,
+                "mrr10": 0.5903,
+                "questions": 2598
+              }
+            },
+            "enumerative": {
+              "cosine": {
+                "ndcg10": 0.5103,
+                "recall10": 0.5518,
+                "mrr10": 0.6245,
+                "questions": 2202
+              },
+              "rerank": {
+                "ndcg10": 0.5076,
+                "recall10": 0.5535,
+                "mrr10": 0.6121,
+                "questions": 2202
+              }
+            },
+            "extractive": {
+              "cosine": {
+                "ndcg10": 0.5491,
+                "recall10": 0.6325,
+                "mrr10": 0.6316,
+                "questions": 5184
+              },
+              "rerank": {
+                "ndcg10": 0.5579,
+                "recall10": 0.6314,
+                "mrr10": 0.6415,
+                "questions": 5184
+              }
+            },
+            "multi-hop": {
+              "cosine": {
+                "ndcg10": 0.4716,
+                "recall10": 0.5039,
+                "mrr10": 0.6474,
+                "questions": 1218
+              },
+              "rerank": {
+                "ndcg10": 0.4638,
+                "recall10": 0.5065,
+                "mrr10": 0.6154,
+                "questions": 1218
+              }
+            },
+            "numerical": {
+              "cosine": {
+                "ndcg10": 0.5817,
+                "recall10": 0.6763,
+                "mrr10": 0.6471,
+                "questions": 3054
+              },
+              "rerank": {
+                "ndcg10": 0.5871,
+                "recall10": 0.6787,
+                "mrr10": 0.6484,
+                "questions": 3054
+              }
+            },
+            "open-ended": {
+              "cosine": {
+                "ndcg10": 0.4476,
+                "recall10": 0.4602,
+                "mrr10": 0.5923,
+                "questions": 4410
+              },
+              "rerank": {
+                "ndcg10": 0.4321,
+                "recall10": 0.4483,
+                "mrr10": 0.5602,
+                "questions": 4410
+              }
+            }
+          },
+          "content": {
+            "Chart": {
+              "cosine": {
+                "ndcg10": 0.523,
+                "recall10": 0.5442,
+                "mrr10": 0.6699,
+                "questions": 2046
+              },
+              "rerank": {
+                "ndcg10": 0.5052,
+                "recall10": 0.5288,
+                "mrr10": 0.6398,
+                "questions": 2046
+              }
+            },
+            "Image": {
+              "cosine": {
+                "ndcg10": 0.4456,
+                "recall10": 0.4261,
+                "mrr10": 0.5992,
+                "questions": 1110
+              },
+              "rerank": {
+                "ndcg10": 0.4641,
+                "recall10": 0.4294,
+                "mrr10": 0.618,
+                "questions": 1110
+              }
+            },
+            "Infographic": {
+              "cosine": {
+                "ndcg10": 0.4845,
+                "recall10": 0.4684,
+                "mrr10": 0.6522,
+                "questions": 2346
+              },
+              "rerank": {
+                "ndcg10": 0.4699,
+                "recall10": 0.4544,
+                "mrr10": 0.6226,
+                "questions": 2346
+              }
+            },
+            "Mixed": {
+              "cosine": {
+                "ndcg10": 0.4516,
+                "recall10": 0.4604,
+                "mrr10": 0.5903,
+                "questions": 1164
+              },
+              "rerank": {
+                "ndcg10": 0.432,
+                "recall10": 0.4349,
+                "mrr10": 0.5616,
+                "questions": 1164
+              }
+            },
+            "N/A (If relevance score=0)": {
+              "cosine": {
+                "ndcg10": 0.4455,
+                "recall10": 0.3158,
+                "mrr10": 0.7173,
+                "questions": 96
+              },
+              "rerank": {
+                "ndcg10": 0.4773,
+                "recall10": 0.349,
+                "mrr10": 0.6856,
+                "questions": 96
+              }
+            },
+            "Other": {
+              "cosine": {
+                "ndcg10": 0.447,
+                "recall10": 0.4135,
+                "mrr10": 0.6542,
+                "questions": 360
+              },
+              "rerank": {
+                "ndcg10": 0.4532,
+                "recall10": 0.4036,
+                "mrr10": 0.6559,
+                "questions": 360
+              }
+            },
+            "Table": {
+              "cosine": {
+                "ndcg10": 0.4813,
+                "recall10": 0.5179,
+                "mrr10": 0.6191,
+                "questions": 5388
+              },
+              "rerank": {
+                "ndcg10": 0.4733,
+                "recall10": 0.5099,
+                "mrr10": 0.6036,
+                "questions": 5388
+              }
+            },
+            "Text": {
+              "cosine": {
+                "ndcg10": 0.5173,
+                "recall10": 0.5665,
+                "mrr10": 0.6361,
+                "questions": 13344
+              },
+              "rerank": {
+                "ndcg10": 0.5153,
+                "recall10": 0.5631,
+                "mrr10": 0.625,
+                "questions": 13344
+              }
+            }
+          },
+          "errors": 0,
+          "ms_median": 2013.0
+        }
+      },
+      "paper": {
+        "qwen3_embedding_8b": {
+          "computer_science": 71.7,
+          "finance_en": 49.4,
+          "pharmaceuticals": 59.2,
+          "hr": 47.6,
+          "industrial": 40.4,
+          "physics": 45.6,
+          "energy": 58.9,
+          "finance_fr": 35.8
+        },
+        "jina_v4_zerank_2": {
+          "computer_science": 82.1,
+          "finance_en": 69.2,
+          "pharmaceuticals": 66.2,
+          "hr": 66.5,
+          "industrial": 53.2,
+          "physics": 48.2,
+          "energy": 71.5,
+          "finance_fr": 53.7
+        },
+        "qwen3_embedding_8b_mean8": 51.1,
+        "jina_v4_zerank_2_mean8": 63.8
+      },
+      "answers": {
+        "judges": [
+          "gemma4",
+          "qwen3"
+        ],
+        "all": {
+          "answers": 1200,
+          "score": 5.24,
+          "good": 0.568,
+          "wrong": 0.16,
+          "not_found": 0.087,
+          "invented": 0.132,
+          "score_gemma4": 5.28,
+          "score_qwen3": 5.21,
+          "judges_gap": 1.95
+        },
+        "corpus": {
+          "hr": {
+            "answers": 150,
+            "score": 5.7,
+            "good": 0.593,
+            "wrong": 0.127,
+            "not_found": 0.08,
+            "invented": 0.14,
+            "score_gemma4": 5.41,
+            "score_qwen3": 6,
+            "judges_gap": 2.07
+          },
+          "finance_en": {
+            "answers": 150,
+            "score": 5.26,
+            "good": 0.627,
+            "wrong": 0.207,
+            "not_found": 0.073,
+            "invented": 0.18,
+            "score_gemma4": 5.09,
+            "score_qwen3": 5.43,
+            "judges_gap": 1.93
+          },
+          "industrial": {
+            "answers": 150,
+            "score": 4.46,
+            "good": 0.447,
+            "wrong": 0.133,
+            "not_found": 0.153,
+            "invented": 0.093,
+            "score_gemma4": 4.29,
+            "score_qwen3": 4.64,
+            "judges_gap": 1.83
+          },
+          "pharmaceuticals": {
+            "answers": 150,
+            "score": 4.61,
+            "good": 0.533,
+            "wrong": 0.227,
+            "not_found": 0.027,
+            "invented": 0.153,
+            "score_gemma4": 4.3,
+            "score_qwen3": 4.93,
+            "judges_gap": 1.77
+          },
+          "computer_science": {
+            "answers": 150,
+            "score": 7.87,
+            "good": 0.787,
+            "wrong": 0.02,
+            "not_found": 0.08,
+            "invented": 0.007,
+            "score_gemma4": 7.86,
+            "score_qwen3": 7.87,
+            "judges_gap": 0.89
+          },
+          "energy": {
+            "answers": 150,
+            "score": 5.62,
+            "good": 0.64,
+            "wrong": 0.153,
+            "not_found": 0.1,
+            "invented": 0.153,
+            "score_gemma4": 6.33,
+            "score_qwen3": 4.91,
+            "judges_gap": 2.33
+          },
+          "physics": {
+            "answers": 150,
+            "score": 6.27,
+            "good": 0.56,
+            "wrong": 0.087,
+            "not_found": 0.053,
+            "invented": 0.087,
+            "score_gemma4": 7.01,
+            "score_qwen3": 5.54,
+            "judges_gap": 2.29
+          },
+          "finance_fr": {
+            "answers": 150,
+            "score": 2.15,
+            "good": 0.353,
+            "wrong": 0.327,
+            "not_found": 0.133,
+            "invented": 0.24,
+            "score_gemma4": 1.97,
+            "score_qwen3": 2.33,
+            "judges_gap": 2.45
+          }
+        },
+        "language": {
+          "english": {
+            "answers": 200,
+            "score": 5.01,
+            "good": 0.54,
+            "wrong": 0.175,
+            "not_found": 0.075,
+            "invented": 0.12,
+            "score_gemma4": 5.12,
+            "score_qwen3": 4.91,
+            "judges_gap": 1.86
+          },
+          "french": {
+            "answers": 200,
+            "score": 5.4,
+            "good": 0.575,
+            "wrong": 0.135,
+            "not_found": 0.1,
+            "invented": 0.125,
+            "score_gemma4": 5.47,
+            "score_qwen3": 5.32,
+            "judges_gap": 2.02
+          },
+          "spanish": {
+            "answers": 200,
+            "score": 5.31,
+            "good": 0.575,
+            "wrong": 0.145,
+            "not_found": 0.1,
+            "invented": 0.13,
+            "score_gemma4": 5.33,
+            "score_qwen3": 5.29,
+            "judges_gap": 1.81
+          },
+          "german": {
+            "answers": 200,
+            "score": 5.03,
+            "good": 0.57,
+            "wrong": 0.19,
+            "not_found": 0.075,
+            "invented": 0.15,
+            "score_gemma4": 4.83,
+            "score_qwen3": 5.22,
+            "judges_gap": 2.19
+          },
+          "italian": {
+            "answers": 200,
+            "score": 5.47,
+            "good": 0.6,
+            "wrong": 0.17,
+            "not_found": 0.09,
+            "invented": 0.13,
+            "score_gemma4": 5.5,
+            "score_qwen3": 5.44,
+            "judges_gap": 1.69
+          },
+          "portuguese": {
+            "answers": 200,
+            "score": 5.24,
+            "good": 0.545,
+            "wrong": 0.145,
+            "not_found": 0.085,
+            "invented": 0.135,
+            "score_gemma4": 5.41,
+            "score_qwen3": 5.07,
+            "judges_gap": 2.12
+          }
+        },
+        "type": {
+          "boolean": {
+            "answers": 102,
+            "score": 4.43,
+            "good": 0.569,
+            "wrong": 0.235,
+            "not_found": 0.118,
+            "invented": 0.225,
+            "score_gemma4": 4.82,
+            "score_qwen3": 4.03,
+            "judges_gap": 1.64
+          },
+          "compare-contrast": {
+            "answers": 204,
+            "score": 6.55,
+            "good": 0.642,
+            "wrong": 0.083,
+            "not_found": 0.054,
+            "invented": 0.078,
+            "score_gemma4": 6.48,
+            "score_qwen3": 6.62,
+            "judges_gap": 1.98
+          },
+          "enumerative": {
+            "answers": 174,
+            "score": 4.84,
+            "good": 0.494,
+            "wrong": 0.213,
+            "not_found": 0.057,
+            "invented": 0.115,
+            "score_gemma4": 4.88,
+            "score_qwen3": 4.8,
+            "judges_gap": 2.39
+          },
+          "extractive": {
+            "answers": 498,
+            "score": 4.68,
+            "good": 0.546,
+            "wrong": 0.205,
+            "not_found": 0.094,
+            "invented": 0.173,
+            "score_gemma4": 4.88,
+            "score_qwen3": 4.49,
+            "judges_gap": 1.83
+          },
+          "multi-hop": {
+            "answers": 96,
+            "score": 6.31,
+            "good": 0.625,
+            "wrong": 0.031,
+            "not_found": 0.167,
+            "invented": 0.031,
+            "score_gemma4": 6.18,
+            "score_qwen3": 6.45,
+            "judges_gap": 1.58
+          },
+          "numerical": {
+            "answers": 258,
+            "score": 3.68,
+            "good": 0.516,
+            "wrong": 0.26,
+            "not_found": 0.089,
+            "invented": 0.267,
+            "score_gemma4": 4.08,
+            "score_qwen3": 3.28,
+            "judges_gap": 2.39
+          },
+          "open-ended": {
+            "answers": 354,
+            "score": 5.69,
+            "good": 0.562,
+            "wrong": 0.113,
+            "not_found": 0.079,
+            "invented": 0.065,
+            "score_gemma4": 5.44,
+            "score_qwen3": 5.94,
+            "judges_gap": 2.04
+          }
+        }
+      },
+      "times": {
+        "answers": 100,
+        "median_s": 5.52,
+        "p95_s": 9.37,
+        "max_s": 12.64
+      }
+    }
+  },
+  "notes": [
+    "the paper's numbers are over 10 corpora in its tables; the means here are over the 8 public ones, recomputed from its per-corpus figures",
+    "the paper's end-to-end correctness is another model's yes or no; ours is the mean score of two local judges from -10 to +10, and 'good' (7 or more) the closest share",
+    "pages without text in the dataset (264) are not indexed; their relevant questions can still name them"
+  ]
+}

@@ -8,6 +8,31 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.99.2] — 2026-10-20 — "vidore"
+
+Documentation and benchmark tools only: the RAG pipelines measured on a
+public benchmark that anyone can run again. The code of the server is
+that of 2.99.0. Pull the image and restart; nothing to migrate.
+
+### Added
+- **A public RAG benchmark, ViDoRe V3 end to end**:
+  [`bench/rag/vidore/`](bench/rag/vidore/README.md) downloads the eight
+  public corpora of [ViDoRe V3](https://arxiv.org/abs/2601.08620)
+  (CC-BY 4.0) at the revision of the reference results (`--latest` takes
+  the current one), writes one note per document with a section per page,
+  cuts them into two indexes (paragraphs and whole pages), measures the
+  search on all 14,514 questions (NDCG@10, recall@10 and MRR@10 per page,
+  with and without the reranker), and the answers of the reference
+  configuration on 200 questions in six languages, judged by two local
+  models. `report.py` writes the JSON of `bench/results`; the pipelines it
+  runs are in `bench/rag/vidore/pipelines/`.
+- **The results open [`docs/rag-benchmarks.md`](docs/rag-benchmarks.md)**:
+  the embedding search is level with the paper's for the same model
+  (NDCG@10 51.9 on whole pages against 51.1; 52.7 on paragraphs), the
+  reranker adds nothing on these documents, the answers score 5.24 out of
+  10 and go wrong on numbers in tables and charts; 5.5 s median per answer,
+  one at a time, on one RTX 4060 Ti 16 GB.
+
 ## [2.99.1] — 2026-10-19 — "benchmarks"
 
 Documentation only: the benchmarks behind the defaults of the RAG

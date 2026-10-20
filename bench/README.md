@@ -14,6 +14,7 @@ vault. Results and method: [docs/benchmark.md](../docs/benchmark.md).
 | `scale/` | Builds a larger copy of the vault: noise notes (plans, meetings, support articles, research) added to `tidewater`, deterministic for a seed, never touching what the questions depend on. |
 | `results/` | Raw results, one file per run, kept as a history. `rag-*.json`: the RAG benchmarks, one file per benchmark or configuration. |
 | `rag/` | `render.py` writes the tables of [docs/rag-benchmarks.md](../docs/rag-benchmarks.md) from `results/rag-*.json` (Python, standard library). |
+| `rag/vidore/` | The public RAG reference, end to end on [ViDoRe V3](https://arxiv.org/abs/2601.08620): download, notes, the two indexes, the search on every question, the answers and their judges, the JSON of the results. How to run it: [rag/vidore/README.md](rag/vidore/README.md). |
 
 ## RAG benchmarks
 

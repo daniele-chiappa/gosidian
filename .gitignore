@@ -22,3 +22,6 @@ Thumbs.db
 
 # Claude Code session artefacts (if they land here)
 .claude/settings.local.json
+
+# Python bytecode of the bench scripts
+__pycache__/
