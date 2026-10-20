@@ -82,6 +82,11 @@ type Token struct {
 // KindOAuth marks a token record minted by the OAuth consent flow (a grant).
 const KindOAuth = "oauth"
 
+// KindRun marks a token minted for one call of a plugin's node that asked
+// for gosidian's MCP (IMP-193): the run's project, the core profile, and an
+// expiry; the call revokes it when it returns.
+const KindRun = "run"
+
 // IsOAuthGrant reports whether the record is an OAuth grant rather than a
 // static bearer.
 func (t *Token) IsOAuthGrant() bool { return t.Kind == KindOAuth }
@@ -419,6 +424,57 @@ func (s *Store) CreateGrant(name string, projects []string, scopes []string, ttl
 		t.Kind = KindOAuth
 		t.ClientID = clientID
 	})
+}
+
+// CreateRun mints the token of one call of a plugin's node (KindRun): the
+// project, read or read and write, the core profile, expiring after ttl.
+// The run tokens a crash left behind, expired, go in the same save. An
+// empty store refuses: its first token would turn MCP's tokens on for
+// every client of a server that runs without them.
+func (s *Store) CreateRun(name, project string, write bool, ttl time.Duration) (plaintext string, tok Token, err error) {
+	if ttl <= 0 {
+		return "", Token{}, errors.New("a run token needs an expiry")
+	}
+	scopes := []string{ScopeRead}
+	if write {
+		scopes = append(scopes, ScopeWrite)
+	}
+	if err := validateCreate(name, scopes); err != nil {
+		return "", Token{}, err
+	}
+	cleanProjects, err := cleanProjectList([]string{project})
+	if err != nil {
+		return "", Token{}, err
+	}
+	if len(cleanProjects) != 1 {
+		return "", Token{}, errors.New("a run token needs its project")
+	}
+	if s.Empty() {
+		return "", Token{}, errors.New("the server has no MCP tokens: a run token would turn them on for every client")
+	}
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", Token{}, err
+	}
+	plaintext = tokenPrefix + base64.RawURLEncoding.EncodeToString(raw)
+	s.mu.Lock()
+	s.reloadIfStale()
+	kept := s.tokens[:0]
+	for _, t := range s.tokens {
+		if t.Kind != KindRun || !t.Expired() {
+			kept = append(kept, t)
+		}
+	}
+	s.tokens = kept
+	s.mu.Unlock()
+	tok, err = s.mint(plaintext, name, cleanProjects, scopes, ttl, "", func(t *Token) {
+		t.Kind = KindRun
+		t.ToolProfile = ToolProfileCore
+	})
+	if err != nil {
+		return "", Token{}, err
+	}
+	return plaintext, tok, nil
 }
 
 // validateCreate holds the argument checks shared by Create and CreateGrant.

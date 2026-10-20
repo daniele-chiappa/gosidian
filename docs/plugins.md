@@ -106,6 +106,9 @@ structured content or as JSON text:
 | `tools` | the tools it offers the agents ([below](#tools)): `name`, `description`, `access` (`read` or `write`), `input_schema`, `output_schema`. A manifest with tools may have no nodes |
 | `graphs` | the graphs it offers the views of the graph ([below](#graphs)): `name`, `description`, `input_schema` |
 | `permissions.source_hosts` | the hosts the URLs of its sources' files may point at, besides the plugin's own: gosidian reads no file from another (a name or an address, with a port or not) |
+| `nodes[].contract` | the common contract the node keeps, a name and a version: `agent-run/1` for an agent ([below](#agent-nodes-agent-run1)) |
+| `nodes[].mcp` | `true`: the node's setting `mcp` (`read` or `write`) gets, for the call, a token of gosidian's MCP ([below](#gosidians-mcp-for-a-call)) |
+| `permissions.mcp` | the access its nodes may ask gosidian's MCP for: `read`, `write`. Needed by `mcp`; accepting the manifest grants it |
 
 The sha that `accept` takes is the SHA-256 of the manifest as gosidian
 reads it: a field it does not know, or the spacing of a schema, changes
@@ -157,6 +160,77 @@ run, the call carries the tokens the run may still use in its `_meta`:
 as `usage: {"total_tokens": …}`, as `llm.chat` does: gosidian adds it to the
 run's count, so the nodes after it see it, and an `llm.chat` past the cap
 fails. A plugin that calls no model ignores both.
+
+### gosidian's MCP for a call
+
+An agent may need the vault while it works: read the notes of its task,
+write its report. A node whose manifest says `"mcp": true` takes the
+setting `mcp`: `none` (or no setting), `read` or `write`. With `read` or
+`write`, gosidian:
+
+1. checks the level against `permissions.mcp` of the accepted manifest:
+   more fails the node;
+2. mints an MCP token for the call alone: the run's project, the scopes
+   of the level (`write` reads too), the `core` tool profile, an expiry at
+   the call's deadline, and a name `run-<run>-<node>` that the audit log
+   and the `claimed_by` of a handoff show;
+3. hands it in the call's `_meta`, with the endpoint as the plugin
+   reaches it: `gosidian/mcp_url` and `gosidian/mcp_token`;
+4. revokes it when the call returns, however it ends; a token a crash
+   left behind expires, and goes with the next one minted.
+
+The token can do what the pipeline can: its project, no more. The
+endpoint is the plugin's `mcp_url`, else `[pipelines] mcp_url`, else
+`files_url` (or `public_url`) with `/mcp`. A server that runs without MCP
+tokens (none created) refuses `mcp`: a first token would turn them on
+for every client.
+
+What the agent reads can steer it (prompt injection), so `write` is for
+the pipelines that need it, and a plugin should ask for `permissions.mcp`
+only with the levels its nodes use.
+
+### Agent nodes: agent-run/1
+
+An agent is a plugin whose node hands a prompt to a model that works in
+several turns with tools: Claude Code (`gosidian-claude`), pi
+(`gosidian-pi`). A node that declares `"contract": "agent-run/1"` keeps
+the settings and the output below, so a pipeline, or the coordinator of a
+team of agents, picks an executor without learning each one. A plugin may
+add settings and output fields of its own; it lists in its
+`input_schema` the values its preset allows (models, effort, tools,
+repositories). The JSON Schema is
+[`schemas/agent-run-1.json`](schemas/agent-run-1.json).
+
+| Setting | |
+|---|---|
+| `prompt` | the task (required) |
+| `system`, `system_mode` | the role: added to the agent's own system prompt (`append`, default) or in its place (`replace`) |
+| `model` | one of the models of the plugin's preset, which knows the endpoint each one is on |
+| `effort` | how much the model may think: `off`, `low`, `medium`, `high`, `max`, as the plugin lists them |
+| `files` | files by reference ([above](#files-by-reference)), in the agent's `in/` |
+| `access` | what the agent may do, within its preset: `read` (read and search the files), `edit` (also write them), `exec` (also run commands) |
+| `tools` | the plugin's own names of the tools, for finer control; they narrow `access` |
+| `max_turns`, `max_seconds`, `max_tokens`, `max_cost` | the limits of the step (`max_cost` in US dollars), within the preset's and the run's tokens left |
+| `json`, `schema` | the answer as JSON, checked against `schema` when given |
+| `repo` | a repository of the preset to work on: `name`, `base`, `branch`, `push`, `pr` (`title`, `body`). The plugin clones and commits; the agent only edits |
+| `mcp` | `none`, `read`, `write`: gosidian's MCP for the call ([above](#gosidians-mcp-for-a-call)) |
+
+| Output | |
+|---|---|
+| `text`, `json` | the answer; `json` with `json` or `schema` |
+| `files` | the files the agent wrote in `out/`, stored as attachments |
+| `model` | `name`, `id` (the endpoint's), `endpoint` |
+| `stop` | `done`, or `length` when the model's output was cut |
+| `turns` | the agent's turns |
+| `usage` | `input`, `output`, `cache_read`, `cache_write`, `total_tokens`: the run counts `total_tokens` |
+| `cost` | US dollars: the endpoint's bill when it gives one, else the preset's prices |
+| `tools` | how many calls of each tool |
+| `denials` | the calls the agent's limits refused |
+| `repo` | `name`, `base`, `branch`, `commit`, `changed`, `insertions`, `deletions`, `pushed`, `pr_url` |
+| `executor` | `plugin`, `version` |
+
+A step that hits a limit (turns, time, tokens, cost) or whose answer is
+not the JSON asked for fails the node, with the reason.
 
 A tool result with `isError` fails the node with its text: a retry
 policy on the node (`retry`) applies, as to any node. A call lasts at

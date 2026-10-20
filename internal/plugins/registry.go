@@ -32,6 +32,17 @@ type Config struct {
 	// FilesURL is the server's address as the plugin reaches it, for the
 	// files a node with file_refs fetches; "" is the engine's PublicURL.
 	FilesURL string
+	// MCPURL is gosidian's MCP endpoint as the plugin reaches it, for the
+	// nodes that ask for it (NodeSpec.MCP); "" refuses them.
+	MCPURL string
+}
+
+// RunTokens mints and revokes the MCP tokens of the nodes' calls that ask
+// for gosidian's MCP (IMP-193): one per call, for the run's project,
+// expiring after ttl, revoked when the call returns.
+type RunTokens interface {
+	MintRun(name, project string, write bool, ttl time.Duration) (id, secret string, err error)
+	Revoke(id string) error
 }
 
 // Secrets resolves a secret's name to its value.
@@ -100,7 +111,14 @@ type Registry struct {
 	live map[string]liveState
 	// limits are set once, before the registry serves (SetLimits).
 	limits Limits
+	// tokens mints the MCP tokens of the calls that ask for them, set
+	// once before the registry serves (SetRunTokens); nil refuses them.
+	tokens RunTokens
 }
+
+// SetRunTokens sets who mints the MCP tokens of the nodes that ask for
+// gosidian's MCP. Call it before the registry serves.
+func (r *Registry) SetRunTokens(t RunTokens) { r.tokens = t }
 
 // Limits are the caps of what goes to and comes from a plugin: the files
 // a call names (a node's setting, an agent's tool), the files a result

@@ -256,11 +256,14 @@ func TestManifest_Check(t *testing.T) {
 		t.Error("a new version keeps the sha")
 	}
 	for name, bad := range map[string]string{
-		"another name":            good,
-		"format 2":                strings.Replace(good, `"gosidian":1`, `"gosidian":2`, 1),
-		"files without the grant": strings.Replace(good, `"files":true`, `"files":false`, 1),
-		"the manifest tool":       strings.Replace(good, `"tool":"convert"`, `"tool":"gosidian_manifest"`, 1),
-		"a bad node name":         strings.Replace(good, `"name":"convert"`, `"name":"Convert"`, 1),
+		"another name":                 good,
+		"format 2":                     strings.Replace(good, `"gosidian":1`, `"gosidian":2`, 1),
+		"files without the grant":      strings.Replace(good, `"files":true`, `"files":false`, 1),
+		"the manifest tool":            strings.Replace(good, `"tool":"convert"`, `"tool":"gosidian_manifest"`, 1),
+		"a bad node name":              strings.Replace(good, `"name":"convert"`, `"name":"Convert"`, 1),
+		"a contract without a version": strings.Replace(good, `"tool":"convert"`, `"tool":"convert","contract":"agent-run"`, 1),
+		"mcp without the grant":        strings.Replace(good, `"tool":"convert"`, `"tool":"convert","mcp":true`, 1),
+		"an mcp grant of admin":        strings.Replace(good, `"files":true`, `"files":true,"mcp":["read","admin"]`, 1),
 	} {
 		want := "docling"
 		if name == "another name" {
@@ -269,6 +272,32 @@ func TestManifest_Check(t *testing.T) {
 		if _, err := ParseManifest([]byte(bad), want); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+// The fields of the agents' contract (IMP-193) are new: a manifest
+// without them keeps the sha it was accepted with.
+func TestManifest_AgentFields(t *testing.T) {
+	good := `{"name":"agent","version":"1.0","gosidian":1,"nodes":[{"name":"run","tool":"run"}],"permissions":{"files":false,"network":[]}}`
+	m, err := ParseManifest([]byte(good), "agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(m)
+	if strings.Contains(string(b), "contract") || strings.Contains(string(b), "mcp") {
+		t.Errorf("a manifest without the agents' fields marshals them: %s", b)
+	}
+	agent := strings.Replace(strings.Replace(good, `"tool":"run"`, `"tool":"run","contract":"agent-run/1","mcp":true`, 1),
+		`"network":[]`, `"network":[],"mcp":["read","write"]`, 1)
+	a, err := ParseManifest([]byte(agent), "agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, _ := a.Node("run"); n.Contract != ContractAgentRun || !n.MCP || fmt.Sprint(a.Permissions.MCP) != "[read write]" {
+		t.Errorf("agent node = %+v, permissions %+v", n, a.Permissions)
+	}
+	if a.SHA() == m.SHA() {
+		t.Error("the agents' fields do not change the sha")
 	}
 }
 
@@ -725,5 +754,154 @@ func TestLinkFiles(t *testing.T) {
 	}
 	if out["n"] != 2 {
 		t.Errorf("n %v", out["n"])
+	}
+}
+
+// fakeRunTokens mints the MCP tokens of the calls in memory.
+type fakeRunTokens struct {
+	mu     sync.Mutex
+	n      int
+	live   map[string]string // id → secret
+	minted []string
+}
+
+func (f *fakeRunTokens) MintRun(name, project string, write bool, ttl time.Duration) (string, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.n++
+	id, secret := fmt.Sprintf("t%d", f.n), fmt.Sprintf("gosidian_secret%d", f.n)
+	if f.live == nil {
+		f.live = map[string]string{}
+	}
+	f.live[id] = secret
+	f.minted = append(f.minted, fmt.Sprintf("%s %s write=%v ttl=%v", name, project, write, ttl > runTokenSlack))
+	return id, secret, nil
+}
+
+func (f *fakeRunTokens) Revoke(id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.live, id)
+	return nil
+}
+
+func (f *fakeRunTokens) isLive(secret string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, s := range f.live {
+		if s == secret {
+			return true
+		}
+	}
+	return false
+}
+
+// agentPlugin is an agent of the agent-run/1 contract that may ask for
+// gosidian's MCP, read only: its run says what it got in the call's _meta.
+func agentPlugin(t *testing.T, tokens *fakeRunTokens) *httptest.Server {
+	t.Helper()
+	s := server.NewMCPServer("coder", "1.0.0", server.WithToolCapabilities(false))
+	s.AddTool(mcp.NewTool(ManifestTool), func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		b, _ := json.Marshal(map[string]any{
+			"name": "coder", "version": "1.0", "gosidian": 1,
+			"nodes":       []any{map[string]any{"name": "run", "tool": "run", "contract": ContractAgentRun, "mcp": true}},
+			"permissions": map[string]any{"files": false, "network": []string{"gosidian"}, "mcp": []string{"read"}},
+		})
+		return mcp.NewToolResultText(string(b)), nil
+	})
+	s.AddTool(mcp.NewTool("run", mcp.WithString("prompt"), mcp.WithString("mcp")), func(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		var url, token any
+		if req.Params.Meta != nil {
+			url, token = req.Params.Meta.AdditionalFields[MetaMCPURL], req.Params.Meta.AdditionalFields[MetaMCPToken]
+		}
+		secret, _ := token.(string)
+		return mcp.NewToolResultStructured(map[string]any{
+			"mcp": req.GetArguments()["mcp"], "url": url, "token": secret != "", "live": secret != "" && tokens.isLive(secret),
+		}, "ran"), nil
+	})
+	ts := httptest.NewServer(server.NewStreamableHTTPServer(s))
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+func TestNode_MCPToken(t *testing.T) {
+	tokens := &fakeRunTokens{}
+	ts := agentPlugin(t, tokens)
+	reg, err := New([]Config{{Name: "coder", URL: ts.URL + "/mcp", MCPURL: "http://gosidian.test/mcp"}}, t.TempDir(), nil, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.SetRunTokens(tokens)
+	ctx := context.Background()
+	reg.Check(ctx)
+	st, _ := reg.State("coder")
+	if _, err := reg.Accept(ctx, "coder", st.SHA, "test"); err != nil {
+		t.Fatal(err)
+	}
+	e, host := newEngine(t, reg)
+	host.mu.Lock()
+	host.notes["p/pipelines/ok.md"] = "---\ntype: pipeline\n---\n\n```pipeline\nnodes:\n" +
+		"  - {id: a, use: coder.run, with: {prompt: hi, mcp: read}}\n" +
+		"  - {id: b, use: coder.run, with: {prompt: hi, mcp: none}}\n" +
+		"  - {id: c, use: coder.run, with: {prompt: hi}}\n```\n"
+	host.notes["p/pipelines/write.md"] = "---\ntype: pipeline\n---\n\n```pipeline\nnodes:\n" +
+		"  - {id: a, use: coder.run, with: {prompt: hi, mcp: write}}\n```\n"
+	host.mu.Unlock()
+	run, _, err := e.Start(pipeline.StartRequest{Path: "p/pipelines/ok.md", Trigger: pipeline.TriggerManual})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run = waitEnd(t, e, run.ID); run.Status != jobs.Done {
+		t.Fatalf("run %s: %s", run.Status, run.Error)
+	}
+	steps, _ := e.Runner().Store().Steps(run.ID)
+	outs := map[string]map[string]any{}
+	for _, s := range steps {
+		var out map[string]any
+		_ = json.Unmarshal(s.Output, &out)
+		outs[s.Name] = out
+	}
+	// a gets a token that is live during its call, and the URL.
+	if a := outs["a"]; a["url"] != "http://gosidian.test/mcp" || a["token"] != true || a["live"] != true || a["mcp"] != "read" {
+		t.Errorf("a = %v", a)
+	}
+	for _, id := range []string{"b", "c"} {
+		if outs[id]["token"] != false || outs[id]["url"] != nil {
+			t.Errorf("%s got gosidian's MCP: %v", id, outs[id])
+		}
+	}
+	tokens.mu.Lock()
+	minted, live := fmt.Sprint(tokens.minted), len(tokens.live)
+	tokens.mu.Unlock()
+	if minted != fmt.Sprintf("[run-%s-a p write=false ttl=true]", run.ID) || live != 0 {
+		t.Errorf("minted %s, %d still live", minted, live)
+	}
+	// write is more than the manifest was accepted with.
+	run, _, err = e.Start(pipeline.StartRequest{Path: "p/pipelines/write.md", Trigger: pipeline.TriggerManual})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run = waitEnd(t, e, run.ID); run.Status != jobs.Failed || !strings.Contains(run.Error, "permissions.mcp") {
+		t.Errorf("write: %s, %q", run.Status, run.Error)
+	}
+	// Without a token minter, gosidian's MCP is closed to the plugins.
+	closed, err := New([]Config{{Name: "coder", URL: ts.URL + "/mcp", MCPURL: "http://gosidian.test/mcp"}}, t.TempDir(), nil, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed.Check(ctx)
+	if _, err := closed.Accept(ctx, "coder", st.SHA, "test"); err != nil {
+		t.Fatal(err)
+	}
+	e2, host2 := newEngine(t, closed)
+	host2.mu.Lock()
+	host2.notes["p/pipelines/ok.md"] = host.note("p/pipelines/ok.md")
+	host2.mu.Unlock()
+	run, _, err = e2.Start(pipeline.StartRequest{Path: "p/pipelines/ok.md", Trigger: pipeline.TriggerManual})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run = waitEnd(t, e2, run.ID); run.Status != jobs.Failed || !strings.Contains(run.Error, "mcp_url") {
+		t.Errorf("no minter: %s, %q", run.Status, run.Error)
 	}
 }

@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"net/url"
 	"path"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 
@@ -31,7 +33,17 @@ const (
 	// tool's access (read or write).
 	MetaCaller = "gosidian/caller"
 	MetaAccess = "gosidian/access"
+	// MetaMCPURL and MetaMCPToken are gosidian's MCP endpoint and a token
+	// for it, read or write as the node's setting mcp asks, for the run's
+	// project and the call alone (IMP-193): the plugin hands them to its
+	// agent. The token is revoked when the call returns.
+	MetaMCPURL   = "gosidian/mcp_url"
+	MetaMCPToken = "gosidian/mcp_token"
 )
+
+// runTokenSlack keeps a call's MCP token valid a little past the call's
+// deadline, for the agent's last answer on its way back.
+const runTokenSlack = 30 * time.Second
 
 // node runs a plugin's node: the settings that name files carry their
 // content, the tool's result is the output, and the files it gives back
@@ -109,6 +121,16 @@ func (n node) Run(ctx context.Context, env *pipeline.Env, with map[string]any) (
 	if left, capped := env.LLMTokensLeft(); capped {
 		meta[MetaLLMTokensLeft] = left
 	}
+	if spec.MCP {
+		token, revoke, err := n.runToken(ctx, env, c, acc, with)
+		if err != nil {
+			return nil, err
+		}
+		if token != "" {
+			defer revoke()
+			meta[MetaMCPURL], meta[MetaMCPToken] = c.MCPURL, token
+		}
+	}
 	sess, err := n.r.session(ctx, c, acc)
 	if err != nil {
 		return nil, err
@@ -144,6 +166,47 @@ func (n node) Run(ctx context.Context, env *pipeline.Env, with map[string]any) (
 		m["skipped"] = skipped
 	}
 	return m, nil
+}
+
+// runToken mints the MCP token of a call whose setting mcp asks for
+// gosidian's MCP: read or write, within what the accepted manifest grants,
+// for the run's project, lasting the call; revoke drops it. No setting, or
+// none: no token.
+func (n node) runToken(ctx context.Context, env *pipeline.Env, c Config, acc Accepted, with map[string]any) (token string, revoke func(), err error) {
+	level, _ := with["mcp"].(string)
+	switch level {
+	case "", "none":
+		return "", nil, nil
+	case AccessRead, AccessWrite:
+	default:
+		return "", nil, fmt.Errorf("with.mcp is none, read or write, not %q", level)
+	}
+	if !slices.Contains(acc.Manifest.Permissions.MCP, level) {
+		return "", nil, fmt.Errorf("with.mcp %s: plugin %s was accepted without it in permissions.mcp", level, c.Name)
+	}
+	if n.r.tokens == nil || c.MCPURL == "" {
+		return "", nil, fmt.Errorf("with.mcp %s: gosidian's MCP is not open to plugin %s ([pipelines] mcp_url)", level, c.Name)
+	}
+	ttl := env.Engine.Config().FileTicketTTL
+	if dl, ok := ctx.Deadline(); ok {
+		ttl = time.Until(dl)
+	}
+	if ttl <= 0 {
+		ttl = 15 * time.Minute
+	}
+	name := "run-" + env.Run.ID
+	if env.Node != nil {
+		name += "-" + env.Node.ID
+	}
+	id, secret, err := n.r.tokens.MintRun(name, env.Project, level == AccessWrite, ttl+runTokenSlack)
+	if err != nil {
+		return "", nil, fmt.Errorf("with.mcp %s: %w", level, err)
+	}
+	return secret, func() {
+		if err := n.r.tokens.Revoke(id); err != nil {
+			n.r.log.Warn("plugins: a call's MCP token not revoked, it expires on its own", "plugin", c.Name, "token", id, "err", err)
+		}
+	}, nil
 }
 
 // fileList hands a plugin that takes files by reference the files a

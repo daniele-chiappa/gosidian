@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/daniele-chiappa/gosidian/blob/main/docs/schemas/agent-run-1.json",
+  "title": "agent-run/1",
+  "description": "The common contract of the agents' nodes (docs/plugins.md, Agent nodes). A plugin lists in its own input_schema the values its preset allows, and may add settings and output fields of its own.",
+  "$defs": {
+    "input": {
+      "type": "object",
+      "required": ["prompt"],
+      "properties": {
+        "prompt": {"type": "string", "minLength": 1, "description": "The task."},
+        "system": {"type": "string", "description": "The role."},
+        "system_mode": {"enum": ["append", "replace"], "default": "append", "description": "Added to the agent's own system prompt, or in its place."},
+        "model": {"type": "string", "description": "One of the models of the plugin's preset."},
+        "effort": {"enum": ["off", "low", "medium", "high", "max"], "description": "How much the model may think; a plugin lists the levels it has."},
+        "files": {
+          "description": "Files by reference, in the agent's in/.",
+          "oneOf": [
+            {"type": "string"},
+            {"type": "array", "maxItems": 100, "items": {"oneOf": [{"type": "string"}, {"type": "object", "required": ["path"], "properties": {"path": {"type": "string"}}}]}}
+          ]
+        },
+        "access": {"enum": ["read", "edit", "exec"], "description": "Read and search the files; also write them; also run commands. Within the preset."},
+        "tools": {"type": "array", "uniqueItems": true, "items": {"type": "string"}, "description": "The plugin's own tool names; they narrow access."},
+        "max_turns": {"type": "integer", "minimum": 1},
+        "max_seconds": {"type": "integer", "minimum": 1},
+        "max_tokens": {"type": "integer", "minimum": 1},
+        "max_cost": {"type": "number", "minimum": 0, "description": "US dollars."},
+        "json": {"type": "boolean", "description": "The answer as JSON."},
+        "schema": {"type": "object", "description": "A JSON Schema the answer must meet."},
+        "repo": {
+          "type": "object",
+          "required": ["name"],
+          "description": "A repository of the preset: the plugin clones it on a branch of its own and commits what the agent changed; the agent only edits.",
+          "properties": {
+            "name": {"type": "string"},
+            "base": {"type": "string", "description": "The branch to start from; default the preset's."},
+            "branch": {"type": "string", "description": "The branch to commit on; default agent/<run>-<node>."},
+            "push": {"type": "boolean", "default": true},
+            "pr": {
+              "description": "Open a pull request, where the repository's server has them.",
+              "oneOf": [
+                {"type": "boolean"},
+                {"type": "object", "properties": {"title": {"type": "string"}, "body": {"type": "string"}}}
+              ]
+            }
+          }
+        },
+        "mcp": {"enum": ["none", "read", "write"], "default": "none", "description": "gosidian's MCP for the call, with a token of the run's project."}
+      }
+    },
+    "output": {
+      "type": "object",
+      "properties": {
+        "text": {"type": "string"},
+        "json": {},
+        "files": {"type": "array", "items": {"type": "object"}},
+        "model": {"type": "object", "properties": {"name": {"type": "string"}, "id": {"type": "string"}, "endpoint": {"type": "string"}}},
+        "stop": {"enum": ["done", "length"]},
+        "turns": {"type": "integer"},
+        "usage": {
+          "type": "object",
+          "properties": {
+            "input": {"type": "integer"},
+            "output": {"type": "integer"},
+            "cache_read": {"type": "integer"},
+            "cache_write": {"type": "integer"},
+            "total_tokens": {"type": "integer"}
+          }
+        },
+        "cost": {"type": "number", "description": "US dollars: the endpoint's bill when it gives one, else the preset's prices."},
+        "tools": {"type": "object", "additionalProperties": {"type": "integer"}, "description": "Calls per tool."},
+        "denials": {"type": "array", "items": {"type": "object"}},
+        "repo": {
+          "type": "object",
+          "properties": {
+            "name": {"type": "string"},
+            "base": {"type": "string"},
+            "branch": {"type": "string"},
+            "commit": {"type": "string"},
+            "changed": {"type": "integer"},
+            "insertions": {"type": "integer"},
+            "deletions": {"type": "integer"},
+            "pushed": {"type": "boolean"},
+            "pr_url": {"type": "string"}
+          }
+        },
+        "executor": {"type": "object", "properties": {"plugin": {"type": "string"}, "version": {"type": "string"}}}
+      }
+    }
+  }
+}

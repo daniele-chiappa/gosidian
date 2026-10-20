@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -339,5 +340,64 @@ func TestStore_RotateRefresh(t *testing.T) {
 	}
 	if _, ok := s.ByRefreshHash("h2"); !ok {
 		t.Error("a failed save left the presented hash replaced")
+	}
+}
+
+func TestStore_CreateRun(t *testing.T) {
+	s := newStore(t)
+	// An empty store runs without tokens: a run token would turn them on.
+	if _, _, err := s.CreateRun("run-1-a", "p", true, time.Minute); err == nil {
+		t.Fatal("a run token on an empty store")
+	}
+	if _, _, err := s.Create("admin", nil, []string{ScopeRead, ScopeWrite}, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.CreateRun("run-1-a", "p", true, 0); err == nil {
+		t.Error("a run token without an expiry")
+	}
+	if _, _, err := s.CreateRun("run-1-a", "", true, time.Minute); err == nil {
+		t.Error("a run token without a project")
+	}
+	plain, tok, err := s.CreateRun("run-1-a", "p", false, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Validate(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Kind != KindRun || !got.IsCoreProfile() || got.HasScope(ScopeWrite) || !got.HasScope(ScopeRead) ||
+		fmt.Sprint(got.ProjectList()) != "[p]" || got.ExpiresAt.IsZero() || got.OwnerUserID != "" {
+		t.Errorf("run token = %+v", got)
+	}
+	_, w, err := s.CreateRun("run-1-b", "p", true, time.Minute)
+	if err != nil || !w.HasScope(ScopeWrite) {
+		t.Fatalf("write run token = %+v, %v", w, err)
+	}
+	// An expired run token left behind goes with the next one; an expired
+	// token of another kind stays, for its owner to see.
+	expired := func(id string) {
+		s.mu.Lock()
+		for i := range s.tokens {
+			if s.tokens[i].ID == id {
+				s.tokens[i].ExpiresAt = time.Now().Add(-time.Second)
+			}
+		}
+		s.mu.Unlock()
+	}
+	_, user, _ := s.Create("user", []string{"p"}, []string{ScopeRead}, time.Hour, "")
+	expired(tok.ID)
+	expired(user.ID)
+	if _, _, err := s.CreateRun("run-2-a", "p", false, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.ByID(tok.ID); ok {
+		t.Error("the expired run token is still there")
+	}
+	if _, ok := s.ByID(user.ID); !ok {
+		t.Error("the expired user token went with the run tokens")
+	}
+	if _, ok := s.ByID(w.ID); !ok {
+		t.Error("a live run token went")
 	}
 }

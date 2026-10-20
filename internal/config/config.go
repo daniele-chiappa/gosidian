@@ -394,6 +394,10 @@ type PipelinesConfig struct {
 	// network of a compose file. Default PublicURL, which can go through a
 	// proxy that caps the size of an answer. A plugin's own files_url wins.
 	FilesURL string `toml:"files_url"`
+	// MCPURL is gosidian's MCP endpoint as the plugins reach it, for the
+	// nodes that ask for it with a token of the call (IMP-193); default
+	// FilesURL (else PublicURL) with /mcp. A plugin's own mcp_url wins.
+	MCPURL string `toml:"mcp_url"`
 	// Timezone is the zone of the schedule triggers; default the
 	// automations' one.
 	Timezone string `toml:"timezone"`
@@ -419,6 +423,9 @@ type PluginConfig struct {
 	// FilesURL is the server's address as this plugin reaches it, for the
 	// files it fetches by reference; default [pipelines] files_url.
 	FilesURL string `toml:"files_url"`
+	// MCPURL is gosidian's MCP endpoint as this plugin reaches it; default
+	// [pipelines] mcp_url.
+	MCPURL string `toml:"mcp_url"`
 }
 
 // LLMProvider is a service with an OpenAI-compatible API.
@@ -1286,6 +1293,9 @@ func (c *Config) applyPipelinesEnv() error {
 	}
 	if v := os.Getenv("GOSIDIAN_PIPELINES_FILES_URL"); v != "" {
 		c.Pipelines.FilesURL = v
+	}
+	if v := os.Getenv("GOSIDIAN_PIPELINES_MCP_URL"); v != "" {
+		c.Pipelines.MCPURL = v
 	}
 	if v := os.Getenv("GOSIDIAN_PIPELINES_TIMEZONE"); v != "" {
 		c.Pipelines.Timezone = v

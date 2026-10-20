@@ -8,6 +8,45 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.100.0] — 2026-10-20 — "agents"
+
+The agents' plugins get a common contract, and gosidian's MCP for the
+length of a call: an agent of a pipeline can read the notes of its task
+and write its report, with a token that lasts the step. Nothing changes
+for a pipeline that does not ask for it. Pull the image and restart;
+nothing to migrate.
+
+### Added
+- **The agents' contract, agent-run/1**: a plugin's node may declare
+  `"contract": "agent-run/1"`, the settings and the output every agent
+  keeps: prompt and role, model and effort, `access` (read, edit, exec),
+  limits of turns, time, tokens and cost, JSON with a schema, a
+  repository to work on; text, usage, cost, the repository's branch,
+  commit and pull request. A pipeline, or later a coordinator of a team
+  of agents, picks an executor without learning each one. Documented in
+  [`docs/plugins.md`](docs/plugins.md#agent-nodes-agent-run1), with its
+  JSON Schema in [`docs/schemas/agent-run-1.json`](docs/schemas/agent-run-1.json).
+  The [gosidian-plugins](https://github.com/daniele-chiappa/gosidian-plugins)
+  claude 0.2.0 and pi 0.2.0 implement it.
+- **gosidian's MCP for a node's call**: a node whose manifest says
+  `"mcp": true`, in a manifest that asks for `permissions.mcp`, takes the
+  setting `mcp: read|write`. gosidian mints an MCP token for the call
+  alone: the run's project, the `core` tools, an expiry at the call's
+  deadline, named `run-<run>-<node>` in the audit log. It hands the token
+  in the call's `_meta` with the endpoint, and revokes it when the call
+  returns. The token can do what the pipeline can, its project and no
+  more; accepting the manifest grants the levels it asks for. A server
+  without MCP tokens refuses `mcp`, so its first token never turns them
+  on for every client.
+- **`[pipelines] mcp_url`** (`GOSIDIAN_PIPELINES_MCP_URL`): gosidian's
+  MCP endpoint as the plugins reach it; by default `files_url` (else
+  `public_url`) with `/mcp`, and a plugin's own `mcp_url` wins.
+  `gosidian plugin show` prints a manifest's contract and MCP levels.
+
+### Notes
+- The new manifest fields are optional: an accepted manifest keeps its
+  sha, and a plugin that does not declare them works as before.
+
 ## [2.99.2] — 2026-10-20 — "vidore"
 
 Documentation and benchmark tools only: the RAG pipelines measured on a

@@ -63,9 +63,15 @@ const (
 )
 
 var (
-	pluginName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
-	nodeName   = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
+	pluginName   = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
+	nodeName     = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
+	contractName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}/[1-9][0-9]{0,3}$`)
 )
+
+// ContractAgentRun is the contract of the agents' nodes (IMP-193): a
+// prompt in, text or JSON out, with the usage, the cost and the limits
+// every executor reads the same way (docs/plugins.md, Agent nodes).
+const ContractAgentRun = "agent-run/1"
 
 // Manifest is what a plugin says about itself.
 type Manifest struct {
@@ -150,6 +156,14 @@ type NodeSpec struct {
 	// for the reader and the editor.
 	Input  json.RawMessage `json:"input_schema,omitempty"`
 	Output json.RawMessage `json:"output_schema,omitempty"`
+	// Contract names the common contract the node keeps, such as
+	// agent-run/1, the agents' (docs/plugins.md, IMP-193): whoever picks
+	// an executor knows its settings and its output.
+	Contract string `json:"contract,omitempty"`
+	// MCP: the node's setting mcp (read or write) gets, for the call, an
+	// MCP token of gosidian for the run's project, within
+	// permissions.mcp.
+	MCP bool `json:"mcp,omitempty"`
 }
 
 // Permissions are what a plugin asks for. Files is enforced by gosidian
@@ -163,6 +177,10 @@ type Permissions struct {
 	// SourceHosts are the hosts the URLs of its sources' files may point
 	// at, besides the plugin's own: gosidian reads no file from another.
 	SourceHosts []string `json:"source_hosts,omitempty"`
+	// MCP lists the access (read, write) its nodes may ask gosidian's MCP
+	// for, with a token that lasts the call: accepting the manifest grants
+	// it.
+	MCP []string `json:"mcp,omitempty"`
 }
 
 // ParseManifest reads a manifest and checks it is one plugin name may
@@ -217,6 +235,17 @@ func (m *Manifest) check(name string) error {
 		}
 		if len(n.Files) > 0 && !m.Permissions.Files {
 			return fmt.Errorf("node %q takes files, and the manifest does not ask for permissions.files", n.Name)
+		}
+		if n.Contract != "" && !contractName.MatchString(n.Contract) {
+			return fmt.Errorf("node %q: contract %q is a name and a version, such as agent-run/1", n.Name, n.Contract)
+		}
+		if n.MCP && len(m.Permissions.MCP) == 0 {
+			return fmt.Errorf("node %q asks for gosidian's MCP, and the manifest does not ask for permissions.mcp", n.Name)
+		}
+	}
+	for _, a := range m.Permissions.MCP {
+		if a != AccessRead && a != AccessWrite {
+			return fmt.Errorf("permissions.mcp: %q is neither read nor write", a)
 		}
 	}
 	seen = map[string]bool{}

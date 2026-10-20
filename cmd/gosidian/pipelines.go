@@ -115,6 +115,9 @@ func startPipelines(ctx context.Context, cfg *config.Config, sdir string, mcpSer
 	if err != nil {
 		log.Fatalf("plugins: %v", err)
 	}
+	if ts := mcpServer.Tokens(); ts != nil {
+		reg.SetRunTokens(runTokens{ts})
+	}
 	engine.Types().Extend(reg)
 	// The IN folders (IMP-172): their batches start the in pipelines, the
 	// in.* nodes read and move through them.

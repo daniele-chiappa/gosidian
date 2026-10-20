@@ -14,6 +14,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/gosidian/gosidian/internal/config"
 	"github.com/gosidian/gosidian/internal/infolder"
 	"github.com/gosidian/gosidian/internal/pipeline"
@@ -39,7 +40,7 @@ func newPlugins(pc config.PipelinesConfig, sdir string, sec pipeline.Secrets, lo
 			files = pc.FilesURL
 		}
 		cfgs = append(cfgs, plugins.Config{Name: p.Name, URL: p.URL, TokenSecret: p.TokenSecret, Timeout: p.Timeout,
-			FilesURL: strings.TrimSuffix(files, "/")})
+			FilesURL: strings.TrimSuffix(files, "/"), MCPURL: pluginMCPURL(pc, p, files)})
 	}
 	// A nil pipeline.Secrets must stay a nil plugins.Secrets.
 	var ps plugins.Secrets
@@ -53,6 +54,34 @@ func newPlugins(pc config.PipelinesConfig, sdir string, sec pipeline.Secrets, lo
 	reg.SetLimits(plugins.Limits{Files: pc.MaxPluginFiles, FilesOut: pc.MaxPluginFilesOut, FilesBytes: pc.MaxPluginFilesBytes, GraphBytes: pc.MaxPluginGraphBytes})
 	return reg, nil
 }
+
+// pluginMCPURL is gosidian's MCP endpoint as plugin p reaches it: its own
+// mcp_url, [pipelines] mcp_url, else the address it fetches files from
+// (files_url, public_url) with /mcp.
+func pluginMCPURL(pc config.PipelinesConfig, p config.PluginConfig, files string) string {
+	for _, u := range []string{p.MCPURL, pc.MCPURL} {
+		if u != "" {
+			return u
+		}
+	}
+	for _, base := range []string{files, pc.PublicURL} {
+		if base != "" {
+			return strings.TrimSuffix(base, "/") + "/mcp"
+		}
+	}
+	return ""
+}
+
+// runTokens mints the MCP tokens of the plugins' calls in the server's
+// token store (IMP-193).
+type runTokens struct{ store *auth.Store }
+
+func (t runTokens) MintRun(name, project string, write bool, ttl time.Duration) (string, string, error) {
+	secret, tok, err := t.store.CreateRun(name, project, write, ttl)
+	return tok.ID, secret, err
+}
+
+func (t runTokens) Revoke(id string) error { return t.store.Revoke(id) }
 
 func runPluginCmd(args []string) {
 	if len(args) == 0 {
@@ -270,6 +299,9 @@ func printManifest(m *plugins.Manifest) {
 		network = strings.Join(m.Permissions.Network, ", ")
 	}
 	fmt.Printf("Reads files: %s\nCalls:       %s (declared: the plugin's container enforces it)\n", files, network)
+	if len(m.Permissions.MCP) > 0 {
+		fmt.Printf("MCP:         %s (a node's call that asks gets a token of gosidian for its run's project, revoked when the call returns)\n", strings.Join(m.Permissions.MCP, ", "))
+	}
 	if len(m.Sources) > 0 {
 		hosts := "the plugin's own host only"
 		if len(m.Permissions.SourceHosts) > 0 {
@@ -332,6 +364,12 @@ func printManifest(m *plugins.Manifest) {
 			if n.FileRefs {
 				fmt.Print(", by reference")
 			}
+		}
+		if n.Contract != "" {
+			fmt.Printf(", contract %s", n.Contract)
+		}
+		if n.MCP {
+			fmt.Print(", gosidian's MCP on request")
 		}
 		fmt.Println()
 		if n.Description != "" {

@@ -625,6 +625,9 @@ func correlationIDFromContext(ctx context.Context) string {
 // apiv1.Version, so the handshake matches /healthz.
 var Version = "dev"
 
+// Tokens is the server's token store: nil when it runs without one.
+func (s *Server) Tokens() *auth.Store { return s.tokens }
+
 // New builds an MCP server exposing the given vault and index. Tools are
 // registered immediately; the server is not yet listening. If tokens is non
 // nil and non empty, Bearer-token auth is enforced on the SSE transport.
