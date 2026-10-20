@@ -106,7 +106,7 @@ structured content or as JSON text:
 | `tools` | the tools it offers the agents ([below](#tools)): `name`, `description`, `access` (`read` or `write`), `input_schema`, `output_schema`. A manifest with tools may have no nodes |
 | `graphs` | the graphs it offers the views of the graph ([below](#graphs)): `name`, `description`, `input_schema` |
 | `permissions.source_hosts` | the hosts the URLs of its sources' files may point at, besides the plugin's own: gosidian reads no file from another (a name or an address, with a port or not) |
-| `nodes[].contract` | the common contract the node keeps, a name and a version: `agent-run/1` for an agent ([below](#agent-nodes-agent-run1)) |
+| `nodes[].contract` | the common contract the node keeps, a name and a version: `agent-run/1` for an agent ([below](#agent-nodes-agent-run1)), `command-run/1` for a command ([below](#command-nodes-command-run1)) |
 | `nodes[].mcp` | `true`: the node's setting `mcp` (`read` or `write`) gets, for the call, a token of gosidian's MCP ([below](#gosidians-mcp-for-a-call)) |
 | `permissions.mcp` | the access its nodes may ask gosidian's MCP for: `read`, `write`. Needed by `mcp`; accepting the manifest grants it |
 
@@ -231,6 +231,41 @@ repositories). The JSON Schema is
 
 A step that hits a limit (turns, time, tokens, cost) or whose answer is
 not the JSON asked for fails the node, with the reason.
+
+### Command nodes: command-run/1
+
+A command node runs a script or a command and gives back what it did:
+the tests and the build of a branch an agent pushed (a gate a pipeline
+checks before it takes the agent's work as done), or an operation on a
+server. A node that declares `"contract": "command-run/1"` keeps the
+settings and the output below; a plugin lists in its `input_schema` the
+targets and the repositories of its preset, and may add fields of its
+own. The JSON Schema is [`schemas/command-run-1.json`](schemas/command-run-1.json).
+
+| Setting | |
+|---|---|
+| `script` or `command` | a script, run by the target's shell with errors stopping it; or a command and its arguments as a list, with no shell. One of them |
+| `target` | where it runs: `local` (the plugin's own sandbox, the default) or a host of the preset |
+| `files` | files by reference ([above](#files-by-reference)), in the step's `in/` |
+| `repo` | a repository of the preset at a ref, in the step's `repo/`: `name`, `ref` (a branch, a tag or a commit; default its base branch). Its changes are never committed |
+| `env` | variables of the script, besides the plugin's own |
+| `timeout` | seconds, within the preset's |
+| `fail_on_error` | `true` (default): an exit code other than 0 fails the node. `false`: the node gives the code, and the pipeline decides (`when:`) |
+| `output_limit` | the bytes of stdout and of stderr the output keeps, their end |
+
+| Output | |
+|---|---|
+| `exit_code`, `signal`, `timed_out` | how it ended |
+| `stdout`, `stderr`, `truncated` | the end of what it wrote, within `output_limit` |
+| `seconds` | how long it ran |
+| `files` | the files it wrote in `out/`, stored as attachments |
+| `repo` | `name`, `ref`, `commit`: the commit it ran on |
+| `target` | where it ran |
+| `executor` | `plugin`, `version`, `image` |
+
+A step that cannot start (a target or a repository outside the preset,
+a ref that does not exist, a host whose key does not match) fails the
+node whatever `fail_on_error` says.
 
 A tool result with `isError` fails the node with its text: a retry
 policy on the node (`retry`) applies, as to any node. A call lasts at

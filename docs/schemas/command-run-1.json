@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/daniele-chiappa/gosidian/blob/main/docs/schemas/command-run-1.json",
+  "title": "command-run/1",
+  "description": "The common contract of the command nodes (docs/plugins.md, Command nodes). A plugin lists in its own input_schema the targets and repositories of its preset, and may add settings and output fields of its own.",
+  "$defs": {
+    "input": {
+      "type": "object",
+      "oneOf": [{"required": ["script"]}, {"required": ["command"]}],
+      "properties": {
+        "script": {"type": "string", "minLength": 1, "description": "A script, run by the target's shell; an error stops it."},
+        "command": {"type": "array", "minItems": 1, "items": {"type": "string"}, "description": "A command and its arguments, with no shell."},
+        "target": {"type": "string", "default": "local", "description": "local (the plugin's sandbox) or a host of the preset."},
+        "files": {
+          "description": "Files by reference, in the step's in/.",
+          "oneOf": [
+            {"type": "string"},
+            {"type": "array", "maxItems": 100, "items": {"oneOf": [{"type": "string"}, {"type": "object", "required": ["path"], "properties": {"path": {"type": "string"}}}]}}
+          ]
+        },
+        "repo": {
+          "type": "object",
+          "required": ["name"],
+          "description": "A repository of the preset at a ref, in the step's repo/; its changes are never committed.",
+          "properties": {
+            "name": {"type": "string"},
+            "ref": {"type": "string", "description": "A branch, a tag or a commit; default the repository's base branch."}
+          }
+        },
+        "env": {"type": "object", "additionalProperties": {"type": "string"}},
+        "timeout": {"type": "integer", "minimum": 1, "description": "Seconds."},
+        "fail_on_error": {"type": "boolean", "default": true},
+        "output_limit": {"type": "integer", "minimum": 0, "description": "Bytes of stdout and of stderr kept, their end."}
+      }
+    },
+    "output": {
+      "type": "object",
+      "properties": {
+        "exit_code": {"type": ["integer", "null"]},
+        "signal": {"type": ["string", "null"]},
+        "timed_out": {"type": "boolean"},
+        "stdout": {"type": "string"},
+        "stderr": {"type": "string"},
+        "truncated": {"type": "boolean"},
+        "seconds": {"type": "number"},
+        "files": {"type": "array", "items": {"type": "object"}},
+        "repo": {"type": "object", "properties": {"name": {"type": "string"}, "ref": {"type": "string"}, "commit": {"type": "string"}}},
+        "target": {"type": "string"},
+        "executor": {"type": "object", "properties": {"plugin": {"type": "string"}, "version": {"type": "string"}, "image": {"type": "string"}}}
+      }
+    }
+  }
+}

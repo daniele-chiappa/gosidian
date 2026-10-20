@@ -73,6 +73,12 @@ var (
 // every executor reads the same way (docs/plugins.md, Agent nodes).
 const ContractAgentRun = "agent-run/1"
 
+// ContractCommandRun is the contract of the command nodes (IMP-194): a
+// script or a command on a target, with files and a repository at a ref;
+// its exit code, the end of its output and its files back
+// (docs/plugins.md, Command nodes).
+const ContractCommandRun = "command-run/1"
+
 // Manifest is what a plugin says about itself.
 type Manifest struct {
 	// Name is the plugin's name, the one it is registered with: its

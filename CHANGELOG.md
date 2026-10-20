@@ -8,6 +8,26 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.100.1] — 2026-10-20 — "command-run"
+
+Documentation only: the contract of the nodes that run commands, beside
+the agents'. The code is that of 2.100.0. Pull the image and restart;
+nothing to migrate.
+
+### Added
+- **The command nodes' contract, command-run/1**: a plugin's node that
+  runs a script or a command (the tests of a branch an agent pushed, an
+  operation on a server) may declare `"contract": "command-run/1"`, the
+  settings and the output every such executor keeps: script or command,
+  target, files, a repository at a ref, env, timeout, `fail_on_error`;
+  the exit code, the end of stdout and stderr, files, the commit it ran
+  on. Documented in
+  [`docs/plugins.md`](docs/plugins.md#command-nodes-command-run1), with its
+  JSON Schema in [`docs/schemas/command-run-1.json`](docs/schemas/command-run-1.json).
+  The [gosidian-plugins](https://github.com/daniele-chiappa/gosidian-plugins)
+  exec 0.1.0 implements it: a pipeline can now check an agent's branch
+  with its tests before it takes the work as done.
+
 ## [2.100.0] — 2026-10-20 — "agents"
 
 The agents' plugins get a common contract, and gosidian's MCP for the
