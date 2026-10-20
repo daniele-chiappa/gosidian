@@ -15,6 +15,7 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	"github.com/gosidian/gosidian/internal/automation"
+	"github.com/gosidian/gosidian/internal/jobs"
 	"github.com/gosidian/gosidian/internal/views"
 )
 
@@ -47,7 +48,14 @@ const (
 	// or by hand; its input is checked (CheckChatInput), and its runs are
 	// interactive.
 	TriggerChat = "chat"
+	// TriggerRun: a run of a pipeline of the project ended with one of
+	// the trigger's statuses (IMP-206): one run per run that ended. A run
+	// it starts starts none when it ends (runtrigger.go).
+	TriggerRun = "run"
 )
+
+// runStatuses are the ends of a run a run trigger may take.
+var runStatuses = []string{string(jobs.Done), string(jobs.Failed), string(jobs.Canceled)}
 
 // PriorityInteractive is the priority of a pipeline whose runs someone
 // waits for: their steps go before the others', and to the interactive
@@ -89,6 +97,13 @@ type Trigger struct {
 	// Every, for schedule: "monday 09:00", "day 18:30", "hour :05".
 	Every    string               `json:"every,omitempty"`
 	Schedule *automation.Schedule `json:"-"`
+	// Status, for run, are the ends of a run it takes: done, failed,
+	// canceled; failed when it names none.
+	Status []string `json:"status,omitempty"`
+	// Pipelines, for run, is a glob on the paths of the pipeline notes
+	// whose runs it takes, relative to the project (pipelines/*); empty:
+	// all of the project's.
+	Pipelines string `json:"pipelines,omitempty"`
 }
 
 // Retry says how often a failed node is tried again.
@@ -180,14 +195,16 @@ type rawNode struct {
 
 type rawSpec struct {
 	Trigger struct {
-		On     string   `yaml:"on"`
-		Kinds  []string `yaml:"kinds"`
-		Folder string   `yaml:"folder"`
-		Every  string   `yaml:"every"`
-		Match  string   `yaml:"match"`
-		Batch  bool     `yaml:"batch"`
-		Take   *bool    `yaml:"take"`
-		Skip   []string `yaml:"skip"`
+		On        string   `yaml:"on"`
+		Kinds     []string `yaml:"kinds"`
+		Folder    string   `yaml:"folder"`
+		Every     string   `yaml:"every"`
+		Match     string   `yaml:"match"`
+		Batch     bool     `yaml:"batch"`
+		Take      *bool    `yaml:"take"`
+		Skip      []string `yaml:"skip"`
+		Status    []string `yaml:"status"`
+		Pipelines string   `yaml:"pipelines"`
 	} `yaml:"trigger"`
 	Nodes    yaml.Node `yaml:"nodes"`
 	Answer   string    `yaml:"answer"`
@@ -251,8 +268,29 @@ func Parse(src string, types Types) (*Spec, error) {
 				return nil, fmt.Errorf("trigger commit: match %q is not a glob (*.md)", s.Trigger.Match)
 			}
 		}
+	case TriggerRun:
+		for _, st := range r.Trigger.Status {
+			st = strings.ToLower(strings.TrimSpace(st))
+			if !slices.Contains(runStatuses, st) {
+				return nil, fmt.Errorf("trigger run: status %q is how a run ends: %s", st, strings.Join(runStatuses, ", "))
+			}
+			if !slices.Contains(s.Trigger.Status, st) {
+				s.Trigger.Status = append(s.Trigger.Status, st)
+			}
+		}
+		if len(s.Trigger.Status) == 0 {
+			s.Trigger.Status = []string{string(jobs.Failed)}
+		}
+		g := strings.TrimPrefix(strings.TrimSpace(r.Trigger.Pipelines), "/")
+		if _, err := path.Match(g, ""); err != nil || strings.Contains(g, "..") || strings.Contains(g, "{{") {
+			return nil, fmt.Errorf("trigger run: pipelines %q is a glob on the project's pipeline notes, relative to it (pipelines/*)", r.Trigger.Pipelines)
+		}
+		s.Trigger.Pipelines = g
 	default:
-		return nil, fmt.Errorf("trigger on %q: it is manual, external, chat, ingest, schedule, in or commit", s.Trigger.On)
+		return nil, fmt.Errorf("trigger on %q: it is manual, external, chat, ingest, schedule, in, commit or run", s.Trigger.On)
+	}
+	if s.Trigger.On != TriggerRun && (len(r.Trigger.Status) > 0 || strings.TrimSpace(r.Trigger.Pipelines) != "") {
+		return nil, fmt.Errorf("trigger %s: status and pipelines are for the run trigger (the runs whose end starts it)", s.Trigger.On)
 	}
 	if r.Trigger.Take != nil && s.Trigger.On != TriggerIN {
 		return nil, fmt.Errorf("trigger %s: take is for the in trigger (take: false leaves the files' status alone)", s.Trigger.On)

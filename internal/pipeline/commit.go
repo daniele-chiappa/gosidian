@@ -14,8 +14,10 @@ import (
 // way: the commit is the version. The files a run of the pipeline itself
 // wrote last are left out, and those of the pipelines it starts with
 // pipeline.run, so that a pipeline writing in its own folder does not
-// start itself again; and the runs notes, which every run's end rewrites,
-// or two commit pipelines would start each other forever.
+// start itself again; the runs notes, which every run's end rewrites,
+// or two commit pipelines would start each other forever; and what the
+// pipelines on run write (IMP-206), or a commit run that fails would start
+// them again.
 
 // Commit is a commit of the vault's git sync: its SHA, its date and the
 // files it changed, as vault paths.
@@ -64,7 +66,8 @@ func (e *Engine) Infos(ps []Pipeline) []Info {
 // Committed starts the commit pipelines of the projects that run
 // pipelines whose folder c changed: each with the files under it (match
 // narrows them by name), but those a run of the pipeline, of the ones it
-// starts or of the ones its skip names wrote last. The
+// starts, of the ones its skip names or of a pipeline on run (and the ones
+// it starts) wrote last. The
 // commit is the run's idempotency key. When the files do not fit in the
 // run's input, files_listed is false, and count says how many they are.
 func (e *Engine) Committed(c Commit) {
@@ -82,6 +85,17 @@ func (e *Engine) Committed(c Commit) {
 	for _, p := range ps {
 		byPath[p.Path] = p
 		runsNotes[RunsNote(p.Path)] = true
+	}
+	// What the pipelines on run write, and the ones they start, starts no
+	// commit pipeline: a commit run that fails could start them again, and
+	// they would write again (runtrigger.go).
+	onRun := map[string]bool{}
+	for _, p := range ps {
+		if p.Err == nil && p.Spec != nil && p.Spec.Trigger.On == TriggerRun {
+			for a := range chainOf(p, byPath) {
+				onRun[a] = true
+			}
+		}
 	}
 	for _, p := range ps {
 		if p.Err != nil || p.Spec == nil || p.Spec.Trigger.On != TriggerCommit || !e.host.Enabled(p.Project) {
@@ -107,8 +121,10 @@ func (e *Engine) Committed(c Commit) {
 			if !in || runsNotes[f.Path] || (tr.Match != "" && !globMatch(tr.Match, path.Base(f.Path))) {
 				continue
 			}
-			if authors != nil && chain[authors.LastWriter(f.Path)] {
-				continue
+			if authors != nil {
+				if w := authors.LastWriter(f.Path); chain[w] || onRun[w] {
+					continue
+				}
 			}
 			files = append(files, f)
 		}

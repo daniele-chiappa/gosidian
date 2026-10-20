@@ -8,6 +8,35 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.101.0] — 2026-10-20 — "on-run"
+
+A pipeline trigger on the end of a run: a project can now have a pipeline
+that tells someone its runs failed. Pull the image and restart; nothing to
+migrate.
+
+### Added
+- **The trigger `on: run`**: `trigger: {on: run, status: [failed],
+  pipelines: "pipelines/*"}` starts a pipeline when a run of a pipeline of
+  the same project ends with one of `status` (`failed` by default, `done`,
+  `canceled`), for the pipelines whose note matches `pipelines` (one glob,
+  relative to the project; by default all of them). It fires once per run
+  that ended, across restarts too. Its `trigger` holds `run`, `pipeline`,
+  `project`, `status`, `error` (cut at 4 KiB) and `failed_step`, the node
+  that failed the run. With a plugin's node that sends a message (the
+  [gosidian-plugins](https://github.com/daniele-chiappa/gosidian-plugins)
+  notify 0.1.0, for one) the pipeline tells the people of a project that a
+  run failed. Documented in
+  [`docs/pipelines.md`](docs/pipelines.md#on-the-end-of-a-run).
+
+### Notes
+- **No loops**: a run started by the trigger, and the runs it starts with
+  `pipeline.run` at any depth, start no `run` pipeline when they end; a
+  chain that cannot be read counts as one. What a `run` pipeline writes
+  starts no `commit` pipeline either, or a failing commit pipeline would be
+  started again by the note about its failure.
+- The pipeline editor's trigger menu does not offer `run` yet: write it in
+  the pipeline's block; saving from the editor keeps its fields.
+
 ## [2.100.1] — 2026-10-20 — "command-run"
 
 Documentation only: the contract of the nodes that run commands, beside

@@ -345,7 +345,7 @@ func (e *Engine) SetClock(now func() time.Time) { e.now = now }
 // StartRequest starts a run.
 type StartRequest struct {
 	Path    string // the pipeline note
-	Trigger string // manual, external, ingest, schedule, in, commit, pipeline
+	Trigger string // manual, external, ingest, schedule, in, commit, run, pipeline
 	Input   any    // the trigger's payload, a JSON value
 	Actor   string // who started it: an account, a token, the server
 	// IdemKey starts the run once: the same key again gives the run
@@ -388,7 +388,7 @@ func (e *Engine) Start(req StartRequest) (jobs.Run, bool, error) {
 		if p.Spec.Trigger.On != TriggerChat {
 			return jobs.Run{}, false, fmt.Errorf("the pipeline starts on %s, not on chat", p.Spec.Trigger.On)
 		}
-	case TriggerIngest, TriggerSchedule, TriggerIN, TriggerCommit:
+	case TriggerIngest, TriggerSchedule, TriggerIN, TriggerCommit, TriggerRun:
 	default:
 		return jobs.Run{}, false, fmt.Errorf("unknown trigger %q", req.Trigger)
 	}
@@ -762,8 +762,9 @@ func (e *Engine) skips(node *Node, sc scope) (bool, error) {
 	return false, nil
 }
 
-// Ended writes the day's line of the pipeline's runs note and calls the
-// run's callback (jobs.Executor).
+// Ended writes the day's line of the pipeline's runs note, calls the
+// run's callback and starts the pipelines on run that take its end
+// (jobs.Executor).
 func (e *Engine) Ended(run jobs.Run, steps []jobs.Step) {
 	e.tickets.dropRun(run.ID)
 	if e.in != nil {
@@ -786,6 +787,7 @@ func (e *Engine) Ended(run jobs.Run, steps []jobs.Step) {
 	if run.Status != jobs.Done {
 		e.stopChildren(run)
 	}
+	e.startOnRun(run, steps)
 }
 
 // OnAttachment starts the ingest pipelines of a project that take a

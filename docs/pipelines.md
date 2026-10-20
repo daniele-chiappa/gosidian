@@ -114,6 +114,7 @@ why a pipeline cannot run.
 | `schedule` | `every: "monday 09:00"`, `"day 18:30"`, `"hour :05"` (every hour, at five past; `"hour"` on the hour) — the automations' syntax — once per slot; a slot missed by more than 10 minutes is not run late | `slot` |
 | `in` | a batch of files of the project's [IN folder](in.md) closes: one run per file it takes, or one per batch with `batch: true`; `folder` (of the IN folder), `kinds` (none: all) and `match` (a glob on the name) choose the files; `take: false` reads them without taking them (their status stays the other pipelines') | per file: `file`, `name`, `stem`, `ext`, `dir`, `size`, `sha256`, `etag` (a source's file), `source` (`local`, or `<plugin>/<source>`), `project`; per batch: `batch`, `dir`, `count`, `bytes`, `files` (the files, when they fit in the input; else `files_listed` is false and `in.list` reads them), `project` |
 | `commit` | a commit of the vault's [git sync](configuration.md#environment-variables) changes files under `folder` (of the project; empty: all of it) whose name matches `match` (a glob, `*.md`): one run per commit; `skip` lists pipelines whose writes do not start it | `commit` (its SHA), `date` (in seconds), `project`, `folder`, `count`, `files` (`path`, `change`: `added`, `modified`, `deleted`, `renamed`, and `from` for a renamed file; when they fit in the input, else `files_listed` is false), `files_listed` |
+| `run` | a run of a pipeline of the project ends with one of `status` (`done`, `failed`, `canceled`; default `[failed]`), its pipeline matching `pipelines` (a glob on the pipeline notes' paths, relative to the project: `pipelines/*`; default: all of them): one run per run that ended; a run it starts starts [none](#on-the-end-of-a-run) | `run` (the id of the run that ended), `pipeline` (its pipeline note), `project`, `status`, `error`, `failed_step` (the node that failed it; empty when none) |
 
 Every file store counts as an arrival: `memory_ingest`,
 `memory_upload_attachment`, `memory_upload_resource`, the media and table
@@ -140,7 +141,8 @@ folder would start each other forever. A commit of such files only starts
 none. Git sync commits the whole vault, some seconds after the last change
 (`commit_debounce`): a run reads the notes as they are when it runs, maybe
 newer than the commit. With git sync off a commit pipeline starts only by
-hand, and the Runs window says so.
+hand, and the Runs window says so. What a [`run` pipeline](#on-the-end-of-a-run)
+writes is left out as well.
 
 `skip` names other pipelines of the project whose writes leave a file out
 as well, as `pipeline.run` names them: `skip: [pipelines/arrival]`. It is
@@ -156,6 +158,40 @@ way its trigger would: once per file for an `in` pipeline per file, once
 for the others. Another run starts any pipeline of its project with
 [`pipeline.run`](#one-pipeline-starting-another): its trigger is then
 `pipeline`, a trigger no pipeline declares.
+
+#### On the end of a run
+
+A `run` pipeline acts once a run of its project ended: it tells someone
+that the run failed, here through a plugin's node that sends a message
+(its settings are what the plugin's manifest says):
+
+```pipeline
+trigger: {on: run, status: [failed], pipelines: "pipelines/*"}
+nodes:
+  - id: tell
+    use: notify.send
+    with:
+      to: [ops]
+      title: "{{ trigger.pipeline }}: {{ trigger.status }}"
+      text: "{{ trigger.error }} (run {{ trigger.run }})"
+```
+
+`pipelines` is a glob as `match` is, on the path with or without `.md`:
+`*` stays inside a folder, so `pipelines/*` takes the pipelines of
+`pipelines/` and not those below it. A `run` run is keyed by the run that
+ended: a run that ends starts each `run` pipeline that takes it once.
+`error` is the run's, as the Runs window shows it (`node: what went
+wrong`), cut at 4 KiB.
+
+A run started by a `run` trigger starts no `run` pipeline when it ends, nor
+do the runs it starts with `pipeline.run`, at any depth: a notice that
+fails is not noticed, and the end of a run starts runs once, never a chain
+of them. For the same reason what a `run` pipeline writes, and the
+pipelines it starts with `pipeline.run` (named as written, not by an
+expression), starts no commit pipeline: a commit pipeline that fails would
+otherwise be started again by the note about its failure. Other ways a
+run may start runs, such as an `http.request` to the server's own API, are
+not followed.
 
 ### Nodes
 
