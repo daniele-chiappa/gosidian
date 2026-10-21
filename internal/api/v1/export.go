@@ -16,6 +16,7 @@ import (
 
 	"github.com/gosidian/gosidian/internal/attach"
 	"github.com/gosidian/gosidian/internal/audit"
+	"github.com/gosidian/gosidian/internal/clock"
 )
 
 // Zip exports (IMP-099): the archive is built on the fly from every file
@@ -46,7 +47,7 @@ func (r *Router) handleProjectExport(w http.ResponseWriter, req *http.Request, p
 		WriteError(w, http.StatusNotFound, CodeNotFound, "project not found")
 		return
 	}
-	r.streamExport(w, req, user, project, project+"-"+time.Now().UTC().Format("20060102")+".zip")
+	r.streamExport(w, req, user, project, project+"-"+clock.Now().Format("20060102")+".zip")
 }
 
 // handleVaultExport serves GET /admin/export.zip (owner only): every file of
@@ -56,7 +57,7 @@ func (r *Router) handleVaultExport(w http.ResponseWriter, req *http.Request) {
 	if !ok {
 		return
 	}
-	r.streamExport(w, req, user, "", "vault-"+time.Now().UTC().Format("20060102")+".zip")
+	r.streamExport(w, req, user, "", "vault-"+clock.Now().Format("20060102")+".zip")
 }
 
 // exportUser checks what both exports share: a GET from a signed-in account

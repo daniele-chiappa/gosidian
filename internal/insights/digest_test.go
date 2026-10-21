@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gosidian/gosidian/internal/clock/clocktest"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/vault"
 )
@@ -97,5 +98,20 @@ func TestDigest_RunNoEmailWhenUnconfigured(t *testing.T) {
 	d.Run(time.Date(2026, 6, 8, 10, 0, 0, 0, time.UTC))
 	if _, err := v.Load("insights/digest-2026-06-08.md"); err != nil {
 		t.Errorf("digest note not written by Run: %v", err)
+	}
+}
+
+// The digest is named and dated with the day of the server's zone
+// (IMP-208): past midnight in Rome, the 9th.
+func TestDigest_CompileNoteZone(t *testing.T) {
+	clocktest.Rome(t)
+	d, v, idx := newDigester(t, DigestConfig{Project: "insights"})
+	seedInsight(t, v, idx, "insights/2026-06-08-a-aaaa.md", pendingNote("Aaa"))
+	path, _, err := d.Compile(time.Date(2026, 6, 8, 22, 30, 0, 0, time.UTC))
+	if err != nil || path != "insights/digest-2026-06-09.md" {
+		t.Fatalf("path = %s, %v", path, err)
+	}
+	if note, err := v.Load(path); err != nil || !strings.Contains(string(note.Content), "\ncreated: 2026-06-09\n") {
+		t.Errorf("digest: %v", err)
 	}
 }

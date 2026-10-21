@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
+	"github.com/gosidian/gosidian/internal/clock"
 	"github.com/gosidian/gosidian/internal/vault"
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -94,7 +95,7 @@ func (s *Server) handleCompact(ctx context.Context, req mcp.CallToolRequest) (*m
 			if keep > 0 {
 				keepStart = starts[original-keep][0]
 			}
-			newBody := renderCompactedHead(body[:headerEnd], summary, original-keep, time.Now().UTC()) + string(body[keepStart:])
+			newBody := renderCompactedHead(body[:headerEnd], summary, original-keep, clock.Now()) + string(body[keepStart:])
 			result.KeptEntries, result.ArchivedEntries, result.NewBytes = keep, original-keep, len(newBody)
 			if dryRun {
 				return nil, errSkipWrite

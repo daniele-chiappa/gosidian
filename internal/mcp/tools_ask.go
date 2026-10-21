@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
+	"github.com/gosidian/gosidian/internal/clock"
 	"github.com/gosidian/gosidian/internal/vault"
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -93,7 +94,7 @@ func (s *Server) handleAsk(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 				existing = note.Content
 			}
 			nextID = nextOQIndex(existing)
-			return appendOQBlock(existing, project, nextID, question, urgency, qContext), nil
+			return appendOQBlock(existing, project, nextID, question, urgency, qContext, time.Now()), nil
 		},
 	})
 	if werr != nil {
@@ -124,9 +125,10 @@ func nextOQIndex(body []byte) int {
 // template is synthesized and the first OQ is placed under the Aperte
 // heading. When the file exists, we append the block after the Aperte
 // heading but before the "Risolte" heading when possible; otherwise we
-// append at the end of the file.
-func appendOQBlock(body []byte, project string, id int, question, urgency, qContext string) []byte {
-	today := time.Now().UTC().Format("2006-01-02")
+// append at the end of the file. The block and a new file are dated with
+// the day of now in the notes' zone (clock).
+func appendOQBlock(body []byte, project string, id int, question, urgency, qContext string, now time.Time) []byte {
+	today := clock.NoteDate(now)
 	summary := oqHeadingSummary(question)
 	block := fmt.Sprintf(
 		"### OQ-%03d — %s\n\n- **Date**: %s\n- **Urgency**: %s\n- **Question**: %s\n",
@@ -136,7 +138,7 @@ func appendOQBlock(body []byte, project string, id int, question, urgency, qCont
 		block += "- **Context**: " + qContext + "\n"
 	}
 	if len(body) == 0 {
-		return []byte(renderOpenQuestionsTemplate(project) + "\n" + block)
+		return []byte(renderOpenQuestionsTemplate(project, today) + "\n" + block)
 	}
 	src := string(body)
 	// Try to insert the block right before the "## Risolte" heading so the
@@ -186,15 +188,15 @@ func oqHeadingSummary(question string) string {
 }
 
 // renderOpenQuestionsTemplate returns the minimal canonical template for a
-// fresh open-questions.md file. Matches the shape used across gosidian
-// projects.
-func renderOpenQuestionsTemplate(project string) string {
+// fresh open-questions.md file, updated today. Matches the shape used across
+// gosidian projects.
+func renderOpenQuestionsTemplate(project, today string) string {
 	return "---\n" +
 		"title: open-questions\n" +
 		"description: Domande aperte senza risposta ancora decisa. Quando una question riceve risposta, spostala in " + project + "/docs/qa.md e rimuovila da qui.\n" +
 		"tags: [" + project + ", type:doc, topic:meta]\n" +
 		"type: doc\n" +
-		"updated: " + time.Now().UTC().Format("2006-01-02") + "\n" +
+		"updated: " + today + "\n" +
 		"---\n\n" +
 		"# Open questions\n\n" +
 		"Sezioni: **Aperte** (in attesa di decisione), **Risolte** (con link alla risposta / plan / ADR).\n\n" +

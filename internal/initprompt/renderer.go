@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gosidian/gosidian/internal/clock"
 )
 
 //go:embed all:assets/*
@@ -100,7 +102,7 @@ func Render(project string, profile Profile, mode Mode, hints Hints, projectExis
 
 	vars := map[string]string{
 		"PROJECT":       project,
-		"TODAY":         time.Now().UTC().Format("2006-01-02"),
+		"TODAY":         clock.NoteDate(time.Now()),
 		"AGENT_PROFILE": string(profile),
 		"AGENT_NAME":    coalesce(hints.AgentName, prof.DisplayName),
 		"STUB_VERSION":  strconv.Itoa(StubVersion),

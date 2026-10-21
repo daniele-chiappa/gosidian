@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
+	"github.com/gosidian/gosidian/internal/clock"
 	"github.com/gosidian/gosidian/internal/server/events"
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -106,7 +107,7 @@ func (s *Server) handleSelfImprove(ctx context.Context, req mcp.CallToolRequest)
 		project = "insights"
 	}
 
-	now := time.Now().UTC()
+	now := clock.Now()
 	path := project + "/" + now.Format("2006-01-02") + "-" + siSlug(title) + "-" + generateCorrelationID() + ".md"
 	rel, err := s.vault.Rel(path)
 	if err != nil {

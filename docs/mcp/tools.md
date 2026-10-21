@@ -129,8 +129,10 @@ a note naming it (and the likely intended argument, e.g. `Project` →
   `exists`, `lt`, `lte`, `gt`, `gte`, `contains`. A list field matches
   element by element; a namespaced tag counts as a field when the note
   has no field of that name (`status:done` → `status = done`), and
-  `tags` is the tag list. ISO dates and numbers compare as such, text
-  ignores case; `ne` and `exists: false` also match notes without the
+  `tags` is the tag list. ISO dates and numbers compare as such (a
+  date-time by its instant, whatever its offset; one without an offset
+  in the server's zone, `TZ`; a date alone with the day a value writes),
+  text ignores case; `ne` and `exists: false` also match notes without the
   field. Each note comes back with its path, title, modification time
   and the fields asked for (default: those used to filter and sort),
   plus `total` and `truncated`. `sort` is a field (or `path`, `title`,

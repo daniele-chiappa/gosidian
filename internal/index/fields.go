@@ -1,6 +1,7 @@
 package index
 
 import (
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"regexp"
@@ -9,7 +10,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gosidian/gosidian/internal/clock"
 	"github.com/gosidian/gosidian/internal/parser"
+	"modernc.org/sqlite"
 )
 
 // Frontmatter fields (IMP-099, memory_query). Every scalar of a note's
@@ -66,6 +69,33 @@ func extractFields(meta string, tags []string) []fieldRow {
 		out = append(out, typedField(ns, v, "tag"))
 	}
 	return out
+}
+
+// dateKeyFunc is the SQL name of dateKey: the queries compare and sort
+// note_fields.date through it, so the rows keep the text as written and a
+// bare day still compares with the day a datetime writes (valueCmp).
+const dateKeyFunc = "note_date_key"
+
+func init() {
+	// The driver gives every connection it opens the functions registered
+	// before; the index opens its own after the program starts. Not
+	// deterministic: the key of a value without an offset follows the
+	// note zone, which a test may change.
+	sqlite.MustRegisterScalarFunction(dateKeyFunc, 1, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+		if v, ok := args[0].(string); ok {
+			return dateKey(v), nil
+		}
+		return args[0], nil // NULL: the value is no date
+	})
+}
+
+// dateKey is what a date value compares and sorts by: its instant
+// (clock.SortKey), so 22:04+02:00 comes before 20:30Z, and a value without
+// an offset is in the zone notes are written in. A value that does not
+// read as a time (2026-13-45) keeps its text.
+func dateKey(v string) string {
+	k, _ := clock.SortKey(v)
+	return k
 }
 
 func typedField(key, value, source string) fieldRow {
@@ -619,8 +649,8 @@ func linkCondSQL(field, op string, paths []string) (string, []any, error) {
 }
 
 // valueCmp compares f's value with v by the type v reads as: an ISO date (a
-// bare day compares with the day of a datetime), a number, or text ignoring
-// case.
+// bare day compares with the day a datetime writes, a datetime by its
+// instant, dateKey), a number, or text ignoring case.
 func valueCmp(sym, v string) (string, any) {
 	v = strings.TrimSpace(v)
 	switch {
@@ -629,7 +659,7 @@ func valueCmp(sym, v string) (string, any) {
 		if len(d) == 10 {
 			return "substr(f.date, 1, 10) " + sym + " ?", d
 		}
-		return "f.date " + sym + " ?", d
+		return dateKeyFunc + "(f.date) " + sym + " ?", dateKey(d)
 	case fieldNumRe.MatchString(v):
 		n, _ := strconv.ParseFloat(v, 64)
 		return "f.num " + sym + " ?", n
@@ -658,7 +688,8 @@ func sortSQL(keys []SortKey) (string, []any) {
 }
 
 // sortTerm is the ORDER BY of one key: modified, path, title, or a
-// frontmatter field — notes without it last, then by date, number or text.
+// frontmatter field — notes without it last, then by date (its instant,
+// dateKey), number or text.
 // With Order, a field sorts by the position of its value in Order instead,
 // the values not listed after the listed ones.
 func sortTerm(k SortKey) (string, []any) {
@@ -682,8 +713,8 @@ func sortTerm(k SortKey) (string, []any) {
 	if k.Desc {
 		agg = "MAX"
 	}
-	col := func(c string) string {
-		return "(SELECT " + agg + "(f." + c + ") FROM note_fields f WHERE f.note_id = n.id AND f.key = ?)"
+	col := func(expr string) string {
+		return "(SELECT " + agg + "(" + expr + ") FROM note_fields f WHERE f.note_id = n.id AND f.key = ?)"
 	}
 	missing := "(SELECT COUNT(*) FROM note_fields f WHERE f.note_id = n.id AND f.key = ?) = 0"
 	if order := k.Order; len(order) > 0 {
@@ -704,10 +735,10 @@ func sortTerm(k SortKey) (string, []any) {
 		args = append(args, rankArgs...)
 		args = append(args, field, field)
 		return missing + ", " + unlisted + ", (SELECT " + agg + "(" + rank + ") FROM note_fields f WHERE f.note_id = n.id AND f.key = ?) " + dir + ", " +
-			col("value") + " COLLATE NOCASE " + dir, args
+			col("f.value") + " COLLATE NOCASE " + dir, args
 	}
-	return missing + ", " + col("date") + " " + dir + ", " + col("num") + " " + dir + ", " +
-			col("value") + " COLLATE NOCASE " + dir,
+	return missing + ", " + col(dateKeyFunc+"(f.date)") + " " + dir + ", " + col("f.num") + " " + dir + ", " +
+			col("f.value") + " COLLATE NOCASE " + dir,
 		[]any{field, field, field, field}
 }
 
@@ -797,11 +828,12 @@ func rankOf(vs, order []string, desc bool) int {
 }
 
 // sortVals is a note's values for one key as sortTerm's ORDER BY reads
-// them: the lowest of each column (the highest, descending), its date, its
-// number and its text, nil where no value has one. The Go sort used to read
-// one value of the list, and a number by strconv.ParseFloat, which takes
-// NaN, Inf and hexadecimals the index never stores as numbers, and dates
-// with a space or a "T" apart (IMP-162, S4-15).
+// them: the lowest of each column (the highest, descending), its date's
+// key (dateKey), its number and its text, nil where no value has one. The
+// Go sort used to read one value of the list, and a number by
+// strconv.ParseFloat, which takes NaN, Inf and hexadecimals the index never
+// stores as numbers, and dates with a space or a "T" apart (IMP-162,
+// S4-15).
 type sortVals struct {
 	date *string
 	num  *float64
@@ -813,8 +845,10 @@ func sortValsOf(vs []string, desc bool) sortVals {
 	better := func(c int) bool { return desc && c > 0 || !desc && c < 0 }
 	for k, v := range vs {
 		f := typedField("", v, "")
-		if d, ok := f.date.(string); ok && (out.date == nil || better(strings.Compare(d, *out.date))) {
-			out.date = &d
+		if d, ok := f.date.(string); ok {
+			if d = dateKey(d); out.date == nil || better(strings.Compare(d, *out.date)) {
+				out.date = &d
+			}
 		}
 		if n, ok := f.num.(float64); ok && (out.num == nil || better(cmpFloat(n, *out.num))) {
 			out.num = &n

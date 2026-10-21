@@ -19,6 +19,7 @@ import (
 
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/auth"
+	"github.com/gosidian/gosidian/internal/clock"
 	"github.com/gosidian/gosidian/internal/scaffold"
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -145,7 +146,7 @@ func (s *Server) handleProjectScaffold(ctx context.Context, req mcp.CallToolRequ
 func resolveVariables(meta scaffold.Meta, project string, req mcp.CallToolRequest) (map[string]string, error) {
 	vars := map[string]string{
 		"PROJECT": project,
-		"TODAY":   time.Now().UTC().Format("2006-01-02"),
+		"TODAY":   clock.NoteDate(time.Now()),
 	}
 	overrides := extractStringMap(req.GetArguments()["variables"])
 
@@ -158,7 +159,7 @@ func resolveVariables(meta scaffold.Meta, project string, req mcp.CallToolReques
 		// respected for PROJECT only, since auto == "" for PROJECT).
 		switch v.Auto {
 		case "date":
-			vars[v.Name] = time.Now().UTC().Format("2006-01-02")
+			vars[v.Name] = clock.NoteDate(time.Now())
 			continue
 		case "project":
 			vars[v.Name] = project

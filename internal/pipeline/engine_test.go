@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gosidian/gosidian/internal/clock/clocktest"
 	"github.com/gosidian/gosidian/internal/jobs"
 	"github.com/gosidian/gosidian/internal/marks"
 	"github.com/gosidian/gosidian/internal/parser"
@@ -754,5 +755,41 @@ nodes:
 		if st := stepOf(t, e, run.ID, name); st.Status != want {
 			t.Errorf("%s: %s, want %s (%s)", name, st.Status, want, st.Error)
 		}
+	}
+}
+
+// run.created and a schedule's trigger.slot carry the offset of the
+// server's zone, and UTC's Z without one; the slot's idempotency key stays
+// in UTC whatever the zone, so a slot starts its run once (IMP-208).
+func TestEngine_TimesInTheNoteZone(t *testing.T) {
+	rome := clocktest.Rome(t)
+	e, host := newEngine(t, Config{Location: rome})
+	created := func() any {
+		return e.scope(jobs.Run{Created: time.Date(2026, 10, 20, 20, 4, 5, 0, time.UTC)}, nil)["run"].(map[string]any)["created"]
+	}
+	if got := created(); got != "2026-10-20T22:04:05+02:00" {
+		t.Errorf("Rome: run.created = %v", got)
+	}
+	host.notes["p/pipelines/daily.md"] = pipelineNote(`
+trigger: {on: schedule, every: "day 09:00"}
+nodes: [{id: a, use: starlark, with: {code: "output = 1"}}]
+`)
+	e.SetClock(func() time.Time { return time.Date(2026, 10, 10, 7, 3, 0, 0, time.UTC) }) // 09:03 in Rome
+	e.TickSchedules(10 * time.Minute)
+	runs, _ := e.Runner().Store().Runs(jobs.RunFilter{Ref: "p/pipelines/daily.md"})
+	if len(runs) != 1 || runs[0].IdemKey != "schedule:2026-10-10T07:00:00Z" {
+		t.Fatalf("schedule runs = %+v", runs)
+	}
+	var in map[string]any
+	if err := json.Unmarshal(runs[0].Input, &in); err != nil || in["slot"] != "2026-10-10T09:00:00+02:00" {
+		t.Errorf("trigger.slot = %v (%v)", in["slot"], err)
+	}
+	clocktest.Zone(t, "UTC")
+	e.TickSchedules(10 * time.Minute)
+	if runs, _ := e.Runner().Store().Runs(jobs.RunFilter{Ref: "p/pipelines/daily.md"}); len(runs) != 1 {
+		t.Errorf("another zone for the notes started the slot again: %d runs", len(runs))
+	}
+	if got := created(); got != "2026-10-20T20:04:05Z" {
+		t.Errorf("UTC: run.created = %v", got)
 	}
 }

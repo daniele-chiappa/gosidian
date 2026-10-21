@@ -15,7 +15,7 @@ import (
 // registerSnapshotTool adds memory_snapshot (IMP-127 iteration 3, phase 3).
 func (s *Server) registerSnapshotTool() {
 	s.impl.AddTool(mcp.NewTool("memory_snapshot",
-		mcp.WithDescription("Freeze a note as it reads now into a dated note beside it, <folder>/<name>.snapshots/YYYY-MM-DD.md (the time is added for a second one the same day): its views replaced by their rows, its `=count(…)` values by their numbers and its embeds included, so the vault's history keeps what they showed and the snapshot never recomputes. The note itself does not change; the snapshot has type: snapshot, source: [[note]] and the project's tag. Returns its path and how many views, values and embeds it froze."),
+		mcp.WithDescription("Freeze a note as it reads now into a dated note beside it, <folder>/<name>.snapshots/YYYY-MM-DD.md (the server's day; its time is added for a second one the same day): its views replaced by their rows, its `=count(…)` values by their numbers and its embeds included, so the vault's history keeps what they showed and the snapshot never recomputes. The note itself does not change; the snapshot has type: snapshot, source: [[note]] and the project's tag. Returns its path and how many views, values and embeds it froze."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative path of the markdown note to freeze, e.g. 'proj/hot.md'.")),
 	), s.handleSnapshot)
 }

@@ -278,6 +278,10 @@ func TestAggregate(t *testing.T) {
 		{"min", []string{"10", "9"}, "9"},
 		{"max", []string{"10", "9"}, "10"},
 		{"max", []string{"2026-01-02", "2026-10-01"}, "2026-10-01"},
+		// By instant: 22:04+02:00 is 20:04Z, before 20:30Z (IMP-208).
+		{"min", []string{"2026-10-20T20:30:00Z", "2026-10-20T22:04:05+02:00"}, "2026-10-20T22:04:05+02:00"},
+		{"max", []string{"2026-10-20T22:04:05+02:00", "2026-10-20T20:30:00Z"}, "2026-10-20T20:30:00Z"},
+		{"max", []string{"2026-10-20T22:04:05+02:00", "soon"}, "soon"},
 		{"min", nil, ""},
 	} {
 		if got := aggregate(tc.calc, tc.values); got != tc.want {

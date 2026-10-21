@@ -8,6 +8,46 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.102.0] — 2026-10-21 — "local time"
+
+What gosidian writes into notes now follows the server's time zone, set
+with the standard `TZ` variable. Pull the image and restart; nothing to
+migrate. Without `TZ` a container stays in UTC, as before.
+
+### Changed
+- **Times and dates in notes follow `TZ`**: handoff names
+  (`YYYYMMDD-HHMMSS-<from>-to-<to>`) and their `created`, `claimed_at` and
+  `completed_at`; the `{{TODAY}}` of scaffolds, database rows and the
+  agent stub; `memory_ask`'s dates and `updated`; insights and their
+  digest; `memory_compact`'s archive line; the `described` of image notes;
+  snapshots (name, `date`, and the zone in the line that says when); the
+  modification date views show; `{{ run.created }}` and a schedule's
+  `{{ trigger.slot }}`; the names of downloaded zips. Times are RFC 3339
+  with the offset (`2026-10-20T22:04:05+02:00`), dates the local day.
+- **What stays in UTC**: the server's own records and the API's answers
+  about them (audit, tokens, accounts, invites, tickets, trash, runs,
+  `modified`), and the keys of a schedule's slots, so changing `TZ` fires
+  no slot twice. Automations and pipelines already took the server's zone
+  when they have none of their own; a `timezone` set for them still wins.
+  Notes written before keep their names.
+- The server logs the zone it writes notes in at start
+  (`note times: CEST +02:00`). An image without zoneinfo works: the zone
+  comes from the database built into the binary, also when something reads
+  local time before it is registered. See
+  [`docs/configuration.md`](docs/configuration.md#time-zone).
+
+### Fixed
+- **`memory_ask` wrote the day before** between midnight and the zone's
+  offset, since it took the date in UTC.
+- **Times written with different offsets compare by instant**:
+  `memory_query`, views, the `min` and `max` of rollups and the rows of an
+  automation's handoff compared a date-time as text, so
+  `2026-10-20T22:04:05+02:00` came after `2026-10-20T20:30:00Z`, which is
+  later, and `20:04:05.5Z` before `20:04:05Z`. Now a date-time counts by its
+  instant (`eq` too); one without an offset, and a date, in the server's
+  zone. A date alone in a condition still compares with the day a value
+  writes. The index stores what it stored: no re-index.
+
 ## [2.101.0] — 2026-10-20 — "on-run"
 
 A pipeline trigger on the end of a run: a project can now have a pipeline

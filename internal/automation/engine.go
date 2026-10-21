@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/gosidian/gosidian/internal/clock"
 )
 
 // Database is a database note that declares automations, as the host
@@ -139,6 +141,8 @@ func (e *Engine) fire(db Database, r Rule, now time.Time) (Run, bool) {
 	}
 	if r.Every != nil {
 		slot := r.Every.Last(now, e.loc)
+		// In UTC whatever the zones: a key that changed with TZ would fire
+		// the slot a second time.
 		key := slot.UTC().Format(time.RFC3339)
 		if slot.Before(rs.FirstSeen) || !rs.Fired[key].IsZero() {
 			return Run{}, false
@@ -212,7 +216,12 @@ func (e *Engine) comeIn(r Rule, rows []Row, now time.Time) []Row {
 			out = append(out, row)
 		}
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Due < out[j].Due })
+	// By instant, as a query orders dates: 22:04+02:00 before 20:30Z.
+	sort.SliceStable(out, func(i, j int) bool {
+		a, _ := clock.SortKey(out[i].Due)
+		b, _ := clock.SortKey(out[j].Due)
+		return a < b
+	})
 	return out
 }
 

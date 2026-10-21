@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gosidian/gosidian/internal/clock/clocktest"
 	"github.com/gosidian/gosidian/internal/lint"
 	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/gosidian/gosidian/internal/projects"
@@ -173,5 +174,22 @@ func TestCreateRow_ReadOnlyMember(t *testing.T) {
 	}
 	if rec := f.request(http.MethodPost, rowsURL, `{"name":"T-2","values":{"status":"todo"}}`, hdr); rec.Code != http.StatusForbidden {
 		t.Errorf("rows: %d, want 403", rec.Code)
+	}
+}
+
+// {{TODAY}} is the day of the server's zone (IMP-208).
+func TestCreateRow_TodayInTheNoteZone(t *testing.T) {
+	loc := clocktest.OtherDay(t)
+	f := newFrontmatterFixture(t)
+	withTemplate(t, f)
+	before := time.Now()
+	r := f.doAuthRecorder(http.MethodPost, rowsURL, `{"name":"T-9","title":"Zone"}`, nil)
+	after := time.Now()
+	if r.code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", r.code, r.body)
+	}
+	fields := parser.ParseFrontmatterFields(parser.ExtractFrontmatterRaw([]byte(f.content(t, "p/docs/tasks/T-9.md"))))
+	if due, _ := fields["due"].(string); !clocktest.Day(due, loc, before, after) {
+		t.Errorf("due = %v, want the day in %s", fields["due"], loc)
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gosidian/gosidian/internal/clock"
 	"github.com/gosidian/gosidian/internal/infolder"
 	"github.com/gosidian/gosidian/internal/jobs"
 )
@@ -457,8 +458,9 @@ func (e *Engine) scope(run jobs.Run, steps []jobs.Step) scope {
 		"run": map[string]any{
 			"id": run.ID, "pipeline": run.Ref, "project": run.Project, "trigger": run.Trigger,
 			"resume_url": e.ResumeURL(run), "resume_key": run.ResumeKey,
-			// When it started, for a report that dates what it writes.
-			"created": run.Created.UTC().Format(time.RFC3339),
+			// When it started, for a report that dates what it writes: the
+			// time of the notes' zone, with its offset.
+			"created": clock.NoteTime(run.Created),
 		},
 	}
 	for _, st := range steps {
@@ -842,8 +844,10 @@ func (e *Engine) TickSchedules(window time.Duration) {
 		if slot.IsZero() || now.Sub(slot) > window {
 			continue
 		}
+		// The key stays in UTC whatever the zones: a key that changed with
+		// TZ would start the slot's run a second time.
 		key := "schedule:" + slot.UTC().Format(time.RFC3339)
-		input := map[string]any{"slot": slot.UTC().Format(time.RFC3339)}
+		input := map[string]any{"slot": clock.NoteTime(slot)}
 		if _, _, err := e.Start(StartRequest{Path: p.Path, Trigger: TriggerSchedule, Input: input, Actor: "schedule", IdemKey: key}); err != nil {
 			e.log.Warn("pipeline: a schedule run", "pipeline", p.Path, "err", err)
 		}

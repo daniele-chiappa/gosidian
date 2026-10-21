@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gosidian/gosidian/internal/clock/clocktest"
 )
 
 const demoDatabase = `title: Tasks
@@ -386,5 +388,50 @@ func TestEngine_RowFiringOutlivesForgetAfter(t *testing.T) {
 	}
 	if _, kept := rs.Fired["demo/tasks/gone.md@2026-10-04"]; kept {
 		t.Error("the firing of the row gone stays")
+	}
+}
+
+// The key of a slot that fired is its instant in UTC whatever the zones,
+// the engine's and the notes' (IMP-208): a key that changed with TZ would
+// fire the slot again.
+func TestEngine_SlotKeysStayUTC(t *testing.T) {
+	rome := clocktest.Rome(t)
+	h := demoHost(t)
+	h.rows = nil
+	now := time.Date(2026, 10, 5, 8, 0, 0, 0, rome) // a Monday, before the slots
+	e, _ := newEngine(t, h, &now)
+	e.Tick("")
+	now = time.Date(2026, 10, 5, 9, 5, 0, 0, rome)
+	if runs := e.Tick(""); len(runs) != 1 || runs[0].Action != "snapshot" {
+		t.Fatalf("09:05: %+v", runs)
+	}
+	var keys []string
+	for _, rs := range e.state.Rules {
+		for k := range rs.Fired {
+			keys = append(keys, k)
+		}
+	}
+	if len(keys) != 1 || keys[0] != "2026-10-05T07:00:00Z" {
+		t.Errorf("fired keys = %v, want the slot in UTC", keys)
+	}
+	clocktest.Zone(t, "UTC")
+	if runs := e.Tick(""); len(runs) != 0 {
+		t.Errorf("the slot fired again in another zone: %+v", runs)
+	}
+}
+
+// The rows of a due rule's handoff come earliest first by instant, whatever
+// offset their dates were written with.
+func TestEngine_DueRowsByInstant(t *testing.T) {
+	h := demoHost(t)
+	h.rows = []Row{
+		{Path: "demo/tasks/b.md", Title: "B", Due: "2026-10-05T20:30:00Z"},
+		{Path: "demo/tasks/a.md", Title: "A", Due: "2026-10-05T22:04:05+02:00"}, // 20:04:05Z
+	}
+	now := time.Date(2026, 10, 5, 23, 0, 0, 0, time.UTC)
+	e, _ := newEngine(t, h, &now)
+	e.Tick("")
+	if len(h.handoffs) != 1 || strings.Index(h.handoffs[0], "[[demo/tasks/a|A]]") > strings.Index(h.handoffs[0], "[[demo/tasks/b|B]]") {
+		t.Errorf("handoff:\n%v", h.handoffs)
 	}
 }

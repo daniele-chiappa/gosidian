@@ -4,9 +4,11 @@
 // Four tools that formalize the "agent A passes state to agent B" pattern:
 // create a handoff note (summary + pending items), query handoffs for a given
 // destination agent, atomically claim one, and complete it. Handoff notes live
-// at <project>/handoffs/YYYYMMDD-HHMMSS-<slug>.md with a stable frontmatter
-// shape so memory_pending_handoffs can filter by `to_agent` and `status`: the
-// index picks the handoffs of a status, a frontmatter scan reads them.
+// at <project>/handoffs/YYYYMMDD-HHMMSS-<slug>.md, in the server's time zone
+// (TZ) as their created, claimed_at and completed_at, with a stable
+// frontmatter shape so memory_pending_handoffs can filter by `to_agent` and
+// `status`: the index picks the handoffs of a status, a frontmatter scan
+// reads them.
 //
 // Lifecycle: pending → claimed → done | rejected. Claim and complete run
 // under the per-note path lock (vault.LockPath), so when several agents race
@@ -26,6 +28,7 @@ import (
 
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/auth"
+	"github.com/gosidian/gosidian/internal/clock"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/gosidian/gosidian/internal/vault"
@@ -46,7 +49,7 @@ var handoffStatuses = map[string]bool{
 // registerHandoffTools adds the four handoff tools.
 func (s *Server) registerHandoffTools() {
 	s.impl.AddTool(mcp.NewTool("memory_create_handoff",
-		mcp.WithDescription("Create a handoff note that passes context from one agent to another. Stored at <project>/handoffs/YYYYMMDD-HHMMSS-<slug>.md with frontmatter {type: handoff, from_agent, to_agent, status: pending, created_by}. created_by is stamped server-side from the caller's token identity; from_agent/to_agent are declarative role slugs. The destination agent picks it up via memory_pending_handoffs, takes it in charge with memory_claim_handoff and closes it with memory_complete_handoff. Use this instead of an ad-hoc note when control switches between specialized agents during a task."),
+		mcp.WithDescription("Create a handoff note that passes context from one agent to another. Stored at <project>/handoffs/YYYYMMDD-HHMMSS-<slug>.md (the server's local time, as created, which carries its offset) with frontmatter {type: handoff, from_agent, to_agent, status: pending, created, created_by}. created_by is stamped server-side from the caller's token identity; from_agent/to_agent are declarative role slugs. The destination agent picks it up via memory_pending_handoffs, takes it in charge with memory_claim_handoff and closes it with memory_complete_handoff. Use this instead of an ad-hoc note when control switches between specialized agents during a task."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Target project (top-level folder). "+scopedProjectNote)),
 		mcp.WithString("from_agent", mcp.Required(), mcp.Description("Slug of the source agent (e.g. 'go-backend').")),
 		mcp.WithString("to_agent", mcp.Required(), mcp.Description("Slug of the destination agent (e.g. 'web-ui-htmx').")),
@@ -116,9 +119,8 @@ func (s *Server) handleCreateHandoff(ctx context.Context, req mcp.CallToolReques
 	}
 	pending := req.GetStringSlice("pending_items", nil)
 
-	now := time.Now().UTC()
-	slug := handoffSlug(fromAgent, toAgent)
-	base := fmt.Sprintf("%s/handoffs/%s-%s", project, now.Format("20060102-150405"), slug)
+	now := time.Now()
+	base := handoffBase(project, fromAgent, toAgent, now)
 
 	creator := tokenIdentity(tok)
 	content := renderHandoffBody(fromAgent, toAgent, creator, now, summary, pending)
@@ -160,7 +162,7 @@ func (s *Server) handleCreateHandoff(ctx context.Context, req mcp.CallToolReques
 		"from_agent": fromAgent,
 		"to_agent":   toAgent,
 		"status":     "pending",
-		"created":    now.Format(time.RFC3339),
+		"created":    clock.NoteTime(now),
 		"created_by": creator,
 	})
 }
@@ -285,7 +287,7 @@ func (s *Server) handleClaimHandoff(ctx context.Context, req mcp.CallToolRequest
 	// The whole read→check→flip sequence runs under the path lock (in
 	// writeNote): among N concurrent claimants exactly one sees
 	// status=pending.
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := clock.NoteTime(time.Now())
 	claimer := tokenIdentity(tok)
 	res, werr := s.writeNote(ctx, tok, noteWrite{
 		rel: rel, mode: writeReplace, action: audit.ActionUpdate,
@@ -351,7 +353,7 @@ func (s *Server) handleCompleteHandoff(ctx context.Context, req mcp.CallToolRequ
 		return errRes, nil
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := clock.NoteTime(time.Now())
 	completer := tokenIdentity(tok)
 	res, werr := s.writeNote(ctx, tok, noteWrite{
 		rel: rel, mode: writeReplace, action: audit.ActionUpdate,
@@ -412,6 +414,13 @@ func handoffWriteError(rel string, werr *writeError) *mcp.CallToolResult {
 
 var slugRe = regexp.MustCompile(`[^a-z0-9]+`)
 
+// handoffBase is the path of a handoff from one agent to another created
+// at now, without its extension: <project>/handoffs/YYYYMMDD-HHMMSS-<slug>,
+// the time of the notes' zone (clock), as its created field.
+func handoffBase(project, from, to string, now time.Time) string {
+	return fmt.Sprintf("%s/handoffs/%s-%s", project, now.In(clock.Location()).Format("20060102-150405"), handoffSlug(from, to))
+}
+
 func handoffSlug(from, to string) string {
 	base := strings.ToLower(from + "-to-" + to)
 	base = slugRe.ReplaceAllString(base, "-")
@@ -430,7 +439,7 @@ func renderHandoffBody(from, to, createdBy string, created time.Time, summary st
 	fmt.Fprintf(&sb, "status: pending\n")
 	fmt.Fprintf(&sb, "from_agent: %s\n", from)
 	fmt.Fprintf(&sb, "to_agent: %s\n", to)
-	fmt.Fprintf(&sb, "created: %s\n", created.Format(time.RFC3339))
+	fmt.Fprintf(&sb, "created: %s\n", clock.NoteTime(created))
 	fmt.Fprintf(&sb, "created_by: %s\n", createdBy)
 	fmt.Fprintf(&sb, "tags: [type:handoff, status:pending]\n")
 	sb.WriteString("---\n\n")

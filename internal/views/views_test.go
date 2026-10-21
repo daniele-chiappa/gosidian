@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gosidian/gosidian/internal/clock/clocktest"
 	"github.com/gosidian/gosidian/internal/dbschema"
 	"github.com/gosidian/gosidian/internal/index"
 )
@@ -461,5 +462,24 @@ func TestLink_KeepsTheHTMLExtension(t *testing.T) {
 		if got := link(index.QueryHit{Path: p}); got != want {
 			t.Errorf("link(%s) = %s, want %s", p, got, want)
 		}
+	}
+}
+
+// A view's today and the modified column are the days of the notes' zone
+// (IMP-208): past midnight in Rome, the 21st, though UTC is still on the
+// 20th.
+func TestTodayAndModified_LocalZone(t *testing.T) {
+	clocktest.Rome(t)
+	at := time.Date(2026, 10, 20, 22, 30, 0, 0, time.UTC)
+	got, err := resolve([]string{"today", "today-1d", "today+1d"}, Context{Today: at})
+	if err != nil || !reflect.DeepEqual(got, []string{"2026-10-21", "2026-10-20", "2026-10-22"}) {
+		t.Errorf("today = %v, %v", got, err)
+	}
+	if got := cell(index.QueryHit{ModTime: at.Unix()}, "modified"); got != "2026-10-21" {
+		t.Errorf("modified cell = %s", got)
+	}
+	clocktest.Zone(t, "UTC")
+	if got := cell(index.QueryHit{ModTime: at.Unix()}, "modified"); got != "2026-10-20" {
+		t.Errorf("modified cell in UTC = %s", got)
 	}
 }

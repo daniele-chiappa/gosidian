@@ -22,7 +22,7 @@ func (s *Server) registerQueryTool() {
 			"A field is a frontmatter key (a list matches element by element); a namespaced tag counts as a field when the note has no field of that name "+
 			"(tag status:done → status = done), and `tags` is the tag list. "+
 			"created_by and modified_by are who created and last modified the note through gosidian (audit log), usable as fields; over the rows of a database (from its source) its rollup fields are computed when fields or sort names them. "+
-			"Operators: eq, ne, in, exists, lt, lte, gt, gte, contains. ISO dates (YYYY-MM-DD) and numbers compare as such, text ignores case; "+
+			"Operators: eq, ne, in, exists, lt, lte, gt, gte, contains. ISO dates and numbers compare as such (a datetime by its instant, whatever its offset; a date YYYY-MM-DD by the day a value writes), text ignores case; "+
 			"ne and exists:false also match notes without the field. "+
 			"A value written as a [[wikilink]] matches by link, however the note writes it: related contains [[p/x]] finds the notes whose related field links to p/x, "+
 			"and the pseudo-field links covers every link, body and frontmatter alike (links contains [[p/x]]: what links to p/x). "+

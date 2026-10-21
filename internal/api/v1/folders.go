@@ -5,9 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
+	"github.com/gosidian/gosidian/internal/clock"
 	"github.com/gosidian/gosidian/internal/server/events"
 	"github.com/gosidian/gosidian/internal/vault"
 )
@@ -50,7 +50,7 @@ func (r *Router) exportFolder(w http.ResponseWriter, req *http.Request, dir stri
 		WriteError(w, http.StatusNotFound, CodeNotFound, "folder not found")
 		return
 	}
-	name := strings.ReplaceAll(clean, "/", "-") + "-" + time.Now().UTC().Format("20060102") + ".zip"
+	name := strings.ReplaceAll(clean, "/", "-") + "-" + clock.Now().Format("20060102") + ".zip"
 	r.streamExport(w, req, user, clean, name)
 }
 

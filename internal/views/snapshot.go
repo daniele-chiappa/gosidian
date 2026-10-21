@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gosidian/gosidian/internal/clock"
 	"github.com/gosidian/gosidian/internal/parser"
 )
 
@@ -78,10 +79,11 @@ func Freeze(body []byte, c Context, q QueryFunc) ([]byte, FreezeStats) {
 
 // SnapshotPath is where a snapshot of the note at rel taken at now goes:
 // <folder>/<name>.snapshots/YYYY-MM-DD.md, with the time added when that
-// name is taken (a second snapshot of the day), and the seconds after that.
+// name is taken (a second snapshot of the day), and the seconds after that;
+// the day and the time of the notes' zone (clock).
 func SnapshotPath(rel string, now time.Time, exists func(string) bool) string {
 	dir := path.Join(path.Dir(rel), strings.TrimSuffix(path.Base(rel), path.Ext(rel))+".snapshots")
-	now = now.UTC()
+	now = now.In(clock.Location())
 	for _, layout := range []string{"2006-01-02", "2006-01-02-1504", "2006-01-02-150405"} {
 		p := dir + "/" + now.Format(layout) + ".md"
 		if !exists(p) {
@@ -96,7 +98,7 @@ func SnapshotPath(rel string, now time.Time, exists func(string) bool) string {
 // the source, the date, the project's tag only, so the snapshot of a plan
 // is no plan), a line that says it, then the frozen body.
 func SnapshotNote(rel, title, project string, frozen []byte, now time.Time) []byte {
-	now = now.UTC()
+	now = now.In(clock.Location())
 	link := "[[" + strings.TrimSuffix(rel, ".md") + "]]"
 	// The note's own title, from its frontmatter, over the one given (the
 	// vault's, which may be the file name).
@@ -111,10 +113,11 @@ func SnapshotNote(rel, title, project string, frozen []byte, now time.Time) []by
 	fmt.Fprintf(&b, "title: %s\n", yamlQuote(title+" — snapshot "+now.Format("2006-01-02 15:04")))
 	b.WriteString("type: snapshot\n")
 	fmt.Fprintf(&b, "source: %s\n", yamlQuote(link))
-	fmt.Fprintf(&b, "date: %s\n", now.Format(time.RFC3339))
+	fmt.Fprintf(&b, "date: %s\n", clock.NoteTime(now))
 	fmt.Fprintf(&b, "tags: [%s]\n", project)
 	b.WriteString("---\n\n")
-	fmt.Fprintf(&b, "> Snapshot of %s taken %s UTC: its views, embeds and counts are frozen as they were then.\n\n", link, now.Format("2006-01-02 15:04"))
+	// MST names the zone: UTC, CEST, or the offset of a zone without a name.
+	fmt.Fprintf(&b, "> Snapshot of %s taken %s: its views, embeds and counts are frozen as they were then.\n\n", link, now.Format("2006-01-02 15:04 MST"))
 	b.WriteString(strings.TrimLeft(parser.BodyAfterFrontmatter(frozen), "\n"))
 	if !strings.HasSuffix(b.String(), "\n") {
 		b.WriteString("\n")

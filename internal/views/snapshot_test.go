@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gosidian/gosidian/internal/clock/clocktest"
 )
 
 // A frozen note has its views, values and embeds as text: read again, it
@@ -51,5 +53,22 @@ func TestSnapshotPathAndNote(t *testing.T) {
 	}
 	if strings.Contains(note, "type:plan") {
 		t.Error("the snapshot of a plan carries the project's tag only")
+	}
+}
+
+// In Rome the snapshot is named and dated with the Italian day and time,
+// its date with the offset (IMP-208).
+func TestSnapshotPathAndNote_LocalZone(t *testing.T) {
+	clocktest.Rome(t)
+	now := time.Date(2026, 10, 20, 22, 30, 5, 0, time.UTC) // 00:30:05 on the 21st in Rome
+	taken := map[string]bool{"p/hot.snapshots/2026-10-21.md": true}
+	if got := SnapshotPath("p/hot.md", now, func(p string) bool { return taken[p] }); got != "p/hot.snapshots/2026-10-21-0030.md" {
+		t.Errorf("path = %s", got)
+	}
+	note := string(SnapshotNote("p/plan.md", "plan", "p", []byte("# Plan\n"), now))
+	for _, want := range []string{"title: \"plan — snapshot 2026-10-21 00:30\"\n", "date: 2026-10-21T00:30:05+02:00\n", "taken 2026-10-21 00:30 CEST:"} {
+		if !strings.Contains(note, want) {
+			t.Errorf("note lacks %q:\n%s", want, note)
+		}
 	}
 }

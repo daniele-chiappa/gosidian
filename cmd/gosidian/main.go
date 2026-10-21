@@ -20,6 +20,7 @@ import (
 	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/gosidian/gosidian/internal/authz"
 	"github.com/gosidian/gosidian/internal/automation"
+	"github.com/gosidian/gosidian/internal/clock"
 	"github.com/gosidian/gosidian/internal/config"
 	"github.com/gosidian/gosidian/internal/gitsync"
 	"github.com/gosidian/gosidian/internal/graphspec"
@@ -80,7 +81,13 @@ func initLogger() {
 var version = "dev"
 
 func main() {
+	// Before anything else reads local time: the zone of the times
+	// written into notes (IMP-208).
+	tzErr := clock.FromTZ()
 	initLogger()
+	if tzErr != nil {
+		log.Printf("TZ=%q: %v; note times stay in %s", os.Getenv("TZ"), tzErr, time.Local)
+	}
 
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
@@ -212,6 +219,9 @@ func main() {
 		log.Fatalf("open audit log: %v", err)
 	}
 	log.Printf("audit log: %s", auditPath)
+	// The zone of the times written into notes (IMP-208): TZ, else the
+	// system's, UTC in a container.
+	log.Printf("note times: %s (TZ=%q)", clock.Now().Format("MST -07:00"), os.Getenv("TZ"))
 
 	projectsPath := filepath.Join(hiddenDir, "projects.json")
 	projectsStore, err := projects.Open(projectsPath)

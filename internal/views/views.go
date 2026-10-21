@@ -32,6 +32,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/gosidian/gosidian/internal/clock"
 	"github.com/gosidian/gosidian/internal/dbschema"
 	"github.com/gosidian/gosidian/internal/index"
 )
@@ -328,6 +329,8 @@ func resolve(vals []string, c Context) ([]string, error) {
 			if d.IsZero() {
 				d = time.Now()
 			}
+			// Today is the day of the notes' zone, as their dates are.
+			d = d.In(clock.Location())
 			if m[2] != "" {
 				n, _ := strconv.Atoi(m[2])
 				if m[1] == "-" {
@@ -759,7 +762,7 @@ func cell(h index.QueryHit, c string) string {
 	case "path":
 		return tableSafe(h.Path)
 	case "modified":
-		return time.Unix(h.ModTime, 0).UTC().Format("2006-01-02")
+		return clock.NoteDate(time.Unix(h.ModTime, 0))
 	}
 	return tableSafe(strings.Join(h.Fields[c], ", "))
 }

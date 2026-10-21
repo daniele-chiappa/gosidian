@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gosidian/gosidian/internal/clock/clocktest"
 )
 
 func TestRender_AllProfilesAllModes(t *testing.T) {
@@ -476,5 +478,19 @@ func TestRenderReadDirectives_KeepsReadingSections(t *testing.T) {
 	}
 	if strings.Contains(read, "### Quando scrivere in memoria") {
 		t.Error("read block still carries the ingest rules")
+	}
+}
+
+// The stub's {{TODAY}} is the day of the server's zone (IMP-208).
+func TestRender_TodayInTheNoteZone(t *testing.T) {
+	loc := clocktest.OtherDay(t)
+	before := time.Now()
+	res, err := Render("myproj", ProfileClaude, ModeAugment, Hints{}, false)
+	after := time.Now()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, a := before.In(loc).Format(time.DateOnly), after.In(loc).Format(time.DateOnly); !strings.Contains(res.GosidianBlock, b) && !strings.Contains(res.GosidianBlock, a) {
+		t.Errorf("GosidianBlock lacks the day in %s (%s)", loc, a)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gosidian/gosidian/internal/clock"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/vault"
 )
@@ -92,7 +93,7 @@ func (d *Digester) Compile(now time.Time) (string, int, error) {
 	if len(rows) == 0 {
 		return "", 0, nil
 	}
-	date := now.UTC().Format("2006-01-02")
+	date := clock.NoteDate(now)
 	path := d.cfg.Project + "/digest-" + date + ".md"
 	if err := d.vault.Save(path, []byte(renderDigest(d.cfg.Project, date, rows))); err != nil {
 		return "", 0, err

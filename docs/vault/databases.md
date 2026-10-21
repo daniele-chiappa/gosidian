@@ -69,7 +69,8 @@ tags: ["{{PROJECT}}", type:doc]
 ```
 
 The placeholders are those of the project templates, `{{PROJECT}}` and
-`{{TODAY}}` (UTC), plus `{{ID}}` (the row's name) and `{{TITLE}}`. Quote
+`{{TODAY}}` (the day in the server's [time zone](../configuration.md#time-zone)),
+plus `{{ID}}` (the row's name) and `{{TITLE}}`. Quote
 them in the frontmatter, as above: unquoted, `{{` is not valid YAML. They
 are filled field by field, so a title holding a colon or quotes keeps the
 frontmatter valid. Without a template a new row gets its title, its `id`,
@@ -174,8 +175,9 @@ fields:
 
 - **`calc`**: `count` (the default), `sum`, `min` or `max`; the last three
   read the field named by `of` in the notes the spec selects. `min` and
-  `max` compare numbers when every value is one, otherwise text, which
-  orders ISO dates too; with no value they give nothing. A sum counts the
+  `max` compare numbers when every value is one, dates and date-times by
+  their instant when every value is one, whatever their offsets,
+  otherwise text; with no value they give nothing. A sum counts the
   numbers only.
 - **The other direction**: `path in this.implements_imp` selects the notes
   the row's own relation points at; add `status = done` and the rollup
@@ -257,8 +259,8 @@ automations:
   compute and a `snapshot` note that does not exist. The engine skips such
   a rule and keeps the others.
 - **Run**: every 5 minutes (`automations.interval`), with the days and
-  times in `automations.timezone`
-  ([configuration](../configuration.md)). What they did is kept in
+  times in `automations.timezone`, by default the server's `TZ`
+  ([configuration](../configuration.md#time-zone)). What they did is kept in
   `automations.json` in the state directory.
 
 ## What checks the rows

@@ -18,6 +18,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_MCP_ADDR` | — (CLI `--mcp-addr`) | empty (legacy SSE listener disabled; MCP is always at `/mcp` and `/mcp/sse` on the web port) |
 | `GOSIDIAN_LOG_LEVEL` | — | `info` (`debug`, `warn`, `error`) |
 | `GOSIDIAN_LOG_FORMAT` | — | `text` (`json`) |
+| `TZ` | — | unset: the system's zone, UTC in a container (the server's time zone, an IANA name such as `Europe/Rome`: the times and days gosidian writes into notes and their names, and by default those of the automations and the pipelines; see [Time zone](#time-zone)) |
 | `GOSIDIAN_GIT_ENABLED` | `git.enabled` | `false` |
 | `GOSIDIAN_GIT_REMOTE` | `git.remote` | empty |
 | `GOSIDIAN_GIT_BRANCH` | `git.branch` | `main` |
@@ -49,7 +50,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_INGEST_URL_ALLOWLIST` | `mcp.ingest_url_allowlist` | empty (off; comma-separated absolute `http(s)` URLs the `memory_ingest` `url` source may fetch from — each entry is matched structurally on scheme, host, port and path segment (never as a text prefix, so `https://api.example.com` does not admit `https://api.example.com.evil/`); the allowlist is the SSRF boundary and also gates every redirect hop) |
 | `GOSIDIAN_AUTOMATIONS_ENABLED` | `automations.enabled` | `true` (the rules of database notes, [automations](vault/databases.md#automations); a rule acts only where a database note declares it) |
 | `GOSIDIAN_AUTOMATIONS_INTERVAL` | `automations.interval` | `5m` (how often the rules run) |
-| `GOSIDIAN_AUTOMATIONS_TIMEZONE` | `automations.timezone` | empty (the server's local zone; an IANA zone such as `Europe/Rome` for the days and times of the rules) |
+| `GOSIDIAN_AUTOMATIONS_TIMEZONE` | `automations.timezone` | empty (the server's zone, `TZ`; an IANA zone such as `Europe/Rome` for the days and times of the rules) |
 | `GOSIDIAN_PIPELINES_ENABLED` | `pipelines.enabled` | `false` (the server runs no [pipelines](pipelines.md); when on, only the projects with `use_pipelines` run theirs) |
 | `GOSIDIAN_PIPELINES_WORKERS` | `pipelines.workers` | `2` (steps run at once) |
 | `GOSIDIAN_PIPELINES_INTERACTIVE_WORKERS` | `pipelines.interactive_workers` | `1` (workers on top of `workers` that run only the steps of [interactive runs](pipelines.md#interactive-runs), a chat's messages, which the others also take first; `0`: none of their own) |
@@ -75,7 +76,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_PIPELINES_PUBLIC_URL` | `pipelines.public_url` | the `[oauth]` issuer (the server's address in `{{ run.resume_url }}`; empty: a path) |
 | `GOSIDIAN_PIPELINES_FILES_URL` | `pipelines.files_url` | the public URL (the server's address as the [plugins](plugins.md#files-by-reference) reach it, for the files they fetch by reference: `http://gosidian:8080` on a compose network; a plugin's own `files_url` wins) |
 | `GOSIDIAN_PIPELINES_MCP_URL` | `pipelines.mcp_url` | `files_url` (else the public URL) with `/mcp`: gosidian's MCP endpoint as the plugins reach it, for the nodes that ask for it with a token of the call ([plugins](plugins.md#gosidians-mcp-for-a-call)); a plugin's own `mcp_url` wins |
-| `GOSIDIAN_PIPELINES_TIMEZONE` | `pipelines.timezone` | the automations' zone (the days and times of the `schedule` triggers) |
+| `GOSIDIAN_PIPELINES_TIMEZONE` | `pipelines.timezone` | the automations' zone, else `TZ` (the days and times of the `schedule` triggers and the days of the `<pipeline>-runs.md` lines) |
 | `GOSIDIAN_PIPELINES_LLM_URL`, `_LLM_MODEL`, `_LLM_KEY_SECRET` | `[[pipelines.llm]]` | none (one OpenAI-compatible provider named `default`: its URL up to `/v1`, its model, the name of the secret with its key; more providers in the file) |
 | `GOSIDIAN_PIPELINES_PLUGINS` | `[[pipelines.plugins]]` | none (comma-separated `name=url` entries: [plugins](plugins.md) whose MCP endpoint is the url, without a token; an entry replaces the url of the file's plugin of the same name. A token needs `token_secret` in the file) |
 | `GOSIDIAN_WEB_GRAPH_DEFAULT_NODES` | `web.graph_default_nodes` | `2000` (the most linked nodes a graph asked without a limit keeps; at most `graph_max_nodes`) |
@@ -135,6 +136,53 @@ read-only there, and a `PUT` that changes one is refused.
 > UI never reads back the bind password. See
 > [Authentication & roles](web-ui/authentication.md) for the full TOTP and
 > LDAP setup, including Active Directory.
+
+## Time zone
+
+The server's time zone is the standard `TZ` variable (`TZ=Europe/Rome`
+in the compose file's `environment`). The binary carries the zone
+database, so an image without `/usr/share/zoneinfo` takes it too. Unset,
+the zone is the system's (`/etc/localtime`): UTC in a container that does
+not mount the host's, and then what follows is what gosidian always
+wrote. The log says it at start: `note times: CEST +02:00
+(TZ="Europe/Rome")`.
+
+**What follows it** is what gosidian writes into notes and their names,
+times as RFC 3339 with the offset (`2026-10-20T22:04:05+02:00`; `Z` in
+UTC) and dates as the day there:
+
+- handoffs: the name `YYYYMMDD-HHMMSS-<slug>`, and `created`,
+  `claimed_at` and `completed_at`;
+- the dates of the notes the server writes: `{{TODAY}}` in templates
+  (project scaffolds, database rows, the agent stub), `memory_ask`'s
+  questions and `updated`, insights and their digest, the archive line of
+  `memory_compact`, the `described` of image notes;
+- snapshots: their name, `date` and the line that says when, with the
+  zone's name (`CEST`);
+- views: their `today` and the modification date they show;
+- pipelines: `{{ run.created }}` and a schedule's `{{ trigger.slot }}`;
+- the names of downloaded zips.
+
+**What stays in UTC** is the server's own records and the answers about
+them: the audit log, tokens, accounts, invites, tickets, the trash, the
+runs, `modified` in `memory_query` and the API, the message of the
+automatic commits. The keys that make a schedule's slot fire once are in
+UTC too, so changing `TZ` fires no slot a second time. Notes written
+before keep their names and times.
+
+**Automations and pipelines** take `TZ` unless they have a zone of their
+own: `[automations] timezone` sets the days and times of the rules,
+`[pipelines] timezone` (by default the automations' zone) those of the
+`schedule` triggers and the days of the `<pipeline>-runs.md` lines. The
+notes a rule writes, a handoff or a snapshot, are named and dated in
+`TZ` like any other.
+
+**Comparisons**: `memory_query`, views and rollups compare and sort a
+date-time by its instant, whatever offset it was written with:
+`2026-10-20T22:04:05+02:00` comes before `2026-10-20T20:30:00Z`. A
+date-time without an offset, and a date, are in `TZ`. A date alone in a
+condition (`updated >= 2026-10-01`, `today`) compares with the day a
+value writes.
 
 ## Lint vocabulary extension
 

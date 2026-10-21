@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gosidian/gosidian/internal/attach"
+	"github.com/gosidian/gosidian/internal/clock"
 	"github.com/gosidian/gosidian/internal/frontmatter"
 )
 
@@ -334,7 +335,7 @@ func (env *Env) describeMediaNote(ctx context.Context, call *Env, with map[strin
 	set := []frontmatter.Field{
 		{Key: "model", Value: model},
 		{Key: "prompt_version", Value: version},
-		{Key: "described", Value: env.Engine.now().Format("2006-01-02")},
+		{Key: "described", Value: clock.NoteDate(env.Engine.now())},
 	}
 	unset := []string{"describe_error"}
 	if label != "" {

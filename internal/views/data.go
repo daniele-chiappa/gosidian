@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/gosidian/gosidian/internal/clock"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/parser"
 )
@@ -103,7 +104,7 @@ func (r *Result) Data(c Context) Data {
 		d.Rows = append(d.Rows, Row{
 			Path:     h.Path,
 			Title:    rowTitle(h),
-			Modified: time.Unix(h.ModTime, 0).UTC().Format("2006-01-02"),
+			Modified: clock.NoteDate(time.Unix(h.ModTime, 0)),
 			Fields:   fields,
 			Links:    fieldLinks(h, c),
 			Writable: c.CanWrite != nil && c.CanWrite(h.Path),

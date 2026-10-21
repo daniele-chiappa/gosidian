@@ -134,9 +134,8 @@ func (h automationHost) Rows(db automation.Database, r automation.Rule, now time
 // Handoff writes a handoff from the automation to r.Handoff in the
 // database's project.
 func (h automationHost) Handoff(db automation.Database, r automation.Rule, summary string, items []string, now time.Time) (string, error) {
-	now = now.UTC()
 	content := renderHandoffBody(AutomationAgent, r.Handoff, AutomationAgent, now, summary, items)
-	base := fmt.Sprintf("%s/handoffs/%s-%s", db.Project, now.Format("20060102-150405"), handoffSlug(AutomationAgent, r.Handoff))
+	base := handoffBase(db.Project, AutomationAgent, r.Handoff, now)
 	for i := 0; i < 10; i++ {
 		candidate := base
 		if i > 0 {

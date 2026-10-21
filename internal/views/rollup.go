@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gosidian/gosidian/internal/clock"
 	"github.com/gosidian/gosidian/internal/dbschema"
 	"github.com/gosidian/gosidian/internal/index"
 )
@@ -166,8 +167,9 @@ func RollupValue(f dbschema.Field, c Context, q QueryFunc) (string, error) {
 const noNote = "\x00no note"
 
 // aggregate reduces the values of a sum, min or max: numbers when every value
-// is one, otherwise text, which orders ISO dates too. A sum of anything but
-// numbers counts only the numbers.
+// is one, dates and times by instant when every value is one (22:04+02:00
+// before 20:30Z, as a query sorts them), otherwise text. A sum of anything
+// but numbers counts only the numbers.
 func aggregate(calc string, values []string) string {
 	nums := make([]float64, 0, len(values))
 	for _, v := range values {
@@ -192,10 +194,29 @@ func aggregate(calc string, values []string) string {
 		}
 		return formatNumber(v)
 	}
+	if v, ok := timeExtreme(values, calc == "max"); ok {
+		return v
+	}
 	if calc == "max" {
 		return slices.Max(values)
 	}
 	return slices.Min(values)
+}
+
+// timeExtreme is the earliest of values (the latest, for max) when every
+// one is a date or a time; ok is false otherwise.
+func timeExtreme(values []string, latest bool) (v string, ok bool) {
+	best := ""
+	for i, s := range values {
+		k, isTime := clock.SortKey(s)
+		if !isTime {
+			return "", false
+		}
+		if i == 0 || latest && k > best || !latest && k < best {
+			v, best = s, k
+		}
+	}
+	return v, true
 }
 
 func formatNumber(n float64) string {

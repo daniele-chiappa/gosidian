@@ -33,7 +33,7 @@ max_llm_tokens = 200000  # LLM tokens one run may use; 0: no cap
 http_allowlist = ["https://api.example.com/", "http://gpu.lan:5001/"]
 public_url = "https://vault.example.com"   # default: [oauth] issuer
 files_url = "http://gosidian:8080"         # where plugins fetch files; default: public_url
-timezone = "Europe/Rome"                   # default: [automations] timezone
+timezone = "Europe/Rome"                   # default: [automations] timezone, else TZ
 
 [[pipelines.llm]]
 name = "default"
@@ -111,7 +111,7 @@ why a pipeline cannot run.
 | `external` | as manual, and also a service with a run token | the input given |
 | `chat` | a message of a chat, the rating of an answer, or a request for a person, from the chat plugin with a run token (or by hand, to try it): its runs are [interactive](#interactive-runs) | `kind` (`message`, the default, `rating` or `handoff`); a message: `message`, `history` (`[{role: user or assistant, content}]`), `scopes` (the names the person chose), `session`, `user`, `as_of` (a day, YYYY-MM-DD); a rating: `turn` (the id of the answer's run), `rating` (-10 to 10), `comment`; a request for a person: `message`, `contact`, `history`, `session`; other keys as given |
 | `ingest` | a file of one of `kinds` is stored as an attachment of the project (with `folder`: a note made with it in that folder) | `file`, `name`, `stem`, `ext`, `folder`, `note`, `project` |
-| `schedule` | `every: "monday 09:00"`, `"day 18:30"`, `"hour :05"` (every hour, at five past; `"hour"` on the hour) — the automations' syntax — once per slot; a slot missed by more than 10 minutes is not run late | `slot` |
+| `schedule` | `every: "monday 09:00"`, `"day 18:30"`, `"hour :05"` (every hour, at five past; `"hour"` on the hour) — the automations' syntax — once per slot; a slot missed by more than 10 minutes is not run late | `slot` (its time, with the offset of the server's [time zone](configuration.md#time-zone)) |
 | `in` | a batch of files of the project's [IN folder](in.md) closes: one run per file it takes, or one per batch with `batch: true`; `folder` (of the IN folder), `kinds` (none: all) and `match` (a glob on the name) choose the files; `take: false` reads them without taking them (their status stays the other pipelines') | per file: `file`, `name`, `stem`, `ext`, `dir`, `size`, `sha256`, `etag` (a source's file), `source` (`local`, or `<plugin>/<source>`), `project`; per batch: `batch`, `dir`, `count`, `bytes`, `files` (the files, when they fit in the input; else `files_listed` is false and `in.list` reads them), `project` |
 | `commit` | a commit of the vault's [git sync](configuration.md#environment-variables) changes files under `folder` (of the project; empty: all of it) whose name matches `match` (a glob, `*.md`): one run per commit; `skip` lists pipelines whose writes do not start it | `commit` (its SHA), `date` (in seconds), `project`, `folder`, `count`, `files` (`path`, `change`: `added`, `modified`, `deleted`, `renamed`, and `from` for a renamed file; when they fit in the input, else `files_listed` is false), `files_listed` |
 | `run` | a run of a pipeline of the project ends with one of `status` (`done`, `failed`, `canceled`; default `[failed]`), its pipeline matching `pipelines` (a glob on the pipeline notes' paths, relative to the project: `pipelines/*`; default: all of them): one run per run that ended; a run it starts starts [none](#on-the-end-of-a-run) | `run` (the id of the run that ended), `pipeline` (its pipeline note), `project`, `status`, `error`, `failed_step` (the node that failed it; empty when none) |
@@ -233,7 +233,9 @@ an interactive pipeline holds that lane while it runs: keep them short.
 
 `{{ name.field.0 }}` reads `trigger`, `run` (`id`, `pipeline`,
 `project`, `trigger`, `resume_url`, `resume_key`, `created`: when the run
-was made, `2026-10-15T07:30:00Z`), the output of a node
+was made, in the server's [time zone](configuration.md#time-zone) with its
+offset, `2026-10-15T09:30:00+02:00`, or `2026-10-15T07:30:00Z` in UTC), the
+output of a node
 that runs before, and `item`/`index` inside an `each`. A string that is
 one expression keeps the value's type (a list, a number); text around
 an expression turns it into text. There are no operators: compute in a

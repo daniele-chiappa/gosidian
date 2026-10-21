@@ -154,7 +154,8 @@ rejected`.
 
 1. Source agent: `memory_create_handoff(project, from_agent,
    to_agent, summary, pending_items?)`. Creates
-   `<project>/handoffs/YYYYMMDD-<slug>.md` with frontmatter
+   `<project>/handoffs/YYYYMMDD-HHMMSS-<slug>.md` (the server's time
+   zone, as `created`) with frontmatter
    `type:handoff, status:pending` and a server-stamped `created_by`
    (token identity — `from_agent`/`to_agent` are declarative role
    slugs, `*_by` fields are who actually held the credentials).

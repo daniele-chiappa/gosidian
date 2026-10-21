@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
+	"github.com/gosidian/gosidian/internal/clock"
 	"github.com/gosidian/gosidian/internal/dbschema"
 	"github.com/gosidian/gosidian/internal/frontmatter"
 	"github.com/gosidian/gosidian/internal/parser"
@@ -186,7 +187,7 @@ func (r *Router) createRow(w http.ResponseWriter, req *http.Request, rel string)
 	}
 	vars := map[string]string{
 		"ID": name, "TITLE": title, "PROJECT": projectOf(schema.Source),
-		"TODAY": time.Now().UTC().Format("2006-01-02"),
+		"TODAY": clock.NoteDate(time.Now()),
 	}
 	content, err := buildRow(tpl, schema, name, title, body.Values, vars)
 	var valueErr *frontmatter.ValueError

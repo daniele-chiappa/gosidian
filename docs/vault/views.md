@@ -69,7 +69,9 @@ group_by: priority
 
 String conditions use `=`, `!=`, `<`, `<=`, `>`, `>=`, `in [a, b]`,
 `contains`, `exists` and `!exists`. ISO dates and numbers compare as such,
-as in `memory_query`.
+as in `memory_query`: a date-time by its instant, whatever its offset
+(`22:04+02:00` before `20:30Z`), a date alone with the day a value
+writes.
 
 Relative values:
 
@@ -83,7 +85,8 @@ Relative values:
   `this.path` and `this.name` (the file name without extension) always
   exist.
 - `today`, `today-7d`, `today+30d` are dates relative to the day the view
-  is computed: `closed >= today-30d` lists what closed in the last month.
+  is computed, in the server's [time zone](../configuration.md#time-zone):
+  `closed >= today-30d` lists what closed in the last month.
 
 ### Relations
 
@@ -143,8 +146,9 @@ other note, write its path in the view instead of `this`.
 A snapshot freezes a note as it reads now: `memory_snapshot(path)`, `POST
 /api/v1/notes/{path}/snapshot`, or the camera button of a note in the web
 UI. It writes a dated note beside it, `<folder>/<name>.snapshots/
-YYYY-MM-DD.md` (with the time for a second one the same day), and the note
-itself does not change.
+YYYY-MM-DD.md` (with the time for a second one the same day; the day and
+the time of the server's [time zone](../configuration.md#time-zone)), and
+the note itself does not change.
 
 - **What it holds**: the note's text with each view replaced by its rows,
   each value by its number (its expression kept as text, between double
