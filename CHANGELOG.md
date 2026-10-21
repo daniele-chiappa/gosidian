@@ -8,6 +8,24 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.103.2] — 2026-10-21 — "dependencies"
+
+An update of the web UI's build dependencies for five advisories of
+2026-10-21. Nothing changes for users: pull the image and restart;
+nothing to migrate.
+
+### Security
+- **`vite`** 8.0.16 → 8.1.6 (GHSA-587h-7wmj-h5pm, GHSA-r825-w8mm-5pxw,
+  GHSA-698v-4r3x-3vcv). They concern vite's development server, which
+  builds the web UI but is not part of the image.
+- **`follow-redirects`** 1.16.0 → 1.16.1 (GHSA-q3jh-wrc6-jgq8,
+  GHSA-8r9p-f939-6h3c). axios brings it for its Node.js adapter, which the
+  browser bundle does not use.
+- With them, rolldown 1.0.3 → 1.1.5 and its bindings, `@oxc-project/types`,
+  `@napi-rs/wasm-runtime` and `@emnapi/*`. Every package that changes was
+  published at least two weeks before this release. The lint, the 342
+  unit tests and the build pass unchanged.
+
 ## [2.103.1] — 2026-10-21 — "mass writes"
 
 Mass writes are several times faster: the same pipeline import of 1,634
