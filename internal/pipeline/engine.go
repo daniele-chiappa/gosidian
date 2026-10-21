@@ -525,6 +525,11 @@ func (e *Engine) Step(ctx context.Context, run jobs.Run, st jobs.Step, steps []j
 	} else {
 		out, err = e.runEach(ctx, env, t, node, sc)
 	}
+	if ws, ok := e.host.(WriteSyncer); ok {
+		if serr := ws.SyncWrites(); serr != nil && err == nil {
+			err = fmt.Errorf("bringing the step's writes to disk: %w", serr)
+		}
+	}
 	var wait WaitFor
 	if errors.As(err, &wait) {
 		return jobs.Outcome{Status: jobs.Waiting, WaitUntil: wait.Until}

@@ -104,6 +104,9 @@ type noteWrite struct {
 	// (shrinkRefusal, IMP-147): an agent's whole-note rewrite that did not
 	// say allow_shrink.
 	shrinkGuard bool
+	// batched is a write of a pipeline step, which syncs the vault once
+	// at its end (vault.SaveBatched, IMP-185).
+	batched bool
 }
 
 // noteWritten is a write's outcome.
@@ -174,7 +177,7 @@ func (s *Server) writeNote(ctx context.Context, tok *auth.Token, w noteWrite) (n
 			return noteWritten{}, &writeError{kind: writeLimit, status: http.StatusRequestEntityTooLarge, msg: msg, wait: wait}
 		}
 	}
-	if err := s.writeAndIndex(w.rel, content); err != nil {
+	if err := s.saveAndIndex(w.rel, content, w.batched); err != nil {
 		return noteWritten{}, &writeError{kind: writeFailed, status: http.StatusInternalServerError, msg: "write failed: " + err.Error()}
 	}
 	created := existing == nil

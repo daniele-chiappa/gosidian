@@ -29,6 +29,10 @@ type Vault struct {
 	stateRel string
 	// hasIN says which projects have an IN folder (SetINProjects).
 	hasIN func(project string) bool
+	// durability is when writes reach the disk, and batch what the batches
+	// wrote without syncing (durability.go).
+	durability Durability
+	batch      batchWrites
 }
 
 // New returns a Vault rooted at the given directory. A 128-entry LRU load
@@ -221,6 +225,16 @@ func (v *Vault) Delete(rel string) error {
 // Save writes a note. Only note files (IsNoteFile) can be written through the
 // vault layer (ADR-021); attachment bytes go through SaveAttachment.
 func (v *Vault) Save(rel string, content []byte) error {
+	return v.save(rel, content, false)
+}
+
+// SaveBatched is Save for a write of a batch that ends with SyncBatch (a
+// pipeline step): with durability batch it is not synced on its own.
+func (v *Vault) SaveBatched(rel string, content []byte) error {
+	return v.save(rel, content, true)
+}
+
+func (v *Vault) save(rel string, content []byte, batched bool) error {
 	r, err := v.Rel(rel)
 	if err != nil {
 		return err
@@ -228,9 +242,12 @@ func (v *Vault) Save(rel string, content []byte) error {
 	if err := v.checkNote(r); err != nil {
 		return err
 	}
-	if err := writeInDir(filepath.Join(v.Root, filepath.FromSlash(r)), content); err != nil {
+	abs := filepath.Join(v.Root, filepath.FromSlash(r))
+	synced := v.syncs(batched)
+	if err := writeInDir(abs, content, synced); err != nil {
 		return err
 	}
+	v.wrote(abs, synced)
 	if v.cache != nil {
 		v.cache.Invalidate(r)
 	}
@@ -243,6 +260,16 @@ func (v *Vault) Save(rel string, content []byte) error {
 // Save's note-only rule this is the only way non-note bytes enter the vault
 // (ADR-021).
 func (v *Vault) SaveAttachment(rel string, content []byte, allowedExt map[string]bool) error {
+	return v.saveAttachment(rel, content, allowedExt, false)
+}
+
+// SaveAttachmentBatched is SaveAttachment for a write of a batch, as
+// SaveBatched.
+func (v *Vault) SaveAttachmentBatched(rel string, content []byte, allowedExt map[string]bool) error {
+	return v.saveAttachment(rel, content, allowedExt, true)
+}
+
+func (v *Vault) saveAttachment(rel string, content []byte, allowedExt map[string]bool, batched bool) error {
 	r, err := v.Rel(rel)
 	if err != nil {
 		return err
@@ -250,7 +277,32 @@ func (v *Vault) SaveAttachment(rel string, content []byte, allowedExt map[string
 	if err := v.checkAttachmentPath(r, allowedExt); err != nil {
 		return err
 	}
-	return writeInDir(filepath.Join(v.Root, filepath.FromSlash(r)), content)
+	abs := filepath.Join(v.Root, filepath.FromSlash(r))
+	// An attachment is named by its content, so the file is often there
+	// already with these bytes: an import run again, an image two notes
+	// share. Writing it again cost a temporary file, an fsync and a rename
+	// for nothing, a quarter of an import's time in the lab (IMP-185). Only
+	// its mtime is renewed: memory_gc_attachments reads it as the age.
+	if sameContent(abs, content) {
+		now := time.Now()
+		return os.Chtimes(abs, now, now)
+	}
+	synced := v.syncs(batched)
+	if err := writeInDir(abs, content, synced); err != nil {
+		return err
+	}
+	v.wrote(abs, synced)
+	return nil
+}
+
+// sameContent reports whether the regular file at abs holds content.
+func sameContent(abs string, content []byte) bool {
+	st, err := os.Lstat(abs)
+	if err != nil || !st.Mode().IsRegular() || st.Size() != int64(len(content)) {
+		return false
+	}
+	old, err := os.ReadFile(abs)
+	return err == nil && bytes.Equal(old, content)
 }
 
 // DeleteAttachment removes an attachment file under the same confinement as
@@ -289,12 +341,12 @@ func renameInDir(from, to string) error {
 
 // writeInDir writes a file, making its folder first. A folder another
 // request pruned in between (PruneEmptyParents) is made again, once.
-func writeInDir(abs string, content []byte) error {
+func writeInDir(abs string, content []byte, durable bool) error {
 	for attempt := 0; ; attempt++ {
 		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 			return err
 		}
-		err := writeWhole(abs, content)
+		err := writeWhole(abs, content, durable)
 		if err == nil || attempt > 0 || !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
@@ -307,11 +359,12 @@ func writeInDir(abs string, content []byte) error {
 // could get half of one. The bytes go to a temporary file in the same
 // folder, synced, then renamed over the target. Its name is hidden and ends
 // in .tmp, which the scan, the watcher and the managed .gitignore leave out.
+// Not durable, the bytes are not synced before the rename (Durability).
 // The target keeps its permissions; a hard link to it is broken, and the
 // file takes the server's owner, as any rename does. A symlink is written
 // through as before: the rename would replace the link with a file. A crash
 // can leave the temporary file behind: Scan removes it (removeStaleWrites).
-func writeWhole(abs string, content []byte) error {
+func writeWhole(abs string, content []byte, durable bool) error {
 	perm := os.FileMode(0o644)
 	if st, err := os.Lstat(abs); err == nil {
 		if st.Mode()&fs.ModeSymlink != 0 {
@@ -325,7 +378,7 @@ func writeWhole(abs string, content []byte) error {
 	}
 	tmp := f.Name()
 	_, err = f.Write(content)
-	if err == nil {
+	if err == nil && durable {
 		err = f.Sync()
 	}
 	if cerr := f.Close(); err == nil {
@@ -548,7 +601,7 @@ func (v *Vault) Scan(idx *index.Index) (ScanStats, error) {
 		}
 		onDisk[n.Path] = true
 		doc := toIndexNote(n)
-		if old, ok := stamps[n.Path]; ok && old.Hash != "" && old.Hash == index.ContentHash(doc) {
+		if old, ok := stamps[n.Path]; ok && old.Holds(doc) {
 			if old.ModTime != doc.ModTime || old.Size != doc.Size {
 				if err := idx.Touch(doc.Path, doc.ModTime, doc.Size); err != nil {
 					return st, fmt.Errorf("index %s: %w", p, err)

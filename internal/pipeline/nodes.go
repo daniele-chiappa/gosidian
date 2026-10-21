@@ -337,6 +337,14 @@ type NoteUpdater interface {
 	UpdateNote(project, path string, build func(existing []byte) ([]byte, error), actor string) (WriteResult, error)
 }
 
+// WriteSyncer is a host whose writes during a step reach the disk together
+// at its end (the vault's durability batch, IMP-185): Step calls SyncWrites
+// before the step counts as done, so a step that ended has its notes and
+// files on disk, and one a power loss cut short runs again.
+type WriteSyncer interface {
+	SyncWrites() error
+}
+
 // WriteResult is note.write's output.
 type WriteResult struct {
 	Path    string `json:"path"`

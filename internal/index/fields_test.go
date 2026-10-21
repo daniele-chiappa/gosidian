@@ -500,8 +500,61 @@ func TestSortPlan_NoteKeyIndex(t *testing.T) {
 		}
 		rows.Close()
 		joined := strings.Join(plan, "\n")
-		if strings.Contains(joined, "note_fields_key") || !strings.Contains(joined, "note_fields_note_key (note_id=? AND key=?)") {
-			t.Errorf("sort %+v: the plan does not look a note's field up by note and key:\n%s", k, joined)
+		for _, step := range plan {
+			if strings.HasPrefix(step, "SEARCH f") && !strings.Contains(step, "note_fields_note_key (note_id=? AND key=?)") {
+				t.Errorf("sort %+v: a subquery does not look the note's field up by note and key: %s\n%s", k, step, joined)
+			}
+		}
+		if !strings.Contains(joined, "note_fields_note_key") {
+			t.Errorf("sort %+v: no subquery on note_fields_note_key:\n%s", k, joined)
+		}
+	}
+}
+
+// A condition field = value starts from the notes that have the value
+// (note_fields_value_ci), not from every note of the scope: the check of a
+// project's databases ran at every write and asked all of them (IMP-185).
+func TestQueryPlan_EqFromValueIndex(t *testing.T) {
+	idx := openTest(t)
+	for i := 0; i < 50; i++ {
+		typ := "doc"
+		if i == 7 {
+			typ = "Database"
+		}
+		upsert(t, idx, fmt.Sprintf("p/n%02d.md", i), fmt.Sprintf("n%d", i), fmt.Sprintf("---\ntype: %s\n---\n", typ))
+	}
+	for _, c := range []FieldCond{
+		{Field: "type", Op: OpEq, Values: []string{"database"}},
+		{Field: "type", Op: OpIn, Values: []string{"database", "table"}},
+	} {
+		where, args := scopeClause([]string{"p"}, nil)
+		sqlc, cargs, err := condSQL(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		q := `SELECT n.id FROM notes n WHERE 1=1` + where + " AND " + sqlc
+		all := append(append([]any{}, args...), cargs...)
+		rows, err := idx.db.Query("EXPLAIN QUERY PLAN "+q, all...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var plan []string
+		for rows.Next() {
+			var id, parent, notused int
+			var detail string
+			if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+				t.Fatal(err)
+			}
+			plan = append(plan, detail)
+		}
+		rows.Close()
+		joined := strings.Join(plan, "\n")
+		if !strings.Contains(joined, "note_fields_value_ci (key=? AND value=?)") || strings.Contains(joined, "SCAN n") {
+			t.Errorf("%s %v: the plan does not start from the notes that have the value:\n%s", c.Op, c.Values, joined)
+		}
+		// The value still compares without case.
+		if got, _ := queryPaths(t, idx, QueryOptions{Projects: []string{"p"}, Where: []FieldCond{c}}); !slices.Equal(got, []string{"p/n07.md"}) {
+			t.Errorf("%s %v: got %v, want the one database", c.Op, c.Values, got)
 		}
 	}
 }

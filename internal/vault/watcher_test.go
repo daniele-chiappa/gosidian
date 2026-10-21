@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/gosidian/gosidian/internal/index"
 )
 
 // TestWatcher_NewSubdirRace covers the race where a subdirectory and a file
@@ -234,6 +236,72 @@ func TestWatcher_OnChangeGetsThePath(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("no onChange")
+	}
+	cancel()
+	<-done
+}
+
+// The watcher leaves alone a note the index already holds as it is on disk,
+// as after a write through the server, and only stores its new mtime
+// (IMP-185). Upserting the same content again would fire notes_hash_guard
+// and clear the hash, so a hash that stays proves the skip. An edit from
+// outside is still indexed.
+func TestWatcher_SkipsWhatTheIndexHolds(t *testing.T) {
+	v := newTestVault(t)
+	idx := openIndex(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	got := make(chan string, 8)
+	done := make(chan error, 1)
+	go func() {
+		done <- v.Watch(ctx, idx, func(rel string) { got <- rel })
+	}()
+	time.Sleep(150 * time.Millisecond) // readiness, as above
+	if err := os.MkdirAll(filepath.Join(v.Root, "p"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	waitChange := func() {
+		t.Helper()
+		select {
+		case rel := <-got:
+			if rel != "p/n.md" {
+				t.Fatalf("onChange(%q), want p/n.md", rel)
+			}
+		case <-time.After(3 * time.Second):
+			t.Fatal("no onChange")
+		}
+	}
+	doc := func(body string) index.NoteDoc {
+		return index.NoteDoc{Path: "p/n.md", Title: titleFromPath("p/n.md"), Body: body}
+	}
+
+	// Indexed first, so the watcher cannot get there before the upsert.
+	if err := idx.Upsert(doc("# n\n\nbody")); err != nil {
+		t.Fatal(err)
+	}
+	write(t, v.Root, "p/n.md", "# n\n\nbody")
+	waitChange()
+	st, ok, err := idx.StampOf("p/n.md")
+	if err != nil || !ok {
+		t.Fatalf("StampOf: %v, indexed %v", err, ok)
+	}
+	if st.Hash == "" {
+		t.Error("the watcher indexed p/n.md again: notes_hash_guard cleared its hash")
+	}
+	info, err := os.Stat(filepath.Join(v.Root, "p", "n.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.ModTime != info.ModTime().Unix() || st.Size != info.Size() {
+		t.Errorf("stamp mtime %d size %d, want the file's %d %d", st.ModTime, st.Size, info.ModTime().Unix(), info.Size())
+	}
+
+	write(t, v.Root, "p/n.md", "# n\n\nedited outside")
+	waitChange()
+	st, _, _ = idx.StampOf("p/n.md")
+	if want := index.ContentHash(doc("# n\n\nedited outside")); st.Hash != want {
+		t.Errorf("after an outside edit hash %q, want %q", st.Hash, want)
 	}
 	cancel()
 	<-done

@@ -139,6 +139,8 @@ func main() {
 	if *vaultDir == "" {
 		log.Fatal("--vault is required")
 	}
+	// First, so the boot scan can be profiled too.
+	servePprof()
 	absVault, err := filepath.Abs(*vaultDir)
 	if err != nil {
 		log.Fatalf("vault path: %v", err)
@@ -411,6 +413,13 @@ func main() {
 	if cfg.Vault.TableNotes {
 		log.Printf("table notes enabled: markdown notes with type:table + media: resolved as CSV table notes (ADR-016)")
 	}
+	// When writes reach the disk (IMP-185).
+	durability, err := vault.ParseDurability(cfg.Vault.Durability)
+	if err != nil {
+		log.Fatalf("vault.durability (GOSIDIAN_VAULT_DURABILITY): %v", err)
+	}
+	v.SetDurability(durability)
+	log.Printf("vault durability: %s", durability)
 	// Web-side login rate-limit + session TTL configuration moved
 	// to internal/api/v1 — the legacy server.ConfigureLogin retired
 	// at the v2.0 cutover alongside the cookie-session middleware.

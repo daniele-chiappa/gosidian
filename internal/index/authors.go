@@ -142,7 +142,7 @@ func (i *Index) RebuildAuthors(events []AuthorEvent) error {
 			return err
 		}
 	}
-	if err := syncAuthorFields(tx, ""); err != nil {
+	if err := syncAuthorFields(prepTx{tx, i.stmts}, ""); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -153,11 +153,12 @@ func (i *Index) RebuildAuthors(events []AuthorEvent) error {
 func (i *Index) RecordAuthor(e AuthorEvent) error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	tx, err := i.db.Begin()
+	sqlTx, err := i.db.Begin()
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback() //nolint:errcheck // no-op after Commit
+	defer sqlTx.Rollback() //nolint:errcheck // no-op after Commit
+	tx := prepTx{sqlTx, i.stmts}
 
 	// The rows the event can touch, loaded into a small table, applied,
 	// and written back.
@@ -224,7 +225,7 @@ func (i *Index) RecordAuthor(e AuthorEvent) error {
 			return err
 		}
 	}
-	return tx.Commit()
+	return sqlTx.Commit()
 }
 
 // AuthorOf returns the authors row of a note, and whether it has one.
@@ -244,7 +245,7 @@ func (i *Index) AuthorOf(path string) (Author, bool, error) {
 // audit) of the note at path, or of every note when path is "": created_by,
 // modified_by, created_at and modified_at from the authors table, unless the
 // frontmatter has a field of that name, which wins.
-func syncAuthorFields(tx *sql.Tx, path string) error {
+func syncAuthorFields(tx prepTx, path string) error {
 	where, args := "", []any{}
 	if path != "" {
 		where, args = ` AND n.path = ?`, []any{path}

@@ -1684,12 +1684,22 @@ func (s *Server) handleGetOutline(ctx context.Context, req mcp.CallToolRequest) 
 // writeAndIndex persists the note and upserts it into the index synchronously
 // so that a search immediately after the write reflects the change.
 func (s *Server) writeAndIndex(rel string, content []byte) error {
+	return s.saveAndIndex(rel, content, false)
+}
+
+// saveAndIndex is writeAndIndex; batched saves the note as a write of a
+// pipeline step (vault.SaveBatched).
+func (s *Server) saveAndIndex(rel string, content []byte, batched bool) error {
 	// ADR-021: write tools only touch notes. The vault layer enforces the same
 	// rule; checking here first yields a didactic error before any I/O.
 	if !s.vault.IsNoteFile(rel) {
 		return fmt.Errorf("%w: %q is not a note (.md, or .html when html notes are enabled) — files go through memory_ingest (bridge_filename, source_path, transfer:\"http\") or memory_upload_attachment", vault.ErrNotNote, rel)
 	}
-	if err := s.vault.Save(rel, content); err != nil {
+	save := s.vault.Save
+	if batched {
+		save = s.vault.SaveBatched
+	}
+	if err := save(rel, content); err != nil {
 		return err
 	}
 	note, err := s.vault.Load(rel)

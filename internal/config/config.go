@@ -216,6 +216,10 @@ type VaultConfig struct {
 	HTMLNotes  bool `toml:"html_notes"`  // treat single-file .html as first-class notes; default false (ADR-011)
 	MediaNotes bool `toml:"media_notes"` // resolve image media notes (type: image + media: pointer); default false (ADR-013)
 	TableNotes bool `toml:"table_notes"` // resolve CSV table notes (type: table + media: pointer); default false (ADR-016)
+	// Durability is when writes reach the disk (IMP-185): "batch" (default)
+	// syncs each write on its own but a pipeline step's once at its end,
+	// "always" every write, "none" never (vault.ParseDurability).
+	Durability string `toml:"durability"`
 }
 
 // I18nConfig chooses the web UI's default language and the languages its
@@ -853,6 +857,9 @@ func (c *Config) ApplyEnv() error {
 	}
 	if v := os.Getenv("GOSIDIAN_VAULT_TABLE_NOTES"); v != "" {
 		c.Vault.TableNotes = envBool(v)
+	}
+	if v := os.Getenv("GOSIDIAN_VAULT_DURABILITY"); v != "" {
+		c.Vault.Durability = v
 	}
 	if v := os.Getenv("GOSIDIAN_I18N_DEFAULT_LANG"); v != "" {
 		c.I18n.DefaultLang = v

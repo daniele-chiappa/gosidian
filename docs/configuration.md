@@ -18,6 +18,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_MCP_ADDR` | — (CLI `--mcp-addr`) | empty (legacy SSE listener disabled; MCP is always at `/mcp` and `/mcp/sse` on the web port) |
 | `GOSIDIAN_LOG_LEVEL` | — | `info` (`debug`, `warn`, `error`) |
 | `GOSIDIAN_LOG_FORMAT` | — | `text` (`json`) |
+| `GOSIDIAN_PPROF_ADDR` | — | empty (off). A loopback `host:port`, such as `127.0.0.1:6060`, opens Go's profiler at `/debug/pprof/` to measure a slow server under its real load: CPU, heap, blocking and mutex profiles, and an execution trace. It has no authentication, so another host is refused; read it from the same host or container, e.g. `docker exec gosidian wget -qO- 'http://127.0.0.1:6060/debug/pprof/profile?seconds=30' > cpu.out`, then `go tool pprof cpu.out` |
 | `TZ` | — | unset: the system's zone, UTC in a container (the server's time zone, an IANA name such as `Europe/Rome`: the times and days gosidian writes into notes and their names, and by default those of the automations and the pipelines; see [Time zone](#time-zone)) |
 | `GOSIDIAN_GIT_ENABLED` | `git.enabled` | `false` |
 | `GOSIDIAN_GIT_REMOTE` | `git.remote` | empty |
@@ -105,6 +106,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_VAULT_HTML_NOTES` | `vault.html_notes` | `false` (treat single-file `.html` as first-class notes; ADR-011, sandboxed iframe) |
 | `GOSIDIAN_VAULT_MEDIA_NOTES` | `vault.media_notes` | `false` (resolve image media notes: `.md` with `type: image` + `media:`; ADR-013) |
 | `GOSIDIAN_VAULT_TABLE_NOTES` | `vault.table_notes` | `false` (resolve CSV table notes: `.md` with `type: table` + `media:`; ADR-016) |
+| `GOSIDIAN_VAULT_DURABILITY` | `vault.durability` | `batch` (when writes reach the disk: `batch`, `always` or `none`; see [Durability](#durability)) |
 | `GOSIDIAN_I18N_DEFAULT_LANG` | `i18n.default_lang` | `en` (the language a browser starts in; must be among the enabled ones) |
 | `GOSIDIAN_I18N_ENABLED_LANGS` | `i18n.enabled_langs` | every language with a catalogue (`it`, `en`, `es`, `fr`, `de`); comma-separated, the languages the web UI's selector offers |
 | `GOSIDIAN_SELF_IMPROVE_ENABLED` | `self_improve.enabled` | `false` |
@@ -136,6 +138,32 @@ read-only there, and a `PUT` that changes one is refused.
 > UI never reads back the bind password. See
 > [Authentication & roles](web-ui/authentication.md) for the full TOTP and
 > LDAP setup, including Active Directory.
+
+## Durability
+
+A note or an attachment is written whole: the bytes go to a temporary
+file in the same folder, which is renamed over the target, so a reader
+never finds half of it. `vault.durability`
+(`GOSIDIAN_VAULT_DURABILITY`) says when the bytes are also synced to the
+disk, which is what a power loss cannot take back:
+
+- **`batch`** (the default): a write on its own (MCP, the web UI, the
+  API) is synced before it returns; the writes of a pipeline step are
+  synced together when the step ends, with one `syncfs` for each
+  filesystem they went to, before the step counts as done. A power loss
+  in the middle of a step can lose what it wrote, or leave it empty, and
+  the step runs again (an `in.import` imports the same documents again). One sync per note
+  was 39% of an import's time in the lab. Where `syncfs` is not available
+  (not Linux) a step's writes are synced one by one, as with `always`;
+- **`always`**: every write is synced before it returns, a pipeline's
+  too;
+- **`none`**: nothing is synced; the system writes the files back when
+  it likes (on Linux within about 30 seconds), and a power loss can take
+  the last writes, or leave them empty.
+
+The index is rebuilt from the notes, so it needs no sync of its own: the
+boot scan re-indexes what changed. The log says the setting at start:
+`vault durability: batch`.
 
 ## Time zone
 

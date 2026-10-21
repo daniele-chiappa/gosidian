@@ -296,7 +296,7 @@ func (h pipelineHost) WriteNote(project, rel string, content []byte, mode pipeli
 	}
 	out, werr := h.s.writeNote(context.Background(), nil, noteWrite{
 		rel: rel, mode: m, content: fixedContent(content),
-		automation: true, source: audit.SourcePipeline, actor: actor,
+		automation: true, source: audit.SourcePipeline, actor: actor, batched: true,
 	})
 	if werr != nil {
 		return pipeline.WriteResult{}, errors.New(werr.msg)
@@ -318,12 +318,25 @@ func (h pipelineHost) UpdateNote(project, rel string, build func(existing []byte
 			}
 			return build(existing.Content)
 		},
-		automation: true, source: audit.SourcePipeline, actor: actor,
+		automation: true, source: audit.SourcePipeline, actor: actor, batched: true,
 	})
 	if werr != nil {
 		return pipeline.WriteResult{}, errors.New(werr.msg)
 	}
 	return pipeline.WriteResult{Path: out.Path, ETag: out.ETag, Created: out.Created}, nil
+}
+
+// SyncWrites brings to disk what the step wrote (pipeline.WriteSyncer):
+// its notes and attachments are saved as a batch (vault.SaveBatched).
+func (h pipelineHost) SyncWrites() error { return h.s.vault.SyncBatch() }
+
+// batchSaver stores a step's attachments as writes of its batch.
+type batchSaver struct{ v *vault.Vault }
+
+func (b batchSaver) Rel(p string) (string, error) { return b.v.Rel(p) }
+
+func (b batchSaver) SaveAttachment(rel string, content []byte, allowedExt map[string]bool) error {
+	return b.v.SaveAttachmentBatched(rel, content, allowedExt)
 }
 
 func (h pipelineHost) ReadAttachment(project, rel string) ([]byte, error) {
@@ -403,7 +416,7 @@ func (h pipelineHost) StatFile(project, rel string) (pipeline.FileStat, error) {
 // attachment of the project, audited as the pipeline. It does not call
 // arrived: a run's files start no runs.
 func (h pipelineHost) StoreAttachment(project, name string, data []byte, actor string) (string, error) {
-	res, err := attach.Store(h.s.vault, data, name, project)
+	res, err := attach.Store(batchSaver{h.s.vault}, data, name, project)
 	if err != nil {
 		return "", err
 	}

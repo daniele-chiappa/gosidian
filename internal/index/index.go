@@ -28,7 +28,8 @@ const (
 type Index struct {
 	mu    sync.Mutex
 	db    *sql.DB
-	stems *stemmer // query-side Porter stems, see stem.go
+	stems *stemmer   // query-side Porter stems, see stem.go
+	stmts *stmtCache // the statements of the writes, prepared (stmts.go)
 }
 
 type NoteDoc struct {
@@ -72,7 +73,7 @@ func Open(path string) (*Index, error) {
 		db.Close()
 		return nil, fmt.Errorf("stemmer: %w", err)
 	}
-	return &Index{db: db, stems: stems}, nil
+	return &Index{db: db, stems: stems, stmts: newStmtCache(db)}, nil
 }
 
 // schemaVersion is stored in PRAGMA user_version. v1 (IMP-095) splits the
@@ -202,7 +203,8 @@ func fillKey(tx *sql.Tx, query, update string, key func(string) string) error {
 // and only a v3 upsert sets hash, so an update of importance that leaves the
 // hash as it was clears it: the next boot scan re-indexes the note. The
 // price is one extra re-index at the next start for a note re-upserted with
-// the same content (the watcher after an API write).
+// the same content, which the watcher no longer does after a write through
+// the server (Stamp.Holds).
 const hashGuardSQL = `CREATE TRIGGER IF NOT EXISTS notes_hash_guard
 AFTER UPDATE OF importance ON notes
 WHEN NEW.hash IS OLD.hash AND NEW.hash IS NOT NULL
@@ -278,6 +280,7 @@ func ContentHash(n NoteDoc) string {
 
 func (i *Index) Close() error {
 	i.stems.close()
+	i.stmts.close()
 	return i.db.Close()
 }
 
@@ -362,6 +365,25 @@ func (i *Index) Stamps() (map[string]Stamp, error) {
 	return out, rows.Err()
 }
 
+// StampOf returns the stamp of the note at path, and whether it is indexed.
+func (i *Index) StampOf(path string) (Stamp, bool, error) {
+	var s Stamp
+	err := i.db.QueryRow(`SELECT COALESCE(hash, ''), mtime, size FROM notes WHERE path = ?`, path).Scan(&s.Hash, &s.ModTime, &s.Size)
+	if err == sql.ErrNoRows {
+		return Stamp{}, false, nil
+	}
+	if err != nil {
+		return Stamp{}, false, err
+	}
+	return s, true, nil
+}
+
+// Holds reports whether the stamp vouches for doc's content as this build
+// extracts it: then the note needs no upsert, at most a Touch.
+func (s Stamp) Holds(doc NoteDoc) bool {
+	return s.Hash != "" && s.Hash == ContentHash(doc)
+}
+
 // Touch updates the mtime and size of a note whose content is unchanged
 // (a file rewritten with the same bytes, a git checkout): recency and
 // memory_stale read mtime, so it must follow the file even when the scan
@@ -439,7 +461,7 @@ func noteKeys(p string, titles ...string) []string {
 // whose target contained the note's name, a scan whose matches grew with
 // the vault (every 001.md retried every link with 001 in it), made writing
 // thousands of notes with links that never resolve quadratic (BUG-121).
-func resolveInbound(tx *sql.Tx, notePath string, titles ...string) error {
+func resolveInbound(tx prepTx, notePath string, titles ...string) error {
 	keys := noteKeys(notePath, titles...)
 	// A note always has its path as a key, but an empty IN () would fail
 	// the whole Upsert, as an empty OR list did for p/.md (IMP-162, S4-12).
@@ -467,7 +489,7 @@ func inboundQuery(n int) string {
 // query selects (rowid, target, and target_path, empty for none) and stores
 // the result, NULL when the target reaches no note, where it differs from
 // what the link had: an unresolved link that stays so costs no write.
-func reresolveLinks(tx *sql.Tx, query string, args ...any) error {
+func reresolveLinks(tx prepTx, query string, args ...any) error {
 	rows, err := tx.Query(query, args...)
 	if err != nil {
 		return err
@@ -508,11 +530,12 @@ func (i *Index) upsertLocked(n NoteDoc, resolve bool) (int64, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
-	tx, err := i.db.Begin()
+	sqlTx, err := i.db.Begin()
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer sqlTx.Rollback()
+	tx := prepTx{sqlTx, i.stmts}
 
 	title := n.Title
 	links, tags, frontTitle, ftsBody := extractForPath(n.Path, n.Body)
@@ -599,7 +622,7 @@ func (i *Index) upsertLocked(n NoteDoc, resolve bool) (int64, error) {
 		}
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := sqlTx.Commit(); err != nil {
 		return 0, err
 	}
 	return id, nil
@@ -609,11 +632,12 @@ func (i *Index) Delete(path string) error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
-	tx, err := i.db.Begin()
+	sqlTx, err := i.db.Begin()
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer sqlTx.Rollback()
+	tx := prepTx{sqlTx, i.stmts}
 
 	var id sql.NullInt64
 	if err := tx.QueryRow(`SELECT id FROM notes WHERE path = ?`, path).Scan(&id); err != nil {
@@ -637,13 +661,13 @@ func (i *Index) Delete(path string) error {
 	if err := reresolveLinks(tx, `SELECT rowid, target, target_path FROM links WHERE target_path = ?`, path); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return sqlTx.Commit()
 }
 
 // Resolve returns the note path the index links target to, or "" when the
 // target reaches no note: the resolution of the links table.
 func (i *Index) Resolve(target string) string {
-	return resolveTarget(i.db, target)
+	return resolveTarget(prepDB{i.stmts}, target)
 }
 
 // ResolveLinksFor re-resolves outgoing links from a single note.
@@ -681,19 +705,20 @@ func (i *Index) ResolveLinksFor(noteID int64) error {
 	// ResolveAll repeat for the whole vault.
 	resolved := make([]string, len(pending))
 	for k, p := range pending {
-		resolved[k] = resolveTarget(i.db, p.target)
+		resolved[k] = resolveTarget(prepDB{i.stmts}, p.target)
 	}
-	tx, err := i.db.Begin()
+	sqlTx, err := i.db.Begin()
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer sqlTx.Rollback()
+	tx := prepTx{sqlTx, i.stmts}
 	for k, p := range pending {
 		if _, err := tx.Exec(`UPDATE links SET target_path = ? WHERE rowid = ?`, nullable(resolved[k]), p.rowid); err != nil {
 			return err
 		}
 	}
-	return tx.Commit()
+	return sqlTx.Commit()
 }
 
 // rowQuerier is what resolveTarget reads through: the database, or the

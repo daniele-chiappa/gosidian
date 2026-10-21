@@ -8,6 +8,64 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.103.0] — 2026-10-21 — "mass writes"
+
+Mass writes are several times faster: the same pipeline import of 1,634
+notes (5 documents and their 1,629 image notes) into a vault of about
+28,000 notes went from 26.8 s to 6.1-7.9 s, and the server's CPU from
+24.1 s to about 8 s. Pull the image and restart; the index builds its new
+index itself at the next start, with no re-index. One default changes:
+a pipeline step's writes are now synced to disk together when the step
+ends (`[vault] durability = "batch"`); set `always` for the behavior of
+every release before.
+
+### Added
+- **`[vault] durability`** (`GOSIDIAN_VAULT_DURABILITY`), when the vault's
+  writes reach the disk:
+  - `batch` (the default) syncs a write on its own (MCP, the web UI, the
+    API) before it returns, as before, and the notes and attachments of a
+    pipeline step with one `syncfs` for each filesystem they went to,
+    before the step counts as done. A power loss in the middle of a step
+    can lose what it wrote, and the step runs again. One fsync per note
+    was 39% of an import's time;
+  - `always` syncs every write before it returns, as every release did
+    until now;
+  - `none` never syncs.
+
+  Without `syncfs` (not Linux) `batch` syncs one by one. The log says it
+  at start (`vault durability: batch`); see
+  [`docs/configuration.md`](docs/configuration.md#durability).
+- **Go's profiler on a loopback address, `GOSIDIAN_PPROF_ADDR`**: set to
+  `127.0.0.1:6060`, it opens `/debug/pprof/` (CPU, heap, blocking and
+  mutex profiles, an execution trace) to measure a slow server where it
+  runs, under its real load, e.g.
+  `docker exec gosidian wget -qO- 'http://127.0.0.1:6060/debug/pprof/profile?seconds=30' > cpu.out`.
+  Unset, nothing opens; another host is refused, since the profiles have
+  no authentication.
+
+### Fixed
+- **Mass writes did their work twice**:
+  - the watcher indexed again every note a write through the server had
+    just saved and indexed, with the same content: a third of the
+    server's CPU during an import, and the import waited on the index
+    while the watcher held it. It now compares the note's content hash
+    with the indexed one, as the boot scan does, and only stores a new
+    mtime. Those notes are no longer re-indexed at the next start either;
+  - an attachment already there with the same bytes (an import run again,
+    an image two notes share) was written again with its fsync, a quarter
+    of an import's time. Now only its mtime is renewed, which
+    `memory_gc_attachments` reads as its age;
+  - the index parsed its write statements again at every run, a sixth of
+    the CPU: they are prepared once.
+- **A condition field = value asked every note of its scope**:
+  `memory_query`, the views, the automations and the check of a project's
+  databases at every write (`eq`, `in`) tested each note with a subquery,
+  and the index on key and value compared with case, so no condition could
+  use it. A condition `eq` or `in` now starts from the notes that have the
+  value, through a new index on key and value without case. A project's
+  databases on 20,000 notes: 4.6 ms → 0.06 ms a query; a note's write
+  through MCP on that vault: 9.1 → 6.5 ms.
+
 ## [2.102.1] — 2026-10-21 — "sort"
 
 A fix for large vaults: sorting by a frontmatter field is fast again.

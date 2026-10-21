@@ -66,7 +66,20 @@ func (v *Vault) Watch(ctx context.Context, idx *index.Index, onChange func(rel s
 			}
 			return
 		}
-		if err := idx.Upsert(toIndexNote(n)); err != nil {
+		doc := toIndexNote(n)
+		// A write through the server has indexed the note already, and its
+		// own event brings it here: indexing the same content again doubled
+		// the index work of every write, and held the index while the next
+		// write waited (IMP-185). As the boot scan, an unchanged note only
+		// gets its new mtime and size.
+		if old, ok, err := idx.StampOf(relSlash); err == nil && ok && old.Holds(doc) {
+			if old.ModTime != doc.ModTime || old.Size != doc.Size {
+				if err := idx.Touch(doc.Path, doc.ModTime, doc.Size); err != nil {
+					log.Printf("watcher touch %s: %v", relSlash, err)
+					return
+				}
+			}
+		} else if err := idx.Upsert(doc); err != nil {
 			log.Printf("watcher upsert %s: %v", relSlash, err)
 			return
 		}

@@ -62,7 +62,12 @@ CREATE TABLE IF NOT EXISTS note_fields (
     date    TEXT,
     source  TEXT NOT NULL  -- field | list | tag
 );
-CREATE INDEX IF NOT EXISTS note_fields_key ON note_fields(key, value);
+-- A field's value without case (IMP-185): a condition field = value (eq,
+-- in) starts from here, the notes that have it, instead of asking every note
+-- of the scope. It replaces note_fields_key (key, value), whose order has
+-- case: the conditions compare without it, so none could use it for value.
+CREATE INDEX IF NOT EXISTS note_fields_value_ci ON note_fields(key, value COLLATE NOCASE);
+DROP INDEX IF EXISTS note_fields_key;
 -- A note's field (BUG-135): the subqueries of a sort ask for note_id and key
 -- together. With note_id alone indexed, SQLite answered MAX(value) from
 -- note_fields_key, walking down the key's values until one was the note's:
