@@ -8,6 +8,24 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.102.1] — 2026-10-21 — "sort"
+
+A fix for large vaults: sorting by a frontmatter field is fast again.
+Pull the image and restart; the index builds the new index itself at the
+next start (under a second for a 400 MB index), with no re-index.
+
+### Fixed
+- **A sort by a frontmatter field grew with the square of the notes**:
+  `memory_query`, the views and the databases sort each note by
+  subqueries on its field, and for the one reading the value SQLite walked
+  the field's values in the index on key and value until it met the note's,
+  half the field's rows for every note. On an index of about 28,000 notes,
+  23,746 sorted by one field took 6 min 57 s, and 19,550 by another
+  3 min 38 s, with the index locked meanwhile; now 0.2 s each, in the same
+  order. A new index on note, key and value replaces the one on the note
+  alone, which it serves too. A test checks the plan of the sort's
+  subqueries.
+
 ## [2.102.0] — 2026-10-21 — "local time"
 
 What gosidian writes into notes now follows the server's time zone, set

@@ -468,3 +468,40 @@ func TestSortHits_AsQueryOnOddValues(t *testing.T) {
 		}
 	}
 }
+
+// A sort by a field asks each note for its values with subqueries on
+// note_id and key: they must use note_fields_note_key, never walk the key's
+// values in note_fields_key, which made a sort grow with the square of the
+// notes (BUG-135: 4000 notes, 3 s against 18 ms).
+func TestSortPlan_NoteKeyIndex(t *testing.T) {
+	idx := openTest(t)
+	for i := 0; i < 50; i++ {
+		upsert(t, idx, fmt.Sprintf("p/n%02d.md", i), fmt.Sprintf("n%d", i),
+			fmt.Sprintf("---\ncreated: 2026-10-%02dT10:00:00Z\npriority: %d\nstatus: open\n---\n", 1+i%28, i%5))
+	}
+	for _, k := range []SortKey{
+		{Field: "created", Desc: true},
+		{Field: "created"},
+		{Field: "status", Order: []string{"open", "done"}},
+	} {
+		order, args := sortSQL([]SortKey{k})
+		rows, err := idx.db.Query("EXPLAIN QUERY PLAN SELECT n.id FROM notes n WHERE 1=1 ORDER BY "+order+" LIMIT 50", args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var plan []string
+		for rows.Next() {
+			var id, parent, notused int
+			var detail string
+			if err := rows.Scan(&id, &parent, &notused, &detail); err != nil {
+				t.Fatal(err)
+			}
+			plan = append(plan, detail)
+		}
+		rows.Close()
+		joined := strings.Join(plan, "\n")
+		if strings.Contains(joined, "note_fields_key") || !strings.Contains(joined, "note_fields_note_key (note_id=? AND key=?)") {
+			t.Errorf("sort %+v: the plan does not look a note's field up by note and key:\n%s", k, joined)
+		}
+	}
+}

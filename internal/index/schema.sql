@@ -63,7 +63,14 @@ CREATE TABLE IF NOT EXISTS note_fields (
     source  TEXT NOT NULL  -- field | list | tag
 );
 CREATE INDEX IF NOT EXISTS note_fields_key ON note_fields(key, value);
-CREATE INDEX IF NOT EXISTS note_fields_note ON note_fields(note_id);
+-- A note's field (BUG-135): the subqueries of a sort ask for note_id and key
+-- together. With note_id alone indexed, SQLite answered MAX(value) from
+-- note_fields_key, walking down the key's values until one was the note's:
+-- half the key's rows for each note, so a sort grew with the square of the
+-- notes. Here the note's highest and lowest value is one step away, and the
+-- index serves what note_id alone did.
+CREATE INDEX IF NOT EXISTS note_fields_note_key ON note_fields(note_id, key, value);
+DROP INDEX IF EXISTS note_fields_note;
 
 -- Who created and last modified each note through gosidian (v5, IMP-127
 -- iteration 3): replayed from the audit log at every start and kept current
