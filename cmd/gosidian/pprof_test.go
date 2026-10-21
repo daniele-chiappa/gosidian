@@ -8,7 +8,7 @@ func TestLoopbackAddr(t *testing.T) {
 			t.Errorf("%s: %v, want accepted", addr, err)
 		}
 	}
-	for _, addr := range []string{":6060", "0.0.0.0:6060", "[::]:6060", "127.0.0.1:6060", "example.com:6060", "127.0.0.1"} {
+	for _, addr := range []string{":6060", "0.0.0.0:6060", "[::]:6060", "192.0.2.10:6060", "example.com:6060", "127.0.0.1"} {
 		if err := loopbackAddr(addr); err == nil {
 			t.Errorf("%s: accepted, want refused", addr)
 		}

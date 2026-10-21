@@ -8,7 +8,7 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
-## [2.103.0] — 2026-10-21 — "mass writes"
+## [2.103.1] — 2026-10-21 — "mass writes"
 
 Mass writes are several times faster: the same pipeline import of 1,634
 notes (5 documents and their 1,629 image notes) into a vault of about
@@ -17,7 +17,9 @@ notes (5 documents and their 1,629 image notes) into a vault of about
 index itself at the next start, with no re-index. One default changes:
 a pipeline step's writes are now synced to disk together when the step
 ends (`[vault] durability = "batch"`); set `always` for the behavior of
-every release before.
+every release before. The 2.103.0 tag was never released: its build
+stopped at a test whose address the public tree rewrites, and 2.103.1
+carries the same code.
 
 ### Added
 - **`[vault] durability`** (`GOSIDIAN_VAULT_DURABILITY`), when the vault's
