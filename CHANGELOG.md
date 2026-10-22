@@ -8,6 +8,38 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.104.0] — 2026-10-22 — "git at night"
+
+With git sync on, git now packs the vault's repository at night instead of
+right after a commit, and no longer looks for deltas between images. Pull
+the image and restart; nothing to migrate. One default changes: the
+maintenance runs at 03:30 in the server's time zone; set
+`[git] maintenance = "auto"` for git's own, as before.
+
+### Changed
+- **Git packs the vault at night**: left to itself, git repacked the
+  repository right after a commit, in the middle of the writes; after a
+  pipeline import of 1,634 notes into a vault full of images that kept a
+  core at 100% for about 20 s. `[git] maintenance`
+  (`GOSIDIAN_GIT_MAINTENANCE`) is a time of day, `03:30` by default in the
+  server's time zone: gosidian sets `gc.auto = 0` and
+  `maintenance.auto = false` in the repository and runs `git gc` then,
+  while no commit is running (`gitsync: maintenance done in …` in the
+  log). `auto` gives the maintenance back to git, taking back only the
+  values gosidian wrote; `off` runs none. A value that is none of these
+  stops git sync at start, as a bad branch does. On the same import the
+  commit's git CPU went from 2.5-3 s to 1.6 s, and the nightly run packed
+  a 1.1 GB repository in 7.9 s.
+- **No delta search on compressed attachments**: at start a managed block
+  of the repository's `info/attributes` puts `-delta` on png, jpg, jpeg,
+  gif, webp, pdf, zip, docx and xlsx, in any case. A delta between two
+  images saves next to nothing: on a copy of a 1.1 GB repository, 95% PNG,
+  a repack went from 21.5 to 6.4 s of CPU and the full one from 60.8 to
+  21.0 s, the pack 0.1% larger. The notes, svg, csv, json and txt keep
+  their deltas. The file is not in the vault and does not reach the
+  remote; lines outside the markers stay, for formats of your own. See
+  [`docs/configuration.md`](docs/configuration.md#git-maintenance).
+
 ## [2.103.2] — 2026-10-21 — "dependencies"
 
 An update of the web UI's build dependencies for five advisories of

@@ -511,6 +511,10 @@ type GitConfig struct {
 	Debounce    time.Duration `toml:"commit_debounce"` // default 30s
 	Push        bool          `toml:"push"`            // default false: commit locally only unless enabled
 	TokenEnv    string        `toml:"token_env"`       // env var name for push credentials
+	// Maintenance is when git packs the repository (IMP-209): a time of day
+	// HH:MM in the server's time zone (default "03:30"), "auto" for git's
+	// own after each commit, or "off".
+	Maintenance string `toml:"maintenance"`
 }
 
 // Load reads the config file from path. Missing files return defaults with no
@@ -637,6 +641,9 @@ func (c *Config) ApplyEnv() error {
 	}
 	if v := os.Getenv("GOSIDIAN_GIT_TOKEN_ENV"); v != "" {
 		c.Git.TokenEnv = v
+	}
+	if v := os.Getenv("GOSIDIAN_GIT_MAINTENANCE"); v != "" {
+		c.Git.Maintenance = v
 	}
 	if v := os.Getenv("GOSIDIAN_MCP_WRITE_PER_MINUTE"); v != "" {
 		n, err := strconv.Atoi(v)
@@ -984,6 +991,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Git.Debounce == 0 {
 		c.Git.Debounce = 30 * time.Second
+	}
+	if c.Git.Maintenance == "" {
+		c.Git.Maintenance = "03:30"
 	}
 	if c.MCP.WritePerMinute == 0 {
 		c.MCP.WritePerMinute = 60

@@ -28,6 +28,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_GIT_DEBOUNCE` | `git.commit_debounce` | `30s` |
 | `GOSIDIAN_GIT_PUSH` | `git.push` | `false` (when on, each commit is pushed, with the annotated tags of the branch the remote lacks: those of [`vault.commit`](pipelines.md#revisions-as-git-history)) |
 | `GOSIDIAN_GIT_TOKEN_ENV` | `git.token_env` | empty |
+| `GOSIDIAN_GIT_MAINTENANCE` | `git.maintenance` | `03:30` (when git packs the repository: a time of day in the server's time zone, `auto` for git's own after each commit, or `off`; see [Git maintenance](#git-maintenance)) |
 | `GOSIDIAN_MCP_WRITE_PER_MINUTE` | `mcp.write_per_minute` | `60` (writes per minute of one MCP session, rolling window; all the sessions of a token together get 5× that, IMP-141) |
 | `GOSIDIAN_MCP_MAX_NOTE_BYTES` | `mcp.max_note_bytes` | `1048576` (1 MiB) |
 | `GOSIDIAN_MCP_MAX_PLUGIN_RESULT` | `mcp.max_plugin_result` | `1048576` (1 MiB: the bytes of a plugin tool's result an agent gets; a plugin's own cap goes up with it, such as the database plugin's `limits.max_result`) |
@@ -164,6 +165,40 @@ disk, which is what a power loss cannot take back:
 The index is rebuilt from the notes, so it needs no sync of its own: the
 boot scan re-indexes what changed. The log says the setting at start:
 `vault durability: batch`.
+
+## Git maintenance
+
+With git sync on, git packs the vault's repository from time to time: it
+gathers the objects of the last commits into packs and merges small packs
+into bigger ones. Left to itself, git does it right after a commit, in the
+middle of the writes, and on a vault full of images that took a core at
+100% for about 20 seconds after an import.
+
+- **`git.maintenance`** (`GOSIDIAN_GIT_MAINTENANCE`) is a time of day,
+  `03:30` by default, in the server's time zone ([Time zone](#time-zone)).
+  gosidian turns git's own maintenance off in the repository
+  (`gc.auto = 0`, `maintenance.auto = false`) and runs `git gc` every day
+  at that time, while no commit is running. Until then the objects of the
+  day's commits stay loose, which costs some disk and nothing else. The
+  log says it at start: `gitsync: maintenance every day at 03:30
+  (Europe/Rome)`, and `gitsync: maintenance done in …` after each run.
+- **`auto`** leaves the maintenance to git, as before; gosidian takes back
+  the two settings above if it wrote them, and keeps them if they are
+  yours.
+- **`off`** turns git's maintenance off and runs none: run `git gc` in the
+  vault yourself.
+
+**No delta search on compressed formats.** At start gosidian also writes a
+managed block into the repository's `info/attributes` with `-delta` on the
+attachment formats that are already compressed: png, jpg, jpeg, gif, webp,
+pdf, zip, docx and xlsx, in any case. A delta between two images saves next
+to nothing, and looking for one made every pack cost seconds of CPU: on a
+copy of a 1.1 GB repository, 95% PNG, a repack went from 21.5 to 6.4 s of
+CPU, the full one from 60.8 to 21.0 s, the pack 0.1% larger. The notes,
+svg, csv, json and txt keep their deltas. The file is the repository's own,
+not the vault's: it is not committed and does not reach the remote. Lines
+outside the markers are kept, so you can add formats of your own (a video,
+`*.mp4 -delta`).
 
 ## Time zone
 

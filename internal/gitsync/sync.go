@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gosidian/gosidian/internal/clock"
 	"github.com/gosidian/gosidian/internal/config"
 	"github.com/gosidian/gosidian/internal/metrics"
 	"github.com/gosidian/gosidian/internal/projects"
@@ -195,6 +196,10 @@ func (s *Sync) Start(ctx context.Context) error {
 		return nil
 	}
 	err := CheckBranch(s.cfg.Branch)
+	var maint maintenance
+	if err == nil {
+		maint, err = parseMaintenance(s.cfg.Maintenance)
+	}
 	if err == nil {
 		err = s.ensureRepo()
 	}
@@ -213,6 +218,21 @@ func (s *Sync) Start(ctx context.Context) error {
 	s.status.LastErrorAt = time.Time{}
 	s.mu.Unlock()
 	statusGauge.Set(statusCodeHealthy)
+	// How git packs the images, and when (IMP-209): what fails here costs
+	// time, not commits, so it is logged and the sync goes on.
+	if err := s.refreshAttributes(); err != nil {
+		log.Printf("gitsync: info/attributes: %v", err)
+	}
+	if err := s.ensureMaintenance(maint); err != nil {
+		log.Printf("gitsync: maintenance settings: %v", err)
+	}
+	switch {
+	case maint.scheduled():
+		log.Printf("gitsync: maintenance every day at %02d:%02d (%s)", maint.hour, maint.minute, clock.Location())
+		go s.maintain(ctx, maint)
+	case maint.off:
+		log.Printf("gitsync: maintenance off")
+	}
 	go func() {
 		<-ctx.Done()
 		s.mu.Lock()
