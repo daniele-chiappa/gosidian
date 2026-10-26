@@ -414,7 +414,7 @@ it as text: `ratings: {"{{ trigger.turn }}": "{{ trigger.rating }}"}`
 | `task.verdict` | `gate`, `answer` | `close`, `status`, `merge`, `close_pr`, `redo`, `report`, `feedback` |
 | `task.pr` | `url`, `action` (`merge`, `close`) | the executor plugin's `pr` output |
 | `task.plan` | `plan` | `action`, `close`, `ask`, `wait`, `summary`, `question`, `created` |
-| `<plugin>.<node>` | what the plugin's manifest says; a setting it lists in `files` names an attachment of the project or a file of its IN folder (or a list of them, for a plugin that takes files by reference: `{{ trigger.files }}`) | the plugin tool's result, plus `files` (`name`, `path`, `mime`, `markdown`): the files it gave back, stored as attachments |
+| `<plugin>.<node>` | what the plugin's manifest says; a setting it lists in `files` names an attachment of the project or a file of its IN folder (or a list of them, for a plugin that takes files by reference: `{{ trigger.files }}`) | the plugin tool's result, plus `files` (`name`, `path`, `mime`, `markdown`): the files it gave back, stored as attachments, a text file of a type attachments do not take as `name`, `mime`, `text` ([plugins](plugins.md)) |
 
 A plugin's nodes exist once the owner accepted its manifest
 (`gosidian plugin accept`, [plugins](plugins.md)); `memory_pipelines`

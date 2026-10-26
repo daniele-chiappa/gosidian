@@ -76,10 +76,14 @@ is a cache — drop it and it rebuilds.
 
 ## Why gosidian instead of X
 
-- **vs RAG / vector search**: gosidian retrieves by *identity* (path,
-  tag, frontmatter, backlinks) — more predictable than similarity
-  search for an agent's working memory. Semantic search is
-  deliberately deferred: see [ADR-007 rationale](docs/faq.md#why-not-rag-or-vector-search).
+- **vs RAG / vector search**: gosidian retrieves the agents' memory by
+  *identity* (path, tag, frontmatter, backlinks) — more predictable
+  than similarity search for an agent's working memory. Semantic search
+  over the notes is deliberately deferred: see
+  [ADR-007 rationale](docs/faq.md#why-not-rag-or-vector-search). A RAG
+  over a project's *documents* (manuals, reports, scans) is another
+  matter, and an [experimental](#experimental-pipelines-plugins-rag-and-agents)
+  part of gosidian.
 - **vs Obsidian Sync**: Sync mirrors a vault between human devices.
   gosidian adds a typed automation surface (MCP) to the same vault.
   Not competitive — complementary.
@@ -99,11 +103,12 @@ sits and where it doesn't, as of September 2026:
 | **Obsidian MCP bridges** — [mcp-obsidian](https://github.com/MarkusPfundstein/mcp-obsidian), [obsidian-local-rest-api](https://github.com/coddingtonbear/obsidian-local-rest-api), wrappers around the Obsidian CLI | Expose a running Obsidian desktop app to agents over MCP. | Headless server: no Obsidian process needed, runs on a box or in a container, multi-user with roles, per-project visibility and grants (accounts and teams), tokens narrowed to each account, audit trail. The vault stays a plain Obsidian vault. |
 | **Markdown memory servers** — [basic-memory](https://github.com/basicmachines-co/basic-memory), [mcp-vault](https://github.com/cyt-666/mcp-vault) | Same "files, not a database" idea; usually add hybrid semantic search, a cloud tier or WebDAV sync. | Ships a full web UI, real multi-user, an agent handoff bus and a server-served working method (versioned directives, lint, stale detection). No semantic search by design ([ADR-007](docs/faq.md#why-not-rag-or-vector-search)), no hosted tier. |
 | **Client-side wiki skills** — [obsidian-wiki](https://github.com/Ar9av/obsidian-wiki) and the "LLM Wiki" pattern | Slash-commands the agent runs locally to compile and maintain a wiki. No server, no auth, no UI. | The same pattern implemented server-side and agent-agnostic: one-call scaffold, directives served at bootstrap, handoffs, audit. Complementary: those skills work against a gosidian vault too. |
-| **Agent memory services** — [mem0](https://github.com/mem0ai/mem0), [agentmemory](https://github.com/rohitg00/agentmemory), [mcp-memory-service](https://github.com/doobidoo/mcp-memory-service) | Memory as an opaque store: embeddings, recall benchmarks, auto-capture hooks. | Memory is markdown that humans read in Obsidian or the web UI; no embeddings, no LLM calls in the binary, retrieval by identity and graph. Auto-capture through Claude Code hooks (`contrib/claude-code/`: focus injected at session start, session digests at compaction and end) rather than inside the binary. No published recall numbers yet. |
+| **Agent memory services** — [mem0](https://github.com/mem0ai/mem0), [agentmemory](https://github.com/rohitg00/agentmemory), [mcp-memory-service](https://github.com/doobidoo/mcp-memory-service) | Memory as an opaque store: embeddings, recall benchmarks, auto-capture hooks. | Memory is markdown that humans read in Obsidian or the web UI, retrieved by identity and graph, with no embeddings; a language model is called only by the pipelines you turn on. Auto-capture through Claude Code hooks (`contrib/claude-code/`: focus injected at session start, session digests at compaction and end) rather than inside the binary. No published recall numbers yet. |
 | **Note apps with community MCP servers** — [SilverBullet](https://github.com/silverbulletmd/silverbullet), [Trilium](https://github.com/TriliumNext/Trilium), [SiYuan](https://github.com/siyuan-note/siyuan) | Mature editors, mobile apps, sometimes real-time collaboration; MCP added by third-party servers on top of their API. | MCP-first: the server is in the binary, behind the same login, roles and audit as the UI. No mobile app, no real-time collaboration, no WYSIWYG editor. |
 
-Honest gaps, in the order they come up: semantic / hybrid search
-(deferred, see the [FAQ](docs/faq.md#why-not-rag-or-vector-search)),
+Honest gaps, in the order they come up: semantic / hybrid search over
+the notes (deferred, see the [FAQ](docs/faq.md#why-not-rag-or-vector-search);
+documents have an experimental RAG),
 mobile sync beyond git, real-time collaboration, a hosted offering. The
 [roadmap](docs/faq.md#whats-the-roadmap) says which of these are planned.
 
@@ -160,6 +165,66 @@ mobile sync beyond git, real-time collaboration, a hosted offering. The
   agents & scaffold templates shared across projects (opt-in per
   project, local-overrides-global)
 
+## Experimental: pipelines, plugins, RAG and agents
+
+> These parts are new, **off by default**, and still changing from one
+> release to the next: their settings, node types and notes may move,
+> and [docs/upgrading.md](docs/upgrading.md) says when they do. The
+> core above (the vault, the MCP server, the web UI) does not depend on
+> them, and an install that leaves them off sees nothing of them.
+
+- **Pipelines** ([docs/pipelines.md](docs/pipelines.md)): a note
+  `type: pipeline` that the server runs when something happens — a file
+  arrives, a commit, a chat message, a call from an agent or a service,
+  the clock. Its nodes read and write notes, call a language model (any
+  OpenAI-compatible endpoint, local or remote), run a script, or wait
+  for a person's answer. One queue for all of them, with limits per
+  plugin, provider and shared resource (a GPU, say), fair among the
+  projects. Edited as text or in a visual editor. They run only once
+  `[pipelines] enabled = true` and a project turns them on.
+- **Plugins** ([docs/plugins.md](docs/plugins.md),
+  [gosidian-plugins](https://github.com/daniele-chiappa/gosidian-plugins)):
+  MCP servers beside gosidian, a container each, that add node types to
+  the pipelines and tools to the agents. A plugin runs only after the
+  owner accepts its manifest, and never sees the vault, only the files
+  a pipeline hands it. Published so far:
+  - documents: `docling` (PDF, office files, HTML to markdown), `ocr`
+    (scans, through a vision model), `images`;
+  - data: `database` (embeddings on PostgreSQL with pgvector, Qdrant or
+    SQLite), `storage` (Nextcloud, S3 or Google Drive as a source of
+    files);
+  - people: `chat` (a bot as a widget for any web page), `notify`
+    (Telegram, ntfy, email, with questions to answer);
+  - agents and code: `claude` (Claude Code) and `pi` (pi.dev) as
+    executors, `exec` (scripts in a sandbox), `preview` (a static build
+    at an address no one guesses).
+- **The IN folder** ([docs/in.md](docs/in.md)): a project's files to work
+  on, under their own names — uploaded from the web UI in resumable
+  pieces, sent by an agent, or read from a remote store — which the
+  pipelines turn into notes.
+- **RAG on a project's documents** ([docs/chat.md](docs/chat.md),
+  [docs/rag-benchmarks.md](docs/rag-benchmarks.md)): the project
+  template `rag` converts the files of the IN folder, cuts the notes into
+  paragraphs, stores them with their embeddings, and answers a question
+  from them, citing its sources; a bot (`type: chat`) asks it, on a
+  page of its own or a widget on any site. Measured with local models on
+  the eight public corpora of ViDoRe V3 (14,514 questions): search
+  NDCG@10 52.7 on paragraphs, 57% of the answers judged good, a median
+  5.5 s per answer. The agents' own memory stays retrieval by
+  identity: the RAG is for documents, not for the vault's notes.
+- **Teams of agents** ([docs/agents.md](docs/agents.md)): a note
+  `type: team` with its roles — a coordinator, writers, developers,
+  reviewers — each an agent that a pipeline runs (Claude Code or pi,
+  through their plugins), on tasks that are notes of the project.
+  gosidian gives the tasks out, checks what each agent changed against
+  its role's paths and checks, asks a person before a merge, and counts
+  the cost against a budget of the day. A
+  [pilot](bench/flotte/README.md) runs the same team again and again on
+  one objective: training plans for five people and a small web app.
+- **Compose presets** ([docs/deployment.md](docs/deployment.md#presets)):
+  `deploy/presets/` starts gosidian with the RAG chain (docling, images,
+  the database plugin on Qdrant, chat) from one `.env`.
+
 ## Documentation
 
 | Area | Start here |
@@ -168,6 +233,7 @@ mobile sync beyond git, real-time collaboration, a hosted offering. The
 | **MCP integration** | [Overview](docs/mcp/overview.md), [Tool catalogue](docs/mcp/tools.md), [Authentication](docs/mcp/authentication.md), [Client setup](docs/mcp/client-setup.md), [Agent patterns](docs/mcp/patterns.md), [Claude Code hooks](contrib/claude-code/README.md) |
 | **Web UI** | [Overview](docs/web-ui/overview.md), [Editor](docs/web-ui/editor.md), [Authentication & roles](docs/web-ui/authentication.md), [Settings](docs/web-ui/settings.md) |
 | **Vault** | [Format](docs/vault/format.md), [Conventions](docs/vault/conventions.md), [Multi-project](docs/vault/multi-project.md), [Global projects](docs/vault/global-projects.md), [Obsidian compatibility](docs/vault/obsidian-compat.md) |
+| **Experimental** | [Pipelines](docs/pipelines.md), [Plugins](docs/plugins.md), [The IN folder](docs/in.md), [Bots](docs/chat.md), [Teams of agents](docs/agents.md), [RAG benchmarks](docs/rag-benchmarks.md) |
 | **Internals** | [Architecture](docs/architecture.md), [Development](docs/development.md) |
 | **Common questions** | [FAQ](docs/faq.md) |
 

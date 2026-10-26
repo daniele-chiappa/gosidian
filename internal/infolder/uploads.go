@@ -838,7 +838,9 @@ func (s *Service) flush(u *Upload, files []UploadFile) error {
 			// A file of no bytes got no piece: its part is made here.
 			if dir, err := s.v.INStaging(u.Project, u.ID, false); err == nil {
 				if fh, err := os.OpenFile(filepath.Join(dir, partName(f.N)), os.O_WRONLY|os.O_CREATE, 0o644); err == nil {
-					fh.Close()
+					if err := fh.Close(); err != nil {
+						return fmt.Errorf("the part of the empty file %s: %w", f.Path, err)
+					}
 				}
 			}
 		}

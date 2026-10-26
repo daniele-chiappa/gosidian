@@ -75,6 +75,7 @@ func fakePlugin(t *testing.T, version *atomic.Value) *httptest.Server {
 			mcp.NewEmbeddedResource(mcp.BlobResourceContents{URI: "file:///fig-1.png", MIMEType: "image/png", Blob: base64.StdEncoding.EncodeToString(pngOf(color.White))}),
 			mcp.NewImageContent(base64.StdEncoding.EncodeToString(pngOf(color.Black)), "image/png"),
 			mcp.NewEmbeddedResource(mcp.BlobResourceContents{URI: "file:///run.sh", MIMEType: "text/x-sh", Blob: base64.StdEncoding.EncodeToString([]byte("#!/bin/sh"))}),
+			mcp.NewEmbeddedResource(mcp.BlobResourceContents{URI: "file:///core.bin", MIMEType: "application/octet-stream", Blob: base64.StdEncoding.EncodeToString([]byte{0x7f, 'E', 'L', 'F', 0})}),
 		)
 		return res, nil
 	})
@@ -381,8 +382,16 @@ func TestRegistry_AcceptRunAndChange(t *testing.T) {
 	}
 	files, _ := out["files"].([]any)
 	skipped, _ := out["skipped"].([]any)
-	if out["name"] != "doc.pdf" || out["ocr"] != true || len(files) != 2 || len(skipped) != 1 {
+	if out["name"] != "doc.pdf" || out["ocr"] != true || len(files) != 3 || len(skipped) != 1 {
 		t.Fatalf("output = %v", out)
+	}
+	// A text of a type attachments do not take comes back as text, not
+	// stored; a binary one is refused.
+	if f2 := files[2].(map[string]any); f2["name"] != "run.sh" || f2["text"] != "#!/bin/sh" || f2["mime"] != "text/x-sh" || f2["path"] != nil {
+		t.Errorf("third file = %v", f2)
+	}
+	if s0 := skipped[0].(map[string]any); s0["name"] != "core.bin" || s0["error"] == "" {
+		t.Errorf("skipped = %v", skipped)
 	}
 	f0 := files[0].(map[string]any)
 	if f0["name"] != "fig-1.png" || !strings.HasPrefix(fmt.Sprint(f0["path"]), "p/attachments/") || !strings.Contains(fmt.Sprint(f0["markdown"]), "/vault-files/p/attachments/") {

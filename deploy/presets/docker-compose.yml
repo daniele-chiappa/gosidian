@@ -14,7 +14,7 @@ name: gosidian
 
 services:
   gosidian:
-    image: ghcr.io/daniele-chiappa/gosidian:v2.118.0
+    image: ghcr.io/daniele-chiappa/gosidian:v2.118.1
     restart: unless-stopped
 
     # The image runs as uid 65532 and writes only to /vault, /data and the

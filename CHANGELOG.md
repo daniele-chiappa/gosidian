@@ -10,6 +10,57 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.118.1] — 2026-10-26 — "DOMPurify"
+
+A security update of the web UI's sanitizer, a change in how a plugin's
+text files come back, and three fixes. Pull the image and restart;
+nothing to migrate.
+
+### Security
+- **DOMPurify 3.4.17 in the web UI** (3.4.16 before), for
+  [GHSA-cg2g-xh64-v4q7](https://github.com/advisories/GHSA-cg2g-xh64-v4q7)
+  (critical, `SAFE_FOR_TEMPLATES` with a shadow root),
+  [GHSA-mrv2-3pqr-j5jr](https://github.com/advisories/GHSA-mrv2-3pqr-j5jr)
+  (high, `IN_PLACE` with a hook that removes a node) and
+  [GHSA-c6gr-qvv4-5v3f](https://github.com/advisories/GHSA-c6gr-qvv4-5v3f)
+  (low, SMIL with `PARSER_MEDIA_TYPE` XHTML). The web UI sanitizes
+  strings with two hooks and uses none of those modes; mermaid gets the
+  same version.
+
+### Changed
+- **A plugin's text files come back as text**
+  ([docs/plugins.md](docs/plugins.md)): a file of a type attachments do
+  not take, such as the `scheda.md` an agent writes, went to `skipped`
+  with `unsupported file type`. When it is UTF-8 text it now comes back
+  in `files` as `{name, mime, text}`, not stored, for a node after it to
+  write (`{{ agent.files.0.text }}` in a `note.write`), and so for an
+  agent's `write` tool. The texts of one result are at most
+  `[pipelines] max_output_bytes` together; a binary file stays in
+  `skipped`.
+
+### Fixed
+- **The `rag` compose preset left the chat plugin waiting for an owner**
+  (2.118.0): it pinned chat 0.5.0 with the manifest of chat 0.4.1, so
+  gosidian did not accept it by itself, and `smoke.py` timed out on the
+  pinned plugins. It now pins chat 0.5.0's manifest, `c74514a18afe`, and
+  takes docling 0.5.4 (Word headings deeper than level 6 become level 6),
+  manifest `5bf7c2419f1d`.
+- **An empty file's part was closed without its error** (2.118.0): the
+  part of a file of no bytes, made when an upload into IN completes, now
+  fails the placing of the files when it cannot be closed, which leaves
+  the upload open with its error (CodeQL
+  go/unhandled-writable-file-close).
+- **A git sync test failed now and then on a busy machine**: it skips
+  git's own `maintenance.lock` and the files that vanish while it walks
+  the repository.
+
+### Notes
+- The README has a section on what is experimental: pipelines, plugins,
+  the IN folder, RAG with its benchmarks, teams of agents and the compose
+  presets. The FAQ says how a project's documents differ from the
+  agents' memory.
+- `bench/flotte/results/` holds the fourth run of the fleet pilot.
+
 ## [2.118.0] — 2026-10-26 — "teams of agents"
 
 The releases from 2.105.0 to 2.118.0 in one: teams of agents that work on

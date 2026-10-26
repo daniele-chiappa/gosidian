@@ -315,7 +315,8 @@ func (s *Server) handFiles(t pluginTool, project string, args map[string]any) (s
 
 // storeToolFiles stores the files a write tool gave back as attachments of
 // the project, written as the caller, and gives the agent its result with
-// them as files ({name, path, mime, markdown}) in place of their bytes.
+// them as files ({name, path, mime, markdown}, or {name, mime, text} for a
+// text of a type attachments do not take) in place of their bytes.
 func (s *Server) storeToolFiles(ctx context.Context, project string, res *mcp.CallToolResult) *mcp.CallToolResult {
 	files, skipped := s.plugins.StoreFiles(res.Content, func(name string, data []byte) (string, error) {
 		r, err := attach.Store(s.vault, data, name, project)

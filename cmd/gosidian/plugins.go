@@ -51,7 +51,7 @@ func newPlugins(pc config.PipelinesConfig, sdir string, sec pipeline.Secrets, lo
 	if err != nil {
 		return nil, err
 	}
-	reg.SetLimits(plugins.Limits{Files: pc.MaxPluginFiles, FilesOut: pc.MaxPluginFilesOut, FilesBytes: pc.MaxPluginFilesBytes, GraphBytes: pc.MaxPluginGraphBytes})
+	reg.SetLimits(plugins.Limits{Files: pc.MaxPluginFiles, FilesOut: pc.MaxPluginFilesOut, FilesBytes: pc.MaxPluginFilesBytes, TextBytes: pc.MaxOutputBytes, GraphBytes: pc.MaxPluginGraphBytes})
 	return reg, nil
 }
 

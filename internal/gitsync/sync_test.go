@@ -530,12 +530,20 @@ func TestSync_RemoteCorruptionMessage(t *testing.T) {
 		t.Fatalf("first push: %+v", st)
 	}
 
-	// Break the remote: empty every object file it holds.
+	// Break the remote: empty every object file it holds. The push may
+	// have left git's own maintenance running on it, whose lock file
+	// (objects/maintenance.lock) can go while the walk reaches it.
 	err := filepath.WalkDir(filepath.Join(bare, "objects"), func(p string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil || d.IsDir() || strings.HasSuffix(p, ".lock") {
 			return err
 		}
 		if err := os.Chmod(p, 0o644); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
+			}
 			return err
 		}
 		return os.WriteFile(p, nil, 0o644)

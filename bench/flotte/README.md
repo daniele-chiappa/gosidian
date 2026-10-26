@@ -73,6 +73,7 @@ runs started after the objective.
 | [2026-10-25](results/claude-sonnet.md) | Claude Code, sonnet in every role | 2.9–5.1 / 7.6–7.8 | 39–39.5 of 40 | 24/24 steps, computer and phone | 10.67 USD (list prices), 95 min, 2 approvals |
 | [2026-10-25, second](results/claude-sonnet-giro2.md) | the same, on gosidian v2.116.0 | 0.75–4.15 / 7.6–7.8 | 34.5–37 of 40 | 24/24 steps, computer and phone | 10.35 USD counted + 6.2 M tokens of two failed steps, 127 min, 1 approval |
 | [2026-10-25, third](results/claude-sonnet-giro3.md) | the same, on gosidian v2.117.0 | 2.0–3.0 / 7.6–7.8 | 33–35 of 40 | 24/24 steps, computer and phone | 8.98 USD and 29.3 M tokens counted (15.6 M in failed steps, unpriced), 105 min, 2 approvals |
+| [2026-10-25, fourth](results/claude-sonnet-giro4.md) | the same, on gosidian v2.118.0 | 4.4–6.0 / 7.6–7.8 | 38–39 of 40 | 24/24 steps, computer and phone | 12.99 USD and 21.6 M tokens counted, 82 min of work (587 with a night's wait), 5 approvals; closed by the coordinator |
 
 ## The measures
 

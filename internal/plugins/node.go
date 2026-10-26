@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/mark3labs/mcp-go/mcp"
 
@@ -277,12 +279,15 @@ func (n node) fileList(env *pipeline.Env, spec NodeSpec, f string, list []any, b
 
 // StoreFiles stores the files of a tool result with store (a run's
 // attachments, or those of an agent's call): the stored ones as
-// {name, path, mime, markdown}, the refused ones as {name, error}.
+// {name, path, mime, markdown}, the refused ones as {name, error}. A
+// text file of a type attachments do not take (scheda.md, page.html)
+// is not stored: it comes back as {name, mime, text}, within the
+// Limits' TextBytes.
 func (reg *Registry) StoreFiles(content []mcp.Content, store func(name string, data []byte) (string, error)) ([]any, []any) {
 	lim := reg.Limits()
 	files, skipped := []any{}, []any{}
 	var total int64
-	images := 0
+	images, text := 0, 0
 	for _, c := range content {
 		var name, mime, b64 string
 		if r, ok := mcp.AsEmbeddedResource(c); ok {
@@ -311,6 +316,18 @@ func (reg *Registry) StoreFiles(content []mcp.Content, store func(name string, d
 			skip(fmt.Sprintf("more than %d bytes of files ([pipelines] max_plugin_files_bytes)", lim.FilesBytes))
 			continue
 		}
+		if _, _, err := attach.ValidateExt(path.Ext(name)); err != nil && isText(data) {
+			if text+len(data) > lim.TextBytes {
+				skip(fmt.Sprintf("more than %d bytes of text files ([pipelines] max_output_bytes)", lim.TextBytes))
+				continue
+			}
+			text += len(data)
+			if mime == "" {
+				mime = "text/plain"
+			}
+			files = append(files, map[string]any{"name": name, "mime": mime, "text": string(data)})
+			continue
+		}
 		rel, err := store(name, data)
 		if err != nil {
 			skip(err.Error())
@@ -320,6 +337,11 @@ func (reg *Registry) StoreFiles(content []mcp.Content, store func(name string, d
 		files = append(files, map[string]any{"name": name, "path": rel, "mime": mime, "markdown": attach.MarkdownRef(rel, name, isImage)})
 	}
 	return files, skipped
+}
+
+// isText reports whether data reads as text: UTF-8, without a NUL.
+func isText(data []byte) bool {
+	return utf8.Valid(data) && bytes.IndexByte(data, 0) < 0
 }
 
 // LinkFiles writes, in every string of a node's output, the markdown links

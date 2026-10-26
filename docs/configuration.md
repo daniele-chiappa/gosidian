@@ -75,7 +75,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_PIPELINES_MAX_WAIT` | `pipelines.max_wait` | `168h` (the longest a `wait.call` may wait) |
 | `GOSIDIAN_PIPELINES_MAX_LLM_TOKENS` | `pipelines.max_llm_tokens` | `0` (no cap on the LLM tokens of one run) |
 | `GOSIDIAN_PIPELINES_MAX_INPUT_BYTES` | `pipelines.max_input_bytes` | `262144` (the bytes of a run's input) |
-| `GOSIDIAN_PIPELINES_MAX_OUTPUT_BYTES` | `pipelines.max_output_bytes` | `1048576` (the bytes of a step's output; raise it for steps that keep many results, and a plugin's own cap with it, such as the database plugin's `limits.max_result`) |
+| `GOSIDIAN_PIPELINES_MAX_OUTPUT_BYTES` | `pipelines.max_output_bytes` | `1048576` (the bytes of a step's output, and of the text files one result of a plugin gives back in place of attachments; raise it for steps that keep many results, and a plugin's own cap with it, such as the database plugin's `limits.max_result`) |
 | `GOSIDIAN_PIPELINES_MAX_RUN_DEPTH` | `pipelines.max_run_depth` | `4` (how many runs may start each other in a chain through `pipeline.run`: a pipeline that starts itself stops there) |
 | `GOSIDIAN_PIPELINES_MAX_RUN_CHILDREN` | `pipelines.max_run_children` | `1000` (how many runs one run may start through `pipeline.run`, in an `each` too) |
 | `GOSIDIAN_PIPELINES_MAX_LIST_ITEMS` | `pipelines.max_list_items` | `5000` (what a node lists or is asked for in one call: a page of `note.list`, the `only` of `note.sections`) |

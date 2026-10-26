@@ -49,19 +49,19 @@ services:
       # .env, so it waits for plugin accept --pending.
       GOSIDIAN_PLUGIN_DOCLING_URL: http://docling:8000/mcp
       GOSIDIAN_PLUGIN_DOCLING_TOKEN: ${DOCLING_TOKEN:?run ./init.sh first}
-      GOSIDIAN_PLUGIN_DOCLING_ACCEPT: ffb9eb2a84b7
+      GOSIDIAN_PLUGIN_DOCLING_ACCEPT: 5bf7c2419f1d
       GOSIDIAN_PLUGIN_IMAGES_URL: http://images:8000/mcp
       GOSIDIAN_PLUGIN_IMAGES_TOKEN: ${IMAGES_TOKEN:?run ./init.sh first}
       GOSIDIAN_PLUGIN_IMAGES_ACCEPT: e1a034f2a848
       GOSIDIAN_PLUGIN_CHAT_URL: http://chat:8000/mcp
       GOSIDIAN_PLUGIN_CHAT_TOKEN: ${CHAT_TOKEN:?run ./init.sh first}
-      GOSIDIAN_PLUGIN_CHAT_ACCEPT: 0730908a36ef
+      GOSIDIAN_PLUGIN_CHAT_ACCEPT: c74514a18afe
       GOSIDIAN_PLUGIN_DATABASE_URL: http://database:8000/mcp
       GOSIDIAN_PLUGIN_DATABASE_TOKEN: ${DATABASE_TOKEN:?run ./init.sh first}
 
   # Documents to markdown, with their pictures.
   docling:
-    image: ghcr.io/daniele-chiappa/gosidian-docling:0.5.3
+    image: ghcr.io/daniele-chiappa/gosidian-docling:0.5.4
     restart: unless-stopped
     read_only: true
     tmpfs:

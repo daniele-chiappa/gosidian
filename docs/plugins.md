@@ -170,7 +170,13 @@ When a pipeline runs `docling.convert`, gosidian:
    gains `files`: `[{name, path, mime, markdown}]`, and `skipped` for the
    files it refused (an extension attachments do not take, more than 200
    files, more than 100 MiB together). These files start no ingest
-   pipeline;
+   pipeline. A text file of a type attachments do not take (`scheda.md`,
+   `page.html`, `out.yaml`: UTF-8, without a NUL) is not stored: it comes
+   back in `files` as `{name, mime, text}`, and a node after it writes it
+   where it belongs (`{{ agent.files.0.text }}` in a `note.write`). The
+   texts of one result are at most `[pipelines] max_output_bytes`
+   together, as a node's output; a binary file of such a type stays in
+   `skipped`;
 5. writes, in every string of the output, a markdown link to one of those
    files by its name (`![caption](fig-1.png)`, also with a title or in
    `<…>`) as gosidian links an attachment
@@ -453,7 +459,8 @@ back (embedded resources with a blob, as a node's) become attachments of
 the project, written as the agent (`upload_attachment` in the audit), and
 the agent gets the plugin's result with them as `files`
 (`[{name, path, mime, markdown}]`, the links to them by name rewritten as
-for a node) in place of their bytes; `skipped` lists those refused. A
+for a node) in place of their bytes, a text of a type attachments do not
+take as `{name, mime, text}`; `skipped` lists those refused. A
 `read` tool's result comes back as the plugin gave it.
 
 `memory_pipelines` lists each plugin's tools and the projects they are

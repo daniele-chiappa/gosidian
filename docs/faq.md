@@ -42,6 +42,15 @@ only when specific triggers hit (>10k notes, tagging discipline
 consistently breaks, fuzzy human browsing becomes the primary use
 case) — not before.
 
+This is about the agents' memory, the notes they write. A project's
+*documents* (manuals, reports, scans) are another matter: there the
+question comes first and the text was written by someone else, so the
+experimental [pipelines](pipelines.md) can convert them, store their
+paragraphs with embeddings through the database plugin, and answer
+questions citing them ([Bots](chat.md),
+[RAG benchmarks](rag-benchmarks.md)). The notes keep their retrieval by
+identity.
+
 ## Why Go?
 
 - **Single binary**. No virtualenv, no node_modules, no runtime.

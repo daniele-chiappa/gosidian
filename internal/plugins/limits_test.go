@@ -2,9 +2,12 @@ package plugins
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -67,5 +70,53 @@ func TestRegistry_Limits(t *testing.T) {
 	}
 	if n := cfg.MaxConcurrent("ocr"); n != 3 {
 		t.Errorf("the config's limit: %d", n)
+	}
+}
+
+// TestStoreFiles_Text: a text file of a type attachments do not take
+// comes back as its text, within the text cap, without being stored; a
+// stored file and a binary one go to the store as before.
+func TestStoreFiles_Text(t *testing.T) {
+	reg, err := New(nil, t.TempDir(), nil, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.SetLimits(Limits{TextBytes: 15})
+	blob := func(name, mime string, data []byte) mcp.Content {
+		return mcp.NewEmbeddedResource(mcp.BlobResourceContents{URI: "file:///" + name, MIMEType: mime, Blob: base64.StdEncoding.EncodeToString(data)})
+	}
+	var stored []string
+	files, skipped := reg.StoreFiles([]mcp.Content{
+		blob("scheda.md", "text/markdown", []byte("# Scheda\n")),
+		blob("notes.txt", "text/plain", []byte("stored")),
+		blob("page.html", "", []byte("<p>a</p>")),
+		blob("out.yaml", "", []byte("a: 1\n")),
+		blob("core", "", []byte{'E', 0, 'F'}),
+	}, func(name string, data []byte) (string, error) {
+		if !strings.HasSuffix(name, ".txt") {
+			return "", errors.New("unsupported file type")
+		}
+		stored = append(stored, name)
+		return "p/attachments/" + name, nil
+	})
+	if len(files) != 3 || len(skipped) != 2 || !slices.Equal(stored, []string{"notes.txt"}) {
+		t.Fatalf("files %v, skipped %v, stored %v", files, skipped, stored)
+	}
+	if f := files[0].(map[string]any); f["name"] != "scheda.md" || f["text"] != "# Scheda\n" || f["mime"] != "text/markdown" || f["path"] != nil {
+		t.Errorf("the markdown = %v", f)
+	}
+	if f := files[1].(map[string]any); f["name"] != "notes.txt" || f["path"] != "p/attachments/notes.txt" || f["text"] != nil {
+		t.Errorf("the stored one = %v", f)
+	}
+	if f := files[2].(map[string]any); f["name"] != "out.yaml" || f["text"] != "a: 1\n" || f["mime"] != "text/plain" {
+		t.Errorf("the yaml = %v", f)
+	}
+	// page.html would take the text past 15 bytes, out.yaml fits after
+	// it; core is no text.
+	if s := skipped[0].(map[string]any); s["name"] != "page.html" || !strings.Contains(s["error"].(string), "max_output_bytes") {
+		t.Errorf("first skipped = %v", s)
+	}
+	if s := skipped[1].(map[string]any); s["name"] != "core" || s["error"] != "unsupported file type" {
+		t.Errorf("second skipped = %v", s)
 	}
 }

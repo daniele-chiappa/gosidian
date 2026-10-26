@@ -150,16 +150,18 @@ func (r *Registry) SetRunScopes(s RunScopes) { r.scopes = s }
 
 // Limits are the caps of what goes to and comes from a plugin: the files
 // a call names (a node's setting, an agent's tool), the files a result
-// gives back and their bytes, and a graph's bytes.
+// gives back and their bytes, the bytes of those that come back as text
+// (a step's output), and a graph's bytes.
 type Limits struct {
 	Files      int
 	FilesOut   int
 	FilesBytes int64
+	TextBytes  int
 	GraphBytes int
 }
 
 // DefaultLimits are the caps the config does not change.
-var DefaultLimits = Limits{Files: 100, FilesOut: 200, FilesBytes: 100 << 20, GraphBytes: 8 << 20}
+var DefaultLimits = Limits{Files: 100, FilesOut: 200, FilesBytes: 100 << 20, TextBytes: 1 << 20, GraphBytes: 8 << 20}
 
 // SetLimits sets the caps ([pipelines] max_plugin_files…); a cap of 0
 // keeps its default. Call it before the registry serves.
@@ -173,6 +175,9 @@ func (r *Registry) SetLimits(l Limits) {
 	}
 	if l.FilesBytes <= 0 {
 		l.FilesBytes = d.FilesBytes
+	}
+	if l.TextBytes <= 0 {
+		l.TextBytes = d.TextBytes
 	}
 	if l.GraphBytes <= 0 {
 		l.GraphBytes = d.GraphBytes
@@ -393,10 +398,11 @@ func withFiles(out json.RawMessage) json.RawMessage {
 		o["properties"] = props
 	}
 	if _, has := props["files"]; !has {
-		props["files"] = map[string]any{"type": "array", "description": "The files it gave back, stored as attachments",
+		props["files"] = map[string]any{"type": "array", "description": "The files it gave back, stored as attachments; a text file of a type attachments do not take comes back in text",
 			"items": map[string]any{"type": "object", "properties": map[string]any{
 				"name": map[string]any{"type": "string"}, "path": map[string]any{"type": "string"},
-				"mime": map[string]any{"type": "string"}, "markdown": map[string]any{"type": "string"}}}}
+				"mime": map[string]any{"type": "string"}, "markdown": map[string]any{"type": "string"},
+				"text": map[string]any{"type": "string"}}}}
 	}
 	b, err := json.Marshal(o)
 	if err != nil {
