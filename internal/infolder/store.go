@@ -140,6 +140,10 @@ CREATE TABLE IF NOT EXISTS sources (
 // added since, each with what makes it.
 var migrations = []struct{ table, column, ddl string }{
 	{"files", "etag", `ALTER TABLE files ADD COLUMN etag TEXT NOT NULL DEFAULT ''`},
+	// The ticket of an upload opened through MCP (IMP-172 phase 5b): its
+	// SHA-256, and the token that minted it.
+	{"uploads", "ticket_hash", `ALTER TABLE uploads ADD COLUMN ticket_hash TEXT NOT NULL DEFAULT ''`},
+	{"uploads", "ticket_token", `ALTER TABLE uploads ADD COLUMN ticket_token TEXT NOT NULL DEFAULT ''`},
 }
 
 func migrate(db *sql.DB) error {
@@ -171,7 +175,7 @@ func OpenStore(p string) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
+	if _, err := db.Exec(schema + uploadSchema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("in.db: schema: %w", err)
 	}
@@ -607,10 +611,13 @@ func (s *Store) ProjectRenamed(from, to string) error {
 	if _, err := tx.Exec(`UPDATE sources SET project = ? WHERE project = ?`, to, from); err != nil {
 		return err
 	}
+	if err := uploadProjectRenamed(tx, from, to); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
-// ProjectRemoved forgets a project's files, batches and sources.
+// ProjectRemoved forgets a project's files, batches, sources and uploads.
 func (s *Store) ProjectRemoved(project string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -619,7 +626,7 @@ func (s *Store) ProjectRemoved(project string) error {
 			return err
 		}
 	}
-	return nil
+	return s.uploadProjectRemoved(project)
 }
 
 // Batch returns a batch.

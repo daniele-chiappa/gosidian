@@ -1,0 +1,43 @@
+# The first team of the pilot: Claude Code with sonnet in every role. The
+# block goes as it is into fitness/squadra.md; the roles' prompts are in
+# ../ruoli/. Another team changes only this file: the models, the
+# executors (pi.run), the limits.
+coordinator: coordinatore
+split: context
+budget: {day_usd: 40, task_usd: 3}
+max_agents: 2
+max_rounds: 5
+alert: ["#lab/fitness"]
+approvers: [daniele]
+roles:
+  coordinatore:
+    agent: "[[fitness/agents/coordinatore]]"
+    run: claude.run
+    model: sonnet
+    max_turns: 30
+    delegates_to: [conoscenza, sviluppo, revisore]
+  conoscenza:
+    agent: "[[fitness/agents/conoscenza]]"
+    run: claude.run
+    model: sonnet
+    max_turns: 40
+    max_seconds: 780
+    writes: [fitness/conoscenza]
+  sviluppo:
+    agent: "[[fitness/agents/sviluppo]]"
+    run: claude.run
+    model: sonnet
+    max_turns: 40
+    max_seconds: 780
+    repo: agents-fitness
+    paths: [web/, data/, test/]
+    forbid: [package.json, build.js]
+    checks: npm test && npm run build
+    preview: dist
+    approve: merge
+  revisore:
+    agent: "[[fitness/agents/revisore]]"
+    run: claude.run
+    model: sonnet
+    max_turns: 30
+    max_seconds: 780

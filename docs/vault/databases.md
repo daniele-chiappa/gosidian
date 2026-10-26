@@ -10,6 +10,33 @@ frontmatter, and `memory_query` answers the question in one call.
 Nothing needs switching on. A project without database notes works
 exactly as before.
 
+## When a collection becomes a database
+
+Notes or sections of one kind that keep coming, with a state or fields you
+filter, sort or count, or links between them you want to follow, make a
+database: a backlog, plans linked to it, inventories (stacks, hosts, proxy
+hosts, certificates, domains), deadlines. A chronology (`log.md`),
+decisions written as sections, gotchas, `hot.md` and the architecture stay
+text. A few rules keep a database honest:
+
+- **One fact in one place**: a field, a tag or the body. When a note has a
+  `status` field, a `status:*` tag only mirrors it; lint
+  (`field-tag-mismatch`) reports the two drifting apart.
+- **No counts written into rows**: a [view](views.md) with `as: count` or
+  a [rollup](#rollups) computes them.
+- **Data copied from a system** (containers, ports, certificates) gets a
+  `checked` date, and a view of what is due a new look
+  (`checked < today-90d`).
+- **`due` only for a real deadline**, such as a certificate's expiry.
+- **Open decisions** found along the way become rows of the backlog.
+- **Reserved names** are not fields: see [Field types](#field-types).
+
+The agents get these rules in the directives (`memory_bootstrap`, from
+directives v26). With [global projects](global-projects.md) on, gosidian
+also seeds the skill `global/skills/design-project-databases`, the whole
+procedure: inventory, criterion, schema, relations, views, rows (a
+backlog written as sections included) and checks.
+
 ## The database note
 
 A database note is a note with `type: database`. Its frontmatter names
@@ -95,6 +122,13 @@ the values given and the project's tag, over a heading.
 any row without being declared. A field named `id` must match the note's
 file name, which keeps links to a row short and stable
 (`[[myproject/docs/improvements/IMP-127]]`).
+
+Some names already mean something, so a field should not take them:
+`path`, `name`, `modified` and `links` are computed from the note by views
+and queries (a field of that name is never read there), and `created_by`,
+`modified_by`, `created_at` and `modified_at` come from the audit, which a
+field of that name hides. A folder of the filesystem is better named
+`folder` or `dir`. Lint and the write that declares one warn about it.
 
 ### Relations
 
@@ -258,17 +292,30 @@ automations:
   parse, a `due` that is not a date field, a `where` that does not
   compute and a `snapshot` note that does not exist. The engine skips such
   a rule and keeps the others.
-- **Run**: every 5 minutes (`automations.interval`), with the days and
-  times in `automations.timezone`, by default the server's `TZ`
-  ([configuration](../configuration.md#time-zone)). What they did is kept in
-  `automations.json` in the state directory.
+- **Run**: every 5 minutes (`automations.interval`) the rules are read,
+  with the days and times in `automations.timezone`, by default the
+  server's `TZ` ([configuration](../configuration.md#time-zone)). The
+  handoff or snapshot a rule fires runs on the server's job runner, the
+  same as the [pipelines](../pipelines.md)' runs, whether the pipelines
+  are on or off: a run of its own, kind `automation`, in
+  `<state-dir>/jobs.db`, tried three times (30 s, then 1 min apart) and
+  taken up again after a restart. While it is queued the rule does not
+  fire it again; one that fails leaves its error on the rule and fires
+  again at the next tick. What the rules did is kept in `automations.json`
+  in the state directory, each action with the id of its run (`job`).
+  `run: true` waits up to 15 s for the actions it queued and says what
+  they wrote.
 
 ## What checks the rows
 
 - **Lint** — the `database-field-invalid` rule (on by default, warning)
   reports a row with an undeclared field, a missing required one, a value
-  of the wrong type or an `id` that differs from the file name, and a
-  database note whose schema does not parse.
+  of the wrong type or an `id` that differs from the file name, a
+  database note whose schema does not parse, and a field declared with a
+  [reserved name](#field-types). `field-tag-mismatch` (on by default,
+  warning) reports a row whose tag `field:value` disagrees with its select
+  field of that name, as it does a note whose `status:*` tag disagrees
+  with its `status` field.
 - **Writes** — `memory_create`, `memory_update`, `memory_edit`,
   `memory_append` and `memory_ingest` add a note to their result
   (`notices`) when the note just written breaks its schema, naming the

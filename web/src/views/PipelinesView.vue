@@ -5,7 +5,9 @@
  * pipeline, resumes a run that waits (wait.call) and cancels one. The
  * window follows the runs live through the `job` event topic. It also
  * lists the plugins whose nodes the pipelines use (IMP-168), read-only:
- * the owner accepts a plugin's manifest on the server.
+ * the owner accepts a plugin's manifest on the server. The queue (IMP-196)
+ * shows what waits for which plugin, model or shared resource, and a queued
+ * step why it waits.
  */
 import { computed, inject, onBeforeUnmount, onMounted, ref, defineAsyncComponent } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -13,6 +15,7 @@ import { useWindowsStore, type OpenSpec } from 'plancia'
 import { ChevronRight, Play, RefreshCw, RotateCcw, Square } from 'lucide-vue-next'
 import {
   cancelRun,
+  getQueue,
   getRun,
   listPipelines,
   listPlugins,
@@ -25,6 +28,7 @@ import {
   type PipelineInfo,
   type PluginInfo,
   type PluginStatus,
+  type QueueView,
   type RunBrief,
   type RunStatus,
   type StepView,
@@ -54,6 +58,7 @@ const sse = useSSE()
 
 const pipelines = ref<PipelineInfo[]>([])
 const plugins = ref<PluginInfo[]>([])
+const queue = ref<QueueView | null>(null)
 const runs = ref<RunBrief[]>([])
 const loading = ref(false)
 const loaded = ref(false)
@@ -79,15 +84,18 @@ async function load() {
   loading.value = true
   error.value = null
   try {
-    const [ps, rs, pl] = await Promise.all([
+    const [ps, rs, pl, q] = await Promise.all([
       listPipelines(),
       listRuns({ project: project.value, status: status.value, limit: 100 }),
-      // The list of plugins is a help: without it the window still works.
+      // The list of plugins and the queue are a help: without them the
+      // window still works.
       listPlugins().catch(() => [] as PluginInfo[]),
+      getQueue(project.value).catch(() => null),
     ])
     pipelines.value = ps
     runs.value = rs
     plugins.value = pl
+    queue.value = q
     loaded.value = true
     if (openRun.value) await loadSteps(openRun.value)
   } catch (e) {
@@ -232,6 +240,50 @@ function acceptCommand(p: PluginInfo): string {
   return `gosidian plugin accept ${p.name} ${p.sha ?? '<sha>'}`
 }
 
+/** The queue is worth showing: something waits or runs. */
+const queueShown = computed(() => {
+  const q = queue.value
+  return !!q && (q.queued > 0 || q.later > 0 || q.running > 0 || q.resources.some((r) => r.running > 0))
+})
+
+/** A resource as the window names it: plugin ocr, model default,
+ *  resource gpu, team fitness/squadra, the agents of every team. */
+function resourceLabel(r: string): string {
+  if (r === 'agents') return t('runs.resource.agents')
+  const [kind, ...rest] = r.split(':')
+  const name = rest.join(':')
+  if (kind === 'plugin' || kind === 'llm' || kind === 'res' || kind === 'cat' || kind === 'team') return t(`runs.resource.${kind}`, { name })
+  return r
+}
+
+/** A category worth naming beside its pipeline: one it names, not those
+ *  a pipeline is in by default. */
+function namedCategory(p: PipelineInfo): string {
+  const c = p.category ?? ''
+  return c === 'default' || (c === 'chat' && p.trigger === 'chat') ? '' : c
+}
+
+/** A wait in seconds as 45 s, 12 min, 3 h 5 min. */
+function waitText(s: number): string {
+  const n = Math.round(s)
+  if (n < 60) return `${n} s`
+  if (n < 3600) return `${Math.round(n / 60)} min`
+  const h = Math.floor(n / 3600)
+  const m = Math.round((n % 3600) / 60)
+  return m ? `${h} h ${m} min` : `${h} h`
+}
+
+/** Why a queued step waits, in words. */
+function waitReason(s: StepView): string {
+  const q = s.queue
+  if (!q) return ''
+  if (s.not_before && Date.parse(s.not_before) > Date.now()) return t('runs.queue_retry')
+  if (q.blocked_by) {
+    return t('runs.queue_blocked', { resource: resourceLabel(q.blocked_by), running: q.running ?? 0, limit: q.limit ?? 0 })
+  }
+  return t('runs.queue_ahead', { n: q.ahead }, q.ahead)
+}
+
 /** A step's output as text: JSON indented, a cut output as it came. */
 function outputText(s: StepView): string {
   if (s.output === undefined || s.output === null) return ''
@@ -311,6 +363,11 @@ onMounted(() => {
           >{{ p.path }}</button>
           <span v-if="p.trigger" class="text-xs px-1.5 rounded border border-border text-text-muted">{{ p.trigger }}</span>
           <span
+            v-if="namedCategory(p)"
+            class="text-xs px-1.5 rounded border border-border text-text-muted"
+            data-pipeline-category
+          >{{ t('runs.resource.cat', { name: namedCategory(p) }) }}</span>
+          <span
             v-if="p.last_run"
             class="text-xs px-1.5 rounded"
             :class="STATUS_CLASS[p.last_run.status]"
@@ -335,6 +392,9 @@ onMounted(() => {
             {{ p.nodes.join(' → ') }}
           </p>
           <p v-if="!p.problem && p.notice" class="basis-full text-xs text-warning">{{ t('runs.commit_off') }}</p>
+          <p v-if="!p.problem && namedCategory(p) && !p.category_rules" class="basis-full text-xs text-warning" data-category-no-rules>
+            {{ t('runs.category_no_rules', { name: namedCategory(p) }) }}
+          </p>
         </li>
       </ul>
 
@@ -368,6 +428,31 @@ onMounted(() => {
         </ul>
       </template>
 
+      <template v-if="queueShown && queue">
+        <h2 class="text-sm font-semibold mb-1">{{ t('runs.queue') }}</h2>
+        <p class="text-xs text-text-muted mb-2" data-queue-total>
+          {{ t('runs.queue_total', { queued: queue.queued, running: queue.running, workers: queue.workers }, queue.queued) }}
+          <template v-if="queue.later"> · {{ t('runs.queue_later', { n: queue.later }, queue.later) }}</template>
+          <template v-if="queue.queued"> · {{ t('runs.queue_oldest', { wait: waitText(queue.oldest_wait_seconds) }) }}</template>
+        </p>
+        <ul v-if="queue.resources.length" class="space-y-1 mb-8 text-sm" data-queue>
+          <li
+            v-for="r in queue.resources"
+            :key="r.resource"
+            class="rounded border border-border bg-surface px-4 py-2 flex items-center gap-3 flex-wrap"
+          >
+            <span class="font-mono">{{ resourceLabel(r.resource) }}</span>
+            <span class="flex-1" />
+            <span class="text-xs" :class="r.limit && r.running >= r.limit ? 'text-warning' : 'text-text-muted'">
+              {{ r.limit ? t('runs.queue_places', { running: r.running, limit: r.limit }) : t('runs.queue_places_free', { running: r.running }) }}
+            </span>
+            <span class="text-xs text-text-muted">{{ t('runs.queue_queued', { n: r.queued }, r.queued) }}</span>
+            <span v-if="r.queued" class="text-xs text-text-muted">{{ t('runs.queue_oldest', { wait: waitText(r.oldest_wait_seconds) }) }}</span>
+          </li>
+        </ul>
+        <div v-else class="mb-8" />
+      </template>
+
       <h2 class="text-sm font-semibold mb-2">{{ t('runs.runs') }}</h2>
       <p v-if="!runs.length" class="text-sm text-text-muted">{{ t('runs.no_runs') }}</p>
       <ul v-else class="space-y-2" data-runs>
@@ -383,6 +468,7 @@ onMounted(() => {
               <span class="font-mono truncate">{{ base(r.pipeline) }}</span>
             </button>
             <span class="text-xs px-1.5 rounded" :class="STATUS_CLASS[r.status]">{{ t(`runs.state.${r.status}`) }}</span>
+            <span v-if="r.low" class="text-xs text-text-muted" data-run-low>{{ t('runs.low') }}</span>
             <span class="text-xs text-text-muted truncate">{{ t('runs.by', { trigger: r.trigger, actor: r.actor || '—' }) }}</span>
             <span class="flex-1" />
             <DateTime class="text-xs text-text-muted whitespace-nowrap" :value="r.created" />
@@ -419,6 +505,7 @@ onMounted(() => {
                 <span v-if="s.wait_until && s.status === 'waiting'" class="text-text-muted">
                   {{ t('runs.waits_until') }} <DateTime :value="s.wait_until" />
                 </span>
+                <span v-if="s.status === 'queued' && s.queue" class="text-text-muted" data-step-queue>{{ waitReason(s) }}</span>
               </div>
               <p v-if="s.error" class="text-danger break-words mt-0.5">{{ s.error }}</p>
               <pre

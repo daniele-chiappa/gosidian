@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -36,7 +37,9 @@ type Config struct {
 	OAuth        OAuthConfig        `toml:"oauth"`
 	Uploads      UploadsConfig      `toml:"uploads"`
 	Pipelines    PipelinesConfig    `toml:"pipelines"`
+	Agents       AgentsConfig       `toml:"agents"`
 	Web          WebConfig          `toml:"web"`
+	IN           INConfig           `toml:"in"`
 
 	// totpWarning says why the configured TOTP mode was read otherwise
 	// (TOTPModeOf); "" when it was read as written.
@@ -72,6 +75,43 @@ type UploadsConfig struct {
 	QuotaBytes int64 `toml:"quota_bytes"`
 	// QuotaWindow is the sliding window of the quota; default 24h.
 	QuotaWindow time.Duration `toml:"quota_window"`
+}
+
+// INConfig is the upload into the IN folders (IMP-172 phase 5): the free
+// disk it leaves, the caps of the zips it unpacks, and the caps of what
+// each way in takes. A cap of 0 is no cap.
+type INConfig struct {
+	// ReserveBytes is the free disk an upload leaves on the IN folders'
+	// filesystem: below it a session is refused, and so is a piece or a
+	// zip's next file. Default 5 GiB; 0 turns it off.
+	ReserveBytes int64 `toml:"reserve_bytes"`
+	// MaxINBytes caps the bytes of the files on the disk of a project's IN
+	// folder, what an upload brings included. Default 0: no cap.
+	MaxINBytes int64 `toml:"max_in_bytes"`
+	// SessionTTL is how long an upload waits for its next piece: then it
+	// is dropped, with what arrived. Default 24h.
+	SessionTTL time.Duration `toml:"session_ttl"`
+	// ZipMaxEntries, ZipMaxBytes and ZipMaxRatio cap a zip the server
+	// unpacks: its files, their bytes, and their bytes over the zip's.
+	// Defaults 100000, 0 (the reserve holds) and 200.
+	ZipMaxEntries int   `toml:"zip_max_entries"`
+	ZipMaxBytes   int64 `toml:"zip_max_bytes"`
+	ZipMaxRatio   int   `toml:"zip_max_ratio"`
+	// Web caps the uploads of the web UI and of the REST API.
+	Web INChannelConfig `toml:"web"`
+	// MCP caps those of the agents, through memory_in_upload.
+	MCP INChannelConfig `toml:"mcp"`
+}
+
+// INChannelConfig caps the uploads of one way into the IN folders.
+type INChannelConfig struct {
+	// MaxFileBytes caps a file, a zip before it is unpacked.
+	MaxFileBytes int64 `toml:"max_file_bytes"`
+	// MaxUploadBytes caps the files of one upload together.
+	MaxUploadBytes int64 `toml:"max_upload_bytes"`
+	// Extensions, when set, are the only kinds of file taken (pdf, xml),
+	// in a zip too; a zip to unpack is taken whatever they say.
+	Extensions []string `toml:"extensions"`
 }
 
 // OAuthConfig enables the embedded OAuth 2.1 authorization server that lets
@@ -410,6 +450,66 @@ type PipelinesConfig struct {
 	// Plugins lists the plugins, MCP servers whose nodes the pipelines
 	// use ([[pipelines.plugins]], IMP-168, docs/plugins.md).
 	Plugins []PluginConfig `toml:"plugins"`
+	// Resources are the resources several plugins or providers share,
+	// each with the calls it bears at once ([[pipelines.resources]],
+	// IMP-196): one GPU behind an OCR plugin and a model server.
+	// GOSIDIAN_PIPELINES_RESOURCES ("gpu=1,net=4") sets them.
+	Resources []ResourceConfig `toml:"resources"`
+	// Categories are the rules of the categories of pipelines
+	// ([[pipelines.categories]], IMP-196): a pipeline names its own with
+	// category:, default without, chat on the chat trigger.
+	Categories []CategoryConfig `toml:"categories"`
+	// Fair takes the steps of a priority in turn among the projects, the
+	// one with the fewest running first (IMP-196); default on.
+	Fair *bool `toml:"fair"`
+}
+
+// AgentsConfig is the work of the agent teams on the tasks of the
+// projects (IMP-195): the agents at work at once, the lease of a task an
+// outside agent takes, the attempts of a task, the sub-tasks of an
+// objective.
+type AgentsConfig struct {
+	// MaxRunning caps the agents of all the teams at work at once; 0 (the
+	// default): no cap.
+	MaxRunning int `toml:"max_running"`
+	// Lease is how long a task an outside agent takes stays its own, each
+	// heartbeat renewing it; default 15m, from 1m to 24h.
+	Lease time.Duration `toml:"lease"`
+	// MaxAttempts is the attempts after which a task goes failed; default
+	// 3, from 1 to 20.
+	MaxAttempts int `toml:"max_attempts"`
+	// MaxTasks is the most sub-tasks an objective may have; default 50,
+	// from 1 to 1000.
+	MaxTasks int `toml:"max_tasks"`
+}
+
+// CategoryConfig is the rules of a category of pipelines.
+type CategoryConfig struct {
+	Name string `toml:"name"`
+	// MaxRunning is its steps running at once; 0: no limit.
+	MaxRunning int `toml:"max_running"`
+	// MaxRuns is its runs not ended: beyond, a start from outside answers
+	// 429; 0: no limit.
+	MaxRuns int `toml:"max_runs"`
+	// Replace cancels the queued runs of the same pipeline with the same
+	// input when one starts.
+	Replace bool `toml:"replace"`
+	// Priority is interactive, normal (default) or low.
+	Priority string `toml:"priority"`
+	// Wait is how long a start that says nothing waits for its run.
+	Wait time.Duration `toml:"wait"`
+	// Projects are the projects whose pipelines may name it; none: all.
+	Projects []string `toml:"projects"`
+}
+
+// FairOn says whether the fair claim is on: [pipelines] fair, default on.
+func (pc PipelinesConfig) FairOn() bool { return pc.Fair == nil || *pc.Fair }
+
+// ResourceConfig is a shared resource and its calls at once (0: no
+// limit).
+type ResourceConfig struct {
+	Name string `toml:"name"`
+	Max  int    `toml:"max"`
 }
 
 // PluginConfig registers a plugin: an MCP server reached over Streamable
@@ -421,6 +521,15 @@ type PluginConfig struct {
 	// TokenSecret names the secret with the plugin's bearer token
 	// (gosidian secret set); empty for a plugin without one.
 	TokenSecret string `toml:"token_secret"`
+	// TokenEnv names the environment variable with the token instead, for
+	// an install configured from a .env (IMP-199). GOSIDIAN_PLUGIN_<NAME>_TOKEN
+	// sets it for any plugin.
+	TokenEnv string `toml:"token_env"`
+	// AcceptSHA is the manifest the installer expects (at least its first
+	// 8 hex characters): served by the plugin and not accepted yet, it is
+	// accepted at the next check, by "preset"; another one waits for an
+	// owner as before. GOSIDIAN_PLUGIN_<NAME>_ACCEPT sets it.
+	AcceptSHA string `toml:"accept_sha"`
 	// Timeout is the longest a call to the plugin may take; default the
 	// step timeout.
 	Timeout time.Duration `toml:"timeout"`
@@ -430,6 +539,14 @@ type PluginConfig struct {
 	// MCPURL is gosidian's MCP endpoint as this plugin reaches it; default
 	// [pipelines] mcp_url.
 	MCPURL string `toml:"mcp_url"`
+	// MaxConcurrent caps the plugin's calls at once, from the steps and the
+	// agents together; 0: what its manifest suggests, else no limit
+	// (IMP-196). GOSIDIAN_PLUGIN_<NAME>_MAX_CONCURRENT sets it.
+	MaxConcurrent int `toml:"max_concurrent"`
+	// Resources are the shared resources its calls take a place in, as
+	// [[pipelines.resources]] names them. GOSIDIAN_PLUGIN_<NAME>_RESOURCES
+	// ("gpu") sets them.
+	Resources []string `toml:"resources"`
 }
 
 // LLMProvider is a service with an OpenAI-compatible API.
@@ -439,7 +556,15 @@ type LLMProvider struct {
 	// APIKeySecret names the secret with the key (gosidian secret set);
 	// empty for a service without keys (Ollama).
 	APIKeySecret string `toml:"api_key_secret"`
-	Model        string `toml:"model"` // the default model
+	// APIKeyEnv names the environment variable with the key instead
+	// (IMP-199); an empty variable is a provider without a key.
+	APIKeyEnv string `toml:"api_key_env"`
+	Model     string `toml:"model"` // the default model
+	// MaxConcurrent caps the calls at once to it from the pipelines' steps;
+	// 0: no limit (IMP-196).
+	MaxConcurrent int `toml:"max_concurrent"`
+	// Resources are the shared resources its calls take a place in.
+	Resources []string `toml:"resources"`
 }
 
 // MCPConfig caps how aggressively an MCP client may mutate the vault.
@@ -556,6 +681,11 @@ func Default() *Config {
 	// And here, as 0 turns the cache off: applyDefaults put it back to 128
 	// (IMP-163).
 	cfg.Vault.CacheSize = 128
+	// And here the caps of the uploads into IN, as 0 turns each off
+	// (IMP-172).
+	cfg.IN.ReserveBytes = 5 << 30
+	cfg.IN.ZipMaxEntries = 100000
+	cfg.IN.ZipMaxRatio = 200
 	cfg.applyDefaults()
 	return cfg
 }
@@ -779,7 +909,13 @@ func (c *Config) ApplyEnv() error {
 	if err := c.applyPipelinesEnv(); err != nil {
 		return err
 	}
+	if err := c.applyAgentsEnv(); err != nil {
+		return err
+	}
 	if err := c.applyWebEnv(); err != nil {
+		return err
+	}
+	if err := c.applyINEnv(); err != nil {
 		return err
 	}
 	if v := os.Getenv("GOSIDIAN_AUTOMATIONS_ENABLED"); v != "" {
@@ -1086,6 +1222,16 @@ func (c *Config) applyDefaults() {
 	if c.Web.PluginTimeout <= 0 {
 		c.Web.PluginTimeout = 2 * time.Minute
 	}
+	// Only 0 takes the default: a value below it is refused (checkAgents).
+	if c.Agents.Lease == 0 {
+		c.Agents.Lease = 15 * time.Minute
+	}
+	if c.Agents.MaxAttempts == 0 {
+		c.Agents.MaxAttempts = 3
+	}
+	if c.Agents.MaxTasks == 0 {
+		c.Agents.MaxTasks = 50
+	}
 	if c.Webauth.SessionTTL == 0 {
 		c.Webauth.SessionTTL = 24 * time.Hour
 	}
@@ -1120,6 +1266,11 @@ func (c *Config) applyDefaults() {
 	if c.SelfImprove.SMTPPort == 0 {
 		c.SelfImprove.SMTPPort = 587
 	}
+	if c.IN.SessionTTL <= 0 {
+		c.IN.SessionTTL = 24 * time.Hour
+	}
+	c.IN.Web.Extensions = normalizeExtensions(c.IN.Web.Extensions)
+	c.IN.MCP.Extensions = normalizeExtensions(c.IN.MCP.Extensions)
 	if c.Global.PublicProject == "" {
 		c.Global.PublicProject = "global"
 	}
@@ -1185,6 +1336,71 @@ func (c *Config) applyWebEnv() error {
 		c.Web.PluginTimeout = d
 	}
 	return nil
+}
+
+// applyINEnv reads the caps of the uploads into the IN folders (IMP-172):
+// a number of bytes, or of files, 0 for no cap.
+func (c *Config) applyINEnv() error {
+	for env, dst := range map[string]*int64{
+		"GOSIDIAN_IN_RESERVE_BYTES":        &c.IN.ReserveBytes,
+		"GOSIDIAN_IN_MAX_IN_BYTES":         &c.IN.MaxINBytes,
+		"GOSIDIAN_IN_ZIP_MAX_BYTES":        &c.IN.ZipMaxBytes,
+		"GOSIDIAN_IN_WEB_MAX_FILE_BYTES":   &c.IN.Web.MaxFileBytes,
+		"GOSIDIAN_IN_WEB_MAX_UPLOAD_BYTES": &c.IN.Web.MaxUploadBytes,
+		"GOSIDIAN_IN_MCP_MAX_FILE_BYTES":   &c.IN.MCP.MaxFileBytes,
+		"GOSIDIAN_IN_MCP_MAX_UPLOAD_BYTES": &c.IN.MCP.MaxUploadBytes,
+	} {
+		v := os.Getenv(env)
+		if v == "" {
+			continue
+		}
+		n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+		if err != nil || n < 0 {
+			return fmt.Errorf("%s: %q is no number of bytes (0 for no cap)", env, v)
+		}
+		*dst = n
+	}
+	for env, dst := range map[string]*int{
+		"GOSIDIAN_IN_ZIP_MAX_ENTRIES": &c.IN.ZipMaxEntries,
+		"GOSIDIAN_IN_ZIP_MAX_RATIO":   &c.IN.ZipMaxRatio,
+	} {
+		v := os.Getenv(env)
+		if v == "" {
+			continue
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil || n < 0 {
+			return fmt.Errorf("%s: %q is no number (0 for no cap)", env, v)
+		}
+		*dst = n
+	}
+	if v := os.Getenv("GOSIDIAN_IN_SESSION_TTL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return fmt.Errorf("GOSIDIAN_IN_SESSION_TTL: %q is no duration", v)
+		}
+		c.IN.SessionTTL = d
+	}
+	if v := os.Getenv("GOSIDIAN_IN_WEB_EXTENSIONS"); v != "" {
+		c.IN.Web.Extensions = normalizeExtensions(strings.Split(v, ","))
+	}
+	if v := os.Getenv("GOSIDIAN_IN_MCP_EXTENSIONS"); v != "" {
+		c.IN.MCP.Extensions = normalizeExtensions(strings.Split(v, ","))
+	}
+	return nil
+}
+
+// normalizeExtensions reads a list of kinds of file: lower case, without
+// the dot, each once.
+func normalizeExtensions(in []string) []string {
+	var out []string
+	for _, e := range in {
+		e = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(e), "."))
+		if e != "" && !slices.Contains(out, e) {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 // envPositiveInts sets each setting whose variable is set, to a number
@@ -1324,8 +1540,17 @@ func (c *Config) applyPipelinesEnv() error {
 		}
 		c.Pipelines.Plugins = mergePlugins(c.Pipelines.Plugins, plugins)
 	}
+	c.Pipelines.Plugins = mergePlugins(c.Pipelines.Plugins, pluginsFromEnv(os.Environ()))
 	if v := os.Getenv("GOSIDIAN_PIPELINES_LLM_URL"); v != "" {
-		p := LLMProvider{Name: "default", BaseURL: v, Model: os.Getenv("GOSIDIAN_PIPELINES_LLM_MODEL"), APIKeySecret: os.Getenv("GOSIDIAN_PIPELINES_LLM_KEY_SECRET")}
+		p := LLMProvider{Name: "default", BaseURL: v, Model: os.Getenv("GOSIDIAN_PIPELINES_LLM_MODEL"), APIKeySecret: os.Getenv("GOSIDIAN_PIPELINES_LLM_KEY_SECRET"),
+			APIKeyEnv: os.Getenv("GOSIDIAN_PIPELINES_LLM_KEY_ENV"), Resources: listEnv(os.Getenv("GOSIDIAN_PIPELINES_LLM_RESOURCES"))}
+		if v := os.Getenv("GOSIDIAN_PIPELINES_LLM_MAX_CONCURRENT"); v != "" {
+			n, err := strconv.Atoi(strings.TrimSpace(v))
+			if err != nil || n < 0 {
+				return fmt.Errorf("GOSIDIAN_PIPELINES_LLM_MAX_CONCURRENT: %q is not a number of calls", v)
+			}
+			p.MaxConcurrent = n
+		}
 		replaced := false
 		for i := range c.Pipelines.LLM {
 			if c.Pipelines.LLM[i].Name == "default" {
@@ -1334,6 +1559,218 @@ func (c *Config) applyPipelinesEnv() error {
 		}
 		if !replaced {
 			c.Pipelines.LLM = append([]LLMProvider{p}, c.Pipelines.LLM...)
+		}
+	}
+	if v := os.Getenv("GOSIDIAN_PIPELINES_RESOURCES"); v != "" {
+		rs, err := parseResourcesEnv(v)
+		if err != nil {
+			return fmt.Errorf("GOSIDIAN_PIPELINES_RESOURCES: %w", err)
+		}
+		c.Pipelines.Resources = rs
+	}
+	if err := applyPluginEnv(c.Pipelines.Plugins); err != nil {
+		return err
+	}
+	return checkResources(c.Pipelines)
+}
+
+// listEnv reads a comma-separated list, without empty items.
+func listEnv(v string) []string {
+	var out []string
+	for _, s := range strings.Split(v, ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// parseResourcesEnv reads "gpu=1,net=4" into the shared resources.
+func parseResourcesEnv(v string) ([]ResourceConfig, error) {
+	var out []ResourceConfig
+	for _, item := range listEnv(v) {
+		name, n, ok := strings.Cut(item, "=")
+		max, err := strconv.Atoi(strings.TrimSpace(n))
+		if !ok || err != nil || max < 0 {
+			return nil, fmt.Errorf("%q is not name=calls", item)
+		}
+		out = append(out, ResourceConfig{Name: strings.TrimSpace(name), Max: max})
+	}
+	return out, nil
+}
+
+// checkResources checks the limits of IMP-196: a resource named once, and
+// each resource a plugin or a provider names among [[pipelines.resources]].
+func checkResources(pc PipelinesConfig) error {
+	known := map[string]bool{}
+	for _, r := range pc.Resources {
+		switch {
+		case !resourceName.MatchString(r.Name):
+			return fmt.Errorf("[[pipelines.resources]]: %q is not a resource's name (letters, digits, - and _)", r.Name)
+		case known[r.Name]:
+			return fmt.Errorf("[[pipelines.resources]]: %q is named twice", r.Name)
+		case r.Max < 0:
+			return fmt.Errorf("[[pipelines.resources]] %s: max is a number of calls, 0 for no limit", r.Name)
+		}
+		known[r.Name] = true
+	}
+	uses := func(who string, max int, rs []string) error {
+		if max < 0 {
+			return fmt.Errorf("%s: max_concurrent is a number of calls, 0 for no limit", who)
+		}
+		for _, r := range rs {
+			if !known[r] {
+				return fmt.Errorf("%s uses resource %q, which [[pipelines.resources]] does not name", who, r)
+			}
+		}
+		return nil
+	}
+	for _, p := range pc.Plugins {
+		if err := uses("plugin "+p.Name, p.MaxConcurrent, p.Resources); err != nil {
+			return err
+		}
+	}
+	for _, p := range pc.LLM {
+		if err := uses("llm provider "+p.Name, p.MaxConcurrent, p.Resources); err != nil {
+			return err
+		}
+	}
+	cats := map[string]bool{}
+	for _, c := range pc.Categories {
+		switch {
+		case !resourceName.MatchString(c.Name):
+			return fmt.Errorf("[[pipelines.categories]]: %q is not a category's name (letters, digits, - and _)", c.Name)
+		case cats[c.Name]:
+			return fmt.Errorf("[[pipelines.categories]]: %q is named twice", c.Name)
+		case c.MaxRunning < 0 || c.MaxRuns < 0:
+			return fmt.Errorf("[[pipelines.categories]] %s: max_running and max_runs are numbers, 0 for no limit", c.Name)
+		case c.Wait < 0:
+			return fmt.Errorf("[[pipelines.categories]] %s: wait is a time, 30s", c.Name)
+		}
+		switch c.Priority {
+		case "", "normal", "interactive", "low":
+		default:
+			return fmt.Errorf("[[pipelines.categories]] %s: priority %q is interactive, normal or low", c.Name, c.Priority)
+		}
+		cats[c.Name] = true
+	}
+	return nil
+}
+
+var resourceName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
+// applyAgentsEnv reads the GOSIDIAN_AGENTS_* variables (IMP-195), then
+// checks [agents], from the file too.
+func (c *Config) applyAgentsEnv() error {
+	for env, dst := range map[string]*int{
+		"GOSIDIAN_AGENTS_MAX_RUNNING":  &c.Agents.MaxRunning,
+		"GOSIDIAN_AGENTS_MAX_ATTEMPTS": &c.Agents.MaxAttempts,
+		"GOSIDIAN_AGENTS_MAX_TASKS":    &c.Agents.MaxTasks,
+	} {
+		v := os.Getenv(env)
+		if v == "" {
+			continue
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil {
+			return fmt.Errorf("%s: %q is no number", env, v)
+		}
+		*dst = n
+	}
+	if v := os.Getenv("GOSIDIAN_AGENTS_LEASE"); v != "" {
+		d, err := time.ParseDuration(strings.TrimSpace(v))
+		if err != nil {
+			return fmt.Errorf("GOSIDIAN_AGENTS_LEASE: %q is no duration", v)
+		}
+		c.Agents.Lease = d
+	}
+	return checkAgents(c.Agents)
+}
+
+// checkAgents checks the settings of [agents] (IMP-195).
+func checkAgents(a AgentsConfig) error {
+	switch {
+	case a.MaxRunning < 0:
+		return fmt.Errorf("[agents] max_running (GOSIDIAN_AGENTS_MAX_RUNNING): %d is no number of agents, 0 for no cap", a.MaxRunning)
+	case a.Lease < time.Minute || a.Lease > 24*time.Hour:
+		return fmt.Errorf("[agents] lease (GOSIDIAN_AGENTS_LEASE): %s is not between 1m and 24h", a.Lease)
+	case a.MaxAttempts < 1 || a.MaxAttempts > 20:
+		return fmt.Errorf("[agents] max_attempts (GOSIDIAN_AGENTS_MAX_ATTEMPTS): %d is not between 1 and 20", a.MaxAttempts)
+	case a.MaxTasks < 1 || a.MaxTasks > 1000:
+		return fmt.Errorf("[agents] max_tasks (GOSIDIAN_AGENTS_MAX_TASKS): %d is not between 1 and 1000", a.MaxTasks)
+	}
+	return nil
+}
+
+// pluginsFromEnv registers the plugins named by GOSIDIAN_PLUGIN_<NAME>_URL
+// (IMP-199): a variable per plugin, so that each compose file of a preset
+// adds its own, where one GOSIDIAN_PIPELINES_PLUGINS would be replaced by
+// the next file's. <NAME> is the plugin's name in upper case with _ for -
+// (a name has no _): VEC_QDRANT is vec-qdrant. Sorted by name.
+func pluginsFromEnv(environ []string) []PluginConfig {
+	var out []PluginConfig
+	for _, kv := range environ {
+		k, v, _ := strings.Cut(kv, "=")
+		name, ok := strings.CutPrefix(k, "GOSIDIAN_PLUGIN_")
+		if !ok {
+			continue
+		}
+		if name, ok = strings.CutSuffix(name, "_URL"); !ok || name == "" || strings.TrimSpace(v) == "" {
+			continue
+		}
+		out = append(out, PluginConfig{Name: strings.ToLower(strings.ReplaceAll(name, "_", "-")), URL: strings.TrimSpace(v)})
+	}
+	slices.SortFunc(out, func(a, b PluginConfig) int { return strings.Compare(a.Name, b.Name) })
+	return out
+}
+
+// pluginEnvName is the environment variable of a plugin's setting: the
+// name in upper case, any other character than a letter or a digit as _
+// (vec-qdrant: GOSIDIAN_PLUGIN_VEC_QDRANT_TOKEN).
+func pluginEnvName(plugin, setting string) string {
+	var b strings.Builder
+	for _, r := range strings.ToUpper(plugin) {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	return "GOSIDIAN_PLUGIN_" + b.String() + "_" + setting
+}
+
+// applyPluginEnv reads each plugin's token and expected manifest from the
+// environment (IMP-199): GOSIDIAN_PLUGIN_<NAME>_TOKEN, when set, is the
+// plugin's token (token_env), in place of a token_secret, and
+// GOSIDIAN_PLUGIN_<NAME>_ACCEPT its accept_sha. Then it checks both: one
+// token source per plugin, and an accept_sha of hex characters, at least 8.
+func applyPluginEnv(ps []PluginConfig) error {
+	for i := range ps {
+		p := &ps[i]
+		if name := pluginEnvName(p.Name, "TOKEN"); os.Getenv(name) != "" {
+			p.TokenEnv, p.TokenSecret = name, ""
+		}
+		if v := strings.TrimSpace(os.Getenv(pluginEnvName(p.Name, "ACCEPT"))); v != "" {
+			p.AcceptSHA = v
+		}
+		if v := strings.TrimSpace(os.Getenv(pluginEnvName(p.Name, "MAX_CONCURRENT"))); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 0 {
+				return fmt.Errorf("%s: %q is not a number of calls", pluginEnvName(p.Name, "MAX_CONCURRENT"), v)
+			}
+			p.MaxConcurrent = n
+		}
+		if v := os.Getenv(pluginEnvName(p.Name, "RESOURCES")); v != "" {
+			p.Resources = listEnv(v)
+		}
+		if p.TokenEnv != "" && p.TokenSecret != "" {
+			return fmt.Errorf("plugin %s: token_env and token_secret are both set: keep one", p.Name)
+		}
+		if a := strings.ToLower(p.AcceptSHA); a != "" {
+			if len(a) < 8 || strings.Trim(a, "0123456789abcdef") != "" {
+				return fmt.Errorf("plugin %s: accept_sha %q is not the start of a manifest's sha (at least 8 hex characters, from gosidian plugin show)", p.Name, p.AcceptSHA)
+			}
+			p.AcceptSHA = a
 		}
 	}
 	return nil

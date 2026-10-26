@@ -214,7 +214,18 @@ const StubVersion = 3
 // from (upstream, upstream_commit, upstream_version; license only as
 // information, the user decides); whether upstream moved on is checked on
 // request with git ls-remote.
-const DirectivesVersion = 25
+//
+// v26 (2026-10-22, IMP-210): when a collection becomes a database note
+// (the criterion, one fact in one place, checked for copied data, due only
+// for a real deadline, open decisions as backlog rows, the reserved field
+// names), the skeleton of a schema with fields as a map rather than the
+// bootstrap's list, and the shipped skill design-project-databases; a
+// plan's status lives in the field, the status:* tag mirrors it.
+//
+// v27 (2026-10-22, IMP-172 phase 5b): files for the project's pipelines go
+// into its IN folder with memory_in_upload (open, the pieces with curl and
+// the ticket, complete), not into notes with memory_ingest.
+const DirectivesVersion = 27
 
 // AnchorVersion is the version of the agent-anchor template/format. It is
 // substituted into the `<!-- gosidian:anchor v=N ... -->` marker so the

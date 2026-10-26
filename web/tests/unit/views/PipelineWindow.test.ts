@@ -14,7 +14,12 @@ import 'plancia-diagrams'
 vi.mock('@/components/domain/diagramView', async () => {
   const lib = await import('plancia-diagrams')
   const shown = (p: Record<string, unknown>) =>
-    JSON.stringify({ run: p.run ?? null, problems: p.problems ?? [], catalog: p.catalog })
+    JSON.stringify({
+      run: p.run ?? null,
+      problems: p.problems ?? [],
+      catalog: p.catalog,
+      triggerKinds: p.triggerKinds ?? null,
+    })
   return {
     findDiagramBlocks: lib.findDiagramBlocks,
     replaceDiagramBlock: lib.replaceDiagramBlock,
@@ -23,7 +28,15 @@ vi.mock('@/components/domain/diagramView', async () => {
       setup: (p) => () => h('div', { class: 'view', 'data-shown': shown(p) }, p.source),
     }),
     PipelineEditor: defineComponent({
-      props: { source: String, catalog: Array, run: Object, problems: Array, labels: Object, height: Number },
+      props: {
+        source: String,
+        catalog: Array,
+        triggerKinds: Array,
+        run: Object,
+        problems: Array,
+        labels: Object,
+        height: Number,
+      },
       emits: ['update:source'],
       setup:
         (p, { emit }) =>
@@ -105,6 +118,7 @@ import PipelineWindow from '@/views/PipelineWindow.vue'
 const PATH = 'p/pipelines/copy.md'
 const i18n = () => createI18n({ legacy: false, locale: 'en', messages: { en: enUI } })
 const NODES = [{ type: 'note.write', group: 'base', input_schema: { type: 'object' } }]
+const TRIGGERS = ['manual', 'external', 'chat', 'ingest', 'schedule', 'in', 'commit', 'run']
 
 const brief = (over: Partial<RunBrief>): RunBrief => ({
   id: 'r1',
@@ -154,7 +168,7 @@ describe('PipelineWindow (IMP-169, F4)', () => {
     updates.length = 0
     refuse = false
     writable = true
-    vi.mocked(getPipelineNodes).mockResolvedValue({ pipelines_enabled: true, nodes: NODES })
+    vi.mocked(getPipelineNodes).mockResolvedValue({ pipelines_enabled: true, nodes: NODES, triggers: TRIGGERS })
     vi.mocked(checkPipeline).mockResolvedValue({ ok: true })
     vi.mocked(listRuns).mockResolvedValue([])
     vi.mocked(getRun).mockReset()
@@ -168,6 +182,7 @@ describe('PipelineWindow (IMP-169, F4)', () => {
     const { w } = await mountWindow()
     expect(w.find('.stand-in').element.textContent).toBe(BLOCK)
     expect(shown(w).catalog).toEqual(NODES)
+    expect(shown(w).triggerKinds).toEqual(TRIGGERS)
     await w.find('.stand-in').trigger('click')
     expect(w.emitted('dirty')?.at(-1)).toEqual([true])
     expect(w.find('[data-unsaved]').exists()).toBe(true)
@@ -223,7 +238,7 @@ describe('PipelineWindow (IMP-169, F4)', () => {
   })
 
   it('edits with the pipelines off, and says they do not run', async () => {
-    vi.mocked(getPipelineNodes).mockResolvedValue({ pipelines_enabled: false, nodes: NODES })
+    vi.mocked(getPipelineNodes).mockResolvedValue({ pipelines_enabled: false, nodes: NODES, triggers: TRIGGERS })
     await usePipelineCatalog().reload()
     const { w } = await mountWindow()
     expect(w.find('[data-pipelines-off]').exists()).toBe(true)

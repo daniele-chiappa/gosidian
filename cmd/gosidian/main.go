@@ -27,6 +27,7 @@ import (
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/infolder"
 	"github.com/gosidian/gosidian/internal/insights"
+	"github.com/gosidian/gosidian/internal/jobs"
 	"github.com/gosidian/gosidian/internal/ldap"
 	"github.com/gosidian/gosidian/internal/marks"
 	mcpsrv "github.com/gosidian/gosidian/internal/mcp"
@@ -438,6 +439,14 @@ func main() {
 		} else if len(seeded) > 0 {
 			log.Printf("global: seeded templates %v under %s/templates/", seeded, cfg.Global.PublicProject)
 		}
+		// The skills gosidian ships (IMP-210), into the same project; an
+		// edited copy is kept.
+		gsdir := filepath.Join(absVault, cfg.Global.PublicProject, "skills")
+		if seeded, err := scaffold.SeedSkillsInto(gsdir, mcpsrv.EmbeddedSkillsFS(), mcpsrv.EmbeddedSkillsRoot, cfg.Global.PublicProject); err != nil {
+			log.Printf("global skills seed failed: %v", err)
+		} else if len(seeded) > 0 {
+			log.Printf("global: seeded skills %v under %s/skills/", seeded, cfg.Global.PublicProject)
+		}
 	}
 	// Raw insights are for the owner's triage. The project is created lazily
 	// by the first insight, so on an upgraded installation (default internal)
@@ -489,6 +498,7 @@ func main() {
 	syncer := gitsync.New(absVault, cfg.Git)
 	syncer.SetProjects(projectsStore)
 	syncer.SetStateDir(v.StateDirInside())
+	syncer.SetStagingDirs(stagingInVault(v, cfg.MCP.BridgeDir, cfg.MCP.AllowedUploadRoots))
 	syncer.SetTokenStore(gitTokenStore)
 	if err := syncer.Start(ctx); err != nil {
 		// IMP-002: gitsync init failure is non-fatal. Log loudly, mark the
@@ -593,6 +603,14 @@ func main() {
 	}
 	mcpServer.SetProjects(projectsStore)
 	mcpServer.SetTrash(trashBin)
+	// The job runner (IMP-166): the pipelines' runs and the automations'
+	// actions, on with either of them; [pipelines] enabled governs only the
+	// pipelines.
+	var runner *jobs.Runner
+	stopRunner := func(_ time.Duration, before func()) { before() }
+	if cfg.Automations.Enabled || cfg.Pipelines.Enabled {
+		runner, stopRunner = startRunner(ctx, cfg, sdir)
+	}
 	// The automations of database notes (IMP-127 iteration 3): after the
 	// scan, so the first run sees every row.
 	if cfg.Automations.Enabled {
@@ -608,6 +626,7 @@ func main() {
 		if err != nil {
 			log.Printf("automations: %v; off until it is fixed", err)
 		} else {
+			engine.SetRunner(runner)
 			mcpServer.SetAutomations(engine)
 			go engine.Start(ctx, cfg.Automations.Interval)
 			log.Printf("automations: enabled (every %s, time zone %s, state %s)", cfg.Automations.Interval, loc, filepath.Join(sdir, "automations.json"))
@@ -620,6 +639,23 @@ func main() {
 		log.Fatalf("IN folders: %v", err)
 	}
 	defer inFolders.Close()
+	// The uploads into IN (IMP-172 phase 5): the caps of [in], the trash
+	// for a file an upload replaces, the audit of each upload.
+	inFolders.SetUploadLimits(infolder.UploadLimits{
+		Reserve: cfg.IN.ReserveBytes, MaxIN: cfg.IN.MaxINBytes, TTL: cfg.IN.SessionTTL,
+		ZipMaxEntries: cfg.IN.ZipMaxEntries, ZipMaxBytes: cfg.IN.ZipMaxBytes, ZipMaxRatio: cfg.IN.ZipMaxRatio,
+		Channels: map[string]infolder.ChannelLimits{
+			"web": {MaxFile: cfg.IN.Web.MaxFileBytes, MaxUpload: cfg.IN.Web.MaxUploadBytes, Extensions: cfg.IN.Web.Extensions},
+			"mcp": {MaxFile: cfg.IN.MCP.MaxFileBytes, MaxUpload: cfg.IN.MCP.MaxUploadBytes, Extensions: cfg.IN.MCP.Extensions},
+		},
+	})
+	if trashBin != nil {
+		inFolders.SetDiscard(func(rel string) error {
+			_, err := trashBin.DiscardNote(rel)
+			return err
+		})
+	}
+	inFolders.SetOnUpload(func(u infolder.Upload) { apiv1.AuditUpload(auditLog, u) })
 	mcpServer.SetIN(inFolders)
 	// The web UI hears of a change of an IN folder as of the tree's.
 	inFolders.SetOnChange(func(project string) {
@@ -653,9 +689,8 @@ func main() {
 	go inFolders.Run(ctx)
 	// The pipelines (IMP-166, ADR-035): after the scan, like the
 	// automations; off unless [pipelines] enabled.
-	stopPipelines := func(_ time.Duration, before func()) { before() }
 	if cfg.Pipelines.Enabled {
-		stopPipelines, pluginReg = startPipelines(ctx, cfg, sdir, mcpServer, inFolders, syncer)
+		pluginReg = startPipelines(ctx, cfg, sdir, runner, mcpServer, inFolders, syncer)
 		if c := mcpServer.Chat(); c != nil {
 			wireChat(c, auditLog)
 			apiv1.SetFrameSources(c.FrameOrigins)
@@ -802,7 +837,7 @@ func main() {
 	// lands before the last git commit, which comes before the jobs
 	// database closes, so that the runs it starts are there at the next
 	// start.
-	stopPipelines(3*time.Second, func() {
+	stopRunner(3*time.Second, func() {
 		if cfg.Git.Enabled {
 			syncer.Flush()
 		}
@@ -814,6 +849,9 @@ func main() {
 	server.Shutdown(shutdownCtx, func() {
 		eventsHub.Close(shutdownCtx)
 		mcpServer.CloseStreams()
+		if e := mcpServer.Pipelines(); e != nil {
+			e.CloseStreams()
+		}
 	}, inflight, httpSrv, legacyMCPSrv)
 }
 

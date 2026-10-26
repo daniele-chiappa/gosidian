@@ -2,11 +2,181 @@
 
 All notable changes to gosidian are documented here. The format loosely
 follows [Keep a Changelog](https://keepachangelog.com/); dates are
-`YYYY-MM-DD`; versions follow [SemVer](https://semver.org/).
+`YYYY-MM-DD`; versions follow [SemVer](https://semver.org/). Skipping
+releases? [docs/upgrading.md](docs/upgrading.md) lists, version by
+version, what an upgrade asks of you.
 
 This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
+
+## [2.118.0] — 2026-10-26 — "teams of agents"
+
+The releases from 2.105.0 to 2.118.0 in one: teams of agents that work on
+a project's tasks by themselves, uploads into the IN folder in resumable
+pieces, compose presets for a purpose, a fair queue with limits per
+plugin, provider and resource, answers streamed as the model writes them,
+and a few fixes. Pull the image and restart: jobs.db gets its new
+columns at start. Coming from 2.104.0, read the entries from 2.106.1
+to 2.116.0 of [docs/upgrading.md](docs/upgrading.md), new in this
+release: a proxy in front of gosidian must let 64 MiB requests through
+for the uploads, a variable `GOSIDIAN_PLUGIN_<NAME>_URL` now registers a
+plugin, and a new default lint rule may warn about tags left behind.
+
+### Added
+- **Teams of agents** ([docs/agents.md](docs/agents.md)): a note
+  `type: team` with a ```team block (roles with their agent note,
+  executor, model, limits, repository or host, paths, checks, the folders
+  they write, whom they delegate to, approval; a budget of a day and of a
+  task; agents at once; the coordinator's rounds) and tasks, notes of
+  `<project>/tasks/` with the A2A states and `review`.
+  - The trigger `on: task` (`ready`, `children_done`, `budget`) takes a
+    ready task for the run it starts and gives it back when the run ends;
+    the nodes `task.context`, `task.update`, `task.complete`; the tools
+    `memory_tasks`, `memory_task_create`, `memory_task_claim`,
+    `memory_task_heartbeat`, `memory_task_update`, `memory_task_complete`
+    and `memory_create_team`; the lint rule `team-invalid`.
+  - `memory_create_team` writes, with the team, an agent note per role, the
+    pipeline that gives the roles' tasks to their agents and the
+    coordinator's. The nodes `task.run` (the role's executor with its
+    agent note, model, limits, repository, MCP and the task's budget),
+    `task.gate` (the files the agent changed against the paths, the notes
+    it wrote, the checks, the preview), `task.verdict` (the gate and a
+    person's answer: merge, redo, discard), `task.pr` (merges or closes the
+    pull request through the executor plugin's `pr` node) and `task.plan`
+    (writes the tasks a coordinator planned, after checking the whole
+    plan).
+  - The pipeline runs a role's checks, in a subshell of their own, only on
+    a branch the agent pushed, and publishes the preview only when they
+    pass; work that fails them goes back with their output, and its pull
+    request is closed. A role that writes in the vault and wrote nothing
+    goes back too. A task's report starts with what the pipeline found,
+    then the agent's own words; its headings go two levels down, so a
+    report reaches the coordinator whole.
+  - A coordinator is called when its sub-tasks are all closed, or once for
+    one that failed or waits for a person, and may answer `wait`. Its
+    prompt says which repository or host each of its roles sees.
+  - **The cost of the steps**: jobs.db keeps each step's cost and tokens,
+    a failed step's too when its plugin says what it spent, and each run's
+    task and team; a team's spend of the day holds its ready tasks once it
+    reaches the budget. `[agents]` (`max_running`, `lease`,
+    `max_attempts`, `max_tasks`) sets the server's limits.
+  - A run of a team's task gets an MCP token that writes only in its
+    role's `writes`; `memory_bootstrap` gives them as `write_paths`. An
+    agent node takes `role`, an agent note given as its system prompt.
+- **Uploads into the IN folder, in pieces and resumable**
+  ([docs/in.md](docs/in.md)): the IN window uploads files, a folder or
+  zips (unpacked on the server, each into its own folder) into the folder
+  it shows. The uploads go on in the background, three files at a time,
+  in pieces of 1 to 32 MiB that follow the line's speed, with pause,
+  resume, cancel and a retry per file, in the new Uploads window and the
+  top bar. The server keeps each piece and the state of the file's SHA-256
+  on the IN folder's disk, so an upload resumes after a lost connection, a
+  restart or a reload. A file whose place is taken is replaced into the
+  trash, kept as `name (2).ext` or skipped. The REST API
+  (`/api/v1/in/<project>/uploads`) is the same protocol, for curl.
+  - `[in]` caps the uploads: the free disk the server keeps
+    (`reserve_bytes`, 5 GiB; under it a piece is refused with 507), the
+    zips' files, bytes and ratio, and by way in the bytes of a file, of an
+    upload, and the kinds taken.
+  - **`memory_in_upload`**: agents upload files of any size into the IN
+    folder for the project's pipelines. `open` answers with a ticket, the
+    agent's shell sends the pieces with curl to `/mcp/in-upload/<id>` with
+    the ticket as the bearer, then `complete`, `status`, `cancel` and
+    `list`. The ticket survives a restart, a revoked token stops it;
+    `[in.mcp]` caps the agents' uploads.
+- **Compose presets for a purpose** ([docs/deployment.md](docs/deployment.md)):
+  `deploy/presets/` has a base `docker-compose.yml` (gosidian from its
+  image, the state dir out of the vault, hardened) and files added with
+  `-f`: `rag` (docling, images, the database plugin on Qdrant, chat, the
+  pipelines and a local git sync) and `storage` (remote stores as sources
+  of the IN folders). One `.env` configures them, `init.sh` writes the keys
+  and tokens, and `test/smoke.py` runs the whole rag chain on a fake model
+  endpoint. With them:
+  - **the project template `rag`**: pipelines that turn a file of the IN
+    folder into a note, cut the notes into paragraphs at each commit and
+    store them in the collection `documents`, answer a question from them
+    with its sources, and a bot that asks it;
+  - **a plugin from the environment alone**: `GOSIDIAN_PLUGIN_<NAME>_URL`
+    registers it, `_TOKEN` is its token and `_ACCEPT` the manifest the
+    installer expects, which the plugin check then accepts by itself;
+    `GOSIDIAN_PIPELINES_LLM_KEY_ENV` names the variable with a provider's
+    key;
+  - **`gosidian plugin accept --pending`** accepts every manifest waiting
+    in one command, printing first what each reads and calls.
+- **Limits and a fair queue for the pipelines** ([docs/pipelines.md](docs/pipelines.md)):
+  - `max_concurrent` on `[[pipelines.plugins]]` and `[[pipelines.llm]]`,
+    and `[[pipelines.resources]]` (a `gpu` with `max = 1`, say) that
+    several of them name: a step whose plugin, provider or resource is
+    full waits in the queue without holding a worker. A plugin's manifest
+    may set its own limit.
+  - Categories: `category:` in a pipeline and `[[pipelines.categories]]`
+    in the config, with `max_running`, `max_runs` (beyond, a start from
+    outside answers 429 with `Retry-After`), `replace`, `priority`, `wait`
+    and `projects`.
+  - A fair queue (`[pipelines] fair`, on by default): the steps of a
+    priority are taken in turn among the projects.
+  - The queue in sight: a Queue panel in the Runs window, why a queued step
+    waits, `GET /api/v1/runs/queue`, a `queue` in `memory_pipelines`, and
+    the gauges `gosidian_pipeline_steps_queued`, `_steps_running` and
+    `_queue_oldest_seconds`.
+  - The `queue` trigger starts a pipeline when a project's queue grows long
+    or waits long, once per episode: a notice, say.
+- **The answer as it comes**: `llm.chat` takes `stream: true`, and a start
+  of a pipeline with `Accept: text/event-stream` answers with server-sent
+  events, the text of its streaming nodes as the model writes it, then the
+  answer. A node streams only while someone follows its run. A chat plugin
+  shows the bot's answer while it is written.
+- **When a collection becomes a database**: the directives (v26) tell
+  agents which collections of a project make database notes and which
+  stay text, with the rules that keep a database honest. With global
+  projects on, the start seeds the skill
+  `global/skills/design-project-databases`, never overwriting an edited
+  copy. The new lint rule `field-tag-mismatch` (on by default, warning)
+  reports a `status:*` or `field:value` tag that disagrees with the note's
+  field.
+- **An upgrade guide**, [docs/upgrading.md](docs/upgrading.md): for an
+  install that skips releases, what each release asks of you, newest
+  first, from 2.0.0 on.
+- **Every trigger in the pipeline editor**: the trigger's menu offers the
+  triggers the server knows, `chat`, `commit` and `run` included, and the
+  panel sets their fields. The editor is plancia-diagrams 0.6.1, whose
+  node types have a search.
+
+### Changed
+- **The automations' actions run on the job runner, which is on with the
+  pipelines off**: the handoff or snapshot a rule fires is a run of its own
+  in `<state-dir>/jobs.db`, tried three times and taken up again after a
+  restart. `pipelines.enabled` governs only the pipelines.
+  `memory_automations` with `run: true` waits up to 15 s for the actions
+  it queued. The log says `job runner: on` at start.
+- **Go modules**: `prometheus/client_golang` 1.25.0, `go-ldap` 3.4.15,
+  `x/crypto` 0.58.0, `x/term` 0.47.0, `x/text` 0.43.0, with `x/sys`
+  0.49.0, each over two weeks old (Dependabot's #86, #87, #88, #90 and
+  #91).
+
+### Fixed
+- **A push with a token kept the operator's git configuration**: the push
+  handed git its token as `GIT_CONFIG_COUNT=1`, which replaced a
+  `GIT_CONFIG_KEY_0`/`VALUE_0` set in the environment. A `safe.directory`
+  set that way made every push fail with "detected dubious ownership". The
+  token now takes the next free index.
+- **Staging folders inside the vault stay out of git sync**: the bridge dir
+  and the upload roots set inside the vault were committed and pushed like
+  notes. The managed `.gitignore` now names them, a commit that already
+  holds them drops them from the index, and the log says at each start
+  which folders it leaves out.
+- **A source in a hidden folder of the vault says how to stage there**: the
+  refusal names the bridge dir (`GOSIDIAN_MCP_BRIDGE_DIR`) and the upload
+  roots (`GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS`).
+- **A field named `path` or `name` no longer hijacks `this`**: the note's
+  path and file name win, and lint and the writes warn about a database
+  field named `path`, `name`, `modified`, `links`, `created_by`,
+  `modified_by`, `created_at` or `modified_at`.
+- **The node types of the pipeline editor wrote over each other**: the
+  entries under «Add a node» took the toolbar buttons' 28px whatever their
+  text. They are as high as their text, a description shows two lines, and
+  a search finds a type by name or description.
 
 ## [2.104.0] — 2026-10-22 — "git at night"
 

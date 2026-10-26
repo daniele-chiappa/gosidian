@@ -20,6 +20,7 @@ import (
 	"github.com/gosidian/gosidian/internal/attach"
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/auth"
+	"github.com/gosidian/gosidian/internal/jobs"
 	"github.com/gosidian/gosidian/internal/plugins"
 )
 
@@ -215,6 +216,15 @@ func (s *Server) handlePluginTool(name string) server.ToolHandlerFunc {
 		meta := map[string]any{plugins.MetaProject: project, plugins.MetaCaller: tok.ID, plugins.MetaAccess: t.access}
 		cctx, cancel := context.WithTimeout(ctx, s.pluginToolTimeout)
 		defer cancel()
+		// The plugin's calls at once are the steps' and the agents' together
+		// (IMP-196): a full plugin makes the call wait, up to its timeout.
+		if gate := s.pluginGate(); gate != nil {
+			res := s.plugins.PluginResources(t.plugin)
+			if err := gate.Take(cctx, res); err != nil {
+				return mcp.NewToolResultErrorf("plugin %s is busy: its calls at once (max_concurrent) are all under way; try again in a while", t.plugin), nil
+			}
+			defer gate.Release(res)
+		}
 		res, err := s.plugins.CallTool(cctx, t.plugin, t.tool, args, meta)
 		s.auditWrite(ctx, audit.ActionPluginCall, project, name, int64(len(raw)))
 		if err != nil {
@@ -228,6 +238,14 @@ func (s *Server) handlePluginTool(name string) server.ToolHandlerFunc {
 		}
 		return res, nil
 	}
+}
+
+// pluginGate is the runner's gate of the resources, nil without pipelines.
+func (s *Server) pluginGate() *jobs.Gate {
+	if s.pipelines == nil {
+		return nil
+	}
+	return s.pipelines.Runner().Gate()
 }
 
 // handFiles puts, in place of each argument of t that names files of the

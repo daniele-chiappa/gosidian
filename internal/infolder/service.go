@@ -39,6 +39,9 @@ type Options struct {
 	Marker string
 	Log    *slog.Logger
 	Now    func() time.Time
+	// FreeBytes reads the space left on the disk of a folder, for the
+	// uploads' reserve; default vault.FreeBytes.
+	FreeBytes func(dir string) (int64, error)
 }
 
 // Service keeps the state of the IN folders: a scan of each, every Every,
@@ -66,6 +69,13 @@ type Service struct {
 	firstErr      map[string]string          // why that check failed
 	remoteMarkers map[string]map[string]bool // the markers a source holds, by project and batch folder
 	client        *http.Client
+
+	// The uploads (uploads.go).
+	limits    UploadLimits
+	discard   func(rel string) error
+	onUpload  func(Upload)
+	upLocks   map[string]*sync.Mutex // a file's pieces, one at a time, by <id>/<n>
+	finishing map[string]bool        // the completions running
 }
 
 // Open opens the service on the database at dbPath, for the IN folders of
@@ -85,6 +95,9 @@ func Open(dbPath string, v *vault.Vault, projects func() []string, opts Options)
 	}
 	if opts.Now == nil {
 		opts.Now = func() time.Time { return time.Now().UTC() }
+	}
+	if opts.FreeBytes == nil {
+		opts.FreeBytes = vault.FreeBytes
 	}
 	st, err := OpenStore(dbPath)
 	if err != nil {
@@ -142,16 +155,24 @@ func (s *Service) lock(project string) func() {
 }
 
 // Run scans the IN folders at once, then every Every, and a project when
-// ScanSoon asks, until ctx ends; the sources, on their own clock.
+// ScanSoon asks, until ctx ends; the sources, on their own clock. It
+// resumes the uploads' completions a restart cut short, and drops the
+// old uploads, at once and every hour.
 func (s *Service) Run(ctx context.Context) {
 	go s.runSources(ctx)
 	t := time.NewTicker(s.opts.Every)
 	defer t.Stop()
+	gc := time.NewTicker(time.Hour)
+	defer gc.Stop()
+	s.resumeUploads()
+	s.gcUploads()
 	s.scanAll()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-gc.C:
+			s.gcUploads()
 		case <-t.C:
 			s.scanAll()
 		case p := <-s.wake:

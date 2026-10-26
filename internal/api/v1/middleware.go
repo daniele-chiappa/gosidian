@@ -235,6 +235,10 @@ func observe(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		started := time.Now()
 		next.ServeHTTP(w, r)
+		// A piece of an upload into IN takes as long as the line it came on.
+		if r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/api/v1/in/") {
+			return
+		}
 		if d := time.Since(started); d > 500*time.Millisecond {
 			// EscapedPath, not Path: the decoded form can carry client-chosen
 			// control bytes (%0A → newline) that would forge log lines in the

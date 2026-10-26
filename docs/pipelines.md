@@ -57,11 +57,18 @@ The environment overrides the file (see [configuration](configuration.md)):
 `_MAX_WAIT`, `_MAX_LLM_TOKENS`, `_MAX_INPUT_BYTES`, `_MAX_OUTPUT_BYTES`,
 `_HTTP_ALLOWLIST` (comma-separated),
 `_PUBLIC_URL`, `_FILES_URL`, `_TIMEZONE`, `_LLM_URL`, `_LLM_MODEL`,
-`_LLM_KEY_SECRET` for one provider named `default`, and `_PLUGINS`
-(`name=url,…`, plugins without a token).
+`_LLM_KEY_SECRET` or `_LLM_KEY_ENV` for one provider named `default`, and
+`_PLUGINS` (`name=url,…`). A plugin also takes variables of its own,
+`GOSIDIAN_PLUGIN_<NAME>_URL`, `_TOKEN` and `_ACCEPT`
+([plugins](plugins.md#registering-a-plugin)): the
+[presets](deployment.md#presets) configure everything that way.
 
 The runs live in `<state-dir>/jobs.db` (SQLite, outside the vault and its
-git history). Secrets live in `<state-dir>/secrets.json`, each sealed with
+git history). The same job runner runs the automations' actions
+([databases](vault/databases.md#automations)), so it is on whenever the
+pipelines or the automations are; `pipelines.enabled` governs only the
+pipelines, and the pages and tools of the runs list only theirs. Its
+`_WORKERS` and `_RETENTION` apply to both. Secrets live in `<state-dir>/secrets.json`, each sealed with
 AES-GCM under `GOSIDIAN_SECRETS_KEY` (32 bytes in base64:
 `openssl rand -base64 32`). Without the key the nodes that need a secret
 fail and say why; the rest work.
@@ -115,6 +122,8 @@ why a pipeline cannot run.
 | `in` | a batch of files of the project's [IN folder](in.md) closes: one run per file it takes, or one per batch with `batch: true`; `folder` (of the IN folder), `kinds` (none: all) and `match` (a glob on the name) choose the files; `take: false` reads them without taking them (their status stays the other pipelines') | per file: `file`, `name`, `stem`, `ext`, `dir`, `size`, `sha256`, `etag` (a source's file), `source` (`local`, or `<plugin>/<source>`), `project`; per batch: `batch`, `dir`, `count`, `bytes`, `files` (the files, when they fit in the input; else `files_listed` is false and `in.list` reads them), `project` |
 | `commit` | a commit of the vault's [git sync](configuration.md#environment-variables) changes files under `folder` (of the project; empty: all of it) whose name matches `match` (a glob, `*.md`): one run per commit; `skip` lists pipelines whose writes do not start it | `commit` (its SHA), `date` (in seconds), `project`, `folder`, `count`, `files` (`path`, `change`: `added`, `modified`, `deleted`, `renamed`, and `from` for a renamed file; when they fit in the input, else `files_listed` is false), `files_listed` |
 | `run` | a run of a pipeline of the project ends with one of `status` (`done`, `failed`, `canceled`; default `[failed]`), its pipeline matching `pipelines` (a glob on the pipeline notes' paths, relative to the project: `pipelines/*`; default: all of them): one run per run that ended; a run it starts starts [none](#on-the-end-of-a-run) | `run` (the id of the run that ended), `pipeline` (its pipeline note), `project`, `status`, `error`, `failed_step` (the node that failed it; empty when none) |
+| `queue` | the project's queue of steps grows long: at least `queued` steps waiting (whose time has come), or the oldest waiting `waited` (`30m`), of every step or of one `resource` (`plugin:ocr`, `llm:default`, `res:gpu`); once each time it becomes long, [again](#when-the-queue-is-long) only after it was short | `project`, `resource`, `queued`, `running`, `limit` (of the resource; 0: none), `oldest_wait_seconds`, `threshold` (`queued`, `waited_seconds`) |
+| `task` | a task of a [team of agents](agents.md) is ready (`events: [ready]`, the default), an objective's sub-tasks closed (`children_done`), or a team spent its budget of the day (`budget`); `team` (a link to its note; none: every team of the project) and `roles` (or `coordinator: true` / `false`) choose the tasks. The trigger [takes the task](agents.md#the-pipelines-on-task) for the run as it starts it | `event`, `task`, `title`, `team`, `role`, `project`, `attempt`; `round` and `children` for `children_done`; `day`, `spent_usd`, `budget_usd` for `budget` |
 
 Every file store counts as an arrival: `memory_ingest`,
 `memory_upload_attachment`, `memory_upload_resource`, the media and table
@@ -193,6 +202,30 @@ otherwise be started again by the note about its failure. Other ways a
 run may start runs, such as an `http.request` to the server's own API, are
 not followed.
 
+#### When the queue is long
+
+A `queue` pipeline acts when the project's steps pile up behind a
+[limit](#calls-at-once), or wait long:
+
+```pipeline
+trigger: {on: queue, resource: plugin:ocr, queued: 50, waited: 30m}
+nodes:
+  - id: tell
+    use: notify.send
+    with:
+      to: [ops]
+      title: "OCR queue: {{ trigger.queued }} steps"
+      text: "the oldest waits {{ trigger.oldest_wait_seconds }} s; {{ trigger.running }} of {{ trigger.limit }} running"
+```
+
+The server reads the queue every minute, with the schedules. The trigger
+starts its pipeline when the queue becomes long (either threshold), and
+not again until the queue was short once: an episode. Its runs are
+interactive, so that they go before the queue they tell about. The
+queue is the project's own: the queues across the projects are the
+gauges of `/metrics`, for the server's monitoring. The episodes live in
+memory: after a restart a queue still long starts the trigger again.
+
 ### Nodes
 
 | Field | |
@@ -218,6 +251,7 @@ Beside `trigger` and `nodes`, a pipeline may say:
 |---|---|
 | `answer` | the node whose output is the run's answer: a start that [waits](#starting-waiting-resuming) gets it back, and so does the callback |
 | `priority` | `interactive` for a pipeline whose runs someone waits for ([below](#interactive-runs)); `normal` (the default) otherwise |
+| `category` | the category of its runs, whose rules the server's config gives ([below](#categories)); `default` without one, `chat` for a pipeline that starts on `chat` |
 
 #### Interactive runs
 
@@ -228,6 +262,115 @@ or one that starts on `chat`, and the runs such a run starts with
 interactive_workers` (default 1, on top of `workers`) run only them: a
 message gets a worker even while the others are all busy. A long step of
 an interactive pipeline holds that lane while it runs: keep them short.
+
+#### Calls at once
+
+`workers` counts every step alike. A model on one GPU, behind an OCR
+plugin or a server of language models, bears one call at a time; more
+workers for the light nodes (notes, starlark, a database) would send it
+more. So each plugin and each provider of language models may have its
+own limit, and a resource several of them share its own too:
+
+```toml
+[[pipelines.resources]]
+name = "gpu"           # one GPU for the OCR plugin and the model server
+max = 1
+
+[[pipelines.plugins]]
+name = "ocr"
+url = "http://gosidian-ocr:8000/mcp"
+max_concurrent = 1     # default: what its manifest suggests, else no limit
+resources = ["gpu"]
+
+[[pipelines.llm]]
+name = "default"
+base_url = "http://gpu.lan:11434/v1"
+max_concurrent = 2     # default: no limit
+resources = ["gpu"]
+```
+
+A step of a plugin's node takes a place in the plugin and in its
+resources while it runs; an `llm.*` step in its provider (the one its
+`provider` names when the step is queued, else the first) and in the
+provider's resources. A step that finds one of them full stays in the
+queue without holding a worker, and the steps after it may go first: a
+note written after an OCR in the queue does not wait for the GPU. When a
+place is freed, the queue's order says who takes it, the interactive
+runs first. An agent's call of a plugin's tool takes a place too, and
+waits for one up to its timeout, then says the plugin is busy. A step
+counts once however many calls it makes (`llm.describe_media` with
+`concurrency`). The limits live in memory: after a restart nothing
+holds a place, and the steps left running are queued again. The
+environment sets them as well: `GOSIDIAN_PIPELINES_RESOURCES`
+(`gpu=1,net=4`), `GOSIDIAN_PIPELINES_LLM_MAX_CONCURRENT` and
+`_LLM_RESOURCES` for the provider `default`, and for each plugin
+`GOSIDIAN_PLUGIN_<NAME>_MAX_CONCURRENT` and `_RESOURCES` (`gpu`).
+
+**The queue** shows what waits for what:
+
+- the Runs window has a Queue panel while something waits or runs: the
+  steps queued, running and the workers, and for each plugin, model and
+  resource its places taken over its limit, its steps queued and the
+  longest wait. A queued step of a run says why it waits: «waits for a
+  place in plugin ocr (1 of 1 taken)», or how many steps the queue takes
+  before it;
+- `GET /api/v1/runs/queue?project=` gives the same, for the projects
+  the caller reads; `memory_pipelines` gives the project's;
+- `/metrics` has `gosidian_pipeline_steps_queued`,
+  `gosidian_pipeline_steps_running` and
+  `gosidian_pipeline_queue_oldest_seconds`, by `resource` (`all` for
+  every step).
+
+The places taken are the whole server's; the steps queued, those of the
+projects asked.
+
+#### Categories
+
+A pipeline names its category, `category: taglio`; one that names none
+is in `default`, one that starts on `chat` in `chat`. The server's config
+gives a category its rules, the installer's to choose:
+
+```toml
+[pipelines]
+fair = true              # the steps of a priority in turn among the projects (default)
+
+[[pipelines.categories]]
+name = "taglio"
+max_running = 1          # its steps running at once; 0: no limit
+max_runs = 5000          # its runs not ended: beyond, a start from outside answers 429
+replace = true           # a start cancels the queued runs of the same pipeline and input
+priority = "low"         # interactive, normal (default) or low
+wait = "0s"              # how long a start that says nothing waits for its run
+projects = ["rag"]       # the projects whose pipelines may name it; none: all
+```
+
+- `max_running` makes the category a resource of the [calls at
+  once](#calls-at-once): `cat:taglio` in the Queue panel, the gauges and
+  the [queue trigger](#when-the-queue-is-long).
+- `max_runs` counts the runs of the category queued, running or waiting,
+  on the whole server. Beyond it a start by hand, over HTTP or MCP, with
+  a run token or from a chat answers `429` with `Retry-After: 30`; an
+  event (an arrival, a commit, a schedule, the end of a run, a long queue)
+  and `pipeline.run` queue their runs as before, not to lose them. The
+  same start again, with its idempotency key, gives back its run.
+- `replace` cancels, when a run starts, the runs of its pipeline with
+  the same input that are still queued, no step of theirs started: they
+  end `canceled`, "replaced by run …". A running one goes on.
+- `priority: low` puts its runs' steps after the normal ones; a run that
+  an interactive one starts stays interactive.
+- `wait` is the default `wait` of a start (REST and `memory_pipeline_run`)
+  that says none, at most `max_sync_wait`.
+- `projects` reserves the category: a pipeline of another project that
+  names it does not start, and says why.
+
+A category the config does not name has no rules: its runs have no
+category limits, and the Runs window says so beside the pipeline.
+
+With `fair` the steps of a priority are taken in turn among the projects:
+first the project with the fewest steps running, then the one served
+least lately. A batch of thousands of runs of a project no longer makes
+the other projects wait for its end. `fair = false` takes them in the
+order of their runs, as before.
 
 ### Expressions
 
@@ -256,13 +399,21 @@ it as text: `ratings: {"{{ trigger.turn }}": "{{ trigger.rating }}"}`
 | `pipeline.run` | `pipeline` (a pipeline note of the project, relative to it), `input` (a map, the started run's `trigger`), `wait` (default yes), `timeout` (of the wait: default `24h`, at most `max_wait`), `key` | with `wait`: `run`, `pipeline`, `status`, `error`, `steps` (each node's status), `outputs` (each node's output, when they fit); without: `run`, `pipeline`, `status`, `existing` — see [below](#one-pipeline-starting-another) |
 | `starlark` | `code` setting `output`, a script (loops and `if` at the top level, `while`, `set`); `input`; the run's values in `ctx`, `json.encode`/`json.decode`; no `load`, no I/O, 10 million steps at most | the value of `output` itself: `{{ node }}`, or `{{ node.field }}` for a map |
 | `http.request` | `url` (in `http_allowlist`), `method`, `json` or `body`, `headers`, `secret_header: "Authorization=secret_name"`, `accept_errors` | `status`, `headers`, `json` or `body` (4 MiB at most) |
-| `llm.chat` | `prompt`, `system`, `provider` (default `default`), `model`, `max_tokens` (default 1024), `temperature`, `json: true`, `reasoning_effort` (`none`, `low`, `medium`, `high`: how much a model that reasons first may think; `none` turns it off on Ollama — a thinking model can spend all `max_tokens` before it answers) | `text`, `json`, `model`, `provider`, `usage`, `finish_reason` (`length` when `max_tokens` ran out), `reasoning` (the model's thinking, when it gives it) |
+| `llm.chat` | `prompt`, `system`, `provider` (default `default`), `model`, `max_tokens` (default 1024), `temperature`, `json: true`, `reasoning_effort` (`none`, `low`, `medium`, `high`: how much a model that reasons first may think; `none` turns it off on Ollama — a thinking model can spend all `max_tokens` before it answers), `stream: true` (the answer as it comes, to whoever [follows the run](#starting-waiting-resuming)) | `text`, `json`, `model`, `provider`, `usage`, `finish_reason` (`length` when `max_tokens` ran out), `reasoning` (the model's thinking, when it gives it) |
 | `llm.describe` | `image` (an attachment of the project, png/jpg/gif/webp, 10 MiB at most), `prompt`, and as `llm.chat` | as `llm.chat`, plus `image` |
 | `llm.describe_media` | `note` (whose image notes, in `<note>_img/`, get a description), `prompt` and `inline_prompt` (with `{title}`, `{section}`, `{context}`), `inline_max_side` (default 128: an image in a sentence with a longer side, a screenshot, gets `prompt`; 0: every one gets `inline_prompt`), `images` (`all`, the default; `icons`, the images in a sentence up to `inline_max_side`; `others`, the rest: two passes, each with its own model), `context_chars` (default 1200), `max_pixels` (default 2000000; 0 sends an image whole), `concurrency` (default 1, at most 8), `prompt_version` (default 1), `redo`, and as `llm.chat` (`max_tokens` default 600) | `described`, `skipped`, `unreadable`, `excluded` (left to another pass by `images`), `failed`, `downscaled`, `errors`, `usage`, `seconds` — see [below](#documents-from-the-in-folder) |
 | `in.list` | `folder` (of the IN folder; empty: all), `recursive` (default yes), `match` (a glob on the name), `kinds`, `status`, `batch` (`{{ trigger.batch }}`), `limit` (default 500, at most 5000), `cursor` | `files` (`path`, `name`, `stem`, `ext`, `dir`, `size`, `sha256`, `etag`, `status`, `modified`, `batch`, `source`), `count`, `next` (the cursor of the next page; empty at the last) |
 | `in.move` | `file` (in the IN folder), `to` (a folder, `done/`, or a path, in the IN folder; empty, or where it is already: it stays; for a file of a [source](in.md#sources), inside the source: `done/` is its `done/`), `status` (`done`, `error`, `ignored`, `new`) | `path`, `from`, `status` |
 | `in.import` | `file` (a `.md` in the IN folder), `dest` (a folder of the project), `base` (the folder of the IN folder whose tree is kept under `dest`; empty: all of it), `media_notes` (default yes), `list_images` (default yes; no keeps only their count, for an `each` over many files), `convert` (a node that converts the images, `images.convert`), `convert_with` (its settings) and `convert_batch` (the images of one call, default 25) | `path`, `created`, `attachments`, `image_count`, `images` (`note`, `attachment`, `src`, `position`, `inline`), `removed`, `unresolved`, `skipped` (`src`, `reason`), with `convert` `converted` and `convert_errors` — see [below](#documents-from-the-in-folder) |
 | `vault.commit` | `message` (default `pipeline <path>: run <id>`), `tag` (a git tag on the commit, with at least one `/`; the project needs `pipeline_tags`) | `commit` (the SHA; HEAD's when nothing was pending), `short`, `committed` (false when nothing was pending), `tag`, `pushed`, `push_error` — see [below](#revisions-as-git-history) |
+| `task.context` | `task` (default `{{ trigger.task }}`), `prompt` | `task`, `body`, `team`, `role`, `system`, `prompt`, `max_cost`, `paths`, `forbid`, `depends_on`, `children` — see [teams of agents](agents.md#the-pipelines-on-task) |
+| `task.update` | `task`, `status` (`working`, `input-required`, `review`, `submitted`), `message` | `task` |
+| `task.complete` | `task`, `status` (`completed`, `failed`, `canceled`), `report` | `task` |
+| `task.run` | `task`, `prompt`, `plan`, and settings for the executor | the output of the role's executor, and `next` (`checks`, `preview`: what runs after it) — see [teams of agents](agents.md#the-pipelines-of-a-team) |
+| `task.gate` | `agent`, `checks`, `preview`, `choices` | `ok`, `close`, `ask`, `redo`, `fail`, `files`, `outside`, `forbidden`, `notes`, `pr_url`, `text`, `feedback`, `choices` |
+| `task.verdict` | `gate`, `answer` | `close`, `status`, `merge`, `close_pr`, `redo`, `report`, `feedback` |
+| `task.pr` | `url`, `action` (`merge`, `close`) | the executor plugin's `pr` output |
+| `task.plan` | `plan` | `action`, `close`, `ask`, `wait`, `summary`, `question`, `created` |
 | `<plugin>.<node>` | what the plugin's manifest says; a setting it lists in `files` names an attachment of the project or a file of its IN folder (or a list of them, for a plugin that takes files by reference: `{{ trigger.files }}`) | the plugin tool's result, plus `files` (`name`, `path`, `mime`, `markdown`): the files it gave back, stored as attachments |
 
 A plugin's nodes exist once the owner accepted its manifest
@@ -658,8 +809,10 @@ types only, and runs nothing.
   `retry`, `timeout` and `on_error`. A text field offers, as you type
   `{{`, what the node may read: the trigger's fields, the run's, the
   outputs of the nodes that run before it, from their types' output
-  schema. The trigger's panel sets its kind, its `kinds` and `folder`, its
-  `every`, or, for `in`, its `match` and whether it runs per batch.
+  schema. The trigger's panel sets its kind, one of those the server
+  knows, its `kinds` and `folder`, its `every`, for `in` its `match` and
+  whether it runs per batch, for `commit` its `folder`, `match` and `skip`,
+  for `run` its `status` and `pipelines`.
 - **YAML**: the block as text. Every change is read as the server reads
   it (`POST /api/v1/pipeline-check`), and the problem shown under the
   drawing.
@@ -676,8 +829,9 @@ live while it goes. **Start** runs the saved pipeline with a JSON input,
 **Resume** hands its data to a run that waits, **Cancel** stops one. The
 Runs window draws the run it opens, too.
 
-The node types and the schemas of their settings and outputs:
-`GET /api/v1/pipeline-nodes`, which answers with the pipelines off too.
+The node types and the schemas of their settings and outputs, and the
+triggers a pipeline may declare: `GET /api/v1/pipeline-nodes`, which
+answers with the pipelines off too.
 
 ## What a run leaves
 
@@ -738,6 +892,23 @@ comes back as it waits; one that waits only for the runs it started
 (`pipeline.run`) is still at work, and the start waits on. One that did
 not end in time comes back `202`, as without `wait`, and
 `GET /api/v1/runs/<id>` follows it.
+
+**Following the answer as it comes** — a start with `Accept:
+text/event-stream` waits as with `wait` (`max_sync_wait` when it gives
+none), and answers `200` with server-sent events instead: `run` (`{run,
+existing}`, at once), `delta` (`{run, pipeline, node, index, text}`: what
+an `llm.chat` with `stream: true` wrote since the last one, of this run or
+of a run it started with `pipeline.run`), `reset` (the same fields
+without `text`: that node is tried again, its text starts over), then
+`answer`, the JSON a start that waits answers, with the `status` it
+answers with (`202` and the run as it is when the time passed). A comment every 15 seconds keeps the proxies from closing
+it. An error before the run starts is the usual JSON error. A node
+streams only while someone follows its run: one nobody follows (a batch,
+a trigger) calls its model whole, and a run resumed after a restart has
+no stream. The text is the model's: the pipeline's answer, which comes
+last, may be another (sources, images, a cleaned text). What a streaming
+node writes reaches whoever started the run asking for it, as the
+answer does: stream only what the answer would show.
 
 **An asynchronous job** — a node hands `{{ run.resume_url }}` to a
 service and a `wait.call` node waits for it: the service POSTs its result

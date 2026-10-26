@@ -101,6 +101,10 @@ type Manifest struct {
 	// (IMP-183).
 	Graphs      []GraphSpec `json:"graphs,omitempty"`
 	Permissions Permissions `json:"permissions"`
+	// MaxConcurrent is how many calls at once the plugin bears (a model on
+	// one GPU: 1), until the server's config says otherwise (IMP-196); 0:
+	// no limit.
+	MaxConcurrent int `json:"max_concurrent,omitempty"`
 }
 
 // GraphSpec is a graph a plugin offers: nodes and edges it makes of its

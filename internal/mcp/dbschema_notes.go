@@ -39,9 +39,16 @@ func (s *Server) noteSchemaProblems(ctx context.Context, rel string, content []b
 				rel, strings.Join(cut, "; ")))
 		}
 	}
-	if _, err := dbschema.Parse(rel, fm); err != nil && !errors.Is(err, dbschema.ErrNotDatabase) {
+	own, err := dbschema.Parse(rel, fm)
+	if err != nil && !errors.Is(err, dbschema.ErrNotDatabase) {
 		addCallNote(ctx, fmt.Sprintf("%s is a database note but its schema does not parse (%v): its rows go unchecked until it does.", rel, err))
 		return
+	}
+	if own != nil {
+		for _, name := range own.ReservedFields() {
+			meaning, _ := dbschema.Reserved(name)
+			addCallNote(ctx, fmt.Sprintf("%s declares the field %q, a name gosidian already gives a meaning (%s): rename it in the schema and in the rows, e.g. path → folder.", rel, name, meaning))
+		}
 	}
 	schema, err := dbschema.Covering(s.index, s.vault, rel)
 	if err != nil || schema == nil || !schema.IsRow(rel, fm) {

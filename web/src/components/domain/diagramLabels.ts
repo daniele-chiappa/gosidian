@@ -9,6 +9,17 @@ const SHAPES = ['box', 'pill', 'decision', 'data', 'doc', 'db', 'circle', 'note'
 const CLASSES = ['user', 'data', 'ext', 'planned', 'off'] as const
 const STYLES = ['solid', 'dashed', 'dotted'] as const
 const STATUSES = ['done', 'active', 'critical', 'milestone'] as const
+const TRIGGERS = [
+  'manual',
+  'external',
+  'chat',
+  'ingest',
+  'schedule',
+  'in',
+  'commit',
+  'run',
+  'queue',
+] as const
 const RUN_STATUSES = [
   'pending',
   'queued',
@@ -264,10 +275,7 @@ export function useDiagramLabels() {
       Object.fromEntries(keys.map((x) => [x, t(`pipeline_editor.${ns}.${x}`)]))
     return {
       trigger: k('trigger'),
-      triggers: map(['manual', 'external', 'ingest', 'schedule', 'in'], 'triggers') as Record<
-        'manual' | 'external' | 'ingest' | 'schedule' | 'in',
-        string
-      >,
+      triggers: map(TRIGGERS, 'triggers') as Record<(typeof TRIGGERS)[number], string>,
       statuses: map(RUN_STATUSES, 'statuses') as Record<(typeof RUN_STATUSES)[number], string>,
       drawing: k('drawing'),
       yaml: k('yaml'),
@@ -280,6 +288,8 @@ export function useDiagramLabels() {
       zoomIn: k('zoom_in'),
       zoomOut: k('zoom_out'),
       palette: k('palette'),
+      searchNodes: k('search_nodes'),
+      noNodes: k('no_nodes'),
       base: k('base'),
       node: k('node'),
       id: k('id'),
@@ -305,6 +315,9 @@ export function useDiagramLabels() {
       every: k('every'),
       match: k('match'),
       batch: k('batch'),
+      skip: k('skip'),
+      runEnds: k('run_ends'),
+      pipelines: k('pipelines'),
       required: k('required'),
       structured: k('structured'),
       invalidValue: k('invalid_value'),

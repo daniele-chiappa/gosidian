@@ -32,6 +32,22 @@ func relIndex(t *testing.T) *index.Index {
 	return idx
 }
 
+// A row's own path and name fields do not hijack `this` (BUG-140): the
+// note's path and file name win.
+func TestThisFields_NotesOwnPathAndNameWin(t *testing.T) {
+	idx := relIndex(t)
+	c := Context{This: ThisFields("p/docs/bugs/BUG-1.md", map[string]any{"id": "BUG-1", "path": "/opt/app", "name": "app"}), Resolve: idx.Resolve}
+	if got := ids(run(t, idx, "from: p/plans\nwhere: [related contains this]\nsort: path", c)); got != "fix" {
+		t.Errorf("related contains this: %s, want fix", got)
+	}
+	if p, n := c.This["path"], c.This["name"]; !reflect.DeepEqual(p, []string{"p/docs/bugs/BUG-1.md"}) || !reflect.DeepEqual(n, []string{"BUG-1"}) {
+		t.Errorf("this.path = %v, this.name = %v", p, n)
+	}
+	if !reflect.DeepEqual(c.This["id"], []string{"BUG-1"}) {
+		t.Errorf("this.id = %v", c.This["id"])
+	}
+}
+
 func bugContext(idx *index.Index) Context {
 	return Context{This: ThisFields("p/docs/bugs/BUG-1.md", map[string]any{"id": "BUG-1"}), Resolve: idx.Resolve}
 }

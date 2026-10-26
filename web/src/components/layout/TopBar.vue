@@ -11,6 +11,7 @@ import { resetSessionState } from '@/composables/useSessionReset'
 import { shortcutLabel } from '@/composables/platform'
 import { Search, LogOut, LogIn, Columns2, SquareStack } from 'lucide-vue-next'
 import InsightsBadge from '@/components/layout/InsightsBadge.vue'
+import UploadsBadge from '@/components/layout/UploadsBadge.vue'
 
 const { t } = useI18n()
 
@@ -86,6 +87,7 @@ async function handleLogout() {
       </div>
     </div>
     <div class="flex items-center gap-3 text-sm">
+      <UploadsBadge />
       <InsightsBadge v-if="auth.isOwner" />
       <span class="text-text-muted hidden md:inline">{{ auth.username }}</span>
       <span

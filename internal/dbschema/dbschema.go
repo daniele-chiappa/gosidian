@@ -465,6 +465,40 @@ func (s *Schema) FieldNames() []string {
 	return out
 }
 
+// reservedFields are the names gosidian already gives a meaning to, from
+// the note itself or from the audit (BUG-140): a field declared with one of
+// them is never read where the views and queries compute the name, or, for
+// the audit's, hides what gosidian recorded.
+var reservedFields = map[string]string{
+	"path":        "the note's own path, in views, queries and `this`",
+	"name":        "the note's file name, in `this.name`",
+	"modified":    "the note's modification time, in views and queries",
+	"links":       "every link of the note, in `links contains`",
+	"created_by":  "who created the note, from the audit, which a field of that name hides",
+	"modified_by": "who last modified the note, from the audit, which a field of that name hides",
+	"created_at":  "when the note was created, from the audit, which a field of that name hides",
+	"modified_at": "when the note was last modified, from the audit, which a field of that name hides",
+}
+
+// Reserved reports what gosidian already means by a field name, and
+// whether it means anything.
+func Reserved(name string) (string, bool) {
+	m, ok := reservedFields[name]
+	return m, ok
+}
+
+// ReservedFields lists the declared fields whose names are reserved, in
+// declaration order.
+func (s *Schema) ReservedFields() []string {
+	var out []string
+	for _, f := range s.Fields {
+		if _, ok := reservedFields[f.Name]; ok {
+			out = append(out, f.Name)
+		}
+	}
+	return out
+}
+
 // Problem is one way a row does not match its schema.
 type Problem struct {
 	Field   string `json:"field,omitempty"`

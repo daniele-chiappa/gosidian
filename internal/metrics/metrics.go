@@ -7,6 +7,7 @@ package metrics
 import (
 	"net/http"
 	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -116,9 +117,62 @@ func Register() {
 		MCPToolCalls, MCPRateLimitHits,
 		MCPToolLatency, MCPToolPayloadBytes,
 		GitSyncCommits, GitSyncStatus, NotesGauge,
-		SearchQueries,
+		SearchQueries, queueCollector{},
 	} {
 		_ = prometheus.Register(c)
+	}
+}
+
+// QueueSample is a resource's queue of the pipelines' steps (IMP-196):
+// the steps queued whose time has come, the places taken, how long the
+// oldest has waited. Resource "" is every step, whatever it takes.
+type QueueSample struct {
+	Resource   string
+	Queued     int
+	Running    int
+	OldestWait float64
+}
+
+var queueSource atomic.Pointer[func() []QueueSample]
+
+// SetQueueSource sets where the gauges of the queue read it, at each
+// scrape; nil, or never set, gives none.
+func SetQueueSource(f func() []QueueSample) {
+	if f == nil {
+		queueSource.Store(nil)
+		return
+	}
+	queueSource.Store(&f)
+}
+
+var (
+	queuedDesc  = prometheus.NewDesc("gosidian_pipeline_steps_queued", "Steps of the pipelines queued whose time has come, by resource (plugin:<name>, llm:<provider>, res:<name>; all: every step).", []string{"resource"}, nil)
+	runningDesc = prometheus.NewDesc("gosidian_pipeline_steps_running", "Places taken in a resource, by the steps and the agents' calls of the plugins' tools.", []string{"resource"}, nil)
+	oldestDesc  = prometheus.NewDesc("gosidian_pipeline_queue_oldest_seconds", "How long the step queued longest has waited, by resource.", []string{"resource"}, nil)
+)
+
+// queueCollector reads the queue at each scrape.
+type queueCollector struct{}
+
+func (queueCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- queuedDesc
+	ch <- runningDesc
+	ch <- oldestDesc
+}
+
+func (queueCollector) Collect(ch chan<- prometheus.Metric) {
+	f := queueSource.Load()
+	if f == nil {
+		return
+	}
+	for _, s := range (*f)() {
+		res := s.Resource
+		if res == "" {
+			res = "all"
+		}
+		ch <- prometheus.MustNewConstMetric(queuedDesc, prometheus.GaugeValue, float64(s.Queued), res)
+		ch <- prometheus.MustNewConstMetric(runningDesc, prometheus.GaugeValue, float64(s.Running), res)
+		ch <- prometheus.MustNewConstMetric(oldestDesc, prometheus.GaugeValue, s.OldestWait, res)
 	}
 }
 

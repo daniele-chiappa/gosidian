@@ -25,6 +25,16 @@ func (v *Vault) SetStateDir(dir string) {
 	}
 }
 
+// RelInside returns the vault-relative path of the folder dir, an absolute
+// path, when it lies inside the vault below its root, with symbolic links
+// resolved; false for the vault itself and for a folder outside it.
+func (v *Vault) RelInside(dir string) (string, bool) {
+	if dir == "" {
+		return "", false
+	}
+	return relInside(v.Root, dir)
+}
+
 // StateDirInside returns the vault-relative path of the state dir when it
 // sits inside the vault, "" otherwise.
 func (v *Vault) StateDirInside() string { return v.stateRel }

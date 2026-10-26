@@ -124,6 +124,14 @@ const (
 	// Individual reads are not audited; a bulk listing is.
 	ActionMirrorSync Action = "mirror_sync"
 
+	// An upload into an IN folder ended (IMP-172): Path is its folder, To
+	// the upload's id, Size the bytes it placed. Each file it placed has
+	// its create or update entry too, a zip's folder one.
+	ActionINUpload Action = "in_upload"
+	// An agent opened an upload into an IN folder through memory_in_upload
+	// (IMP-172 phase 5b): Path is its folder, To its id, Size its bytes.
+	ActionINUploadOpen Action = "in_upload_open"
+
 	// A zip export was downloaded (IMP-099): Path = the project, "" for the
 	// whole vault; Size = bytes sent.
 	ActionExport Action = "export"

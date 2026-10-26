@@ -54,10 +54,36 @@ func TestMCP_ListBootstrapTemplates(t *testing.T) {
 			t.Errorf("template %q has zero files", e.Name)
 		}
 	}
-	for _, want := range []string{"karpathy-wiki", "minimal", "team"} {
+	for _, want := range []string{"karpathy-wiki", "minimal", "team", "rag"} {
 		if !names[want] {
 			t.Errorf("expected template %q in listing, got %+v", want, names)
 		}
+	}
+}
+
+// The rag template brings its pipelines and its bot, with the project's
+// name filled in and the expressions of the pipelines left as written
+// (IMP-199).
+func TestMCP_ProjectScaffold_RAG(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	seedTemplatesForTest(t, s.vault.Root)
+	res, err := s.handleProjectScaffold(context.Background(), call(map[string]any{"project": "docs", "template": "rag"}))
+	if err != nil || res.IsError {
+		t.Fatalf("scaffold: %v %s", err, resultText(t, res))
+	}
+	for _, p := range []string{"docs/pipelines/arrive.md", "docs/pipelines/cut.md", "docs/pipelines/cut-note.md", "docs/pipelines/answer.md", "docs/pipelines/bot.md", "docs/bots/assistant.md"} {
+		n, err := s.vault.Load(p)
+		if err != nil {
+			t.Fatalf("%s: %v", p, err)
+		}
+		body := string(n.Content)
+		if strings.Contains(body, "{{PROJECT}}") || !strings.Contains(body, "tags: [docs") {
+			t.Errorf("%s: the project is not filled in:\n%s", p, body[:200])
+		}
+	}
+	n, _ := s.vault.Load("docs/pipelines/answer.md")
+	if !strings.Contains(string(n.Content), `query: "{{ trigger.question }}"`) {
+		t.Error("an expression of a pipeline was changed")
 	}
 }
 

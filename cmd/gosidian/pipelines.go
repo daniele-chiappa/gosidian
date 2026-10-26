@@ -21,6 +21,7 @@ import (
 	"github.com/gosidian/gosidian/internal/infolder"
 	"github.com/gosidian/gosidian/internal/jobs"
 	mcpsrv "github.com/gosidian/gosidian/internal/mcp"
+	"github.com/gosidian/gosidian/internal/metrics"
 	"github.com/gosidian/gosidian/internal/pipeline"
 	"github.com/gosidian/gosidian/internal/plugins"
 	"github.com/gosidian/gosidian/internal/secrets"
@@ -44,10 +45,47 @@ func openSecrets(sdir string) (*secrets.Store, error) {
 	return secrets.Open(filepath.Join(sdir, secrets.FileName), key)
 }
 
-// startPipelines opens jobs.db, builds the engine on the MCP server and
-// starts the runner and the schedules. The returned stop waits for the
-// runner to put down its steps (ctx must be done) and closes jobs.db.
-func startPipelines(ctx context.Context, cfg *config.Config, sdir string, mcpServer *mcpsrv.Server, in *infolder.Service, syncer *gitsync.Sync) (stop func(time.Duration, func()), reg *plugins.Registry) {
+// startRunner opens jobs.db and starts the job runner (IMP-166), for the
+// pipelines' runs and the automations' actions. The returned stop waits
+// for the runner to put down its steps (ctx must be done), calls before
+// while the jobs database is still open, and closes it.
+func startRunner(ctx context.Context, cfg *config.Config, sdir string) (*jobs.Runner, func(time.Duration, func())) {
+	pc := cfg.Pipelines
+	dbPath := filepath.Join(sdir, "jobs.db")
+	store, err := jobs.Open(dbPath)
+	if err != nil {
+		log.Fatalf("job runner: %v", err)
+	}
+	runner := jobs.NewRunner(store, jobs.Options{
+		Workers:            pc.Workers,
+		InteractiveWorkers: pc.InteractiveWorkers,
+		Lease:              pc.StepTimeout,
+		Retention:          pc.Retention,
+		Logger:             slog.Default(),
+		// The limits come with the plugins (startPipelines, IMP-196).
+		Gate: jobs.NewGate(nil),
+		Fair: pc.FairOn(),
+	})
+	done := make(chan struct{})
+	go func() { runner.Start(ctx); close(done) }()
+	log.Printf("job runner: on (%d workers, retention %s, state %s)", max(pc.Workers, 1), pc.Retention, dbPath)
+	// stop waits up to d for the steps to end, then calls before (the last
+	// git commit: the runs of its commit pipelines are queued for the next
+	// start) while the jobs database is still open, and closes it.
+	return runner, func(d time.Duration, before func()) {
+		select {
+		case <-done:
+		case <-time.After(d):
+			log.Printf("job runner: steps still running at shutdown, the next start takes them back")
+		}
+		before()
+		_ = store.Close()
+	}
+}
+
+// startPipelines builds the engine on runner and the MCP server and starts
+// the schedules, the plugins and the bots.
+func startPipelines(ctx context.Context, cfg *config.Config, sdir string, runner *jobs.Runner, mcpServer *mcpsrv.Server, in *infolder.Service, syncer *gitsync.Sync) *plugins.Registry {
 	pc := cfg.Pipelines
 	loc := time.Local
 	tz := pc.Timezone
@@ -61,11 +99,7 @@ func startPipelines(ctx context.Context, cfg *config.Config, sdir string, mcpSer
 		}
 		loc = l
 	}
-	dbPath := filepath.Join(sdir, "jobs.db")
-	store, err := jobs.Open(dbPath)
-	if err != nil {
-		log.Fatalf("pipelines: %v", err)
-	}
+	store := runner.Store()
 	// A nil *secrets.Store must not become a non-nil interface.
 	var sec pipeline.Secrets
 	switch s, err := openSecrets(sdir); {
@@ -78,20 +112,13 @@ func startPipelines(ctx context.Context, cfg *config.Config, sdir string, mcpSer
 	}
 	providers := make([]pipeline.Provider, 0, len(pc.LLM))
 	for _, p := range pc.LLM {
-		providers = append(providers, pipeline.Provider{Name: p.Name, BaseURL: p.BaseURL, APIKeySecret: p.APIKeySecret, Model: p.Model})
+		providers = append(providers, pipeline.Provider{Name: p.Name, BaseURL: p.BaseURL, APIKeySecret: p.APIKeySecret, APIKeyEnv: p.APIKeyEnv, Model: p.Model, Resources: p.Resources})
 	}
 	publicURL := pc.PublicURL
 	if publicURL == "" {
 		publicURL = cfg.OAuth.Issuer
 	}
 	interactive := pc.InteractiveWorkers
-	runner := jobs.NewRunner(store, jobs.Options{
-		Workers:            pc.Workers,
-		InteractiveWorkers: interactive,
-		Lease:              pc.StepTimeout,
-		Retention:          pc.Retention,
-		Logger:             slog.Default(),
-	})
 	mcpServer.SetPipelinesSwitch(true)
 	engine := pipeline.New(mcpServer.PipelineHost(), runner, pipeline.Config{
 		MaxInputBytes:  pc.MaxInputBytes,
@@ -110,8 +137,10 @@ func startPipelines(ctx context.Context, cfg *config.Config, sdir string, mcpSer
 		FileTicketTTL:  pc.StepTimeout,
 		MaxSyncWait:    pc.MaxSyncWait,
 		RunTokenRate:   pc.RunTokenRate,
+		Categories:     categories(pc.Categories),
+		Tasks:          pipeline.TaskConfig{Lease: cfg.Agents.Lease, MaxAttempts: cfg.Agents.MaxAttempts, MaxTasks: cfg.Agents.MaxTasks},
 	}, sec, slog.Default())
-	reg, err = newPlugins(pc, sdir, sec, slog.Default())
+	reg, err := newPlugins(pc, sdir, sec, slog.Default())
 	if err != nil {
 		log.Fatalf("plugins: %v", err)
 	}
@@ -119,6 +148,11 @@ func startPipelines(ctx context.Context, cfg *config.Config, sdir string, mcpSer
 		reg.SetRunTokens(runTokens{ts})
 	}
 	engine.Types().Extend(reg)
+	// The calls at once of each plugin, provider and shared resource
+	// (IMP-196), for the steps and the agents' calls of the plugins' tools.
+	runner.Gate().SetLimit(resourceLimit(pc, reg, engine, cfg.Agents.MaxRunning))
+	// A run of a team's task writes only in its role's folders (IMP-195).
+	reg.SetRunScopes(engine)
 	// The IN folders (IMP-172): their batches start the in pipelines, the
 	// in.* nodes read and move through them.
 	engine.SetIN(in)
@@ -140,6 +174,18 @@ func startPipelines(ctx context.Context, cfg *config.Config, sdir string, mcpSer
 	}
 	mcpServer.SetPipelines(engine)
 	mcpServer.SetPlugins(reg)
+	// The gauges of the queue (IMP-196), read at each scrape.
+	metrics.SetQueueSource(func() []metrics.QueueSample {
+		q, err := engine.Queue(nil)
+		if err != nil {
+			return nil
+		}
+		out := []metrics.QueueSample{{Queued: q.Queued, Running: q.Running, OldestWait: q.OldestWait}}
+		for _, r := range q.Resources {
+			out = append(out, metrics.QueueSample{Resource: r.Resource, Queued: r.Queued, Running: r.Running, OldestWait: r.OldestWait})
+		}
+		return out
+	})
 	// The bots (IMP-191): the notes type: chat, handed to their chat
 	// plugin with a run token of their pipeline.
 	var chatSecrets chatbot.Secrets
@@ -155,27 +201,68 @@ func startPipelines(ctx context.Context, cfg *config.Config, sdir string, mcpSer
 	if len(reg.Names()) > 0 {
 		go reg.Start(ctx, pluginCheckEvery)
 	}
-	done := make(chan struct{})
-	go func() { runner.Start(ctx); close(done) }()
 	go engine.StartSchedules(ctx)
+	// The tasks of the teams of agents (IMP-195).
+	go engine.StartTasks(ctx)
 	names := make([]string, 0, len(providers))
 	for _, p := range providers {
 		names = append(names, p.Name)
 	}
-	log.Printf("pipelines: enabled (%d workers and %d interactive, step timeout %s, retention %s, time zone %s, llm %v, plugins %v, http allowlist %d, state %s)",
-		max(pc.Workers, 1), interactive, pc.StepTimeout, pc.Retention, loc, names, reg.Names(), len(pc.HTTPAllowlist), dbPath)
-	// stop waits up to d for the steps to end, then calls before (the last
-	// git commit: the runs of its commit pipelines are queued for the next
-	// start) while the jobs database is still open, and closes it.
-	return func(d time.Duration, before func()) {
-		select {
-		case <-done:
-		case <-time.After(d):
-			log.Printf("pipelines: steps still running at shutdown, the next start takes them back")
+	log.Printf("pipelines: enabled (%d interactive workers, step timeout %s, time zone %s, llm %v, plugins %v, http allowlist %d)",
+		interactive, pc.StepTimeout, loc, names, reg.Names(), len(pc.HTTPAllowlist))
+	return reg
+}
+
+// resourceLimit is the limit of a resource of the steps (IMP-196): a
+// plugin's max_concurrent (its config's, else its manifest's), a
+// provider's, a shared resource's; 0 for none.
+func resourceLimit(pc config.PipelinesConfig, reg *plugins.Registry, engine *pipeline.Engine, agents int) func(string) int {
+	return func(res string) int {
+		switch {
+		case res == pipeline.ResourceAgents:
+			return agents
+		case strings.HasPrefix(res, pipeline.ResourceTeam):
+			return engine.TeamLimit(strings.TrimPrefix(res, pipeline.ResourceTeam))
+		case strings.HasPrefix(res, pipeline.ResourcePlugin):
+			return reg.MaxConcurrent(strings.TrimPrefix(res, pipeline.ResourcePlugin))
+		case strings.HasPrefix(res, pipeline.ResourceLLM):
+			name := strings.TrimPrefix(res, pipeline.ResourceLLM)
+			for _, p := range pc.LLM {
+				if p.Name == name {
+					return p.MaxConcurrent
+				}
+			}
+		case strings.HasPrefix(res, pipeline.ResourceShared):
+			name := strings.TrimPrefix(res, pipeline.ResourceShared)
+			for _, r := range pc.Resources {
+				if r.Name == name {
+					return r.Max
+				}
+			}
+		case strings.HasPrefix(res, pipeline.ResourceCategory):
+			name := strings.TrimPrefix(res, pipeline.ResourceCategory)
+			for _, c := range pc.Categories {
+				if c.Name == name {
+					return c.MaxRunning
+				}
+			}
 		}
-		before()
-		_ = store.Close()
-	}, reg
+		return 0
+	}
+}
+
+// categories are the rules of [[pipelines.categories]] for the engine.
+func categories(cs []config.CategoryConfig) []pipeline.Category {
+	out := make([]pipeline.Category, 0, len(cs))
+	for _, c := range cs {
+		p := c.Priority
+		if p == "normal" {
+			p = ""
+		}
+		out = append(out, pipeline.Category{Name: c.Name, MaxRunning: c.MaxRunning, MaxRuns: c.MaxRuns, Replace: c.Replace,
+			Priority: p, Wait: c.Wait, Projects: c.Projects})
+	}
+	return out
 }
 
 // gitCommitter is git sync as the committer of vault.commit.

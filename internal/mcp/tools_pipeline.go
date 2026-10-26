@@ -44,7 +44,7 @@ func (s *Server) registerPipelineTools() {
 		mcp.WithObject("input", mcp.Description("start: the trigger's payload, a JSON object.")),
 		mcp.WithString("idempotency_key", mcp.Description("start: the same key starts the pipeline once and gives back that run.")),
 		mcp.WithString("callback_url", mcp.Description("start: an address to POST the summary to when the run ends.")),
-		mcp.WithNumber("wait", mcp.Description("start: seconds to wait for the run to end or wait (default 0; at most [pipelines] max_sync_wait).")),
+		mcp.WithNumber("wait", mcp.Description("start: seconds to wait for the run to end or wait (default the pipeline's category's, else 0; at most [pipelines] max_sync_wait).")),
 		mcp.WithString("run", mcp.Description("resume, cancel: the run's id.")),
 		mcp.WithString("step", mcp.Description("resume: the waiting step, when more than one waits.")),
 		mcp.WithObject("data", mcp.Description("resume: the waiting step's output, a JSON object.")),
@@ -73,7 +73,9 @@ func (s *Server) handlePipelines(ctx context.Context, req mcp.CallToolRequest) (
 		if err != nil {
 			return mcp.NewToolResultErrorFromErr("steps", err), nil
 		}
-		return mcp.NewToolResultJSON(map[string]any{"run": pipeline.Brief(run), "pipeline": run.Ref, "steps": pipeline.StepViews(run, steps, s.stepOutputShown)})
+		views := pipeline.StepViews(run, steps, s.stepOutputShown)
+		s.pipelines.Waits(run, views)
+		return mcp.NewToolResultJSON(map[string]any{"run": pipeline.Brief(run), "pipeline": run.Ref, "steps": views})
 	}
 	limit := int(req.GetFloat("limit", 20))
 	if limit <= 0 || limit > 100 {
@@ -83,7 +85,7 @@ func (s *Server) handlePipelines(ctx context.Context, req mcp.CallToolRequest) (
 		if !strings.HasPrefix(p, project+"/") {
 			return mcp.NewToolResultErrorf("%s is not in project %q", p, project), nil
 		}
-		runs, err := store.Runs(jobs.RunFilter{Ref: p, Limit: limit})
+		runs, err := store.Runs(jobs.RunFilter{Kind: pipeline.Kind, Ref: p, Limit: limit})
 		if err != nil {
 			return mcp.NewToolResultErrorFromErr("runs", err), nil
 		}
@@ -94,6 +96,11 @@ func (s *Server) handlePipelines(ctx context.Context, req mcp.CallToolRequest) (
 		return mcp.NewToolResultErrorFromErr("pipelines", err), nil
 	}
 	res := map[string]any{"project": project, "pipelines": s.pipelines.Infos(ps)}
+	// The queue of the project's steps (IMP-196): whether a run started now
+	// would wait, and for which plugin.
+	if q, err := s.pipelines.Queue([]string{project}); err == nil {
+		res["queue"] = q
+	}
 	if s.plugins != nil && len(s.plugins.Names()) > 0 {
 		res["plugins"] = pluginBriefs(s.plugins)
 	}
@@ -190,7 +197,12 @@ func (s *Server) pipelineStart(ctx context.Context, req mcp.CallToolRequest, arg
 	if !existing {
 		s.auditWrite(ctx, audit.ActionPipelineRun, path, run.ID, int64(len(raw)))
 	}
-	if d := s.pipelines.SyncWait(time.Duration(req.GetFloat("wait", 0) * float64(time.Second))); d > 0 {
+	// Unsaid, the wait is the category's (IMP-196).
+	wait := s.pipelines.DefaultWait(path)
+	if _, said := args["wait"]; said {
+		wait = time.Duration(req.GetFloat("wait", 0) * float64(time.Second))
+	}
+	if d := s.pipelines.SyncWait(wait); d > 0 {
 		if r, err := s.pipelines.Wait(ctx, run.ID, d); err == nil {
 			run = r
 		}

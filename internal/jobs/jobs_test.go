@@ -17,7 +17,9 @@ import (
 // pending step once its dependencies are done; a failed or canceled
 // dependency cancels it.
 type fakeExec struct {
-	fns   map[string]func(ctx context.Context, st Step) Outcome
+	fns map[string]func(ctx context.Context, st Step) Outcome
+	// res are the resources of the steps by name, given when queued.
+	res   map[string][]string
 	mu    sync.Mutex
 	ended []Run
 }
@@ -54,7 +56,7 @@ func (f *fakeExec) Next(_ Run, steps []Step) ([]StepChange, *RunChange) {
 		case blocked:
 			out = append(out, StepChange{Name: st.Name, Status: Canceled, Error: "a step before it failed"})
 		case ready:
-			out = append(out, StepChange{Name: st.Name, Status: Queued})
+			out = append(out, StepChange{Name: st.Name, Status: Queued, Resources: f.res[st.Name]})
 		}
 	}
 	return out, nil
@@ -351,7 +353,7 @@ func TestRunner_AStepLeftRunningIsTakenBackAfterARestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A process claims the step and dies before it ends.
-	if got, err := st.claim(time.Now(), 1, time.Hour, false); err != nil || len(got) != 1 {
+	if got, err := st.claim(time.Now(), 1, time.Hour, false, nil, false); err != nil || len(got) != 1 {
 		t.Fatal(err, got)
 	}
 	st.Close()
@@ -489,14 +491,14 @@ func TestStore_ClaimTakesInteractiveFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := st.claim(time.Now(), 1, time.Minute, false)
+	got, err := st.claim(time.Now(), 1, time.Minute, false, nil, false)
 	if err != nil || len(got) != 1 || got[0].RunID != chat.ID {
 		t.Fatalf("claim: %+v %v", got, err)
 	}
-	if got, err := st.claim(time.Now(), 5, time.Minute, true); err != nil || len(got) != 0 {
+	if got, err := st.claim(time.Now(), 5, time.Minute, true, nil, false); err != nil || len(got) != 0 {
 		t.Errorf("the lane took a normal step: %+v %v", got, err)
 	}
-	if got, err := st.claim(time.Now(), 5, time.Minute, false); err != nil || len(got) != 1 || got[0].Name != "x" {
+	if got, err := st.claim(time.Now(), 5, time.Minute, false, nil, false); err != nil || len(got) != 1 || got[0].Name != "x" {
 		t.Errorf("claim of the rest: %+v %v", got, err)
 	}
 }
@@ -519,7 +521,7 @@ func TestStore_ClaimTakesTheOldestRunFirst(t *testing.T) {
 	}
 	var order []string
 	for range 3 {
-		got, err := st.claim(time.Now(), 1, time.Minute, false)
+		got, err := st.claim(time.Now(), 1, time.Minute, false, nil, false)
 		if err != nil || len(got) != 1 {
 			t.Fatalf("claim: %+v %v", got, err)
 		}
@@ -559,5 +561,26 @@ func TestStore_OpensADatabaseWithoutPriority(t *testing.T) {
 			t.Errorf("open %d: %+v %v", i+1, run, err)
 		}
 		st.Close()
+	}
+}
+
+// Runs filters by kind: the pipelines' pages do not list the automations'
+// actions (IMP-166).
+func TestStore_RunsByKind(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "jobs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	pipe, _, _ := st.CreateRun(Run{Kind: "pipeline", Ref: "p/pipelines/a.md", Project: "p"}, chain("a"))
+	act, _, _ := st.CreateRun(Run{Kind: "automation", Ref: "p/tasks.md", Project: "p"}, chain("action"))
+	for kind, want := range map[string]string{"pipeline": pipe.ID, "automation": act.ID} {
+		runs, err := st.Runs(RunFilter{Kind: kind, Projects: []string{"p"}})
+		if err != nil || len(runs) != 1 || runs[0].ID != want {
+			t.Errorf("kind %s: %+v, %v; want only %s", kind, runs, err, want)
+		}
+	}
+	if all, _ := st.Runs(RunFilter{Projects: []string{"p"}}); len(all) != 2 {
+		t.Errorf("no kind: %d runs, want both", len(all))
 	}
 }

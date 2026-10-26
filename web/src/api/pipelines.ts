@@ -25,6 +25,11 @@ export interface RunBrief {
   created: string
   started?: string
   finished?: string
+  /** Its steps go before the others' (interactive) or after them (low). */
+  interactive?: boolean
+  low?: boolean
+  /** The category of its pipeline (IMP-196). */
+  category?: string
 }
 
 export interface PipelineInfo {
@@ -39,6 +44,10 @@ export interface PipelineInfo {
   /** What keeps it from starting by itself: a commit trigger with git sync off. */
   notice?: string
   last_run?: RunBrief
+  /** The category of its runs, and whether the server has rules for it
+   *  (IMP-196). */
+  category?: string
+  category_rules?: boolean
 }
 
 export interface StepView {
@@ -52,6 +61,40 @@ export interface StepView {
   started?: string
   finished?: string
   wait_until?: string
+  /** What the step takes a place in while it runs (IMP-196). */
+  resources?: string[]
+  queued_at?: string
+  not_before?: string
+  /** Why a queued step waits: the steps before it, a full resource. */
+  queue?: StepQueue
+}
+
+export interface StepQueue {
+  ahead: number
+  blocked_by?: string
+  running?: number
+  limit?: number
+}
+
+/** The queue of the steps (IMP-196): by resource (plugin:<name>,
+ *  llm:<provider>, res:<name>), the steps queued, the places taken of the
+ *  whole server and the limit (0: none). */
+export interface ResourceQueue {
+  resource: string
+  queued: number
+  running: number
+  limit: number
+  oldest_wait_seconds: number
+}
+
+export interface QueueView {
+  queued: number
+  later: number
+  running: number
+  workers: number
+  interactive_workers: number
+  oldest_wait_seconds: number
+  resources: ResourceQueue[]
 }
 
 export interface RunDetail {
@@ -87,6 +130,11 @@ export async function listRuns(f: RunFilter = {}): Promise<RunBrief[]> {
   if (f.limit) params.limit = f.limit
   const { data } = await client.get<{ runs: RunBrief[] | null }>('/runs', { params })
   return data.runs ?? []
+}
+
+export async function getQueue(project = ''): Promise<QueueView> {
+  const { data } = await client.get<{ queue: QueueView }>('/runs/queue', { params: project ? { project } : {} })
+  return data.queue
 }
 
 export async function getRun(id: string): Promise<RunDetail> {
@@ -158,12 +206,18 @@ export interface PipelineNodeType {
 export interface PipelineCatalog {
   pipelines_enabled: boolean
   nodes: PipelineNodeType[]
+  /** The triggers a pipeline may declare, as the server knows them (IMP-207). */
+  triggers: string[]
 }
 
-/** The node types for the pipeline editor; answers with the pipelines off too (base types only). */
+/** The node types and triggers for the pipeline editor; answers with the pipelines off too (base types only). */
 export async function getPipelineNodes(): Promise<PipelineCatalog> {
   const { data } = await client.get<PipelineCatalog>('/pipeline-nodes')
-  return { pipelines_enabled: !!data.pipelines_enabled, nodes: data.nodes ?? [] }
+  return {
+    pipelines_enabled: !!data.pipelines_enabled,
+    nodes: data.nodes ?? [],
+    triggers: data.triggers ?? [],
+  }
 }
 
 /** Whether the server would run a ```pipeline block not saved yet, and why not. */

@@ -22,6 +22,10 @@ type Info struct {
 	// stopping it by hand: a commit trigger with git sync off.
 	Notice  string    `json:"notice,omitempty"`
 	LastRun *RunBrief `json:"last_run,omitempty"`
+	// Category is the category of its runs (IMP-196); CategoryRules says
+	// whether the server has rules for it.
+	Category      string `json:"category,omitempty"`
+	CategoryRules bool   `json:"category_rules,omitempty"`
 }
 
 // RunBrief is a run without its steps.
@@ -36,14 +40,19 @@ type RunBrief struct {
 	Created  time.Time   `json:"created"`
 	Started  time.Time   `json:"started,omitzero"`
 	Finished time.Time   `json:"finished,omitzero"`
-	// Interactive: its steps go first, and to the interactive workers.
+	// Interactive: its steps go first, and to the interactive workers;
+	// Low: they go after the others' (IMP-196).
 	Interactive bool `json:"interactive,omitempty"`
+	Low         bool `json:"low,omitempty"`
+	// Category is the category of its pipeline (IMP-196).
+	Category string `json:"category,omitempty"`
 }
 
 // Brief is r without its steps.
 func Brief(r jobs.Run) *RunBrief {
 	return &RunBrief{ID: r.ID, Pipeline: r.Ref, Project: r.Project, Status: r.Status, Trigger: r.Trigger, Actor: r.Actor,
-		Error: r.Error, Created: r.Created, Started: r.Started, Finished: r.Finished, Interactive: r.Priority >= jobs.PriorityInteractive}
+		Error: r.Error, Created: r.Created, Started: r.Started, Finished: r.Finished, Interactive: r.Priority >= jobs.PriorityInteractive,
+		Low: r.Priority < jobs.PriorityNormal, Category: r.Category}
 }
 
 // Briefs is runs without their steps.
@@ -67,6 +76,22 @@ type StepView struct {
 	Started   time.Time   `json:"started,omitzero"`
 	Finished  time.Time   `json:"finished,omitzero"`
 	WaitUntil time.Time   `json:"wait_until,omitzero"`
+	// Resources are what the step takes a place in (IMP-196); a queued
+	// step says since when it waits, and why (Engine.Waits).
+	Resources []string   `json:"resources,omitempty"`
+	QueuedAt  time.Time  `json:"queued_at,omitzero"`
+	NotBefore time.Time  `json:"not_before,omitzero"`
+	Queue     *StepQueue `json:"queue,omitempty"`
+}
+
+// StepQueue is why a queued step waits: the steps the queue takes before
+// it, and the first of its resources that is full, with its places taken
+// and its limit.
+type StepQueue struct {
+	Ahead     int    `json:"ahead"`
+	BlockedBy string `json:"blocked_by,omitempty"`
+	Running   int    `json:"running,omitempty"`
+	Limit     int    `json:"limit,omitempty"`
 }
 
 // StepViews is a run's steps in the order of its nodes: an output larger
@@ -75,7 +100,11 @@ func StepViews(run jobs.Run, steps []jobs.Step, max int) []StepView {
 	spec, _ := SpecOf(run)
 	out := make([]StepView, 0, len(steps))
 	for _, st := range steps {
-		v := StepView{Name: st.Name, Status: st.Status, Attempt: st.Attempt, Error: st.Error, Started: st.Started, Finished: st.Finished, WaitUntil: st.WaitUntil}
+		v := StepView{Name: st.Name, Status: st.Status, Attempt: st.Attempt, Error: st.Error, Started: st.Started, Finished: st.Finished, WaitUntil: st.WaitUntil,
+			Resources: st.Resources}
+		if st.Status == jobs.Queued {
+			v.QueuedAt, v.NotBefore = st.QueuedAt, st.NotBefore
+		}
 		if spec != nil {
 			if n, ok := spec.Node(st.Name); ok {
 				v.Use = n.Use

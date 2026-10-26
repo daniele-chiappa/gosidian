@@ -246,3 +246,10 @@ the run token: the answer is `200` with `answer` once the run ended
 (`[pipelines] max_sync_wait` caps the wait), `202` when it did not in
 time. A run token starts at most `[pipelines] run_token_rate` runs a
 minute, 60 by default: raise it for a busy bot.
+
+With `Accept: text/event-stream` the start answers with
+[events](pipelines.md#starting-waiting-resuming): the text of the
+pipeline's `llm.chat` nodes with `stream: true` as the model writes it,
+then the same answer. The chat shows the text as it comes and puts the
+answer in its place: in the bot's pipeline above, `stream: true` on
+`model`.

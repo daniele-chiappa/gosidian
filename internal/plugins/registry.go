@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -27,6 +28,12 @@ type Config struct {
 	URL  string // the MCP endpoint (Streamable HTTP)
 	// TokenSecret names the secret with its bearer token; "" for none.
 	TokenSecret string
+	// TokenEnv names the environment variable with the token, in place of
+	// TokenSecret (IMP-199).
+	TokenEnv string
+	// AcceptSHA is the start of the manifest the installer expects: served
+	// and not yet the accepted one, Check accepts it, by "preset".
+	AcceptSHA string
 	// Timeout caps a call; 0: the step's own timeout.
 	Timeout time.Duration
 	// FilesURL is the server's address as the plugin reaches it, for the
@@ -35,14 +42,28 @@ type Config struct {
 	// MCPURL is gosidian's MCP endpoint as the plugin reaches it, for the
 	// nodes that ask for it (NodeSpec.MCP); "" refuses them.
 	MCPURL string
+	// MaxConcurrent caps its calls at once, in place of its manifest's
+	// max_concurrent; 0: the manifest's (IMP-196).
+	MaxConcurrent int
+	// Resources are the shared resources its calls take a place in.
+	Resources []string
 }
 
 // RunTokens mints and revokes the MCP tokens of the nodes' calls that ask
 // for gosidian's MCP (IMP-193): one per call, for the run's project,
-// expiring after ttl, revoked when the call returns.
+// expiring after ttl, revoked when the call returns. writePaths, for a
+// write token, are the only folders it writes in; none: the whole project
+// (IMP-195).
 type RunTokens interface {
-	MintRun(name, project string, write bool, ttl time.Duration) (id, secret string, err error)
+	MintRun(name, project string, write bool, ttl time.Duration, runID string, writePaths []string) (id, secret string, err error)
 	Revoke(id string) error
+}
+
+// RunScopes says where a run's write token may write (IMP-195).
+type RunScopes interface {
+	// RunWritePaths: scoped is true for a run of a team's task; paths
+	// are its role's folders then, empty when the role writes nowhere.
+	RunWritePaths(runID string) (paths []string, scoped bool, err error)
 }
 
 // Secrets resolves a secret's name to its value.
@@ -114,11 +135,18 @@ type Registry struct {
 	// tokens mints the MCP tokens of the calls that ask for them, set
 	// once before the registry serves (SetRunTokens); nil refuses them.
 	tokens RunTokens
+	// scopes narrows the write tokens of the runs of a team's tasks, set
+	// once before the registry serves (SetRunScopes); nil: none narrowed.
+	scopes RunScopes
 }
 
 // SetRunTokens sets who mints the MCP tokens of the nodes that ask for
 // gosidian's MCP. Call it before the registry serves.
 func (r *Registry) SetRunTokens(t RunTokens) { r.tokens = t }
+
+// SetRunScopes sets who says where the write tokens of the runs of a
+// team's tasks may write (IMP-195). Call it before the registry serves.
+func (r *Registry) SetRunScopes(s RunScopes) { r.scopes = s }
 
 // Limits are the caps of what goes to and comes from a plugin: the files
 // a call names (a node's setting, an agent's tool), the files a result
@@ -221,16 +249,55 @@ func (r *Registry) Check(ctx context.Context) {
 			before := r.live[name]
 			r.live[name] = ls
 			r.mu.Unlock()
-			if (before.err == nil) != (err == nil) || before.sha != ls.sha {
+			changed := (before.err == nil) != (err == nil) || before.sha != ls.sha
+			if changed {
 				if err != nil {
 					r.log.Warn("plugin: unreachable", "plugin", name, "err", err)
 				} else {
 					r.log.Info("plugin: up", "plugin", name, "version", m.Version, "sha", ls.sha[:12])
 				}
 			}
+			if m != nil {
+				r.acceptExpected(name, m, ls.sha, changed)
+			}
 		}(name)
 	}
 	wg.Wait()
+}
+
+// Expected is the start of the manifest a plugin's config expects
+// (AcceptSHA), "" when it pins none.
+func (r *Registry) Expected(name string) string { return r.plugins[name].AcceptSHA }
+
+// acceptExpected accepts the manifest a plugin serves when it is the one
+// its config expects (AcceptSHA) and not the accepted one yet (IMP-199):
+// the installer pinned it in the preset, which is their consent. Another
+// manifest is left to an owner, with a warning when it shows up.
+func (r *Registry) acceptExpected(name string, m *Manifest, sha string, changed bool) {
+	want := r.plugins[name].AcceptSHA
+	if want == "" {
+		return
+	}
+	if !strings.HasPrefix(sha, want) {
+		if changed {
+			r.log.Warn("plugin: serves another manifest than the preset expects, accept it by hand if you mean it", "plugin", name,
+				"sha", sha[:12], "expected", want, "hint", "gosidian plugin show "+name)
+		}
+		return
+	}
+	acc, err := r.store.all()
+	if err != nil {
+		r.log.Warn("plugin: reading the accepted manifests", "plugin", name, "err", err)
+		return
+	}
+	if a, ok := acc[name]; ok && a.SHA == sha {
+		return
+	}
+	if err := r.store.set(name, &Accepted{SHA: sha, Manifest: *m, At: time.Now().UTC(), By: "preset"}); err != nil {
+		r.log.Warn("plugin: accepting the expected manifest", "plugin", name, "err", err)
+		return
+	}
+	r.log.Info("plugin: accepted the manifest the preset expects", "plugin", name, "version", m.Version, "sha", sha[:12])
 }
 
 // States is every plugin's state, in the order of the config.
@@ -388,6 +455,45 @@ func split(use string) (string, string, bool) {
 	return p, n, ok && p != "" && n != ""
 }
 
+// Resources are what a call of use, a node of a plugin, takes a place in
+// (IMP-196): the plugin, and the shared resources of its config; nil when
+// use is no plugin's (pipeline.Engine asks it of its extension).
+func (r *Registry) Resources(use string) []string {
+	p, _, ok := split(use)
+	if !ok {
+		return nil
+	}
+	return r.PluginResources(p)
+}
+
+// PluginResources are what a call of the plugin takes a place in: the
+// plugin, and its shared resources; nil for no plugin.
+func (r *Registry) PluginResources(plugin string) []string {
+	c, ok := r.plugins[plugin]
+	if !ok {
+		return nil
+	}
+	out := []string{"plugin:" + plugin}
+	for _, s := range c.Resources {
+		out = append(out, "res:"+s)
+	}
+	return out
+}
+
+// MaxConcurrent is how many calls of the plugin may run at once: its
+// config's max_concurrent, else its accepted manifest's; 0 for no limit.
+func (r *Registry) MaxConcurrent(plugin string) int {
+	c, ok := r.plugins[plugin]
+	if !ok {
+		return 0
+	}
+	if c.MaxConcurrent > 0 {
+		return c.MaxConcurrent
+	}
+	acc, _ := r.store.all()
+	return max(acc[plugin].Manifest.MaxConcurrent, 0)
+}
+
 // FilesURL is the address a plugin fetches the files it gets by reference
 // from, when its config sets one; "" for the server's.
 func (r *Registry) FilesURL(plugin string) string {
@@ -411,6 +517,17 @@ func (r *Registry) accepted(use string) (Config, Accepted, NodeSpec, bool) {
 	}
 	spec, ok := a.Manifest.Node(n)
 	return c, a, spec, ok
+}
+
+// Contract is the common contract the node use keeps (agent-run/1), ""
+// for none or no node: the engine gives the agents of a team's task their
+// team's places (IMP-195).
+func (r *Registry) Contract(use string) string {
+	_, _, spec, ok := r.accepted(use)
+	if !ok {
+		return ""
+	}
+	return spec.Contract
 }
 
 // Known says whether use is a node of an accepted plugin manifest
@@ -456,7 +573,13 @@ func (r *Registry) Why(use string) string {
 // connect opens a session with a plugin.
 func (r *Registry) connect(ctx context.Context, c Config) (*client.Client, error) {
 	headers := map[string]string{}
-	if c.TokenSecret != "" {
+	if c.TokenEnv != "" {
+		tok := strings.TrimSpace(os.Getenv(c.TokenEnv))
+		if tok == "" {
+			return nil, fmt.Errorf("plugin %s: its token is the variable %s, which is empty", c.Name, c.TokenEnv)
+		}
+		headers["Authorization"] = "Bearer " + tok
+	} else if c.TokenSecret != "" {
 		if r.secrets == nil {
 			return nil, fmt.Errorf("plugin %s: its token is the secret %q, and the server has no secrets key", c.Name, c.TokenSecret)
 		}
@@ -550,6 +673,20 @@ func ResultJSON(res *mcp.CallToolResult) []byte {
 		}
 	}
 	return []byte(resultText(res))
+}
+
+// errorOutput is the structured content of a tool's error, a JSON object,
+// or nil: what a step that failed hands on (what it spent).
+func errorOutput(res *mcp.CallToolResult) map[string]any {
+	raw := res.RawStructuredContent
+	if len(raw) == 0 && res.StructuredContent != nil {
+		raw, _ = json.Marshal(res.StructuredContent)
+	}
+	var out map[string]any
+	if len(raw) == 0 || json.Unmarshal(raw, &out) != nil || len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func resultText(res *mcp.CallToolResult) string {

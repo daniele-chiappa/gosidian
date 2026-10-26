@@ -61,6 +61,10 @@ describe('i18n catalogues (IMP-155)', () => {
     ...each('admin.users.via', ['owner', 'public', 'internal']),
     ...each('admin.users.totp_policy_name', ['inherit', 'enabled', 'disabled']),
     ...each('cut.state', ['same', 'changed', 'missing']),
+    ...each('uploads.state', ['opening', 'asking', 'sending', 'paused', 'completing', 'done', 'error']),
+    ...each('uploads.item', ['waiting', 'sending', 'paused', 'sent', 'error', 'dropped', 'missing']),
+    ...each('uploads.result', ['new', 'replaced', 'renamed', 'skipped', 'same', 'unzipped', 'dropped', 'error']),
+    ...each('uploads.policy', ['replace', 'keep', 'skip']),
   ]
 
   it('has every key built from a value', () => {

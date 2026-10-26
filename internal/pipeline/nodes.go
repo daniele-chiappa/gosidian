@@ -91,6 +91,14 @@ func NewRegistry() *Registry {
 	r.Register("in.move", TypeFunc(inMove))
 	r.Register("in.import", TypeFunc(inImport))
 	r.Register("vault.commit", TypeFunc(vaultCommit))
+	r.Register("task.context", TypeFunc(taskContext))
+	r.Register("task.update", TypeFunc(taskUpdate))
+	r.Register("task.complete", TypeFunc(taskComplete))
+	r.Register("task.run", TypeFunc(taskRun))
+	r.Register("task.gate", TypeFunc(taskGate))
+	r.Register("task.verdict", TypeFunc(taskVerdict))
+	r.Register("task.pr", TypeFunc(taskPR))
+	r.Register("task.plan", TypeFunc(taskPlan))
 	return r
 }
 

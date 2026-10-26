@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gosidian/gosidian/internal/infolder"
 )
@@ -165,5 +166,71 @@ func TestIN_API(t *testing.T) {
 	tree := f.doAuthRecorder(http.MethodGet, "/api/v1/tree", "", nil)
 	if !strings.Contains(tree.body, `"path":"Alpha/IN"`) || !strings.Contains(tree.body, `"kind":"in"`) || !strings.Contains(tree.body, `"in":{"files":1`) {
 		t.Errorf("tree %s", tree.body)
+	}
+}
+
+// An upload through the API (IMP-172 phase 5): opened, sent in pieces at
+// the offset received, completed in the background; a piece at another
+// offset says the right one, and the reserve answers 507.
+func TestIN_Uploads(t *testing.T) {
+	f := newAdminFixture(t)
+	f.seedNote(t, "Alpha/a.md", "x")
+	if w := f.doAuthRecorder(http.MethodPut, "/api/v1/projects/Alpha", `{"use_in":true}`, nil); w.code != http.StatusOK {
+		t.Fatalf("use_in: %d %s", w.code, w.body)
+	}
+	w := f.doAuthRecorder(http.MethodPost, "/api/v1/in/Alpha/uploads", `{"dir":"IN/lotto","files":[{"path":"a.txt","size":6,"received":99}]}`, nil)
+	if w.code != http.StatusCreated {
+		t.Fatalf("open: %d %s", w.code, w.body)
+	}
+	var u infolder.Upload
+	if err := json.Unmarshal([]byte(w.body), &u); err != nil || u.Dir != "lotto" || u.Files[0].Received != 0 {
+		t.Fatalf("opened: %+v %v", u, err)
+	}
+	base := "/api/v1/in/Alpha/uploads/" + u.ID
+	if w := f.doAuthRecorder(http.MethodPut, base+"/files/0?offset=0", "abc", nil); w.code != http.StatusOK || !strings.Contains(w.body, `"received":3`) {
+		t.Fatalf("a piece: %d %s", w.code, w.body)
+	}
+	if w := f.doAuthRecorder(http.MethodPut, base+"/files/0?offset=5", "zz", nil); w.code != http.StatusConflict || !strings.Contains(w.body, `"received":3`) {
+		t.Fatalf("at the wrong offset: %d %s", w.code, w.body)
+	}
+	if w := f.doAuthRecorder(http.MethodPost, base+"/complete", `{}`, nil); w.code != http.StatusConflict || !strings.Contains(w.body, `"files":[0]`) {
+		t.Fatalf("complete before the end: %d %s", w.code, w.body)
+	}
+	if w := f.doAuthRecorder(http.MethodPut, base+"/files/0?offset=3", "def", nil); w.code != http.StatusOK {
+		t.Fatalf("the last piece: %d %s", w.code, w.body)
+	}
+	if w := f.doAuthRecorder(http.MethodPost, base+"/complete", `{"policy":"replace"}`, nil); w.code != http.StatusAccepted {
+		t.Fatalf("complete: %d %s", w.code, w.body)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		w := f.doAuthRecorder(http.MethodGet, base, "", nil)
+		if strings.Contains(w.body, `"state":"done"`) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("not done: %s", w.body)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if data, err := os.ReadFile(filepath.Join(f.vaultRoot, "Alpha", "IN", "lotto", "a.txt")); err != nil || string(data) != "abcdef" {
+		t.Fatalf("a.txt: %q %v", data, err)
+	}
+	if w := f.doAuthRecorder(http.MethodGet, "/api/v1/in/Alpha/uploads", "", nil); w.code != http.StatusOK || !strings.Contains(w.body, u.ID) {
+		t.Fatalf("the list: %d %s", w.code, w.body)
+	}
+	f.in.SetUploadLimits(infolder.UploadLimits{Reserve: 1 << 62})
+	if w := f.doAuthRecorder(http.MethodPost, "/api/v1/in/Alpha/uploads", `{"files":[{"path":"b.txt","size":1}]}`, nil); w.code != http.StatusInsufficientStorage || !strings.Contains(w.body, "storage.full") {
+		t.Fatalf("over the reserve: %d %s", w.code, w.body)
+	}
+	f.in.SetUploadLimits(infolder.UploadLimits{})
+	if w := f.doAuthRecorder(http.MethodPost, "/api/v1/in/Alpha/uploads", `{"files":[{"path":"../b.txt","size":1}]}`, nil); w.code != http.StatusBadRequest {
+		t.Fatalf("a path out: %d %s", w.code, w.body)
+	}
+	if w := f.doAuthRecorder(http.MethodPost, "/api/v1/in/Beta/uploads", `{"files":[{"path":"b.txt","size":1}]}`, nil); w.code != http.StatusNotFound {
+		t.Fatalf("a project without IN: %d %s", w.code, w.body)
+	}
+	if w := f.doAuthRecorder(http.MethodDelete, base, "", nil); w.code != http.StatusOK {
+		t.Fatalf("forget: %d %s", w.code, w.body)
 	}
 }

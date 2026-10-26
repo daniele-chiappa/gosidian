@@ -72,6 +72,11 @@ and the initial YAML frontmatter block.
   not referenced in `<project>/hot.md` `## Active plans`. Any wikilink
   that resolves to the plan counts: `[[<basename>]]`,
   `[[plans/<basename>]]` or the vault path
+- `field-tag-mismatch` (warning) — a `status:*` tag that disagrees with
+  the note's `status` field (the field is what queries read), and on the
+  rows of a database a `field:value` tag that disagrees with that select
+  field. A plan keeps its status in the field; the tag, when the project
+  uses one, mirrors it
 
 A healthy vault returns zero `severity:error`. Use `min_severity=error`
 for strict CI-style gating.

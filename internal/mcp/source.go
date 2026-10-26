@@ -82,10 +82,32 @@ func (s *Server) checkSource(ctx context.Context, p string) (string, error) {
 	}
 	tok := s.tokenFromContext(ctx)
 	vrel, err := s.vault.Rel(rel)
+	if err != nil && stagedInHiddenFolder(rel) {
+		// Since v2.71.2 a folder staging files in the vault, often a dot
+		// folder, is a source only once the operator declares it (BUG-137).
+		return "", fmt.Errorf("%w: it is in a hidden folder. A folder inside the vault that stages files for an import is a source only as the bridge dir (GOSIDIAN_MCP_BRIDGE_DIR) or an upload root (GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS), which the operator sets", refused)
+	}
 	if err != nil || tok == nil || !tok.AllowsPath(vrel) || s.pathInHiddenProject(vrel) {
 		return "", refused
 	}
 	return real, nil
+}
+
+// stagedInHiddenFolder reports whether the vault-relative path rel lies in
+// a hidden folder that could be a staging place: one starting with a dot,
+// but for git's and gosidian's own (.git, .gosidian with the trash), which
+// are never one.
+func stagedInHiddenFolder(rel string) bool {
+	segs := strings.Split(rel, "/")
+	if segs[0] == ".git" || segs[0] == ".gosidian" {
+		return false
+	}
+	for _, seg := range segs[:len(segs)-1] {
+		if len(seg) > 1 && seg[0] == '.' && seg != ".." {
+			return true
+		}
+	}
+	return false
 }
 
 // checkSourceFile is checkSource for a single file. It is the one check

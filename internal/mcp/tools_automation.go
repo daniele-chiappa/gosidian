@@ -44,7 +44,9 @@ func (s *Server) handleAutomations(ctx context.Context, req mcp.CallToolRequest)
 		if errRes := s.checkWriteLimits(ctx, tok, 0); errRes != nil {
 			return errRes, nil
 		}
-		runs := s.automations.Tick(project)
+		// The actions run on the job runner (IMP-166): wait for them, so
+		// the answer says what was written, as before.
+		runs := s.automations.Await(s.automations.Tick(project), automationAwait)
 		plan, err := s.automations.Plan(project, time.Time{})
 		if err != nil {
 			return mcp.NewToolResultErrorFromErr("automations", err), nil
@@ -65,6 +67,9 @@ func (s *Server) handleAutomations(ctx context.Context, req mcp.CallToolRequest)
 	}
 	return mcp.NewToolResultJSON(map[string]any{"project": project, "dry_run": true, "plan": plan})
 }
+
+// automationAwait is how long run:true waits for the actions it queued.
+const automationAwait = 15 * time.Second
 
 // parseAsOf reads the moment of a dry run; a date alone is its last
 // minute, so the plan covers the whole day: 23:59 on the clock, not 24

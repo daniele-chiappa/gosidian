@@ -1,10 +1,13 @@
 package v1
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -23,8 +26,12 @@ import (
 //	POST /api/v1/pipelines/<path>/runs       start it: a session with write
 //	                                         access, or a run token; with
 //	                                         wait (seconds, or ?wait=), the
-//	                                         answer once the run ended
+//	                                         answer once the run ended; with
+//	                                         Accept: text/event-stream, the
+//	                                         text of its streaming nodes as
+//	                                         it comes, then the answer
 //	GET  /api/v1/runs?project=&status=       the runs the caller reads
+//	GET  /api/v1/runs/queue?project=         the queue of the steps (IMP-196)
 //	GET  /api/v1/runs/<id>                   a run with its steps
 //	POST /api/v1/runs/<id>/resume[?key=]     hand data to a waiting step: the
 //	                                         run's resume key, or a writer
@@ -54,7 +61,11 @@ func (r *Router) pipelinesOff(w http.ResponseWriter) bool {
 
 // pipelineError maps an engine refusal onto a status.
 func pipelineError(w http.ResponseWriter, err error) {
+	var full pipeline.ErrCategoryFull
 	switch {
+	case errors.As(err, &full):
+		w.Header().Set("Retry-After", strconv.Itoa(int(full.RetryAfter.Seconds())))
+		WriteError(w, http.StatusTooManyRequests, CodeRateLimit, err.Error())
 	case errors.Is(err, pipeline.ErrNoNote), errors.Is(err, jobs.ErrNotFound):
 		WriteError(w, http.StatusNotFound, CodeNotFound, err.Error())
 	case errors.Is(err, jobs.ErrState), errors.Is(err, pipeline.ErrDisabled):
@@ -133,7 +144,7 @@ func (r *Router) handlePipelineRuns(w http.ResponseWriter, req *http.Request) {
 	switch req.Method {
 	case http.MethodGet:
 		limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
-		runs, err := r.deps.Pipelines.Runner().Store().Runs(jobs.RunFilter{Ref: path, Limit: limit})
+		runs, err := r.deps.Pipelines.Runner().Store().Runs(jobs.RunFilter{Kind: pipeline.Kind, Ref: path, Limit: limit})
 		if err != nil {
 			WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
 			return
@@ -177,8 +188,9 @@ type startRunRequest struct {
 	IdempotencyKey string `json:"idempotency_key"`
 	CallbackURL    string `json:"callback_url"`
 	// Wait is how many seconds to wait for the run to end, at most
-	// [pipelines] max_sync_wait: the answer comes back with it.
-	Wait float64 `json:"wait"`
+	// [pipelines] max_sync_wait: the answer comes back with it. Unset, the
+	// wait of the pipeline's category (IMP-196).
+	Wait *float64 `json:"wait"`
 }
 
 func (r *Router) startRun(w http.ResponseWriter, req *http.Request, path, trigger, actor, userID string) {
@@ -199,10 +211,46 @@ func (r *Router) startRun(w http.ResponseWriter, req *http.Request, path, trigge
 	if key == "" {
 		key = strings.TrimSpace(req.Header.Get("Idempotency-Key"))
 	}
-	run, existing, err := r.deps.Pipelines.Start(pipeline.StartRequest{
+	wait := -1.0
+	if body.Wait != nil {
+		if *body.Wait < 0 {
+			WriteError(w, http.StatusBadRequest, CodeValidationFormat, "wait is a number of seconds")
+			return
+		}
+		wait = *body.Wait
+	}
+	if q := req.URL.Query().Get("wait"); q != "" {
+		v, err := strconv.ParseFloat(q, 64)
+		if err != nil || v < 0 {
+			WriteError(w, http.StatusBadRequest, CodeValidationFormat, "wait is a number of seconds")
+			return
+		}
+		wait = v
+	}
+	events := wantsEvents(req)
+	switch {
+	case events && wait <= 0:
+		// A stream follows the run as long as the server waits for one.
+		wait = math.MaxInt32
+	case wait < 0:
+		// Unsaid: the category's wait.
+		wait = r.deps.Pipelines.DefaultWait(path).Seconds()
+	}
+	sreq := pipeline.StartRequest{
 		Path: path, Trigger: trigger, Input: body.Input, Actor: actor,
 		IdemKey: key, CallbackURL: strings.TrimSpace(body.CallbackURL),
-	})
+	}
+	var (
+		run      jobs.Run
+		existing bool
+		stream   *pipeline.Stream
+		err      error
+	)
+	if events {
+		run, existing, stream, err = r.deps.Pipelines.StartStream(sreq)
+	} else {
+		run, existing, err = r.deps.Pipelines.Start(sreq)
+	}
 	if err != nil {
 		pipelineError(w, err)
 		return
@@ -212,33 +260,133 @@ func (r *Router) startRun(w http.ResponseWriter, req *http.Request, path, trigge
 		status = http.StatusAccepted
 		_ = r.deps.Audit.Write(audit.Entry{Source: audit.SourceHTTP, Actor: actor, UserID: userID, Action: audit.ActionPipelineRun, Path: path, To: run.ID})
 	}
-	wait := body.Wait
-	if q := req.URL.Query().Get("wait"); q != "" {
-		v, err := strconv.ParseFloat(q, 64)
-		if err != nil || v < 0 {
-			WriteError(w, http.StatusBadRequest, CodeValidationFormat, "wait is a number of seconds")
-			return
-		}
-		wait = v
+	d := r.deps.Pipelines.SyncWait(time.Duration(wait * float64(time.Second)))
+	if events {
+		defer r.deps.Pipelines.CloseStream(stream)
+		r.streamRun(w, req, run, existing, stream, d)
+		return
 	}
-	out := map[string]any{"existing": existing}
 	// A start that waits for its run: 200 with the answer once it ended,
 	// or once it waits for a call; 202 as before when the time passed.
-	if d := r.deps.Pipelines.SyncWait(time.Duration(wait * float64(time.Second))); d > 0 {
+	if d > 0 {
 		if now, err := r.deps.Pipelines.Wait(req.Context(), run.ID, d); err == nil {
 			run = now
 		}
 		if r.deps.Pipelines.Settled(run) {
 			status = http.StatusOK
-			if steps, err := r.deps.Pipelines.Runner().Store().Steps(run.ID); err == nil {
-				if answer, ok := pipeline.AnswerOf(run, steps); ok {
-					out["answer"] = answer
-				}
+		}
+	}
+	WriteJSON(w, status, r.runAnswer(run, existing, d > 0))
+}
+
+// runAnswer is what a start says of its run: the run, and its answer when
+// the start waited and the run settled.
+func (r *Router) runAnswer(run jobs.Run, existing, waited bool) map[string]any {
+	out := map[string]any{"existing": existing, "run": pipeline.Brief(run)}
+	if waited && r.deps.Pipelines.Settled(run) {
+		if steps, err := r.deps.Pipelines.Runner().Store().Steps(run.ID); err == nil {
+			if answer, ok := pipeline.AnswerOf(run, steps); ok {
+				out["answer"] = answer
 			}
 		}
 	}
-	out["run"] = pipeline.Brief(run)
-	WriteJSON(w, status, out)
+	return out
+}
+
+// wantsEvents says whether a start asks to follow its run as a stream.
+func wantsEvents(req *http.Request) bool {
+	return strings.Contains(req.Header.Get("Accept"), "text/event-stream")
+}
+
+// runStreamHeartbeat keeps a quiet stream open through the proxies.
+const runStreamHeartbeat = 15 * time.Second
+
+// streamRun answers a start that asked for text/event-stream (IMP-191
+// phase 8): an event run with the run, delta and reset events with the
+// text its streaming nodes write (and those of the runs it starts), then
+// an event answer with what a start that waits answers, and the status it
+// answers with, once the run settled or d passed.
+func (r *Router) streamRun(w http.ResponseWriter, req *http.Request, run jobs.Run, existing bool, stream *pipeline.Stream, d time.Duration) {
+	rc := http.NewResponseController(w)
+	h := w.Header()
+	h.Set("Content-Type", "text/event-stream")
+	h.Set("Cache-Control", "no-cache")
+	h.Set("X-Accel-Buffering", "no")
+	applySecurityHeaders(w)
+	w.WriteHeader(http.StatusOK)
+	send := func(event string, v any) bool {
+		b, err := json.Marshal(v)
+		if err != nil {
+			return false
+		}
+		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b); err != nil {
+			return false
+		}
+		return rc.Flush() == nil
+	}
+	var cur pipeline.StreamCursor
+	text := func() (<-chan struct{}, bool) {
+		evs, wake := stream.Read(&cur)
+		for _, ev := range evs {
+			if !send(ev.Kind, ev) {
+				return nil, false
+			}
+		}
+		return wake, true
+	}
+	if !send("run", map[string]any{"existing": existing, "run": pipeline.Brief(run)}) {
+		return
+	}
+	answer := func(now jobs.Run) {
+		if _, ok := text(); !ok {
+			return
+		}
+		// status is the one a start that waits answers with: 202 when the
+		// time passed.
+		out, status := r.runAnswer(now, existing, true), http.StatusAccepted
+		if existing || r.deps.Pipelines.Settled(now) {
+			status = http.StatusOK
+		}
+		out["status"] = status
+		send("answer", out)
+	}
+	ctx, cancel := context.WithCancel(req.Context())
+	defer cancel()
+	settled := make(chan jobs.Run, 1)
+	go func() {
+		now := run
+		if d > 0 {
+			if n, err := r.deps.Pipelines.Wait(ctx, run.ID, d); err == nil {
+				now = n
+			}
+		}
+		settled <- now
+	}()
+	beat := time.NewTicker(runStreamHeartbeat)
+	defer beat.Stop()
+	for {
+		wake, ok := text()
+		if !ok {
+			return
+		}
+		select {
+		case <-wake:
+		case <-stream.Ended():
+			// The server shuts down: the run as it is.
+			cancel()
+			answer(<-settled)
+			return
+		case now := <-settled:
+			answer(now)
+			return
+		case <-beat.C:
+			if _, err := io.WriteString(w, ": heartbeat\n\n"); err != nil || rc.Flush() != nil {
+				return
+			}
+		case <-req.Context().Done():
+			return
+		}
+	}
 }
 
 // handleRuns lists the runs of the projects the caller reads.
@@ -257,14 +405,33 @@ func (r *Router) handleRuns(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	limit, _ := strconv.Atoi(q.Get("limit"))
+	// Only the pipelines' runs: the runner runs the automations' actions too
+	// (IMP-166), which the Runs page cannot draw.
 	runs, err := r.deps.Pipelines.Runner().Store().Runs(jobs.RunFilter{
-		Ref: strings.TrimSpace(q.Get("pipeline")), Projects: scope, Status: jobs.Status(strings.TrimSpace(q.Get("status"))), Limit: limit,
+		Kind: pipeline.Kind, Ref: strings.TrimSpace(q.Get("pipeline")), Projects: scope, Status: jobs.Status(strings.TrimSpace(q.Get("status"))), Limit: limit,
 	})
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
 		return
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"runs": pipeline.Briefs(runs)})
+}
+
+// handleQueue answers the queue of the steps of the projects the caller
+// reads (one with ?project=): the steps queued by resource, with the places
+// taken and the limits of the whole server.
+func (r *Router) handleQueue(w http.ResponseWriter, req *http.Request) {
+	scope, err := r.searchScope(principalFromContext(req), strings.TrimSpace(req.URL.Query().Get("project")))
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
+		return
+	}
+	q, err := r.deps.Pipelines.Queue(scope)
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
+		return
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"queue": q})
 }
 
 // runRoutes serves /api/v1/runs/<id>[/resume|/cancel]: a resume with the
@@ -291,6 +458,10 @@ func (r *Router) handleRun(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	id, action := runPath(req)
+	if id == "queue" && action == "" && req.Method == http.MethodGet {
+		r.handleQueue(w, req)
+		return
+	}
 	store := r.deps.Pipelines.Runner().Store()
 	run, err := store.Run(id)
 	p := principalFromContext(req)
@@ -305,7 +476,9 @@ func (r *Router) handleRun(w http.ResponseWriter, req *http.Request) {
 			WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
 			return
 		}
-		WriteJSON(w, http.StatusOK, map[string]any{"run": pipeline.Brief(run), "steps": pipeline.StepViews(run, steps, maxStepOutputShown)})
+		views := pipeline.StepViews(run, steps, maxStepOutputShown)
+		r.deps.Pipelines.Waits(run, views)
+		WriteJSON(w, http.StatusOK, map[string]any{"run": pipeline.Brief(run), "steps": views})
 	case (action == "resume" || action == "cancel") && req.Method == http.MethodPost:
 		user := UserFromContext(req.Context())
 		if denyGuestWrite(w, user) || r.denyWriteProject(w, p, run.Project) {

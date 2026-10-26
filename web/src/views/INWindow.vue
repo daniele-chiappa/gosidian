@@ -11,11 +11,16 @@
  * A folder at its root may be a plugin's source (IMP-172 phase 2): its
  * files stay in the source, are read from there, and are neither deleted
  * nor moved out of it; they move inside it when the binding lets them.
+ *
+ * Files, a folder or zips upload into the folder shown, chosen or dropped
+ * on the window (IMP-172 phase 5): the uploads store sends them, and goes
+ * on when the window closes. An upload a reload cut short shows here, and
+ * resumes when the same files are chosen again.
  */
 import { computed, inject, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWindowsStore, type OpenSpec } from 'plancia'
-import { ChevronRight, Cloud, Download, FileText, Folder, Inbox, Play, RefreshCw, RotateCcw, Search, Trash2, EyeOff, FolderInput } from 'lucide-vue-next'
+import { ChevronRight, Cloud, Download, FileArchive, FileText, Folder, FolderUp, Inbox, Play, RefreshCw, RotateCcw, Search, Trash2, EyeOff, FolderInput, Upload } from 'lucide-vue-next'
 import {
   deleteIN,
   inFileHref,
@@ -43,6 +48,10 @@ import { useAccessStore } from '@/stores/access'
 import { useUIStore } from '@/stores/ui'
 import { useTreeStore } from '@/stores/tree'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
+import UploadJobCard from '@/components/domain/UploadJobCard.vue'
+import { cancelUpload, listUploads, type UploadInfo } from '@/api/inUpload'
+import { useUploadsStore } from '@/stores/uploads'
+import { entriesOfDrop, pickedFromDrop, pickedFromInput, zipAdvised, type Picked, type PickMode } from '@/composables/useUploadPick'
 
 const props = defineProps<{ project: string }>()
 const emit = defineEmits<{ title: [string] }>()
@@ -253,6 +262,106 @@ function startRun() {
   })
 }
 
+// The uploads (IMP-172 phase 5).
+const uploads = useUploadsStore()
+/** Uploads go into the folder shown, but a source's. */
+const canUpload = computed(() => canWrite.value && !here.value)
+const jobs = computed(() => uploads.jobs.filter((j) => j.project === props.project))
+const interrupted = ref<UploadInfo[]>([])
+/** The upload the next files chosen resume. */
+const resuming = ref<UploadInfo | null>(null)
+const inputs = { files: ref<HTMLInputElement | null>(null), folder: ref<HTMLInputElement | null>(null), zip: ref<HTMLInputElement | null>(null) }
+const fileInput = inputs.files
+const folderInput = inputs.folder
+const zipInput = inputs.zip
+const dragging = ref(0)
+
+function pick(mode: PickMode) {
+  resuming.value = null
+  inputs[mode].value?.click()
+}
+
+function onPicked(e: Event, mode: PickMode) {
+  const input = e.target as HTMLInputElement
+  const picked = pickedFromInput(input.files ?? [], mode)
+  input.value = ''
+  void start(picked)
+}
+
+async function start(p: Picked) {
+  error.value = null
+  const notes: string[] = []
+  if (p.hidden) notes.push(t('in.upload.hidden_left', { count: p.hidden }, p.hidden))
+  if (p.refused.length) notes.push(t('in.upload.refused_left', { count: p.refused.length, names: p.refused.slice(0, 3).join(', ') }, p.refused.length))
+  if (!p.files.length) {
+    error.value = [t('in.upload.nothing'), ...notes].join(' ')
+    return
+  }
+  if (zipAdvised(p.files)) notes.push(t('in.upload.zip_advised'))
+  message.value = notes.join(' ') || null
+  const u = resuming.value
+  resuming.value = null
+  try {
+    if (u) await uploads.resumeWith(props.project, u.id, p.files)
+    else await uploads.add(props.project, dir.value, p.files)
+  } catch (e) {
+    error.value = errorText(e, t, t('in.upload.failed'))
+  }
+  void loadInterrupted()
+}
+
+function onDragEnter(e: DragEvent) {
+  if (canUpload.value && e.dataTransfer?.types.includes('Files')) dragging.value++
+}
+function onDragOver(e: DragEvent) {
+  if (!canUpload.value || !e.dataTransfer?.types.includes('Files')) return
+  e.preventDefault()
+  e.dataTransfer.dropEffect = 'copy'
+}
+function onDragLeave() {
+  dragging.value = Math.max(0, dragging.value - 1)
+}
+function onDrop(e: DragEvent) {
+  dragging.value = 0
+  if (!canUpload.value || !e.dataTransfer) return
+  e.preventDefault()
+  // The entries now: the drop's items go once this handler returns.
+  const taken = entriesOfDrop(e.dataTransfer)
+  resuming.value = null
+  void pickedFromDrop(taken).then(start, (err) => (error.value = errorText(err, t, t('in.upload.failed'))))
+}
+
+/** The uploads of the account on the server that this tab does not send:
+ *  a reload, another tab, another browser cut them short. */
+async function loadInterrupted() {
+  if (!canWrite.value) return
+  try {
+    const mine = new Set(uploads.jobs.map((j) => j.id))
+    interrupted.value = (await listUploads(props.project)).filter((u) => u.state === 'open' && !mine.has(u.id))
+  } catch {
+    interrupted.value = []
+  }
+}
+
+function resumeUpload(u: UploadInfo) {
+  resuming.value = u
+  inputs[u.zips ? 'zip' : u.folders ? 'folder' : 'files'].value?.click()
+}
+
+async function dropInterrupted(u: UploadInfo) {
+  if (!(await confirmAction(t('uploads.confirm_cancel', { where: `${props.project}/IN${u.dir ? '/' + u.dir : ''}` }), { confirmLabel: t('uploads.cancel'), danger: true }))) return
+  try {
+    await cancelUpload(props.project, u.id)
+  } catch (e) {
+    error.value = errorText(e, t, t('in.action_failed'))
+  }
+  void loadInterrupted()
+}
+
+function openUploads() {
+  openWindow({ type: 'uploads', key: planciaKey('uploads'), title: t('uploads.window_title'), props: {} })
+}
+
 function openRuns() {
   openWindow({ type: 'runs', key: planciaKey('runs'), title: t('nav.runs'), props: {} })
 }
@@ -299,17 +408,35 @@ sse.on('tree', (p) => {
 
 watch(search, () => void load())
 watch(status, () => void load())
+// The access of a member arrives after a reload opens the window: what
+// needs write access loads when it does.
+watch(canWrite, (w) => {
+  if (!w) return
+  void loadPipelines()
+  void loadInterrupted()
+}, { immediate: true })
 
 onMounted(() => {
   emit('title', t('in.window_title', { name: props.project }))
   void load()
-  void loadPipelines()
 })
 </script>
 
 <template>
-  <div class="p-6 max-w-5xl mx-auto text-sm" data-in-window>
+  <div
+    class="relative p-6 max-w-5xl mx-auto text-sm min-h-full"
+    data-in-window
+    @dragenter="onDragEnter"
+    @dragover="onDragOver"
+    @dragleave="onDragLeave"
+    @drop="onDrop"
+  >
     <h1 class="sr-only">{{ t('in.window_title', { name: project }) }}</h1>
+    <div
+      v-if="dragging"
+      class="pointer-events-none absolute inset-2 z-20 flex items-center justify-center rounded-lg border-2 border-dashed border-accent bg-accent/10 text-accent font-medium"
+      data-in-drop-zone
+    >{{ t('in.upload.drop_here', { where: dir ? `IN/${dir}` : 'IN' }) }}</div>
 
     <div class="flex flex-wrap items-center gap-3 mb-4">
       <Inbox class="w-5 h-5 text-text-muted" aria-hidden="true" />
@@ -332,6 +459,32 @@ onMounted(() => {
         <span v-if="counts.errors" class="text-danger"> · {{ t('in.count_errors', { count: counts.errors }) }}</span>
       </span>
       <span class="flex-1" />
+      <template v-if="canUpload">
+        <button
+          type="button"
+          class="h-control-sm text-xs px-2 rounded border border-border hover:bg-surface-hover inline-flex items-center gap-1"
+          :title="t('in.upload.files_help')"
+          data-in-upload="files"
+          @click="pick('files')"
+        ><Upload class="w-3 h-3" /> {{ t('in.upload.files') }}</button>
+        <button
+          type="button"
+          class="h-control-sm text-xs px-2 rounded border border-border hover:bg-surface-hover inline-flex items-center gap-1"
+          :title="t('in.upload.folder_help')"
+          data-in-upload="folder"
+          @click="pick('folder')"
+        ><FolderUp class="w-3 h-3" /> {{ t('in.upload.folder') }}</button>
+        <button
+          type="button"
+          class="h-control-sm text-xs px-2 rounded border border-border hover:bg-surface-hover inline-flex items-center gap-1"
+          :title="t('in.upload.zip_help')"
+          data-in-upload="zip"
+          @click="pick('zip')"
+        ><FileArchive class="w-3 h-3" /> {{ t('in.upload.zip') }}</button>
+        <input ref="fileInput" type="file" multiple class="hidden" data-in-upload-input="files" @change="onPicked($event, 'files')" />
+        <input ref="folderInput" type="file" multiple webkitdirectory class="hidden" data-in-upload-input="folder" @change="onPicked($event, 'folder')" />
+        <input ref="zipInput" type="file" multiple accept=".zip,application/zip" class="hidden" data-in-upload-input="zip" @change="onPicked($event, 'zip')" />
+      </template>
       <button
         v-if="!here"
         type="button"
@@ -339,6 +492,36 @@ onMounted(() => {
         :title="t('in.download_folder')"
         @click="downloadFolder(dir)"
       ><Download class="w-3 h-3" /> {{ t('tree.menu.download_zip') }}</button>
+    </div>
+
+    <div v-if="jobs.length || interrupted.length" class="mb-4 space-y-2" data-in-uploads>
+      <div class="flex items-center gap-2 text-xs text-text-muted">
+        <span>{{ t('uploads.window_title') }} ·</span>
+        <button type="button" class="hover:underline" data-in-open-uploads @click="openUploads">{{ t('in.upload.open_window') }}</button>
+      </div>
+      <UploadJobCard v-for="job in jobs" :key="job.key" :job="job" compact />
+      <div
+        v-for="u in interrupted"
+        :key="u.id"
+        class="flex flex-wrap items-center gap-2 rounded border border-warning/40 bg-warning/5 px-3 py-2 text-xs"
+        :data-in-interrupted="u.id"
+      >
+        <span class="flex-1 min-w-0">{{ t('in.upload.interrupted', {
+          where: u.dir ? `IN/${u.dir}` : 'IN',
+          files: u.file_count,
+          sent: formatSize(u.received),
+          total: formatSize(u.bytes),
+        }, u.file_count) }}</span>
+        <button
+          v-if="canUpload"
+          type="button"
+          class="h-control-sm px-2 rounded border border-border hover:bg-surface-hover"
+          :title="t('in.upload.resume_help')"
+          data-in-resume
+          @click="resumeUpload(u)"
+        >{{ t('in.upload.resume') }}</button>
+        <button type="button" class="h-control-sm px-2 rounded text-danger hover:bg-surface-hover" data-in-drop-upload @click="dropInterrupted(u)">{{ t('uploads.cancel') }}</button>
+      </div>
     </div>
 
     <ul v-if="!dir && sources.length && !filtering" class="mb-4 space-y-1" data-in-sources>

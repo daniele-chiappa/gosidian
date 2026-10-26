@@ -1,6 +1,6 @@
 # MCP tool catalogue
 
-**63 tools** cover the full retrieval → write → workflow →
+**71 tools** cover the full retrieval → write → workflow →
 orchestration → self-check cycle for agent memory.
 
 Consult each tool's `description` via your client's `tools/list` call
@@ -237,6 +237,8 @@ a note naming it (and the likely intended argument, e.g. `Project` →
   A note replaced with `overwrite: true` passes the same shrink guard as
   `memory_update`: `allow_shrink: true` confirms a much shorter content,
   and for a ticket it is given when the ticket is minted.
+  **Files for the pipelines** go into the IN folder with `memory_in_upload`
+  instead (below).
   **Packages** (`as: "package"`, `dest`, `dry_run?`): a folder or a `.zip`
   imported whole in one call — a folder or `.zip` staged in the bridge dir
   (`bridge_filename`), a server folder or `.zip` (`source_path`), a base64
@@ -258,6 +260,16 @@ a note naming it (and the likely intended argument, e.g. `Project` →
   `package_max_files` (500) and `package_max_bytes` unpacked (20 MiB), each
   note at `max_note_bytes`. The audit has an entry per note plus an
   `ingest_package` summary
+- `memory_in_upload(action, project, id?, dir?, files?, policy?, drop?, files_out?)` —
+  files of any size into a project's IN folder, for its pipelines
+  (IMP-172): `open` lists the files (`{path, size, unzip?, modified?}`)
+  and answers with the upload, a ticket and its endpoint; the agent's shell
+  sends each file in pieces of at most 64 MiB, at the offset the server
+  has, with `PUT <endpoint>/files/<n>?offset=X` and the ticket as the
+  bearer; `complete` (or `POST <endpoint>/complete`) places them as one
+  batch, a zip with `unzip` unpacked; `status` follows it, `cancel` drops
+  it, `list` gives the account's uploads. The same files opened again are
+  the same upload, with a new ticket. See [upload](upload.md#files-for-the-pipelines-memory_in_upload).
 - `memory_upload_attachment(project, data|source_path, filename)` —
   single-step upload returning a ready-to-splice markdown embed
 - `memory_upload_resource(project, data|source_path, filename, kind?)` —
@@ -321,6 +333,38 @@ from the caller's token identity and cannot be forged, while
   `resync:true` means the cursor fell out of the short replay window —
   reconcile with `memory_recent`
 
+## Teams of agents (tasks)
+
+The tasks of a project's [teams of agents](../agents.md) (IMP-195): notes
+in `<project>/tasks/`, rows of the database `tasks.md`, with the states
+`submitted`, `working`, `input-required`, `review`, `completed`,
+`failed`, `canceled`. A pipeline's run moves and closes its task with the
+task nodes; the agent of a run (a run token) reads the tasks and creates
+sub-tasks, but moves none. An outside agent moves and closes the tasks it
+claimed.
+All but `memory_create_team` are in the `core` profile.
+
+- `memory_tasks(project, team?, status?, role?)` — the tasks (`open` by
+  default, `all`, or one status), each submitted one with why it does not
+  start yet, and each team with its spend of the day against its budget
+- `memory_task_create(project, team, assignee, title, body?, parent?,
+  depends_on?, paths?, forbid?, budget_usd?, hold?)` — a task for a role.
+  A run token creates tasks only for the roles its own role delegates
+  to, under its own task; one level of sub-tasks, `[agents] max_tasks`
+  per objective
+- `memory_task_claim(path)` — an outside agent takes a ready task, with
+  a lease of `[agents] lease`
+- `memory_task_heartbeat(path)` — renews the lease
+- `memory_task_update(path, status, message?)` — `working`,
+  `input-required`, `review`, or `submitted` to give it back
+- `memory_task_complete(path, report, status?)` — closes it with the
+  `## Report` section the tasks after it read
+- `memory_create_team(project, name?, roles?, run?, coordinator?)` —
+  writes a team's note, an agent note per role, the pipelines that give
+  its tasks to their agents and, with a coordinator, its objectives to
+  it, the database `tasks.md` when there is none, and a note that shows
+  the team's tasks
+
 ## Workflow
 
 - `memory_compact(path, keep_last_n, archive_summary, dry_run?)` —
@@ -343,17 +387,22 @@ from the caller's token identity and cannot be forged, while
   (notes `type: pipeline`) with their trigger and nodes, or the problem
   that keeps one from running, and a `notice` for one that starts on a
   commit while git sync is off; with `path` its last runs, with `run` one
-  run and its steps (outputs cut at 4 KiB). Without `path` and `run` it
-  also lists the plugins with their status and the node types they add
-  (`<plugin>.<node>`, [plugins](../plugins.md)). Read-only. Off unless the
+  run and its steps (outputs cut at 4 KiB; a queued step says why it
+  waits, in `queue`). Without `path` and `run` it also lists the plugins
+  with their status and the node types they add (`<plugin>.<node>`,
+  [plugins](../plugins.md)), and the project's `queue`: its steps queued
+  by plugin, model and shared resource, with the places taken and the
+  limits ([calls at once](../pipelines.md#calls-at-once)). Read-only. Off unless the
   server runs pipelines and the project has `use_pipelines`
   ([pipelines](../pipelines.md)).
 - `memory_pipeline_run(action?, path?, input?, idempotency_key?,
   callback_url?, wait?, run?, step?, data?)` — `start` (default) runs a
   pipeline with `input` as `trigger`; the same `idempotency_key` gives
-  back the same run; `wait` (max 60 s) waits for it to end or stop at a
-  `wait.call`. `resume` hands `data` to the waiting step of `run`,
-  `cancel` stops it. Write access to the pipeline's project.
+  back the same run; `wait` (max 60 s; unset, the wait of the pipeline's
+  [category](../pipelines.md#categories)) waits for it to end or stop at
+  a `wait.call`. A category with its most runs not ended refuses the
+  start, and says so. `resume` hands `data` to the waiting step of
+  `run`, `cancel` stops it. Write access to the pipeline's project.
 - `memory_self_stats()` — token identity (including the multi-project
   scope list), `access` (every project the token reaches with its live
   level, `read` or `write`: a write-scoped token can still be read-only
@@ -387,7 +436,9 @@ from the caller's token identity and cannot be forged, while
   frontmatter that is not valid YAML, usually an unquoted `: `,
   `[[wikilink]]` or `{{placeholder}}`; a write of such a note also says
   so in `notices`),
-  `frontmatter-tag-unknown`, `status-incoherent`, `hot-oversize`
+  `frontmatter-tag-unknown`, `status-incoherent`, `field-tag-mismatch`
+  (a `status:*` tag, or on a database's rows a `field:value` tag of a
+  select field, that disagrees with the field), `hot-oversize`
   (a `hot.md` past 8 KiB has usually become a chronicle that belongs in
   `log.md`, and it is inlined into every bootstrap — threshold
   configurable via `[lint] hot_oversize_bytes`), `skill-oversize` (a
@@ -405,7 +456,11 @@ from the caller's token identity and cannot be forged, while
   a twin with no diagram right above), `graph-invalid` (a ```` ```graph ````
   block that does not read as a saved view of the graph, or a
   `type: graph` note without exactly one block;
-  [graphs](../vault/graphs.md)). Zero `severity:error` on a coherent vault.
+  [graphs](../vault/graphs.md)), `team-invalid` (a ```` ```team ```` block
+  that does not read as a team of agents, on the line of the problem, a
+  `type: team` note without exactly one block, or a role whose agent is
+  no note of the vault; [agents](../agents.md)). Zero `severity:error` on
+  a coherent vault.
 - `memory_self_improve(category, title, friction, confidence, …)` —
   *experimental, opt-in, off by default*: record a structured insight
   about gosidian's own ergonomics (see

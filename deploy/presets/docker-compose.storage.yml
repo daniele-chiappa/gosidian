@@ -1,0 +1,39 @@
+# gosidian presets: storage. Remote stores as sources of the projects' IN
+# folders: Nextcloud and other WebDAV servers, S3, Google Drive, local
+# folders. Use it on top of the base, with or without rag:
+#
+#   cp storage.yaml.example storage.yaml    # then name your sources
+#   docker compose -f docker-compose.yml -f docker-compose.storage.yml up -d
+#
+# Its manifest lists the sources of storage.yaml, so it waits for an owner:
+#
+#   docker compose exec gosidian /gosidian plugin accept --pending
+#   docker compose exec gosidian /gosidian plugin bind storage <source> <project>
+
+services:
+  gosidian:
+    depends_on:
+      storage:
+        condition: service_started
+    environment:
+      GOSIDIAN_PIPELINES_ENABLED: "true"
+      GOSIDIAN_PLUGIN_STORAGE_URL: http://storage:8000/mcp
+      GOSIDIAN_PLUGIN_STORAGE_TOKEN: ${STORAGE_TOKEN:?run ./init.sh first}
+
+  storage:
+    image: ghcr.io/daniele-chiappa/gosidian-storage:0.2.2
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ./storage.yaml:/etc/gosidian-storage/storage.yaml:ro
+      # The credentials storage.yaml names, readable by uid 65532.
+      - ./secrets:/run/secrets:ro
+    environment:
+      GOSIDIAN_PLUGIN_TOKEN: ${STORAGE_TOKEN:?run ./init.sh first}
+      STORAGE_PUBLIC_URL: http://storage:8000

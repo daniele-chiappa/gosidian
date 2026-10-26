@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
+	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/gosidian/gosidian/internal/server/events"
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 )
@@ -76,6 +77,21 @@ func writeConformanceCases() []conformanceCase {
 	none := func(*testing.T, *Server, context.Context) string { return "" }
 	note := func(files map[string]string) func(*testing.T, *Server, context.Context) string {
 		return func(t *testing.T, s *Server, _ context.Context) string { seed(t, s, files); return "" }
+	}
+	// The task tools (IMP-195) work on a team and its task a.md.
+	fleetSetup := func(status, extra string) func(*testing.T, *Server, context.Context) string {
+		return func(t *testing.T, s *Server, ctx context.Context) string {
+			return seedFleet(t, s, ctx, fleetTask(status, extra))
+		}
+	}
+	taskCall := func(h func(*Server) toolFn, a map[string]any) func(context.Context, *Server, string) (*mcplib.CallToolResult, error) {
+		return func(ctx context.Context, s *Server, path string) (*mcplib.CallToolResult, error) {
+			m := map[string]any{"path": path}
+			for k, v := range a {
+				m[k] = v
+			}
+			return h(s)(ctx, call(m))
+		}
 	}
 	handoff := func(claim bool) func(*testing.T, *Server, context.Context) string {
 		return func(t *testing.T, s *Server, ctx context.Context) string {
@@ -163,6 +179,37 @@ func writeConformanceCases() []conformanceCase {
 			},
 			audit:  []auditWant{{audit.ActionUpdate, "$"}},
 			events: []seenEvent{{events.TopicNote, "update", "$"}}},
+		{tool: "memory_task_create", setup: fleetSetup("working", ""),
+			call: args(func(s *Server) toolFn { return s.handleTaskCreate }, map[string]any{
+				"project": "p", "team": "squadra", "assignee": "dev", "title": "La pagina", "parent": "p/tasks/a.md",
+			}),
+			audit:  []auditWant{{audit.ActionCreate, "p/tasks/*"}},
+			events: []seenEvent{{events.TopicNote, "create", "p/tasks/*"}, {events.TopicTree, "create", "p/tasks/*"}}},
+		{tool: "memory_task_claim", setup: fleetSetup("submitted", ""),
+			call:   taskCall(func(s *Server) toolFn { return s.handleTaskClaim }, nil),
+			audit:  []auditWant{{audit.ActionUpdate, "$"}},
+			events: []seenEvent{{events.TopicNote, "update", "$"}}},
+		{tool: "memory_task_heartbeat", setup: fleetSetup("working", "claimed_by: "+tokenIdentity(auth.AdminToken())+"\n"),
+			call:   taskCall(func(s *Server) toolFn { return s.handleTaskHeartbeat }, nil),
+			audit:  []auditWant{{audit.ActionUpdate, "$"}},
+			events: []seenEvent{{events.TopicNote, "update", "$"}}},
+		{tool: "memory_task_update", setup: fleetSetup("working", "claimed_by: "+tokenIdentity(auth.AdminToken())+"\n"),
+			call:   taskCall(func(s *Server) toolFn { return s.handleTaskUpdate }, map[string]any{"status": "review", "message": "look"}),
+			audit:  []auditWant{{audit.ActionUpdate, "$"}},
+			events: []seenEvent{{events.TopicNote, "update", "$"}}},
+		{tool: "memory_task_complete", setup: fleetSetup("working", "claimed_by: "+tokenIdentity(auth.AdminToken())+"\n"),
+			call:   taskCall(func(s *Server) toolFn { return s.handleTaskComplete }, map[string]any{"report": "done"}),
+			audit:  []auditWant{{audit.ActionUpdate, "$"}},
+			events: []seenEvent{{events.TopicNote, "update", "$"}}},
+		{tool: "memory_create_team", setup: none,
+			call: args(func(s *Server) toolFn { return s.handleCreateTeam }, map[string]any{"project": "p", "name": "squadra"}),
+			audit: []auditWant{{audit.ActionCreate, "p/squadra.md"}, {audit.ActionCreate, "p/tasks.md"}, {audit.ActionCreate, "p/squadra-tasks.md"},
+				{audit.ActionCreate, "p/pipelines/squadra-work.md"}, {audit.ActionCreate, "p/agents/dev.md"}},
+			events: []seenEvent{{events.TopicNote, "create", "p/squadra.md"}, {events.TopicTree, "create", "p/squadra.md"},
+				{events.TopicNote, "create", "p/tasks.md"}, {events.TopicTree, "create", "p/tasks.md"},
+				{events.TopicNote, "create", "p/squadra-tasks.md"}, {events.TopicTree, "create", "p/squadra-tasks.md"},
+				{events.TopicNote, "create", "p/pipelines/squadra-work.md"}, {events.TopicTree, "create", "p/pipelines/squadra-work.md"},
+				{events.TopicNote, "create", "p/agents/dev.md"}, {events.TopicTree, "create", "p/agents/dev.md"}}},
 		{tool: "memory_self_improve",
 			server: func(t *testing.T) *Server {
 				s, _, _ := newTestServer(t)
@@ -263,6 +310,15 @@ func writeConformanceCases() []conformanceCase {
 			call:   args(func(s *Server) toolFn { return s.handleAutomations }, map[string]any{"project": "p", "run": true}),
 			audit:  []auditWant{{audit.ActionCreate, "p/handoffs/*"}},
 			events: []seenEvent{{events.TopicNote, "create", "p/handoffs/*"}, {events.TopicTree, "create", "p/handoffs/*"}}},
+		// An upload into IN opened by an agent: its folder in IN/.uploads,
+		// the bytes come later over HTTP (IMP-172 phase 5b).
+		{tool: "memory_in_upload",
+			server: inUploadServer,
+			setup:  none,
+			call: args(func(s *Server) toolFn { return s.handleINUpload }, map[string]any{
+				"action": "open", "project": "p", "dir": "lot", "files": []any{map[string]any{"path": "a.pdf", "size": 3}},
+			}),
+			audit: []auditWant{{audit.ActionINUploadOpen, "p/IN/lot"}}},
 		// A run it starts writes as the pipeline, on the runner, without the
 		// caller's budget; the start itself takes a place and is audited.
 		{tool: "memory_pipeline_run",
@@ -286,7 +342,7 @@ var readOnlyTools = map[string]bool{
 	"memory_lint": true, "memory_list_attachments": true, "memory_list_bootstrap_templates": true,
 	"memory_list_notes": true, "memory_list_projects": true, "memory_list_tags": true,
 	"memory_notes_by_importance": true, "memory_notes_by_tag": true, "memory_outlinks": true,
-	"memory_path": true, "memory_pending_handoffs": true, "memory_pinned": true, "memory_pipelines": true,
+	"memory_path": true, "memory_pending_handoffs": true, "memory_tasks": true, "memory_pinned": true, "memory_pipelines": true,
 	"memory_plans": true, "memory_query": true, "memory_recent": true,
 	"memory_search": true, "memory_self_stats": true, "memory_skills": true,
 	"memory_stale": true, "memory_todos": true, "memory_wait_changes": true,

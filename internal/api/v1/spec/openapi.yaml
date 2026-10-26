@@ -1348,3 +1348,146 @@ paths:
           description: "`{project, folder}`"
         "400":
           description: folder names no folder at the root of the IN folder.
+
+  /api/v1/in/{project}/uploads:
+    get:
+      tags: [in]
+      summary: The uploads of the account into the IN folder, newest first (write access).
+      description: Without their files; an upload's own GET has them. A done upload stays listed, with its results, until session_ttl after its end.
+      parameters:
+        - {name: project, in: path, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: "`{uploads: [{id, project, dir, policy, owner, channel, state (open, completing, done), created, updated, expires, error, file_count, bytes, received, chunk_size, max_chunk, batches}]}`"
+    post:
+      tags: [in]
+      summary: Open an upload into the IN folder (write access).
+      description: |
+        Lists the files of the upload, each with its path under dir and its
+        size; a zip with unzip is unpacked on the server, into a folder of
+        its own. The same account opening the same files into the same
+        folder again gets the open upload back, with the bytes received:
+        the way to resume after a reload. The caps of [in] (a file, an
+        upload, the kinds, the IN folder) and the disk's reserve are checked
+        here, on the sizes given. Then each file is sent in pieces (PUT),
+        and the upload completed.
+      parameters:
+        - {name: project, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [files]
+              properties:
+                dir: {type: string, description: "A folder of the IN folder, made if missing; empty for its root."}
+                policy: {type: string, enum: [replace, keep, skip], description: "For a file whose place is taken: replace (the old one into the trash), keep both (\"name (2).ext\"), skip. Default keep; the completion can change it."}
+                files:
+                  type: array
+                  maxItems: 100000
+                  items:
+                    type: object
+                    required: [path, size]
+                    properties:
+                      path: {type: string, description: "Relative to dir: no hidden, empty, . or .. segment, no \\, at most 1024 bytes."}
+                      size: {type: integer, format: int64}
+                      unzip: {type: boolean, description: "A .zip to unpack."}
+                      modified: {type: integer, format: int64, description: "The time the file keeps, Unix milliseconds."}
+      responses:
+        "201":
+          description: "The upload, with its files: `{…, files: [{n, path, size, unzip, modified, received, sha256, exists}]}`. exists: the file's place (a zip's folder) is taken."
+        "400":
+          description: A path no file can have, a folder of a source, a file named twice.
+        "404":
+          description: No such project, or it has no IN folder.
+        "413":
+          description: "Over a cap of [in]: code request.too_large."
+        "507":
+          description: "The disk would go under the reserve: code storage.full."
+
+  /api/v1/in/{project}/uploads/{id}:
+    get:
+      tags: [in]
+      summary: An upload, with its files and, once done, their results (write access).
+      parameters:
+        - {name: project, in: path, required: true, schema: {type: string}}
+        - {name: id, in: path, required: true, schema: {type: string}}
+        - {name: files, in: query, schema: {type: boolean, default: true}, description: "false leaves the files out: the way to follow a completion."}
+      responses:
+        "200":
+          description: "The upload. A file's result, once done: `{result (new, replaced, renamed, skipped, same, unzipped, dropped, error), path, error}`, a zip's with `counts` by result, `ignored` (folders, hidden files, links) and the first files `refused`, with why."
+        "404":
+          description: No such upload of the account in the project.
+    delete:
+      tags: [in]
+      summary: Drop an open upload with what arrived, or forget a done one (write access).
+      parameters:
+        - {name: project, in: path, required: true, schema: {type: string}}
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: "`{id, dropped: true}`"
+        "409":
+          description: The upload is completing.
+
+  /api/v1/in/{project}/uploads/{id}/files/{n}:
+    put:
+      tags: [in]
+      summary: A piece of a file of an open upload (write access).
+      description: |
+        The body is the bytes of file n from offset on, at most max_chunk
+        (64 MiB) and no more than the file lacks; offset is at most the
+        bytes received so far: the bytes the server has are skipped, so a
+        piece sent again after a connection lost in its middle goes on
+        where it stopped, and an offset past them answers 409. The piece is
+        written to the disk, synced, and recorded with the state of the
+        file's SHA-256 before the answer. A piece refused is read whole
+        before the answer, so the client gets it while still sending.
+      parameters:
+        - {name: project, in: path, required: true, schema: {type: string}}
+        - {name: id, in: path, required: true, schema: {type: string}}
+        - {name: n, in: path, required: true, schema: {type: integer}}
+        - {name: offset, in: query, required: true, schema: {type: integer, format: int64}}
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: {type: string, format: binary}
+      responses:
+        "200":
+          description: "`{n, received, size, sha256}`: sha256 once the file is whole."
+        "409":
+          description: "Another offset than the bytes received (`details.received` says them), or the upload is not open."
+        "413":
+          description: A piece over max_chunk.
+        "507":
+          description: "The disk would go under the reserve: code storage.full."
+
+  /api/v1/in/{project}/uploads/{id}/complete:
+    post:
+      tags: [in]
+      summary: Complete an open upload (write access).
+      description: |
+        Every file must have arrived whole, but those in drop. The files
+        then take their places in the background (state completing, then
+        done): each as the policy says, the same file there left as it is,
+        a zip unpacked first; their rows in in.db have their SHA-256, and
+        the upload is one batch of each first-level folder it fills, closed
+        at once. GET the upload for the results.
+      parameters:
+        - {name: project, in: path, required: true, schema: {type: string}}
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                policy: {type: string, enum: [replace, keep, skip], description: "Empty keeps the upload's."}
+                drop: {type: array, items: {type: integer}, description: "Files left out."}
+      responses:
+        "202":
+          description: The upload, completing.
+        "409":
+          description: "Files have not arrived whole (`details.files`), or the upload is not open."

@@ -25,12 +25,42 @@ url = "http://gosidian-docling:8000/mcp"  # the MCP endpoint
 token_secret = "docling-token"            # gosidian secret set docling-token
 timeout = "10m"                           # default: the step timeout
 files_url = "http://gosidian:8080"        # where it fetches files; default [pipelines] files_url
+max_concurrent = 1                        # its calls at once; default its manifest's, else none
+resources = ["gpu"]                       # shared resources it takes a place in
 ```
 
+`max_concurrent` and `resources` limit the calls at once, the steps' and
+the agents' together ([pipelines](pipelines.md#calls-at-once)).
+
 `GOSIDIAN_PIPELINES_PLUGINS="docling=http://gosidian-docling:8000/mcp,…"`
-registers plugins from the environment too (without a token: a token
-needs `token_secret` in the file). The plugins exist only while
+registers plugins from the environment too. The plugins exist only while
 `[pipelines] enabled` is on.
+
+**From the environment alone**, as the [presets](deployment.md#presets)
+do, each plugin has variables of its own, named after it in upper case
+with `_` for `-` (`vec-qdrant` → `VEC_QDRANT`), so that each compose file
+adds its plugins without replacing another file's list:
+
+| Variable | In the file | |
+|---|---|---|
+| `GOSIDIAN_PLUGIN_<NAME>_URL` | `url` | registers the plugin `<name>` at that MCP endpoint |
+| `GOSIDIAN_PLUGIN_<NAME>_TOKEN` | `token_env = "<variable>"` | the plugin's bearer token, in place of a `token_secret` |
+| `GOSIDIAN_PLUGIN_<NAME>_ACCEPT` | `accept_sha = "<sha>"` | the manifest you expect (at least its first 8 characters) |
+| `GOSIDIAN_PLUGIN_<NAME>_MAX_CONCURRENT` | `max_concurrent` | its calls at once |
+| `GOSIDIAN_PLUGIN_<NAME>_RESOURCES` | `resources` | the shared resources it takes a place in, comma-separated |
+
+A plugin serving the manifest its `accept_sha` names, and not that one
+accepted yet, is accepted by the next check, by `preset`. You pinned it
+together with the image's version, so the server does not wait for you;
+any other manifest waits for an owner as before, with a warning in the
+log, and `plugin show` says which one the preset expects. When you move
+the image to a new version, move its `accept_sha` with it.
+
+A plugin whose manifest depends on your own configuration cannot be
+pinned that way: the database plugin names the hosts its preset calls,
+and storage lists the sources of its `storage.yaml`. For those,
+`gosidian plugin accept --pending` accepts in one command every manifest
+waiting, printing first what each reads and calls.
 
 Then read what the plugin asks for, and accept it:
 
@@ -109,6 +139,7 @@ structured content or as JSON text:
 | `nodes[].contract` | the common contract the node keeps, a name and a version: `agent-run/1` for an agent ([below](#agent-nodes-agent-run1)), `command-run/1` for a command ([below](#command-nodes-command-run1)) |
 | `nodes[].mcp` | `true`: the node's setting `mcp` (`read` or `write`) gets, for the call, a token of gosidian's MCP ([below](#gosidians-mcp-for-a-call)) |
 | `permissions.mcp` | the access its nodes may ask gosidian's MCP for: `read`, `write`. Needed by `mcp`; accepting the manifest grants it |
+| `max_concurrent` | how many calls at once the plugin bears (a model on one GPU: `1`): its limit until the server's config sets one ([pipelines](pipelines.md#calls-at-once)) |
 
 The sha that `accept` takes is the SHA-256 of the manifest as gosidian
 reads it: a field it does not know, or the spacing of a schema, changes
@@ -205,6 +236,7 @@ repositories). The JSON Schema is
 |---|---|
 | `prompt` | the task (required) |
 | `system`, `system_mode` | the role: added to the agent's own system prompt (`append`, default) or in its place (`replace`) |
+| `role` | an agent note (`"[[p/agents/dev]]"`): gosidian reads it and gives its body, below its title, as `system`, before the node's own; the plugin never sees the setting ([teams of agents](agents.md)) |
 | `model` | one of the models of the plugin's preset, which knows the endpoint each one is on |
 | `effort` | how much the model may think: `off`, `low`, `medium`, `high`, `max`, as the plugin lists them |
 | `files` | files by reference ([above](#files-by-reference)), in the agent's `in/` |
@@ -226,11 +258,17 @@ repositories). The JSON Schema is
 | `cost` | US dollars: the endpoint's bill when it gives one, else the preset's prices |
 | `tools` | how many calls of each tool |
 | `denials` | the calls the agent's limits refused |
-| `repo` | `name`, `base`, `branch`, `commit`, `changed`, `insertions`, `deletions`, `pushed`, `pr_url` |
+| `repo` | `name`, `base`, `branch`, `commit`, `changed`, `files` (the paths the commit changed), `insertions`, `deletions`, `pushed`, `pr_url` |
 | `executor` | `plugin`, `version` |
 
 A step that hits a limit (turns, time, tokens, cost) or whose answer is
 not the JSON asked for fails the node, with the reason.
+
+An agent plugin may also have a node `pr` (`repo`, `url` or `number`,
+`action`: `merge` or `close`, `delete_branch`), which merges or closes a
+pull request its `run` opened, with its preset's credentials: the
+pipelines of a [team of agents](agents.md#the-pipelines-of-a-team) call
+it through `task.pr`.
 
 ### Command nodes: command-run/1
 

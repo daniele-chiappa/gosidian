@@ -46,8 +46,10 @@ const (
 
 // The priorities of a run: an interactive one (a chat's message, IMP-191)
 // has its steps taken before the others', and the workers of the
-// interactive lane (Options.InteractiveWorkers) take only those.
+// interactive lane (Options.InteractiveWorkers) take only those; a low one
+// (a category's batch, IMP-196) after the normal ones.
 const (
+	PriorityLow         = -1
 	PriorityNormal      = 0
 	PriorityInteractive = 1
 )
@@ -76,8 +78,15 @@ type Run struct {
 	CallbackURL string `json:"callback_url,omitempty"`
 	// ResumeKey lets an outside caller resume the run's waiting steps.
 	ResumeKey string `json:"-"`
-	// Priority is PriorityNormal or PriorityInteractive.
-	Priority int       `json:"priority,omitempty"`
+	// Priority is PriorityLow, PriorityNormal or PriorityInteractive.
+	Priority int `json:"priority,omitempty"`
+	// Category is the category of its pipeline (IMP-196), "" for a run
+	// of another kind.
+	Category string `json:"category,omitempty"`
+	// Task is the vault path of the task note the run executes, Team that
+	// of the task's team note (IMP-195); "" for the other runs.
+	Task     string    `json:"task,omitempty"`
+	Team     string    `json:"team,omitempty"`
 	Error    string    `json:"error,omitempty"`
 	Created  time.Time `json:"created"`
 	Started  time.Time `json:"started,omitzero"`
@@ -99,6 +108,15 @@ type Step struct {
 	NotBefore  time.Time       `json:"not_before,omitzero"`
 	LeaseUntil time.Time       `json:"-"`
 	WaitUntil  time.Time       `json:"wait_until,omitzero"`
+	// Resources are what the step takes a place in while it runs (IMP-196):
+	// plugin:<name>, llm:<provider>, res:<name>. QueuedAt is when it last
+	// entered the queue.
+	Resources []string  `json:"resources,omitempty"`
+	QueuedAt  time.Time `json:"queued_at,omitzero"`
+	// CostUSD and Tokens are what the step spent, read from its output
+	// when it finished (IMP-195, CostOf): an agent's cost and tokens.
+	CostUSD float64 `json:"cost_usd,omitempty"`
+	Tokens  int64   `json:"tokens,omitempty"`
 }
 
 // ErrNotFound: no such run or step.
@@ -165,6 +183,10 @@ CREATE TABLE IF NOT EXISTS tokens (
 type Store struct {
 	db *sql.DB
 	mu sync.Mutex
+	// served is when the fair claim last took a step of each project, as
+	// the count turn of the steps it took (IMP-196); under mu.
+	served map[string]uint64
+	turn   uint64
 }
 
 // Open opens (creating it if needed) the jobs database at path. It is
@@ -180,7 +202,24 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("jobs: schema: %w", err)
 	}
-	if err := addColumn(db, "runs", "priority", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+	for _, c := range []struct{ table, col, def string }{
+		{"runs", "priority", "INTEGER NOT NULL DEFAULT 0"},
+		{"steps", "resources", "TEXT NOT NULL DEFAULT ''"},
+		{"steps", "queued_at", "INTEGER NOT NULL DEFAULT 0"},
+		{"runs", "category", "TEXT NOT NULL DEFAULT ''"},
+		{"runs", "task", "TEXT NOT NULL DEFAULT ''"},
+		{"runs", "team", "TEXT NOT NULL DEFAULT ''"},
+		{"steps", "cost_usd", "REAL NOT NULL DEFAULT 0"},
+		{"steps", "tokens", "INTEGER NOT NULL DEFAULT 0"},
+	} {
+		if err := addColumn(db, c.table, c.col, c.def); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("jobs: schema: %w", err)
+		}
+	}
+	// The runs of a team, for its spend (IMP-195, TeamSpend): made after
+	// the columns, which an older database gets only above.
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS runs_team ON runs(project, team, finished) WHERE team != ''`); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("jobs: schema: %w", err)
 	}
@@ -276,9 +315,9 @@ func (s *Store) CreateRun(r Run, steps []Step) (Run, bool, error) {
 		return Run{}, false, err
 	}
 	defer tx.Rollback()
-	_, err = tx.Exec(`INSERT INTO runs (id, kind, ref, project, trigger, status, input, spec, idem_key, actor, callback_url, resume_key, error, created, priority)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		r.ID, r.Kind, r.Ref, r.Project, r.Trigger, r.Status, string(r.Input), string(r.Spec), r.IdemKey, r.Actor, r.CallbackURL, r.ResumeKey, r.Error, ms(r.Created), r.Priority)
+	_, err = tx.Exec(`INSERT INTO runs (id, kind, ref, project, trigger, status, input, spec, idem_key, actor, callback_url, resume_key, error, created, priority, category, task, team)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		r.ID, r.Kind, r.Ref, r.Project, r.Trigger, r.Status, string(r.Input), string(r.Spec), r.IdemKey, r.Actor, r.CallbackURL, r.ResumeKey, r.Error, ms(r.Created), r.Priority, r.Category, r.Task, r.Team)
 	if err != nil {
 		return Run{}, false, err
 	}
@@ -298,7 +337,7 @@ func (s *Store) CreateRun(r Run, steps []Step) (Run, bool, error) {
 	return r, false, nil
 }
 
-const runCols = `id, kind, ref, project, trigger, status, input, spec, idem_key, actor, callback_url, resume_key, error, created, started, finished, priority`
+const runCols = `id, kind, ref, project, trigger, status, input, spec, idem_key, actor, callback_url, resume_key, error, created, started, finished, priority, category, task, team`
 
 type scanner interface{ Scan(dest ...any) error }
 
@@ -306,7 +345,7 @@ func scanRun(sc scanner) (Run, error) {
 	var r Run
 	var input, spec string
 	var created, started, finished int64
-	err := sc.Scan(&r.ID, &r.Kind, &r.Ref, &r.Project, &r.Trigger, &r.Status, &input, &spec, &r.IdemKey, &r.Actor, &r.CallbackURL, &r.ResumeKey, &r.Error, &created, &started, &finished, &r.Priority)
+	err := sc.Scan(&r.ID, &r.Kind, &r.Ref, &r.Project, &r.Trigger, &r.Status, &input, &spec, &r.IdemKey, &r.Actor, &r.CallbackURL, &r.ResumeKey, &r.Error, &created, &started, &finished, &r.Priority, &r.Category, &r.Task, &r.Team)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Run{}, ErrNotFound
 	}
@@ -322,6 +361,36 @@ func (s *Store) runByIdem(ref, key string) (Run, error) {
 	return scanRun(s.db.QueryRow(`SELECT `+runCols+` FROM runs WHERE ref = ? AND idem_key = ?`, ref, key))
 }
 
+// RunByIdem is the run of ref started with key, ErrNotFound when none.
+func (s *Store) RunByIdem(ref, key string) (Run, error) { return s.runByIdem(ref, key) }
+
+// Unended counts the runs of category not ended yet (IMP-196): queued,
+// running or waiting.
+func (s *Store) Unended(category string) (int, error) {
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM runs WHERE category = ? AND status IN (?, ?, ?)`, category, Queued, Running, Waiting).Scan(&n)
+	return n, err
+}
+
+// QueuedTwins are the runs of ref with the same input still queued, no
+// step of theirs started, other than the run but (IMP-196, replace).
+func (s *Store) QueuedTwins(ref string, input json.RawMessage, but string) ([]string, error) {
+	rows, err := s.db.Query(`SELECT id FROM runs WHERE ref = ? AND input = ? AND status = ? AND id != ?`, ref, string(input), Queued, but)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // Run returns a run.
 func (s *Store) Run(id string) (Run, error) {
 	return scanRun(s.db.QueryRow(`SELECT `+runCols+` FROM runs WHERE id = ?`, id))
@@ -329,6 +398,7 @@ func (s *Store) Run(id string) (Run, error) {
 
 // RunFilter selects runs, newest first.
 type RunFilter struct {
+	Kind     string   // one kind of run: pipeline, automation
 	Ref      string   // one pipeline
 	Projects []string // these projects; nil: all
 	Status   Status
@@ -351,6 +421,10 @@ func (s *Store) CountRuns(idemPrefix string) (int, error) {
 func (s *Store) Runs(f RunFilter) ([]Run, error) {
 	var where []string
 	var args []any
+	if f.Kind != "" {
+		where = append(where, "kind = ?")
+		args = append(args, f.Kind)
+	}
 	if f.Ref != "" {
 		where = append(where, "ref = ?")
 		args = append(args, f.Ref)
@@ -402,13 +476,13 @@ func (s *Store) Runs(f RunFilter) ([]Run, error) {
 	return out, rows.Err()
 }
 
-const stepCols = `run_id, name, deps, status, attempt, output, error, started, finished, not_before, lease_until, wait_until`
+const stepCols = `run_id, name, deps, status, attempt, output, error, started, finished, not_before, lease_until, wait_until, resources, queued_at, cost_usd, tokens`
 
 func scanStep(sc scanner) (Step, error) {
 	var st Step
-	var deps, output string
-	var started, finished, notBefore, lease, wait int64
-	err := sc.Scan(&st.RunID, &st.Name, &deps, &st.Status, &st.Attempt, &output, &st.Error, &started, &finished, &notBefore, &lease, &wait)
+	var deps, output, resources string
+	var started, finished, notBefore, lease, wait, queued int64
+	err := sc.Scan(&st.RunID, &st.Name, &deps, &st.Status, &st.Attempt, &output, &st.Error, &started, &finished, &notBefore, &lease, &wait, &resources, &queued, &st.CostUSD, &st.Tokens)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Step{}, ErrNotFound
 	}
@@ -421,6 +495,10 @@ func scanStep(sc scanner) (Step, error) {
 	st.Output = raw(output)
 	st.Started, st.Finished = fromMS(started), fromMS(finished)
 	st.NotBefore, st.LeaseUntil, st.WaitUntil = fromMS(notBefore), fromMS(lease), fromMS(wait)
+	if resources != "" {
+		st.Resources = strings.Split(resources, ",")
+	}
+	st.QueuedAt = fromMS(queued)
 	return st, nil
 }
 
@@ -448,7 +526,7 @@ func (s *Store) Steps(runID string) ([]Step, error) {
 // goes first: a step queued without a delay has no not_before, and ordering
 // by it and the run's random id left, under a full queue, the runs whose id
 // sorts last waiting for hours behind newer ones.
-func (s *Store) claim(now time.Time, n int, lease time.Duration, interactive bool) ([]Step, error) {
+func (s *Store) claim(now time.Time, n int, lease time.Duration, interactive bool, gate *Gate, fair bool) (out []Step, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	tx, err := s.db.Begin()
@@ -456,26 +534,23 @@ func (s *Store) claim(now time.Time, n int, lease time.Duration, interactive boo
 		return nil, err
 	}
 	defer tx.Rollback()
-	cols := "s." + strings.ReplaceAll(stepCols, ", ", ", s.")
-	q := `SELECT ` + cols + ` FROM steps s JOIN runs r ON r.id = s.run_id WHERE s.status = ? AND s.not_before <= ?`
-	if interactive {
-		q += ` AND r.priority >= ` + fmt.Sprint(PriorityInteractive)
-	}
-	q += ` ORDER BY r.priority DESC, r.created, s.run_id, s.pos LIMIT ?`
-	rows, err := tx.Query(q, Queued, ms(now), n)
-	if err != nil {
-		return nil, err
-	}
-	var out []Step
-	for rows.Next() {
-		st, err := scanStep(rows)
+	// The places the steps took, given back if the claim fails.
+	defer func() {
 		if err != nil {
-			rows.Close()
-			return nil, err
+			for _, st := range out {
+				gate.Release(st.Resources)
+			}
+			out = nil
 		}
-		out = append(out, st)
+	}()
+	if fair {
+		out, err = s.pickFair(tx, now, n, interactive, gate)
+	} else {
+		out, err = pickInOrder(tx, now, n, interactive, gate)
 	}
-	rows.Close()
+	if err != nil {
+		return out, err
+	}
 	for i := range out {
 		out[i].Status = Running
 		out[i].Attempt++
@@ -483,14 +558,170 @@ func (s *Store) claim(now time.Time, n int, lease time.Duration, interactive boo
 		out[i].LeaseUntil = now.Add(lease)
 		if _, err := tx.Exec(`UPDATE steps SET status = ?, attempt = ?, started = ?, lease_until = ?, error = '' WHERE run_id = ? AND name = ?`,
 			Running, out[i].Attempt, ms(now), ms(out[i].LeaseUntil), out[i].RunID, out[i].Name); err != nil {
-			return nil, err
+			return out, err
 		}
 		if _, err := tx.Exec(`UPDATE runs SET status = ?, started = CASE WHEN started = 0 THEN ? ELSE started END WHERE id = ? AND status IN (?, ?)`,
 			Running, ms(now), out[i].RunID, Queued, Waiting); err != nil {
-			return nil, err
+			return out, err
 		}
 	}
 	return out, tx.Commit()
+}
+
+// pickInOrder takes up to n steps in the queue's order: priority, then
+// the oldest run. A step whose resource is full stays in the queue, and
+// the ones after it may go (IMP-196).
+func pickInOrder(tx *sql.Tx, now time.Time, n int, interactive bool, gate *Gate) (out []Step, err error) {
+	cols := "s." + strings.ReplaceAll(stepCols, ", ", ", s.")
+	q := `SELECT ` + cols + ` FROM steps s JOIN runs r ON r.id = s.run_id WHERE s.status = ? AND s.not_before <= ?`
+	if interactive {
+		q += ` AND r.priority >= ` + fmt.Sprint(PriorityInteractive)
+	}
+	q += ` ORDER BY r.priority DESC, r.created, s.run_id, s.pos`
+	if gate == nil {
+		q += ` LIMIT ` + fmt.Sprint(n)
+	}
+	rows, err := tx.Query(q, Queued, ms(now))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	full := map[string]bool{}
+	for len(out) < n && rows.Next() {
+		st, err := scanStep(rows)
+		if err != nil {
+			return out, err
+		}
+		if skipFull(st.Resources, full) || !gate.TryTake(st.Resources) {
+			if r := gate.Full(st.Resources); r != "" {
+				full[r] = true
+			}
+			continue
+		}
+		out = append(out, st)
+	}
+	return out, rows.Err()
+}
+
+// withExtra scans a row of stepCols and more columns after them.
+type withExtra struct {
+	rows *sql.Rows
+	more []any
+}
+
+func (w withExtra) Scan(dest ...any) error { return w.rows.Scan(append(dest, w.more...)...) }
+
+// pickFair takes up to n steps in turn among the projects (IMP-196): at
+// each priority, from the highest, the project with the fewest steps
+// running and taken in this claim gives its next step, the one served
+// least lately among equals, in the queue's order; a step whose resource
+// is full is passed over. It reads the first steps of each project and set
+// of resources, so that the thousands of steps a project queued, or those
+// waiting for a full plugin, hide no other's.
+func (s *Store) pickFair(tx *sql.Tx, now time.Time, n int, interactive bool, gate *Gate) (out []Step, err error) {
+	inner := make([]string, 0, 16)
+	for _, c := range strings.Split(stepCols, ", ") {
+		inner = append(inner, "s."+c+" AS "+c)
+	}
+	q := `SELECT ` + stepCols + `, proj, prio FROM (SELECT ` + strings.Join(inner, ", ") + `, s.pos AS pos, r.project AS proj, r.priority AS prio, r.created AS cr,
+		ROW_NUMBER() OVER (PARTITION BY r.project, s.resources ORDER BY r.priority DESC, r.created, s.run_id, s.pos) AS rn
+		FROM steps s JOIN runs r ON r.id = s.run_id WHERE s.status = ? AND s.not_before <= ?`
+	if interactive {
+		q += ` AND r.priority >= ` + fmt.Sprint(PriorityInteractive)
+	}
+	q += `) WHERE rn <= ? ORDER BY prio DESC, cr, run_id, pos`
+	rows, err := tx.Query(q, Queued, ms(now), n+2)
+	if err != nil {
+		return nil, err
+	}
+	type cand struct {
+		st   Step
+		proj string
+	}
+	var levels []int
+	queues := map[int]map[string][]cand{}
+	order := map[int][]string{}
+	for rows.Next() {
+		var proj string
+		var prio int
+		st, err := scanStep(withExtra{rows, []any{&proj, &prio}})
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if queues[prio] == nil {
+			queues[prio] = map[string][]cand{}
+			levels = append(levels, prio)
+		}
+		if _, seen := queues[prio][proj]; !seen {
+			order[prio] = append(order[prio], proj)
+		}
+		queues[prio][proj] = append(queues[prio][proj], cand{st, proj})
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+	running := map[string]int{}
+	rr, err := tx.Query(`SELECT r.project, COUNT(*) FROM steps s JOIN runs r ON r.id = s.run_id WHERE s.status = ? GROUP BY r.project`, Running)
+	if err != nil {
+		return nil, err
+	}
+	for rr.Next() {
+		var p string
+		var c int
+		if err := rr.Scan(&p, &c); err != nil {
+			rr.Close()
+			return nil, err
+		}
+		running[p] = c
+	}
+	rr.Close()
+	picked := map[string]int{}
+	for _, lv := range levels {
+		qs := queues[lv]
+		for len(out) < n {
+			best := ""
+			for _, p := range order[lv] {
+				if len(qs[p]) == 0 {
+					continue
+				}
+				load, bl := running[p]+picked[p], running[best]+picked[best]
+				if best == "" || load < bl || (load == bl && s.served[p] < s.served[best]) {
+					best = p
+				}
+			}
+			if best == "" {
+				break
+			}
+			for len(qs[best]) > 0 {
+				c := qs[best][0]
+				qs[best] = qs[best][1:]
+				if gate.TryTake(c.st.Resources) {
+					out = append(out, c.st)
+					picked[best]++
+					if s.served == nil {
+						s.served = map[string]uint64{}
+					}
+					s.turn++
+					s.served[best] = s.turn
+					break
+				}
+			}
+		}
+	}
+	return out, nil
+}
+
+// skipFull says whether one of resources was found full in this claim.
+func skipFull(resources []string, full map[string]bool) bool {
+	for _, r := range resources {
+		if full[r] {
+			return true
+		}
+	}
+	return false
 }
 
 // StepChange is a change to one step, decided by an Executor.
@@ -503,6 +734,10 @@ type StepChange struct {
 	WaitUntil time.Time
 	// Finished stamps the end time (for a terminal status).
 	Finished time.Time
+	// Resources, when not nil, are the step's from now on; Queued, when
+	// set, is when it entered the queue.
+	Resources []string
+	Queued    time.Time
 }
 
 // RunChange is the run's new status, when it changes.
@@ -524,9 +759,21 @@ func (s *Store) apply(runID string, changes []StepChange, rc *RunChange) error {
 	}
 	defer tx.Rollback()
 	for _, c := range changes {
-		_, err := tx.Exec(`UPDATE steps SET status = ?, output = CASE WHEN ? = '' THEN output ELSE ? END, error = ?, not_before = ?, wait_until = ?, finished = ?, lease_until = 0
+		// A step that finishes with an output keeps what it spent
+		// (IMP-195).
+		spent := len(c.Output) > 0 && !c.Finished.IsZero()
+		var cost float64
+		var tokens int64
+		if spent {
+			cost, tokens = CostOf(c.Output)
+		}
+		_, err := tx.Exec(`UPDATE steps SET status = ?, output = CASE WHEN ? = '' THEN output ELSE ? END, error = ?, not_before = ?, wait_until = ?, finished = ?, lease_until = 0,
+			resources = CASE WHEN ? THEN ? ELSE resources END, queued_at = CASE WHEN ? > 0 THEN ? ELSE queued_at END,
+			cost_usd = CASE WHEN ? THEN ? ELSE cost_usd END, tokens = CASE WHEN ? THEN ? ELSE tokens END
 			WHERE run_id = ? AND name = ? AND status NOT IN (?, ?, ?, ?)`,
 			c.Status, string(c.Output), string(c.Output), c.Error, ms(c.NotBefore), ms(c.WaitUntil), ms(c.Finished),
+			c.Resources != nil, strings.Join(c.Resources, ","), ms(c.Queued), ms(c.Queued),
+			spent, cost, spent, tokens,
 			runID, c.Name, Done, Failed, Skipped, Canceled)
 		if err != nil {
 			return err
@@ -547,8 +794,8 @@ func (s *Store) apply(runID string, changes []StepChange, rc *RunChange) error {
 func (s *Store) recoverRunning(now time.Time) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	res, err := s.db.Exec(`UPDATE steps SET status = ?, not_before = ?, lease_until = 0 WHERE status = ?`,
-		Queued, ms(now), Running)
+	res, err := s.db.Exec(`UPDATE steps SET status = ?, not_before = ?, queued_at = ?, lease_until = 0 WHERE status = ?`,
+		Queued, ms(now), ms(now), Running)
 	if err != nil {
 		return 0, err
 	}
@@ -562,8 +809,8 @@ func (s *Store) recoverRunning(now time.Time) (int, error) {
 func (s *Store) requeueWaiting(runID, name string, now time.Time) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	res, err := s.db.Exec(`UPDATE steps SET status = ?, attempt = MAX(attempt - 1, 0), not_before = ?, wait_until = 0, lease_until = 0
-		WHERE run_id = ? AND name = ? AND status = ?`, Queued, ms(now), runID, name, Waiting)
+	res, err := s.db.Exec(`UPDATE steps SET status = ?, attempt = MAX(attempt - 1, 0), not_before = ?, queued_at = ?, wait_until = 0, lease_until = 0
+		WHERE run_id = ? AND name = ? AND status = ?`, Queued, ms(now), ms(now), runID, name, Waiting)
 	if err != nil {
 		return false, err
 	}
@@ -599,4 +846,92 @@ func (s *Store) Prune(cutoff time.Time) (int, error) {
 	}
 	n, _ := res.RowsAffected()
 	return int(n), nil
+}
+
+// QueueRow is what waits in the queue with the same resources (IMP-196):
+// the steps queued, those whose time has come, and since when the oldest
+// of these waits.
+type QueueRow struct {
+	Resources []string
+	Queued    int
+	Ready     int
+	Oldest    time.Time
+}
+
+// Queue is the queue by resources, of the runs of projects (all for nil).
+// A step waits since it entered the queue, its retry time, or its run's
+// start, whichever comes last.
+func (s *Store) Queue(projects []string, now time.Time) ([]QueueRow, error) {
+	q := `SELECT s.resources, COUNT(*), SUM(CASE WHEN s.not_before <= ? THEN 1 ELSE 0 END),
+		MIN(CASE WHEN s.not_before <= ? THEN MAX(s.queued_at, s.not_before, r.created) END)
+		FROM steps s JOIN runs r ON r.id = s.run_id WHERE s.status = ?`
+	args := []any{ms(now), ms(now), Queued}
+	if projects != nil {
+		if len(projects) == 0 {
+			return nil, nil
+		}
+		q += ` AND r.project IN (?` + strings.Repeat(",?", len(projects)-1) + `)`
+		for _, p := range projects {
+			args = append(args, p)
+		}
+	}
+	q += ` GROUP BY s.resources`
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []QueueRow
+	for rows.Next() {
+		var res string
+		var row QueueRow
+		var oldest sql.NullInt64
+		if err := rows.Scan(&res, &row.Queued, &row.Ready, &oldest); err != nil {
+			return nil, err
+		}
+		if res != "" {
+			row.Resources = strings.Split(res, ",")
+		}
+		if oldest.Valid {
+			row.Oldest = fromMS(oldest.Int64)
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+// Running counts the steps running, of the runs of projects (all for nil).
+func (s *Store) Running(projects []string) (int, error) {
+	q := `SELECT COUNT(*) FROM steps s JOIN runs r ON r.id = s.run_id WHERE s.status = ?`
+	args := []any{Running}
+	if projects != nil {
+		if len(projects) == 0 {
+			return 0, nil
+		}
+		q += ` AND r.project IN (?` + strings.Repeat(",?", len(projects)-1) + `)`
+		for _, p := range projects {
+			args = append(args, p)
+		}
+	}
+	var n int
+	err := s.db.QueryRow(q, args...).Scan(&n)
+	return n, err
+}
+
+// Ahead counts the steps whose time has come that the claim takes before
+// the queued step name of run, in the claim's order (whatever their
+// resources: a full one lets the steps after it go).
+func (s *Store) Ahead(run Run, name string, now time.Time) (int, error) {
+	var pos int
+	if err := s.db.QueryRow(`SELECT pos FROM steps WHERE run_id = ? AND name = ?`, run.ID, name).Scan(&pos); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, ErrNotFound
+		}
+		return 0, err
+	}
+	var n int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM steps s JOIN runs r ON r.id = s.run_id
+		WHERE s.status = ? AND s.not_before <= ? AND (r.priority > ? OR (r.priority = ? AND (r.created < ? OR (r.created = ? AND (s.run_id < ? OR (s.run_id = ? AND s.pos < ?))))))`,
+		Queued, ms(now), run.Priority, run.Priority, ms(run.Created), ms(run.Created), run.ID, run.ID, pos).Scan(&n)
+	return n, err
 }

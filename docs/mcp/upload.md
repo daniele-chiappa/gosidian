@@ -72,6 +72,48 @@ Agents behind an SSH tunnel that forwards only the web port (e.g.
 This is the deployment shape solved by the
 [single-port mode](client-setup.md).
 
+## Files for the pipelines: `memory_in_upload`
+
+A file a project's pipelines take in (a corpus, scans, PDFs or XML to
+convert, of any size) goes into its IN folder, not into a note:
+`memory_in_upload`, for projects with `use_in` ([the IN folder](../in.md#uploading)).
+The bytes never cross the model's context and have no 10 MiB cap: they go
+in pieces of at most 64 MiB, each at the offset the server has, so a
+transfer cut short goes on from where it stopped.
+
+```jsonc
+// 1. Open: the files, by path under dir and size
+{ "name": "memory_in_upload", "arguments": {
+    "action": "open", "project": "archive", "dir": "scans",
+    "files": [{ "path": "2026.zip", "size": 2147483648, "unzip": true }] } }
+// → { "upload": { "id": "…", "files": [{ "n": 0, "received": 0, … }], … },
+//     "ticket": "…", "endpoint": "/mcp/in-upload/<id>", "max_piece": 67108864 }
+```
+
+```bash
+# 2. The pieces, from the agent's shell, with the ticket as the bearer
+#    (not the MCP token); 409 says the right offset.
+F=2026.zip; S=$(stat -c %s "$F"); OFF=0
+while [ "$OFF" -lt "$S" ]; do
+  OFF=$(tail -c +$((OFF + 1)) "$F" | head -c 33554432 |
+    curl -s -X PUT -H "Authorization: Bearer $TICKET" -H 'Content-Type: application/octet-stream' \
+      --data-binary @- "https://host/mcp/in-upload/$ID/files/0?offset=$OFF" | jq '.received')
+done
+# 3. Complete: the files take their places in the background, as one batch
+curl -s -X POST -H "Authorization: Bearer $TICKET" "https://host/mcp/in-upload/$ID/complete"
+```
+
+Then `action: "status"` follows the completion to `state: "done"`, with
+`files_out: true` each file's result (`new`, `replaced`, `renamed`,
+`skipped`, `same`, `unzipped`, `error`). The ticket lasts as long as the
+upload and survives a restart of the server; `open` with the same files
+into the same folder gives the same upload, with what arrived, and a new
+ticket (the old one stops). A revoked token stops its tickets. The upload
+belongs to the token's account: the IN window shows it, and the account
+can resume or cancel it there. Many small files go better as one `.zip`
+with `unzip: true`. `[in.mcp]` caps what agents upload; the disk reserve
+of `[in]` holds for every way in ([configuration](../configuration.md#uploads-into-in)).
+
 ## The lower-level paths
 
 The dedicated tools remain for explicit workflows (and for the web UI):
@@ -365,7 +407,12 @@ Use `data` (base64) for cross-host setups (SSH tunnel, separate
 container without shared volume); use `source_path` only when gosidian
 and the agent share a filesystem (local install, mounted volume).
 `source_path` is validated against
-`GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS` (vault root always allowed).
+`GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS` (vault root always allowed). A folder
+that stages files inside the vault, often a hidden one such as
+`<vault>/.staging`, is a source only when it is the bridge dir or one of
+those roots: elsewhere in the vault a source must be a path the token may
+read, and a hidden folder is none, so the call is refused with a hint. A
+staging folder declared that way stays out of git sync.
 
 ### Cheap ingestion: the bridge dir
 

@@ -1,0 +1,20 @@
+# The database plugin of the rag preset: chunks in Qdrant, embeddings from
+# the endpoint of .env. The plugin fills ${NAME} and ${NAME:-default} from
+# its environment before it reads this file (0.6.0 and later), so the model
+# is chosen in .env; edit this file only for more models or a reranker
+# (see the plugin's README).
+description: Chunks in Qdrant, embeddings from the endpoint of .env
+endpoint:
+  base_url: ${EMBED_URL}
+  api_key_env: EMBED_API_KEY        # empty: an endpoint without a key
+models:
+  - id: ${EMBED_MODEL}
+    name: embed
+    dims: ${EMBED_DIMS}
+    dimensions: ${EMBED_DIMENSIONS:-0}
+    query_prefix: "${EMBED_QUERY_PREFIX:-}"
+    document_template: "${EMBED_DOCUMENT_TEMPLATE:-}"
+default_model: embed
+store:
+  kind: qdrant
+  url: http://qdrant:6333

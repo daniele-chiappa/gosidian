@@ -294,7 +294,7 @@ func (env *Env) describeMediaNote(ctx context.Context, call *Env, with map[strin
 			}
 		}
 		var out map[string]any
-		out, err = env.Engine.chat(ctx, call, callWith, msgs)
+		out, err = env.Engine.chat(ctx, call, callWith, msgs, nil)
 		add(out)
 		if err == nil {
 			// A JSON that does not read is tried again; the last try keeps

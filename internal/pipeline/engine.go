@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"path"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -76,7 +77,12 @@ type Provider struct {
 	BaseURL string // up to /v1
 	// APIKeySecret names the secret with the key; "" for none (Ollama).
 	APIKeySecret string
-	Model        string // the default model
+	// APIKeyEnv names the environment variable with the key instead.
+	APIKeyEnv string
+	Model     string // the default model
+	// Resources are the shared resources its calls take a place in, as
+	// [[pipelines.resources]] names them (IMP-196).
+	Resources []string
 }
 
 // Config tunes the engine.
@@ -119,6 +125,68 @@ type Config struct {
 	// how many resumes one run's key makes; default 60. A chat's widget
 	// starts a run per message of everyone who chats with it.
 	RunTokenRate int
+	// Categories are the rules of the categories of pipelines (IMP-196,
+	// [[pipelines.categories]]); a category without rules has no limits.
+	Categories []Category
+	// Tasks are the limits of the teams' tasks (IMP-195, [agents]).
+	Tasks TaskConfig
+}
+
+// Category is the rules of a category of pipelines (IMP-196).
+type Category struct {
+	Name string
+	// MaxRunning is the steps of its runs running at once; 0: no limit.
+	MaxRunning int
+	// MaxRuns is its runs not ended: beyond, a start from outside answers
+	// ErrCategoryFull; 0: no limit.
+	MaxRuns int
+	// Replace cancels, when a run starts, the runs of the same pipeline
+	// with the same input still queued.
+	Replace bool
+	// Priority is interactive, normal ("") or low.
+	Priority string
+	// Wait is how long a start that says nothing waits for its run; at
+	// most MaxSyncWait.
+	Wait time.Duration
+	// Projects are the projects whose pipelines may name it; none: all.
+	Projects []string
+}
+
+// ErrCategoryFull refuses a start whose category has its most runs not
+// ended (IMP-196): try again after RetryAfter.
+type ErrCategoryFull struct {
+	Category   string
+	Runs       int
+	RetryAfter time.Duration
+}
+
+func (e ErrCategoryFull) Error() string {
+	return fmt.Sprintf("the category %s has %d runs not ended, its most ([[pipelines.categories]] max_runs): try again in a while", e.Category, e.Runs)
+}
+
+// categoryFullRetry is the Retry-After of a start refused by its category.
+const categoryFullRetry = 30 * time.Second
+
+// Category is the rules of category name, ok false when the server has
+// none for it.
+func (e *Engine) Category(name string) (Category, bool) {
+	for _, c := range e.cfg.Categories {
+		if c.Name == name {
+			return c, true
+		}
+	}
+	return Category{Name: name}, false
+}
+
+// DefaultWait is how long a start of the pipeline at path waits when it
+// says nothing: its category's wait, at most MaxSyncWait.
+func (e *Engine) DefaultWait(path string) time.Duration {
+	p, err := e.host.Pipeline(path)
+	if err != nil || p.Err != nil || p.Spec == nil {
+		return 0
+	}
+	c, _ := e.Category(p.Spec.CategoryOf())
+	return e.SyncWait(c.Wait)
 }
 
 // MaxOutputBytes is a step's output in bytes ([pipelines]
@@ -148,6 +216,12 @@ type Engine struct {
 	committer Committer
 	// waits are the callers waiting for a run to change (Wait).
 	waits waiters
+	// streams are the runs followed as they write (StartStream).
+	streams streams
+	// queueLong are the queue triggers whose queue is long, since when.
+	queueLong queueEpisodes
+	// tasks is the state of the task trigger (IMP-195).
+	tasks taskLoop
 }
 
 // New is an engine acting through host, running on runner (which it
@@ -190,11 +264,14 @@ func New(host Host, runner *jobs.Runner, cfg Config, secrets Secrets, logger *sl
 	}
 	e := &Engine{host: host, runner: runner, types: NewRegistry(), cfg: cfg, secrets: secrets, log: logger,
 		now: func() time.Time { return time.Now().UTC() }}
+	e.tasks.kick = make(chan struct{}, 1)
 	e.client = guardedClient(e)
 	runner.Register(Kind, e)
 	runner.SetOnChange(func(id string) {
 		e.waits.notify(id)
-		if run, err := runner.Store().Run(id); err == nil {
+		// The runner runs the automations' actions too (IMP-166): the web
+		// UI hears only of the pipelines'.
+		if run, err := runner.Store().Run(id); err == nil && run.Kind == Kind {
 			host.Changed(run)
 		}
 	})
@@ -357,6 +434,12 @@ type StartRequest struct {
 	// that an interactive one starts is interactive too. An interactive
 	// pipeline's runs are interactive whatever it says.
 	Priority int
+	// stream follows the run as its nodes write (StartStream, and the
+	// children of a run that has one).
+	stream *Stream
+	// id, task and team: the run the task trigger starts for a task it
+	// took for it (IMP-195), with the id it took it with.
+	id, task, team string
 }
 
 // ErrDisabled: the pipeline's project does not run pipelines.
@@ -389,7 +472,7 @@ func (e *Engine) Start(req StartRequest) (jobs.Run, bool, error) {
 		if p.Spec.Trigger.On != TriggerChat {
 			return jobs.Run{}, false, fmt.Errorf("the pipeline starts on %s, not on chat", p.Spec.Trigger.On)
 		}
-	case TriggerIngest, TriggerSchedule, TriggerIN, TriggerCommit, TriggerRun:
+	case TriggerIngest, TriggerSchedule, TriggerIN, TriggerCommit, TriggerRun, TriggerQueue, TriggerTask:
 	default:
 		return jobs.Run{}, false, fmt.Errorf("unknown trigger %q", req.Trigger)
 	}
@@ -402,8 +485,21 @@ func (e *Engine) Start(req StartRequest) (jobs.Run, bool, error) {
 		}
 		req.Input = in
 	}
-	priority := req.Priority
-	if p.Spec.Interactive() {
+	// The category (IMP-196): reserved to some projects, it sets the
+	// priority, interactive staying so for the runs an interactive one
+	// starts, as before.
+	cat, _ := e.Category(p.Spec.CategoryOf())
+	if len(cat.Projects) > 0 && !slices.Contains(cat.Projects, p.Project) {
+		return jobs.Run{}, false, fmt.Errorf("the category %s is not open to project %s ([[pipelines.categories]] projects)", cat.Name, p.Project)
+	}
+	priority := jobs.PriorityNormal
+	switch cat.Priority {
+	case CategoryLow:
+		priority = jobs.PriorityLow
+	case PriorityInteractive:
+		priority = jobs.PriorityInteractive
+	}
+	if p.Spec.Interactive() || req.Priority == jobs.PriorityInteractive {
 		priority = jobs.PriorityInteractive
 	}
 	// The key of a run pipeline.run starts names the run its end resumes
@@ -430,11 +526,77 @@ func (e *Engine) Start(req StartRequest) (jobs.Run, bool, error) {
 	for i, n := range p.Spec.Nodes {
 		steps[i] = jobs.Step{Name: n.ID, Deps: n.After}
 	}
-	run, existing, err := e.runner.Submit(jobs.Run{
+	run := jobs.Run{
 		Kind: Kind, Ref: p.Path, Project: p.Project, Trigger: req.Trigger, Input: input, Spec: spec,
 		IdemKey: req.IdemKey, Actor: req.Actor, CallbackURL: req.CallbackURL, ResumeKey: jobs.NewSecret(), Priority: priority,
-	}, steps)
-	return run, existing, err
+		Category: cat.Name, Task: req.task, Team: req.team,
+	}
+	if req.id != "" {
+		run.ID = req.id
+	}
+	// A start from outside beyond the category's runs not ended is refused,
+	// unless it is one already made (its key); an event (an arrival, a
+	// commit, a schedule) and pipeline.run go to the queue, not lost.
+	if cat.MaxRuns > 0 && fromOutside(req.Trigger) {
+		again := false
+		if req.IdemKey != "" {
+			_, err := e.runner.Store().RunByIdem(p.Path, req.IdemKey)
+			again = err == nil
+		}
+		if !again {
+			n, err := e.runner.Store().Unended(cat.Name)
+			if err != nil {
+				return jobs.Run{}, false, err
+			}
+			if n >= cat.MaxRuns {
+				return jobs.Run{}, false, ErrCategoryFull{Category: cat.Name, Runs: n, RetryAfter: categoryFullRetry}
+			}
+		}
+	}
+	if req.stream != nil {
+		// The stream is there before the run can start: its first node
+		// may be the one that writes.
+		run.ID = jobs.NewID()
+		e.streams.attach(run.ID, req.stream)
+	}
+	stored, existing, err := e.runner.Submit(run, steps)
+	if req.stream != nil && (err != nil || existing) {
+		e.streams.detach(run.ID)
+		if err == nil && !stored.Status.Terminal() && e.streams.of(stored.ID) == nil {
+			e.streams.attach(stored.ID, req.stream)
+		}
+	}
+	if err == nil && !existing && cat.Replace {
+		e.replaceTwins(stored)
+	}
+	return stored, existing, err
+}
+
+// fromOutside says whether a run of trigger was started from outside (by
+// hand, over HTTP or MCP, a run token, a chat), which a full category may
+// refuse.
+func fromOutside(trigger string) bool {
+	switch trigger {
+	case TriggerManual, TriggerExternal, TriggerChat:
+		return true
+	}
+	return false
+}
+
+// replaceTwins cancels the runs of run's pipeline with its input still
+// queued, no step of theirs started (IMP-196, a category's replace): the
+// newest start stands for them.
+func (e *Engine) replaceTwins(run jobs.Run) {
+	ids, err := e.runner.Store().QueuedTwins(run.Ref, run.Input, run.ID)
+	if err != nil {
+		e.log.Warn("pipeline: the runs a start replaces", "pipeline", run.Ref, "err", err)
+		return
+	}
+	for _, id := range ids {
+		if err := e.runner.CancelFor(id, "replaced by run "+run.ID); err != nil && !errors.Is(err, jobs.ErrState) {
+			e.log.Warn("pipeline: replacing a queued run", "run", id, "err", err)
+		}
+	}
 }
 
 // SpecOf is the spec a run executes, as it was when the run started.
@@ -546,6 +708,8 @@ func (e *Engine) Step(ctx context.Context, run jobs.Run, st jobs.Step, steps []j
 		var fw FailedWith
 		if errors.As(err, &fw) {
 			if b, merr := json.Marshal(fw.Output); merr == nil && len(b) <= e.cfg.MaxOutputBytes {
+				// What a failed step spent counts too (IMP-195).
+				e.addTaskCost(run, b)
 				return jobs.Outcome{Status: jobs.Failed, Error: err.Error(), Output: b}
 			}
 		}
@@ -558,6 +722,7 @@ func (e *Engine) Step(ctx context.Context, run jobs.Run, st jobs.Step, steps []j
 	if len(b) > e.cfg.MaxOutputBytes {
 		return jobs.Outcome{Status: jobs.Failed, Error: fmt.Sprintf("the output is %d bytes, at most %d: write large content to a note and pass its path", len(b), e.cfg.MaxOutputBytes)}
 	}
+	e.addTaskCost(run, b)
 	return jobs.Outcome{Status: jobs.Done, Output: b}
 }
 
@@ -648,7 +813,7 @@ func (e *Engine) Next(run jobs.Run, steps []jobs.Step) ([]jobs.StepChange, *jobs
 			if st.Status != jobs.Pending || decided[st.Name] {
 				continue
 			}
-			c, ok := e.decide(spec, st.Name, byName, continues, sc, now)
+			c, ok := e.decide(run, spec, st.Name, byName, continues, sc, now)
 			if !ok {
 				continue
 			}
@@ -707,7 +872,7 @@ func firstError(st jobs.Step, changes []jobs.StepChange) string {
 
 // decide is what becomes of a pending node, given the steps it waits for:
 // queued, skipped, canceled or failed; false while it must wait.
-func (e *Engine) decide(spec *Spec, name string, byName map[string]jobs.Step, continues func(string) bool, sc scope, now time.Time) (jobs.StepChange, bool) {
+func (e *Engine) decide(run jobs.Run, spec *Spec, name string, byName map[string]jobs.Step, continues func(string) bool, sc scope, now time.Time) (jobs.StepChange, bool) {
 	node, ok := spec.Node(name)
 	if !ok {
 		return jobs.StepChange{Name: name, Status: jobs.Canceled, Error: "not in the pipeline", Finished: now}, true
@@ -744,8 +909,65 @@ func (e *Engine) decide(spec *Spec, name string, byName map[string]jobs.Step, co
 	case skip:
 		return jobs.StepChange{Name: name, Status: jobs.Skipped, Finished: now}, true
 	}
-	return jobs.StepChange{Name: name, Status: jobs.Queued}, true
+	return jobs.StepChange{Name: name, Status: jobs.Queued, Resources: e.resources(run, node, sc)}, true
 }
+
+// resources are what the step of node takes a place in while it runs
+// (IMP-196): the category of its run, and the provider of language models
+// of an llm node or the plugin of a plugin's node, with the shared
+// resources the server's config gives them. The provider is the one with
+// names when the step is queued, or the default one.
+func (e *Engine) resources(run jobs.Run, node *Node, sc scope) []string {
+	var out []string
+	if run.Category != "" {
+		out = append(out, ResourceCategory+run.Category)
+	}
+	// The agents of a team's task (IMP-195): its team's places and the
+	// installation's.
+	if run.Team != "" && (e.agentNode(node) || node.Use == "task.run") {
+		out = append(out, ResourceTeam+strings.TrimSuffix(run.Team, ".md"), ResourceAgents)
+	}
+	if node.Use == "task.run" || node.Use == "task.pr" {
+		// The executor's plugin, which the node calls.
+		return append(out, e.executorResources(run)...)
+	}
+	return append(out, e.nodeResources(node, sc)...)
+}
+
+func (e *Engine) nodeResources(node *Node, sc scope) []string {
+	if strings.HasPrefix(node.Use, "llm.") {
+		name := ""
+		if v, ok := node.With["provider"]; ok {
+			if x, err := sc.eval(v); err == nil {
+				name, _ = x.(string)
+			}
+		}
+		p, err := e.provider(strings.TrimSpace(name))
+		if err != nil {
+			return nil
+		}
+		out := []string{ResourceLLM + p.Name}
+		for _, r := range p.Resources {
+			out = append(out, ResourceShared+r)
+		}
+		return out
+	}
+	if _, base := e.types.types[node.Use]; base {
+		return nil
+	}
+	if x, ok := e.types.ext.(interface{ Resources(use string) []string }); ok {
+		return x.Resources(node.Use)
+	}
+	return nil
+}
+
+// The kinds of resource a step takes a place in (IMP-196).
+const (
+	ResourcePlugin   = "plugin:"
+	ResourceLLM      = "llm:"
+	ResourceShared   = "res:"
+	ResourceCategory = "cat:"
+)
 
 func (e *Engine) skips(node *Node, sc scope) (bool, error) {
 	if node.When != "" {
@@ -795,6 +1017,8 @@ func (e *Engine) Ended(run jobs.Run, steps []jobs.Step) {
 		e.stopChildren(run)
 	}
 	e.startOnRun(run, steps)
+	e.taskRunEnded(run)
+	e.forgetRunWrites(run.ID)
 }
 
 // OnAttachment starts the ingest pipelines of a project that take a
@@ -865,6 +1089,7 @@ func (e *Engine) StartSchedules(ctx context.Context) {
 	defer t.Stop()
 	for {
 		e.TickSchedules(10 * time.Minute)
+		e.TickQueues()
 		select {
 		case <-ctx.Done():
 			return

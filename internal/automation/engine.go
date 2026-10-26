@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gosidian/gosidian/internal/clock"
+	"github.com/gosidian/gosidian/internal/jobs"
 )
 
 // Database is a database note that declares automations, as the host
@@ -52,6 +53,9 @@ type Engine struct {
 	loc   *time.Location
 	now   func() time.Time
 	log   *slog.Logger
+
+	// runner runs the actions (SetRunner); nil, the engine acts at once.
+	runner *jobs.Runner
 
 	mu    sync.Mutex
 	state *State
@@ -100,6 +104,9 @@ func (e *Engine) Tick(project string) []Run {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	now := e.now()
+	if e.runner != nil {
+		e.reconcile()
+	}
 	dbs, err := e.host.Databases(project)
 	if err != nil {
 		e.log.Warn("automations: list databases", "err", err)
@@ -110,17 +117,25 @@ func (e *Engine) Tick(project string) []Run {
 		for _, r := range db.Rules {
 			if run, ok := e.fire(db, r, now); ok {
 				runs = append(runs, run)
-				e.state.log(run)
+				// A queued action is logged when its run ends (settle).
+				if run.Job == "" {
+					e.state.log(run)
+				}
 			}
 		}
 	}
 	if project == "" {
 		e.state.prune(now)
 	}
+	e.save()
+	return runs
+}
+
+// save writes the state; the caller holds e.mu.
+func (e *Engine) save() {
 	if err := e.store.Save(e.state); err != nil {
 		e.log.Warn("automations: save state", "err", err)
 	}
-	return runs
 }
 
 // fire runs r now if it is due, and says what it did. A failure is
@@ -144,8 +159,15 @@ func (e *Engine) fire(db Database, r Rule, now time.Time) (Run, bool) {
 		// In UTC whatever the zones: a key that changed with TZ would fire
 		// the slot a second time.
 		key := slot.UTC().Format(time.RFC3339)
-		if slot.Before(rs.FirstSeen) || !rs.Fired[key].IsZero() {
+		if slot.Before(rs.FirstSeen) || !rs.Fired[key].IsZero() || rs.Pending[key] != "" {
 			return Run{}, false
+		}
+		if e.runner != nil {
+			in := actionInput{Rule: r.Name, Action: run.Action, Snapshot: r.Snapshot != "", Keys: []string{key}, At: now}
+			if !in.Snapshot {
+				in.Summary = everySummary(db, r)
+			}
+			return e.queue(db, r, rs, in, run, fail)
 		}
 		var path string
 		var err error
@@ -180,7 +202,7 @@ func (e *Engine) fire(db Database, r Rule, now time.Time) (Run, bool) {
 	}
 	var due []Row
 	for _, row := range e.comeIn(r, rows, now) {
-		if rs.Fired[rowKey(row)].IsZero() {
+		if k := rowKey(row); rs.Fired[k].IsZero() && rs.Pending[k] == "" {
 			due = append(due, row)
 		}
 	}
@@ -189,6 +211,14 @@ func (e *Engine) fire(db Database, r Rule, now time.Time) (Run, bool) {
 		return Run{}, false
 	}
 	summary, items := e.dueHandoff(db, r, due, now)
+	if e.runner != nil {
+		in := actionInput{Rule: r.Name, Action: run.Action, Summary: summary, Items: items, At: now}
+		for _, row := range due {
+			in.Keys = append(in.Keys, rowKey(row))
+			run.Rows = append(run.Rows, row.Path)
+		}
+		return e.queue(db, r, rs, in, run, fail)
+	}
 	path, err := e.host.Handoff(db, r, summary, items, now)
 	if err != nil {
 		return fail(err)
@@ -407,6 +437,16 @@ func (e *Engine) plan(db Database, r Rule, now, asOf time.Time) PlannedRule {
 	if rs := e.state.Rules[r.Key(db.Path)]; rs != nil {
 		firstSeen, fired = rs.FirstSeen, rs.Fired
 		pr.Error = rs.Error
+		// A queued action counts as done: it is on its way.
+		if len(rs.Pending) > 0 {
+			fired = make(map[string]time.Time, len(rs.Fired)+len(rs.Pending))
+			for k, at := range rs.Fired {
+				fired[k] = at
+			}
+			for k := range rs.Pending {
+				fired[k] = rs.LastSeen
+			}
+		}
 	}
 	if r.Every != nil {
 		slot := r.Every.Last(asOf, e.loc)

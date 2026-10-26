@@ -173,6 +173,7 @@ const baseCodec: PlanciaCodec = createArgCodec({
     settings: { arg: () => null, title: () => tr('nav.settings') },
     trash: { arg: () => null, title: () => tr('nav.trash') },
     runs: { arg: () => null, title: () => tr('nav.runs') },
+    uploads: { arg: () => null, title: () => tr('uploads.window_title') },
   },
   // Unlisted types are bare singletons titled by their type.
   default: { arg: () => null },

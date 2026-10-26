@@ -1,0 +1,231 @@
+{
+  "version": 1,
+  "retrieved": "2026-10-25",
+  "documents": [
+    {
+      "id": "who-2020-guidelines",
+      "title": "WHO guidelines on physical activity and sedentary behaviour",
+      "authors": "World Health Organization",
+      "year": 2020,
+      "journal": "World Health Organization (publisher)",
+      "doi": null,
+      "isbn": "9789240015128",
+      "pmcid": null,
+      "url": "https://iris.who.int/server/api/core/bitstreams/faa83413-d89e-4be9-bb01-b24671aef7ca/content",
+      "landing": "https://iris.who.int/handle/10665/336656",
+      "license": "CC BY-NC-SA 3.0 IGO",
+      "license_url": "https://creativecommons.org/licenses/by-nc-sa/3.0/igo",
+      "sha256": "50b66c44e7083cc3752849f301ae1d60d9360d511e34c0c948b39bdf6e13dc88",
+      "bytes": 4041257,
+      "pages": 104,
+      "topics": [
+        "physical activity guidelines",
+        "sedentary behaviour",
+        "pregnancy and postpartum",
+        "chronic conditions"
+      ],
+      "why": "The reference doses (minutes per week, intensity, muscle-strengthening days, balance for older adults, limits on sitting) for every age group, pregnancy/postpartum and adults with chronic conditions such as hypertension."
+    },
+    {
+      "id": "iversen-2021-time-efficient-resistance-training",
+      "title": "No Time to Lift? Designing Time-Efficient Training Programs for Strength and Hypertrophy: A Narrative Review",
+      "authors": "Iversen VM et al.",
+      "year": 2021,
+      "journal": "Sports Medicine",
+      "doi": "10.1007/s40279-021-01490-1",
+      "pmcid": "PMC8449772",
+      "url": "https://pmc-oa-opendata.s3.amazonaws.com/PMC8449772.1/PMC8449772.1.pdf",
+      "landing": "https://pmc.ncbi.nlm.nih.gov/articles/PMC8449772/",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "sha256": "8cc1c5ede96cd086e0f190cf44c7a14166cf6b4dcdab6917b870bd491f10e2e0",
+      "bytes": 880778,
+      "pages": 17,
+      "topics": [
+        "resistance training",
+        "sets and repetitions",
+        "training frequency",
+        "program design"
+      ],
+      "why": "Concrete resistance-training prescriptions for untrained people (weekly sets per muscle, load and rep ranges, frequency, rest, exercise choice) and how to build short, effective sessions."
+    },
+    {
+      "id": "afonso-2024-warm-up",
+      "title": "Revisiting the 'Whys' and 'Hows' of the Warm-Up: Are We Asking the Right Questions?",
+      "authors": "Afonso J et al.",
+      "year": 2024,
+      "journal": "Sports Medicine",
+      "doi": "10.1007/s40279-023-01908-y",
+      "pmcid": "PMC10798919",
+      "url": "https://pmc-oa-opendata.s3.amazonaws.com/PMC10798919.1/PMC10798919.1.pdf",
+      "landing": "https://pmc.ncbi.nlm.nih.gov/articles/PMC10798919/",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "sha256": "277f99eadaadd0ab4d6bc9a63807cae1e59221a16d802081aee47abb51c426ee",
+      "bytes": 582733,
+      "pages": 8,
+      "topics": [
+        "warm-up",
+        "injury prevention",
+        "session structure"
+      ],
+      "why": "What a warm-up is for (performance, injury risk, readiness), how to build one, and how to keep it from turning into fatigue."
+    },
+    {
+      "id": "izquierdo-2021-older-adults-icfsr",
+      "title": "International Exercise Recommendations in Older Adults (ICFSR): Expert Consensus Guidelines",
+      "authors": "Izquierdo M et al.",
+      "year": 2021,
+      "journal": "The Journal of Nutrition, Health & Aging",
+      "doi": "10.1007/s12603-021-1665-8",
+      "pmcid": "PMC12369211",
+      "url": "https://pmc-oa-opendata.s3.amazonaws.com/PMC12369211.1/PMC12369211.1.pdf",
+      "landing": "https://pmc.ncbi.nlm.nih.gov/articles/PMC12369211/",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "sha256": "94e89f805e74b845195da9b10a2a6a408ca841632dd842297ee95a6d025b09bd",
+      "bytes": 893744,
+      "pages": 30,
+      "topics": [
+        "older adults",
+        "multicomponent training",
+        "balance and falls",
+        "frailty"
+      ],
+      "why": "Expert consensus prescription for people over 65: resistance, aerobic, balance and flexibility doses, multicomponent programs, falls prevention and progression for frail or deconditioned adults."
+    },
+    {
+      "id": "goh-2019-exercise-knee-hip-oa",
+      "title": "Efficacy and potential determinants of exercise therapy in knee and hip osteoarthritis: A systematic review and meta-analysis",
+      "authors": "Goh SL et al.",
+      "year": 2019,
+      "journal": "Annals of Physical and Rehabilitation Medicine",
+      "doi": "10.1016/j.rehab.2019.04.006",
+      "pmcid": "PMC6880792",
+      "url": "https://pmc-oa-opendata.s3.amazonaws.com/PMC6880792.1/PMC6880792.1.pdf",
+      "landing": "https://pmc.ncbi.nlm.nih.gov/articles/PMC6880792/",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "sha256": "4650d91015a1fe13d486cdc34c09fdbc4689378f48eea4fd26d3526003d3df3d",
+      "bytes": 2026893,
+      "pages": 10,
+      "topics": [
+        "knee osteoarthritis",
+        "exercise therapy",
+        "pain and function"
+      ],
+      "why": "How much exercise therapy improves pain, function and quality of life in knee/hip osteoarthritis, how the benefit evolves (peak around 8 weeks, fading after 9 months) and who benefits most."
+    },
+    {
+      "id": "brites-lagos-2024-postpartum-program",
+      "title": "Development and validation of the physical exercise program \"Active Mums\" for postpartum recovery: application of the CReDECI-2 guidelines",
+      "authors": "Brites-Lagos C et al.",
+      "year": 2024,
+      "journal": "BMC Pregnancy and Childbirth",
+      "doi": "10.1186/s12884-024-06387-1",
+      "pmcid": "PMC11103992",
+      "url": "https://pmc-oa-opendata.s3.amazonaws.com/PMC11103992.1/PMC11103992.1.pdf",
+      "landing": "https://pmc.ncbi.nlm.nih.gov/articles/PMC11103992/",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "sha256": "fa4728ce153a994875457e408ff1eafc1f6b6f38e2823538a80b7c5922b433fd",
+      "bytes": 1270520,
+      "pages": 11,
+      "topics": [
+        "postpartum",
+        "pelvic floor training",
+        "program design"
+      ],
+      "why": "A postpartum exercise program built from international recommendations: session structure, periodization from early to late postpartum, pelvic floor training, screening and fitness tests."
+    },
+    {
+      "id": "pescatello-2015-exercise-hypertension",
+      "title": "Exercise for Hypertension: A Prescription Update Integrating Existing Recommendations with Emerging Research",
+      "authors": "Pescatello LS et al.",
+      "year": 2015,
+      "journal": "Current Hypertension Reports",
+      "doi": "10.1007/s11906-015-0600-y",
+      "pmcid": "PMC4589552",
+      "url": "https://pmc-oa-opendata.s3.amazonaws.com/PMC4589552.1/PMC4589552.1.pdf",
+      "landing": "https://pmc.ncbi.nlm.nih.gov/articles/PMC4589552/",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "sha256": "8670726fd09e816a2337e16305a82d67ce0aa606e0277c7290e3e562180144f2",
+      "bytes": 816523,
+      "pages": 10,
+      "topics": [
+        "hypertension",
+        "blood pressure",
+        "exercise prescription"
+      ],
+      "why": "An updated FITT prescription (frequency, intensity, time, type) for adults with hypertension, combining aerobic and dynamic resistance training, with the expected blood-pressure reductions."
+    },
+    {
+      "id": "garcia-2023-minimal-dose-activity",
+      "title": "Non-occupational physical activity and risk of cardiovascular disease, cancer and mortality outcomes: a dose-response meta-analysis of large prospective studies",
+      "authors": "Garcia L et al.",
+      "year": 2023,
+      "journal": "British Journal of Sports Medicine",
+      "doi": "10.1136/bjsports-2022-105669",
+      "pmcid": "PMC10423495",
+      "url": "https://pmc-oa-opendata.s3.amazonaws.com/PMC10423495.1/PMC10423495.1.pdf",
+      "landing": "https://pmc.ncbi.nlm.nih.gov/articles/PMC10423495/",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "sha256": "13d1770f5b594f716214f511962c3e881fbece1c345904e428944d45c3d9d968",
+      "bytes": 2535122,
+      "pages": 15,
+      "topics": [
+        "dose-response",
+        "minimal effective dose",
+        "mortality risk"
+      ],
+      "why": "How much risk drops with small amounts of activity (e.g. half the recommended minimum), so a sedentary beginner can be given a realistic first target."
+    },
+    {
+      "id": "schwendinger-2020-home-based-exercise",
+      "title": "Counteracting Physical Inactivity during the COVID-19 Pandemic: Evidence-Based Recommendations for Home-Based Exercise",
+      "authors": "Schwendinger F et al.",
+      "year": 2020,
+      "journal": "International Journal of Environmental Research and Public Health",
+      "doi": "10.3390/ijerph17113909",
+      "pmcid": "PMC7311977",
+      "url": "https://pmc-oa-opendata.s3.amazonaws.com/PMC7311977.1/PMC7311977.1.pdf",
+      "landing": "https://pmc.ncbi.nlm.nih.gov/articles/PMC7311977/",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "sha256": "c56b6b94901df047c86ada4c733e11a7d47bf028d2134ee43c99e7567fd4d35b",
+      "bytes": 470231,
+      "pages": 5,
+      "topics": [
+        "home-based training",
+        "bodyweight exercise",
+        "interval training",
+        "safety"
+      ],
+      "why": "Training at home with little space and no equipment: bodyweight strength work, short high-intensity intervals, breaking up sitting time, and the safety checks (contraindications, supervision for novices) before starting."
+    },
+    {
+      "id": "collado-mateo-2021-exercise-adherence",
+      "title": "Key Factors Associated with Adherence to Physical Exercise in Patients with Chronic Diseases and Older Adults: An Umbrella Review",
+      "authors": "Collado-Mateo D et al.",
+      "year": 2021,
+      "journal": "International Journal of Environmental Research and Public Health",
+      "doi": "10.3390/ijerph18042023",
+      "pmcid": "PMC7922504",
+      "url": "https://pmc-oa-opendata.s3.amazonaws.com/PMC7922504.1/PMC7922504.1.pdf",
+      "landing": "https://pmc.ncbi.nlm.nih.gov/articles/PMC7922504/",
+      "license": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "sha256": "d22c5166f0244321b132df0a2701efa82d0abe5da81e0245d74206f9cf37786c",
+      "bytes": 675809,
+      "pages": 24,
+      "topics": [
+        "adherence",
+        "behaviour change",
+        "older adults"
+      ],
+      "why": "The factors that make people stick with an exercise program (supervision, social support, goal setting, enjoyment, feedback) to make a plan sustainable."
+    }
+  ]
+}

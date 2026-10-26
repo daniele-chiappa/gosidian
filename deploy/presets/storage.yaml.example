@@ -1,0 +1,26 @@
+# The sources of the storage preset: copy to storage.yaml and keep the
+# ones you use. Credentials are files in ./secrets (mounted on
+# /run/secrets), readable by uid 65532. The plugin's README has every
+# option; a project shows a source with gosidian plugin bind.
+sources:
+  # A Nextcloud folder: a user of its own with an app password, two lines
+  # in secrets/nextcloud (the user, the password).
+  - name: nextcloud
+    kind: webdav
+    description: Nextcloud, the folder Documents
+    url: https://cloud.example.com/remote.php/dav/files/gosidian/Documents/
+    vendor: nextcloud
+    credentials: /run/secrets/nextcloud
+    move: true                    # gosidian may move files inside it (done/)
+
+  # A bucket of S3 or a compatible store: two lines in secrets/s3 (the
+  # access key, the secret).
+  # - name: archive
+  #   kind: s3
+  #   provider: Other               # AWS (no endpoint), Cloudflare, Wasabi, Ceph, Other…
+  #   endpoint: https://s3.example.com
+  #   region: us-east-1
+  #   bucket: archive
+  #   prefix: documents
+  #   path_style: true
+  #   credentials: /run/secrets/s3

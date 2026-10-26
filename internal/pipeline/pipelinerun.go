@@ -89,7 +89,9 @@ func pipelineRun(_ context.Context, env *Env, with map[string]any) (any, error) 
 	if err := e.roomForChild(env.Run, rel, key); err != nil {
 		return nil, err
 	}
-	child, existing, err := e.Start(StartRequest{Path: rel, Trigger: TriggerPipeline, Input: input, Actor: Actor(env.Run.Ref), IdemKey: key, Priority: env.Run.Priority})
+	// The child writes to the stream of its parent, if anyone follows it.
+	child, existing, err := e.Start(StartRequest{Path: rel, Trigger: TriggerPipeline, Input: input, Actor: Actor(env.Run.Ref), IdemKey: key, Priority: env.Run.Priority,
+		stream: e.streams.of(env.Run.ID)})
 	if err != nil {
 		return nil, err
 	}

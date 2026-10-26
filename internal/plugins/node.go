@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"path"
@@ -71,6 +72,22 @@ func (n node) Run(ctx context.Context, env *pipeline.Env, with map[string]any) (
 	for k, v := range with {
 		args[k] = v
 	}
+	// The role of an agent (IMP-195): the body of an agent note, its system
+	// prompt, before the node's own system; gosidian reads it, the plugin
+	// never sees the setting.
+	if spec.Contract == ContractAgentRun {
+		if ro, _ := args["role"].(string); strings.TrimSpace(ro) != "" {
+			prompt, err := env.AgentPrompt(ro)
+			if err != nil {
+				return nil, fmt.Errorf("with.role: %w", err)
+			}
+			if sys, _ := args["system"].(string); strings.TrimSpace(sys) != "" {
+				prompt += "\n\n" + sys
+			}
+			args["system"] = prompt
+		}
+		delete(args, "role")
+	}
 	base := c.FilesURL
 	if base == "" && spec.FileRefs {
 		base = env.Engine.Config().PublicURL
@@ -78,9 +95,9 @@ func (n node) Run(ctx context.Context, env *pipeline.Env, with map[string]any) (
 	optional := optionalFiles(spec)
 	for _, f := range spec.Files {
 		// A file field the node's schema does not require may be left out,
-		// or be an empty list: the plugin then gets none.
+		// or be empty: the plugin then gets none.
 		if optional[f] {
-			if v, ok := args[f]; !ok || v == nil {
+			if v, ok := args[f]; !ok || v == nil || v == "" {
 				delete(args, f)
 				continue
 			} else if list, ok := v.([]any); ok && len(list) == 0 {
@@ -141,7 +158,14 @@ func (n node) Run(ctx context.Context, env *pipeline.Env, with map[string]any) (
 		return nil, fmt.Errorf("plugin %s, %s: %w", c.Name, spec.Tool, err)
 	}
 	if res.IsError {
-		return nil, fmt.Errorf("plugin %s, %s: %s", c.Name, spec.Tool, strings.TrimSpace(resultText(res)))
+		err := fmt.Errorf("plugin %s, %s: %s", c.Name, spec.Tool, strings.TrimSpace(resultText(res)))
+		// A step that fails after spending (an agent stopped at its
+		// limits) says what it spent in the error's structured content:
+		// the step and its task keep it (IMP-195).
+		if spent := errorOutput(res); spent != nil {
+			return nil, pipeline.FailedWith{Output: spent, Err: err}
+		}
+		return nil, err
 	}
 	var out any
 	if raw := ResultJSON(res); len(raw) > 0 {
@@ -171,7 +195,8 @@ func (n node) Run(ctx context.Context, env *pipeline.Env, with map[string]any) (
 // runToken mints the MCP token of a call whose setting mcp asks for
 // gosidian's MCP: read or write, within what the accepted manifest grants,
 // for the run's project, lasting the call; revoke drops it. No setting, or
-// none: no token.
+// none: no token. A run of a team's task writes only in its role's
+// folders, and gets no write token when the role writes nowhere (IMP-195).
 func (n node) runToken(ctx context.Context, env *pipeline.Env, c Config, acc Accepted, with map[string]any) (token string, revoke func(), err error) {
 	level, _ := with["mcp"].(string)
 	switch level {
@@ -187,6 +212,19 @@ func (n node) runToken(ctx context.Context, env *pipeline.Env, c Config, acc Acc
 	if n.r.tokens == nil || c.MCPURL == "" {
 		return "", nil, fmt.Errorf("with.mcp %s: gosidian's MCP is not open to plugin %s ([pipelines] mcp_url)", level, c.Name)
 	}
+	write := level == AccessWrite
+	var paths []string
+	if write && n.r.scopes != nil {
+		roleDirs, scoped, err := n.r.scopes.RunWritePaths(env.Run.ID)
+		switch {
+		case err != nil:
+			return "", nil, fmt.Errorf("with.mcp write: %w", err)
+		case scoped && len(roleDirs) == 0:
+			return "", nil, errors.New("with.mcp write: the run's role writes nowhere in the vault (writes in the team)")
+		case scoped:
+			paths = roleDirs
+		}
+	}
 	ttl := env.Engine.Config().FileTicketTTL
 	if dl, ok := ctx.Deadline(); ok {
 		ttl = time.Until(dl)
@@ -198,7 +236,7 @@ func (n node) runToken(ctx context.Context, env *pipeline.Env, c Config, acc Acc
 	if env.Node != nil {
 		name += "-" + env.Node.ID
 	}
-	id, secret, err := n.r.tokens.MintRun(name, env.Project, level == AccessWrite, ttl+runTokenSlack)
+	id, secret, err := n.r.tokens.MintRun(name, env.Project, write, ttl+runTokenSlack, env.Run.ID, paths)
 	if err != nil {
 		return "", nil, fmt.Errorf("with.mcp %s: %w", level, err)
 	}

@@ -72,6 +72,7 @@ func (r *Router) inChanged(project string, closed bool) {
 //	POST /api/v1/in/{project}/delete  {paths}: into the trash (a folder needs it)
 //	POST /api/v1/in/{project}/run     {pipeline, paths}: a run on the files
 //	POST /api/v1/in/{project}/scan    {folder}: check the folder's source now ("" all)
+//	     /api/v1/in/{project}/uploads…    the uploads (inupload.go)
 //
 // Paths are relative to the IN folder, or vault paths. Reading needs read
 // access to the project, the rest write access.
@@ -96,6 +97,10 @@ func (r *Router) handleIN(w http.ResponseWriter, req *http.Request) {
 		r.listIN(w, req, project)
 		return
 	}
+	if action == "uploads" || strings.HasPrefix(action, "uploads/") {
+		r.uploadsIN(w, req, user, project, action)
+		return
+	}
 	if req.Method != http.MethodPost {
 		WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
 		return
@@ -115,7 +120,7 @@ func (r *Router) handleIN(w http.ResponseWriter, req *http.Request) {
 	case "scan":
 		r.scanIN(w, req, project)
 	default:
-		WriteError(w, http.StatusNotFound, CodeNotFound, "use /api/v1/in/<project>, /move, /status, /delete, /run or /scan")
+		WriteError(w, http.StatusNotFound, CodeNotFound, "use /api/v1/in/<project>, /move, /status, /delete, /run, /scan or /uploads")
 	}
 }
 

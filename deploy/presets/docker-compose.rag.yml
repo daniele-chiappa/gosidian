@@ -1,0 +1,148 @@
+# gosidian presets: rag. Documents dropped in a project's IN folder become
+# notes (docling, images), are cut and stored with their embeddings
+# (database on Qdrant), and a bot answers from them (chat, the model of
+# gosidian). Use it on top of the base:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.rag.yml up -d
+#
+# The models are yours to choose, in .env (LLM_*, EMBED_*): .env.example has
+# commented examples by hardware. Then, once: a project from the rag
+# template, and the plugins whose manifest depends on your .env accepted:
+#
+#   docker compose exec gosidian /gosidian plugin accept --pending
+#
+# docs/deployment.md#presets has the whole walk-through.
+
+services:
+  gosidian:
+    depends_on:
+      database:
+        condition: service_started
+      docling:
+        condition: service_started
+      images:
+        condition: service_started
+      chat:
+        condition: service_started
+    # host.docker.internal: a model server on the host, as in .env.example.
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    environment:
+      GOSIDIAN_PIPELINES_ENABLED: "true"
+      # git sync commits the vault, and its commits start the cut of the
+      # notes changed (the rag template's pipelines/cut). No remote here:
+      # add GOSIDIAN_GIT_REMOTE and GOSIDIAN_GIT_PUSH for a backup.
+      GOSIDIAN_GIT_ENABLED: "true"
+      GOSIDIAN_GIT_PUSH: ${GOSIDIAN_GIT_PUSH:-false}
+      # How the plugins reach gosidian: the files of a step, and its MCP.
+      GOSIDIAN_PIPELINES_FILES_URL: http://gosidian:8080
+      GOSIDIAN_PIPELINES_MCP_URL: http://gosidian:8080/mcp
+      # The model of the answers and the descriptions: an OpenAI-compatible
+      # endpoint up to /v1 (Ollama, vLLM, llama.cpp, OpenRouter).
+      GOSIDIAN_PIPELINES_LLM_URL: ${LLM_URL:?set LLM_URL in .env}
+      GOSIDIAN_PIPELINES_LLM_MODEL: ${LLM_MODEL:?set LLM_MODEL in .env}
+      GOSIDIAN_PIPELINES_LLM_KEY_ENV: LLM_API_KEY
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      # The plugins, each with its token. docling, images and chat serve a
+      # manifest that does not depend on the install: gosidian accepts the
+      # pinned one by itself. The database's names the hosts of your
+      # .env, so it waits for plugin accept --pending.
+      GOSIDIAN_PLUGIN_DOCLING_URL: http://docling:8000/mcp
+      GOSIDIAN_PLUGIN_DOCLING_TOKEN: ${DOCLING_TOKEN:?run ./init.sh first}
+      GOSIDIAN_PLUGIN_DOCLING_ACCEPT: ffb9eb2a84b7
+      GOSIDIAN_PLUGIN_IMAGES_URL: http://images:8000/mcp
+      GOSIDIAN_PLUGIN_IMAGES_TOKEN: ${IMAGES_TOKEN:?run ./init.sh first}
+      GOSIDIAN_PLUGIN_IMAGES_ACCEPT: e1a034f2a848
+      GOSIDIAN_PLUGIN_CHAT_URL: http://chat:8000/mcp
+      GOSIDIAN_PLUGIN_CHAT_TOKEN: ${CHAT_TOKEN:?run ./init.sh first}
+      GOSIDIAN_PLUGIN_CHAT_ACCEPT: 0730908a36ef
+      GOSIDIAN_PLUGIN_DATABASE_URL: http://database:8000/mcp
+      GOSIDIAN_PLUGIN_DATABASE_TOKEN: ${DATABASE_TOKEN:?run ./init.sh first}
+
+  # Documents to markdown, with their pictures.
+  docling:
+    image: ghcr.io/daniele-chiappa/gosidian-docling:0.5.3
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=1g
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${DOCLING_MEMORY:-6g}
+    environment:
+      GOSIDIAN_PLUGIN_TOKEN: ${DOCLING_TOKEN:?run ./init.sh first}
+      HOME: /tmp
+
+  # Images without loss: PNG optimized or WebP, TIFF to PNG.
+  images:
+    image: ghcr.io/daniele-chiappa/gosidian-images:0.2.0
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=2g
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${IMAGES_MEMORY:-4g}
+    environment:
+      GOSIDIAN_PLUGIN_TOKEN: ${IMAGES_TOKEN:?run ./init.sh first}
+
+  # The bots: a widget for any page and a page of its own. The widget is
+  # served to the browsers of who chats, so CHAT_PUBLIC_URL is the address
+  # they reach it at.
+  chat:
+    image: ghcr.io/daniele-chiappa/gosidian-chat:0.5.0
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "${CHAT_BIND:-127.0.0.1}:${CHAT_PORT:-8095}:8000"
+    environment:
+      GOSIDIAN_PLUGIN_TOKEN: ${CHAT_TOKEN:?run ./init.sh first}
+      CHAT_PUBLIC_URL: ${CHAT_PUBLIC_URL:-http://localhost:8095}
+
+  # The chunks and their embeddings, in Qdrant; the endpoint and the model
+  # of the embeddings come from .env through database.yaml.
+  database:
+    image: ghcr.io/daniele-chiappa/gosidian-database:0.6.0
+    restart: unless-stopped
+    depends_on:
+      - qdrant
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - ./database.yaml:/etc/gosidian-database/preset.yaml:ro
+    environment:
+      DB_NAME: database
+      GOSIDIAN_PLUGIN_TOKEN: ${DATABASE_TOKEN:?run ./init.sh first}
+      DB_PASSWORD: ${QDRANT_API_KEY:?run ./init.sh first}
+      EMBED_URL: ${EMBED_URL:?set EMBED_URL in .env}
+      EMBED_MODEL: ${EMBED_MODEL:?set EMBED_MODEL in .env}
+      EMBED_DIMS: ${EMBED_DIMS:?set EMBED_DIMS in .env}
+      EMBED_DIMENSIONS: ${EMBED_DIMENSIONS:-0}
+      EMBED_QUERY_PREFIX: ${EMBED_QUERY_PREFIX:-}
+      EMBED_DOCUMENT_TEMPLATE: ${EMBED_DOCUMENT_TEMPLATE:-}
+      EMBED_API_KEY: ${EMBED_API_KEY:-}
+
+  qdrant:
+    image: qdrant/qdrant:v1.19.1-unprivileged
+    restart: unless-stopped
+    volumes:
+      - qdrant:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?run ./init.sh first}
+      QDRANT__TELEMETRY_DISABLED: "true"
+
+volumes:
+  qdrant: {}

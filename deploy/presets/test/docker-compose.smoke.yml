@@ -1,0 +1,22 @@
+# The smoke test of the presets (test/smoke.py): base + rag with a fake
+# OpenAI-compatible endpoint in place of the models, and the images the
+# test names in place of the released ones (a gosidian built from the
+# checkout, say). Not for a real install.
+
+services:
+  gosidian:
+    image: ${SMOKE_GOSIDIAN_IMAGE:-ghcr.io/daniele-chiappa/gosidian:v2.118.0}
+    depends_on:
+      fake:
+        condition: service_started
+
+  database:
+    image: ${SMOKE_DATABASE_IMAGE:-ghcr.io/daniele-chiappa/gosidian-database:0.6.0}
+
+  fake:
+    image: python:3.13-alpine
+    command: ["python3", "/fake-openai.py"]
+    environment:
+      FAKE_DIMS: "256"
+    volumes:
+      - ./test/fake-openai.py:/fake-openai.py:ro

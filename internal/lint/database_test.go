@@ -46,6 +46,21 @@ func TestLint_DatabaseFieldInvalid(t *testing.T) {
 	}
 }
 
+// A schema field named as something gosidian computes is reported on the
+// database note (BUG-140); its rows are not, since they follow the schema.
+func TestLint_DatabaseReservedField(t *testing.T) {
+	_, v, idx := newTestLinter(t)
+	seed(t, v, idx, "p/docs/stacks.md", "---\ntitle: Stacks\ntags: [p, type:index]\ntype: database\nsource: p/docs/stacks\nfields:\n  path: {type: text}\n---\n\n# Stacks\n")
+	seed(t, v, idx, "p/docs/stacks/app.md", "---\ntitle: app\npath: /opt/app\ntags: [p, type:doc]\n---\n\n# app\n")
+	issues, err := New(v, idx).Run(context.Background(), "p", []string{"database-field-invalid"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 1 || issues[0].File != "p/docs/stacks.md" || !strings.Contains(issues[0].Message, `field "path" is a name gosidian already gives a meaning`) {
+		t.Fatalf("issues: %+v", issues)
+	}
+}
+
 // IMP-127: an Active plans section made of a view on the plans folder
 // references the in-progress plans it lists.
 func TestLint_StatusIncoherent_PlansListedByAView(t *testing.T) {
@@ -108,5 +123,37 @@ func TestLint_DatabaseRows(t *testing.T) {
 	}
 	if len(issues) != 1 || issues[0].File != "p/plans/b.md" || !strings.Contains(issues[0].Message, `required field "status"`) {
 		t.Errorf("issues = %+v", issues)
+	}
+}
+
+// A namespaced tag that disagrees with its field is reported (IMP-210):
+// status on any note, and the select fields of a database's schema on its
+// rows. A tag with no field stands for it; type is left alone.
+func TestLint_FieldTagMismatch(t *testing.T) {
+	_, v, idx := newTestLinter(t)
+	seed(t, v, idx, "p/plans/a.md", "---\ntitle: A\ntype: plan\nstatus: done\ntags: [p, type:plan, status:in-progress]\n---\n")
+	seed(t, v, idx, "p/plans/b.md", "---\ntitle: B\ntype: plan\nstatus: in-progress\ntags: [p, type:plan, status:In-Progress]\n---\n")
+	seed(t, v, idx, "p/plans/c.md", "---\ntitle: C\ntype: plan\ntags: [p, type:plan, status:draft]\n---\n")
+	seed(t, v, idx, "p/docs/tasks.md", "---\ntitle: Tasks\ntags: [p, type:index]\ntype: database\nsource: p/docs/tasks\nfields:\n"+
+		"  priority: {type: select, options: [low, high]}\n  labels: {type: multi-select, options: [ui, mcp]}\n  owner: {type: text}\n---\n")
+	seed(t, v, idx, "p/docs/tasks/t1.md", "---\ntitle: t1\npriority: high\nlabels: [ui, mcp]\nowner: ann\ntags: [p, type:doc, priority:low, labels:ui, owner:bob]\n---\n")
+	// Outside the database, priority is no checked namespace.
+	seed(t, v, idx, "p/docs/other.md", "---\ntitle: other\npriority: high\ntags: [p, type:doc, priority:low]\n---\n")
+	issues, err := New(v, idx).Run(context.Background(), "p", []string{"field-tag-mismatch"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string][]string{}
+	for _, is := range issues {
+		got[is.File] = append(got[is.File], is.Message)
+	}
+	if len(issues) != 2 || len(got["p/plans/a.md"]) != 1 || len(got["p/docs/tasks/t1.md"]) != 1 {
+		t.Fatalf("issues: %+v", issues)
+	}
+	if !strings.Contains(got["p/plans/a.md"][0], `tag "status:in-progress" disagrees with the field status: done`) {
+		t.Errorf("plan: %q", got["p/plans/a.md"][0])
+	}
+	if !strings.Contains(got["p/docs/tasks/t1.md"][0], `"priority:low"`) {
+		t.Errorf("row: %q", got["p/docs/tasks/t1.md"][0])
 	}
 }

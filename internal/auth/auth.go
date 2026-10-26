@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -63,6 +64,13 @@ type Token struct {
 	// ClientID is the OAuth client the grant was issued to (DCR id or CIMD
 	// URL); empty for static bearers.
 	ClientID string `json:"client_id,omitempty"`
+	// RunID is the pipeline run a KindRun token was minted for (IMP-195).
+	RunID string `json:"run_id,omitempty"`
+	// WritePaths, when set, are the only folders the token writes in:
+	// vault-relative, inside its project, each ending with "/". Reading is
+	// unchanged. A run of a team's task gets its role's folders (IMP-195).
+	// See AllowsWrite.
+	WritePaths []string `json:"write_paths,omitempty"`
 	// writeFilter, when set, narrows the write scope per project on top of
 	// Scopes: the runtime derives it for a token whose owning account may
 	// write some of the token's projects but only read others (per-project
@@ -182,14 +190,34 @@ func ProjectOf(path string) string {
 }
 
 // AllowsWrite reports whether the token may mutate the given vault-relative
-// path: it needs the write scope, the path inside its project scope, and —
-// when the runtime narrowed the token to its owner's live access — a
-// write-level membership on that project.
+// path: it needs the write scope, the path inside its project scope and
+// under one of its WritePaths when it has some (IMP-195), and — when the
+// runtime narrowed the token to its owner's live access — a write-level
+// membership on that project.
 func (t *Token) AllowsWrite(path string) bool {
-	if !t.HasScope(ScopeWrite) || !t.AllowsPath(path) {
+	if !t.HasScope(ScopeWrite) || !t.AllowsPath(path) || !t.InWritePaths(path) {
 		return false
 	}
 	return t.writeFilter == nil || t.writeFilter(ProjectOf(path))
+}
+
+// InWritePaths reports whether p lies strictly under one of the token's
+// WritePaths, cleaned first so "a/../b" cannot climb out of them; true for
+// a token without any (IMP-195).
+func (t *Token) InWritePaths(p string) bool {
+	if len(t.WritePaths) == 0 {
+		return true
+	}
+	p = path.Clean(p)
+	if p == ".." || strings.HasPrefix(p, "../") || strings.HasPrefix(p, "/") {
+		return false
+	}
+	for _, dir := range t.WritePaths {
+		if strings.HasPrefix(p, dir) {
+			return true
+		}
+	}
+	return false
 }
 
 // WithWriteFilter returns a copy of the token whose writes are additionally
@@ -427,13 +455,18 @@ func (s *Store) CreateGrant(name string, projects []string, scopes []string, ttl
 }
 
 // CreateRun mints the token of one call of a plugin's node (KindRun): the
-// project, read or read and write, the core profile, expiring after ttl.
-// The run tokens a crash left behind, expired, go in the same save. An
-// empty store refuses: its first token would turn MCP's tokens on for
-// every client of a server that runs without them.
-func (s *Store) CreateRun(name, project string, write bool, ttl time.Duration) (plaintext string, tok Token, err error) {
+// project, read or read and write, the core profile, expiring after ttl,
+// tagged with runID. writePaths, only with write, narrow its writes to
+// those folders of the project; none: the whole project (IMP-195). The run
+// tokens a crash left behind, expired, go in the same save. An empty store
+// refuses: its first token would turn MCP's tokens on for every client of
+// a server that runs without them.
+func (s *Store) CreateRun(name, project string, write bool, ttl time.Duration, runID string, writePaths []string) (plaintext string, tok Token, err error) {
 	if ttl <= 0 {
 		return "", Token{}, errors.New("a run token needs an expiry")
+	}
+	if len(writePaths) > 0 && !write {
+		return "", Token{}, errors.New("a read run token has no write paths")
 	}
 	scopes := []string{ScopeRead}
 	if write {
@@ -448,6 +481,10 @@ func (s *Store) CreateRun(name, project string, write bool, ttl time.Duration) (
 	}
 	if len(cleanProjects) != 1 {
 		return "", Token{}, errors.New("a run token needs its project")
+	}
+	cleanPaths, err := cleanWritePaths(cleanProjects[0], writePaths)
+	if err != nil {
+		return "", Token{}, err
 	}
 	if s.Empty() {
 		return "", Token{}, errors.New("the server has no MCP tokens: a run token would turn them on for every client")
@@ -470,6 +507,8 @@ func (s *Store) CreateRun(name, project string, write bool, ttl time.Duration) (
 	tok, err = s.mint(plaintext, name, cleanProjects, scopes, ttl, "", func(t *Token) {
 		t.Kind = KindRun
 		t.ToolProfile = ToolProfileCore
+		t.RunID = runID
+		t.WritePaths = cleanPaths
 	})
 	if err != nil {
 		return "", Token{}, err
@@ -502,6 +541,32 @@ func cleanProjectList(projects []string) ([]string, error) {
 		}
 	}
 	return cleanProjects, nil
+}
+
+// cleanWritePaths normalizes the folders a run token writes in (IMP-195):
+// each ends with "/" and lies inside project; an empty, "." or ".."
+// segment (a leading "/" included) or a backslash is refused. Duplicates
+// go, order stays.
+func cleanWritePaths(project string, paths []string) ([]string, error) {
+	var out []string
+	for _, p := range paths {
+		dir := strings.TrimSuffix(p, "/")
+		bad := strings.Contains(dir, "\\")
+		for _, seg := range strings.Split(dir, "/") {
+			bad = bad || seg == "" || seg == "." || seg == ".."
+		}
+		if bad {
+			return nil, fmt.Errorf("invalid write path %q", p)
+		}
+		dir += "/"
+		if !strings.HasPrefix(dir, project+"/") {
+			return nil, fmt.Errorf("write path %q is outside project %q", p, project)
+		}
+		if !slices.Contains(out, dir) {
+			out = append(out, dir)
+		}
+	}
+	return out, nil
 }
 
 // mint builds the record for plaintext, appends it and saves. cleanProjects
@@ -666,6 +731,19 @@ func (s *Store) RenameProject(from, to string) (int, error) {
 				renamed[j] = p
 			}
 			t.Projects = normalizeProjects(renamed)
+			changed = true
+		}
+		// Its write folders follow (IMP-195), in a new slice: the copies
+		// handed out share the old one.
+		if slices.ContainsFunc(t.WritePaths, func(p string) bool { return strings.HasPrefix(p, from+"/") }) {
+			renamed := make([]string, len(t.WritePaths))
+			for j, p := range t.WritePaths {
+				if rest, ok := strings.CutPrefix(p, from+"/"); ok {
+					p = to + "/" + rest
+				}
+				renamed[j] = p
+			}
+			t.WritePaths = renamed
 			changed = true
 		}
 		if changed {

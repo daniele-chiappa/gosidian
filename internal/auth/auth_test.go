@@ -126,6 +126,40 @@ func TestToken_AllowsPath(t *testing.T) {
 	}
 }
 
+// A token with WritePaths writes only strictly under them, and reads its
+// whole project as before (IMP-195).
+func TestToken_AllowsWriteWritePaths(t *testing.T) {
+	rw := []string{ScopeRead, ScopeWrite}
+	scoped := &Token{Project: "p", Scopes: rw, WritePaths: []string{"p/kb/", "p/out/"}}
+	whole := &Token{Project: "p", Scopes: rw}
+	read := &Token{Project: "p", Scopes: []string{ScopeRead}, WritePaths: []string{"p/kb/"}}
+	cases := []struct {
+		tok  *Token
+		path string
+		want bool
+	}{
+		{scoped, "p/kb/a.md", true},
+		{scoped, "p/kb/sub/b.md", true},
+		{scoped, "p/out/c.md", true},
+		{scoped, "p/kb", false},
+		{scoped, "p/kbx/a.md", false},
+		{scoped, "p/notes.md", false},
+		{scoped, "p", false},
+		{scoped, "p/kb/../notes.md", false},
+		{scoped, "q/kb/a.md", false},
+		{whole, "p/notes.md", true},
+		{read, "p/kb/a.md", false},
+	}
+	for _, c := range cases {
+		if got := c.tok.AllowsWrite(c.path); got != c.want {
+			t.Errorf("AllowsWrite(%q) paths=%v = %v, want %v", c.path, c.tok.WritePaths, got, c.want)
+		}
+	}
+	if !scoped.AllowsPath("p/notes.md") {
+		t.Error("write paths narrowed reading")
+	}
+}
+
 // TestStore_HotReload exercises IMP-006 / BUG-004: a token created by a
 // second actor after Open() becomes effective without restart, thanks to the
 // lazy mtime-check in Validate / Empty.
@@ -346,19 +380,19 @@ func TestStore_RotateRefresh(t *testing.T) {
 func TestStore_CreateRun(t *testing.T) {
 	s := newStore(t)
 	// An empty store runs without tokens: a run token would turn them on.
-	if _, _, err := s.CreateRun("run-1-a", "p", true, time.Minute); err == nil {
+	if _, _, err := s.CreateRun("run-1-a", "p", true, time.Minute, "", nil); err == nil {
 		t.Fatal("a run token on an empty store")
 	}
 	if _, _, err := s.Create("admin", nil, []string{ScopeRead, ScopeWrite}, 0, ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.CreateRun("run-1-a", "p", true, 0); err == nil {
+	if _, _, err := s.CreateRun("run-1-a", "p", true, 0, "", nil); err == nil {
 		t.Error("a run token without an expiry")
 	}
-	if _, _, err := s.CreateRun("run-1-a", "", true, time.Minute); err == nil {
+	if _, _, err := s.CreateRun("run-1-a", "", true, time.Minute, "", nil); err == nil {
 		t.Error("a run token without a project")
 	}
-	plain, tok, err := s.CreateRun("run-1-a", "p", false, time.Minute)
+	plain, tok, err := s.CreateRun("run-1-a", "p", false, time.Minute, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -370,7 +404,7 @@ func TestStore_CreateRun(t *testing.T) {
 		fmt.Sprint(got.ProjectList()) != "[p]" || got.ExpiresAt.IsZero() || got.OwnerUserID != "" {
 		t.Errorf("run token = %+v", got)
 	}
-	_, w, err := s.CreateRun("run-1-b", "p", true, time.Minute)
+	_, w, err := s.CreateRun("run-1-b", "p", true, time.Minute, "", nil)
 	if err != nil || !w.HasScope(ScopeWrite) {
 		t.Fatalf("write run token = %+v, %v", w, err)
 	}
@@ -388,7 +422,7 @@ func TestStore_CreateRun(t *testing.T) {
 	_, user, _ := s.Create("user", []string{"p"}, []string{ScopeRead}, time.Hour, "")
 	expired(tok.ID)
 	expired(user.ID)
-	if _, _, err := s.CreateRun("run-2-a", "p", false, time.Minute); err != nil {
+	if _, _, err := s.CreateRun("run-2-a", "p", false, time.Minute, "", nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := s.ByID(tok.ID); ok {
@@ -399,5 +433,46 @@ func TestStore_CreateRun(t *testing.T) {
 	}
 	if _, ok := s.ByID(w.ID); !ok {
 		t.Error("a live run token went")
+	}
+}
+
+// A run of a team's task gets a token that writes only in its role's
+// folders, kept with its run on disk (IMP-195).
+func TestStore_CreateRunWritePaths(t *testing.T) {
+	s := newStore(t)
+	if _, _, err := s.Create("admin", nil, []string{ScopeRead, ScopeWrite}, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range [][]string{{"/p/kb"}, {"p/../q"}, {"p//kb"}, {"p/./kb"}, {"p\\kb"}, {""}, {"q/kb"}, {"pp/kb"}} {
+		if _, _, err := s.CreateRun("run-1-a", "p", true, time.Minute, "r1", bad); err == nil {
+			t.Errorf("write paths %q accepted", bad)
+		}
+	}
+	if _, _, err := s.CreateRun("run-1-a", "p", false, time.Minute, "r1", []string{"p/kb"}); err == nil {
+		t.Error("a read run token with write paths")
+	}
+	plain, tok, err := s.CreateRun("run-1-a", "p", true, time.Minute, "r1", []string{"p/kb", "p/kb/", "p/out/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tok.RunID != "r1" || fmt.Sprint(tok.WritePaths) != "[p/kb/ p/out/]" {
+		t.Errorf("run token = %+v", tok)
+	}
+	// Reloaded from disk, the token keeps its run and its folders.
+	s2, err := Open(s.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s2.Validate(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.RunID != "r1" || fmt.Sprint(got.WritePaths) != "[p/kb/ p/out/]" || !got.AllowsWrite("p/kb/a.md") || got.AllowsWrite("p/a.md") {
+		t.Errorf("reloaded run token = %+v", got)
+	}
+	// No folders: the whole project, as before.
+	_, whole, err := s.CreateRun("run-1-b", "p", true, time.Minute, "r1", nil)
+	if err != nil || whole.WritePaths != nil || !whole.AllowsWrite("p/a.md") {
+		t.Errorf("unscoped run token = %+v, %v", whole, err)
 	}
 }

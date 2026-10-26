@@ -357,6 +357,10 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 		// must see html_notes:false, not silence, to know .html is off here.
 		"capabilities": s.projectCapabilities(project, readOnly),
 	}
+	if tok != nil && len(tok.WritePaths) > 0 {
+		// The only folders it writes (a run of a team's task, IMP-195).
+		payload["write_paths"] = tok.WritePaths
+	}
 	if readOnly {
 		payload["directives_scope"] = "read"
 	}

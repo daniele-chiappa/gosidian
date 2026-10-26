@@ -45,6 +45,24 @@ func TestParse(t *testing.T) {
 	}
 }
 
+// A field named as something gosidian computes parses, and is listed
+// (BUG-140): the lint and the write notices warn about it.
+func TestSchema_ReservedFields(t *testing.T) {
+	s, err := Parse("p/docs/stacks.md", "type: database\nsource: p/docs/stacks\nfields:\n  title: {type: text}\n  path: {type: text}\n  host: {type: text}\n  created_by: {type: text}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(s.ReservedFields(), ","); got != "path,created_by" {
+		t.Errorf("reserved = %s", got)
+	}
+	if m, ok := Reserved("name"); !ok || !strings.Contains(m, "file name") {
+		t.Errorf("name: %q %v", m, ok)
+	}
+	if _, ok := Reserved("folder"); ok {
+		t.Error("folder is no reserved name")
+	}
+}
+
 func TestParse_Errors(t *testing.T) {
 	cases := map[string]string{
 		"not a database":       "title: x\ntype: doc",

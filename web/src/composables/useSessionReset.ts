@@ -1,6 +1,7 @@
 /**
  * Per-account client state must not survive a change of account in the same
- * browser tab: the tree, the effective-access map, the recently-viewed notes,
+ * browser tab: the tree, the effective-access map, the uploads into IN on
+ * their way, the recently-viewed notes,
  * the persisted window layout and the cut view's rules (which name projects
  * and collections) all belong to whoever was signed in, and
  * showing them — even for the few hundred milliseconds it takes the new
@@ -14,6 +15,7 @@
 import { useWindowsStore } from 'plancia'
 import { useTreeStore } from '@/stores/tree'
 import { useAccessStore } from '@/stores/access'
+import { useUploadsStore } from '@/stores/uploads'
 import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
 import { cancelAll } from '@/composables/useConfirm'
 
@@ -26,6 +28,7 @@ export const CUT_STORAGE_PREFIX = 'gosidian.cut.'
 export function resetSessionState(): void {
   useTreeStore().invalidateAll()
   useAccessStore().reset()
+  useUploadsStore().reset()
   useRecentlyViewed().clear()
   useWindowsStore().reset()
   cancelAll()

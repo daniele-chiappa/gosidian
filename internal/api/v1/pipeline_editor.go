@@ -13,7 +13,8 @@ import (
 // the base ones; with them on, the accepted plugins' are there too.
 //
 //	GET  /api/v1/pipeline-nodes  the node types, with the JSON Schemas of
-//	                             their settings and output
+//	                             their settings and output, and the
+//	                             triggers a pipeline may declare
 //	POST /api/v1/pipeline-check  {source}: whether the server would run
 //	                             the block, and why not
 
@@ -46,7 +47,7 @@ func (r *Router) handlePipelineNodes(w http.ResponseWriter, req *http.Request) {
 				Files: n.Files, Input: n.Input, Output: n.Output})
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"pipelines_enabled": r.deps.Pipelines != nil, "nodes": out})
+	writeJSON(w, http.StatusOK, map[string]any{"pipelines_enabled": r.deps.Pipelines != nil, "nodes": out, "triggers": pipeline.Triggers})
 }
 
 type pipelineCheckRequest struct {

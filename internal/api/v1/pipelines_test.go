@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -48,6 +51,13 @@ type pipelineFixture struct {
 // running pipelines.
 func newPipelineFixture(t *testing.T) *pipelineFixture {
 	t.Helper()
+	return newPipelineFixtureWith(t, pipeline.Config{})
+}
+
+// newPipelineFixtureWith is newPipelineFixture with cfg (its location
+// and public address set).
+func newPipelineFixtureWith(t *testing.T, cfg pipeline.Config) *pipelineFixture {
+	t.Helper()
 	f := newAdminFixture(t)
 	if err := f.projects.Set("Alpha", projects.Flags{UsePipelines: true}); err != nil {
 		t.Fatal(err)
@@ -71,7 +81,8 @@ func newPipelineFixture(t *testing.T) *pipelineFixture {
 		t.Fatal(err)
 	}
 	runner := jobs.NewRunner(store, jobs.Options{Workers: 2, Poll: 10 * time.Millisecond, Lease: time.Minute})
-	e := pipeline.New(s.PipelineHost(), runner, pipeline.Config{Location: time.UTC, PublicURL: "https://vault.example"}, nil, nil)
+	cfg.Location, cfg.PublicURL = time.UTC, "https://vault.example"
+	e := pipeline.New(s.PipelineHost(), runner, cfg, nil, nil)
 	s.SetPipelines(e)
 	ctx, cancel := context.WithCancel(context.Background())
 	stopped := make(chan struct{})
@@ -314,7 +325,8 @@ func TestPluginsREST(t *testing.T) {
 }
 
 // The pipeline editor's routes answer with the pipelines off too: the base
-// node types with their schemas, and the checks of a block (IMP-169, F4).
+// node types with their schemas, the triggers (IMP-207), and the checks of
+// a block (IMP-169, F4).
 func TestPipelineEditorRoutes_PipelinesOff(t *testing.T) {
 	f := newAdminFixture(t)
 	w := f.doAuthRecorder(http.MethodGet, "/api/v1/pipeline-nodes", "", nil)
@@ -329,6 +341,7 @@ func TestPipelineEditorRoutes_PipelinesOff(t *testing.T) {
 			Input  json.RawMessage `json:"input_schema"`
 			Output json.RawMessage `json:"output_schema"`
 		} `json:"nodes"`
+		Triggers []string `json:"triggers"`
 	}
 	if err := json.Unmarshal([]byte(w.body), &got); err != nil {
 		t.Fatal(err)
@@ -348,6 +361,9 @@ func TestPipelineEditorRoutes_PipelinesOff(t *testing.T) {
 	}
 	if got.Enabled || len(got.Nodes) != len(pipeline.NewRegistry().Names()) {
 		t.Errorf("enabled=%v, %d nodes", got.Enabled, len(got.Nodes))
+	}
+	if !slices.Equal(got.Triggers, pipeline.Triggers) || !slices.Contains(got.Triggers, "run") {
+		t.Errorf("triggers %v, want %v", got.Triggers, pipeline.Triggers)
 	}
 
 	check := func(src string) map[string]any {
@@ -441,6 +457,76 @@ func TestPipelinesREST_StartAndWait(t *testing.T) {
 	}
 	if w := f.doAuthRecorder(http.MethodPost, "/api/v1/pipelines/Alpha/pipelines/parent.md/runs", `{"wait":1}`, nil); w.code != http.StatusAccepted || runOf(t, w.body).Status != jobs.Waiting {
 		t.Errorf("a run that waits for its child: %d %s", w.code, w.body)
+	}
+}
+
+const restStreamPipeline = "---\ntitle: Bot\ntype: pipeline\n---\n\n```pipeline\n" + `trigger: {on: chat}
+answer: reply
+nodes:
+  - {id: llm, use: llm.chat, with: {prompt: "{{ trigger.message }}", stream: true}}
+  - {id: reply, use: starlark, with: {input: "{{ llm.text }}", code: "output = {'text': 'risposta: ' + input}"}}
+` + "```\n"
+
+// TestPipelinesREST_StartStream: a start that asks for text/event-stream
+// gets the run, the text of its streaming node as it comes, then the
+// answer; an error before the start is still an error.
+func TestPipelinesREST_StartStream(t *testing.T) {
+	llm := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, d := range []string{
+			`{"model":"m","choices":[{"index":0,"delta":{"content":"Buon"}}]}`,
+			`{"model":"m","choices":[{"index":0,"delta":{"content":"giorno"},"finish_reason":"stop"}]}`,
+			"[DONE]",
+		} {
+			_, _ = io.WriteString(w, "data: "+d+"\n\n")
+			w.(http.Flusher).Flush()
+		}
+	}))
+	defer llm.Close()
+	f := newPipelineFixtureWith(t, pipeline.Config{Providers: []pipeline.Provider{{Name: "o", BaseURL: llm.URL + "/v1", Model: "m"}}})
+	if w := f.doAuthRecorder(http.MethodPost, "/api/v1/notes", mustJSON(t, map[string]string{"path": "Alpha/pipelines/bot.md", "content": restStreamPipeline}), nil); w.code != http.StatusCreated {
+		t.Fatalf("seed: %d %s", w.code, w.body)
+	}
+	_, secret, err := f.engine.Runner().Store().CreateToken("Alpha/pipelines/bot.md", "widget", "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	headers := map[string]string{"Authorization": "Bearer " + secret, "Accept": "text/event-stream"}
+	w := f.request(http.MethodPost, "/api/v1/pipelines/Alpha/pipelines/bot.md/runs", `{"input":{"message":"ciao"},"wait":5}`, headers)
+	if w.Code != http.StatusOK || !strings.HasPrefix(w.Header().Get("Content-Type"), "text/event-stream") {
+		t.Fatalf("start: %d %s %s", w.Code, w.Header().Get("Content-Type"), w.Body)
+	}
+	var names, text []string
+	var answer struct {
+		Run    pipeline.RunBrief `json:"run"`
+		Answer map[string]any    `json:"answer"`
+		Status int               `json:"status"`
+	}
+	for _, block := range strings.Split(strings.TrimSpace(w.Body.String()), "\n\n") {
+		name, data, _ := strings.Cut(block, "\ndata: ")
+		name = strings.TrimPrefix(name, "event: ")
+		names = append(names, name)
+		switch name {
+		case "delta":
+			var ev pipeline.StreamEvent
+			if err := json.Unmarshal([]byte(data), &ev); err != nil || ev.Node != "llm" || ev.Pipeline != "Alpha/pipelines/bot.md" {
+				t.Fatalf("delta %s: %v", data, err)
+			}
+			text = append(text, ev.Text)
+		case "answer":
+			if err := json.Unmarshal([]byte(data), &answer); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if names[0] != "run" || names[len(names)-1] != "answer" || strings.Join(text, "") != "Buongiorno" {
+		t.Fatalf("events %v, text %q:\n%s", names, text, w.Body)
+	}
+	if answer.Run.Status != jobs.Done || answer.Answer["text"] != "risposta: Buongiorno" || answer.Status != http.StatusOK {
+		t.Fatalf("answer: %+v", answer)
+	}
+	if w := f.request(http.MethodPost, "/api/v1/pipelines/Alpha/pipelines/bot.md/runs", `{"input":{"text":"no message"}}`, headers); w.Code != http.StatusBadRequest || !strings.Contains(w.Header().Get("Content-Type"), "json") {
+		t.Errorf("a wrong input: %d %s", w.Code, w.Header().Get("Content-Type"))
 	}
 }
 
@@ -546,5 +632,60 @@ func TestChatREST(t *testing.T) {
 	tokens, _ := f.engine.Runner().Store().Tokens("Alpha/pipelines/bot.md")
 	if len(tokens) != 1 || tokens[0].Name != "chat:chat/bot" {
 		t.Errorf("tokens: %+v", tokens)
+	}
+}
+
+// TestPipelinesREST_Queue: the queue of the steps, for a session; the
+// fixture's runner has its two workers and no step queued.
+func TestPipelinesREST_Queue(t *testing.T) {
+	f := newPipelineFixture(t)
+	w := f.doAuthRecorder(http.MethodGet, "/api/v1/runs/queue", "", nil)
+	if w.code != http.StatusOK {
+		t.Fatalf("queue: %d %s", w.code, w.body)
+	}
+	var out struct {
+		Queue pipeline.QueueView `json:"queue"`
+	}
+	if err := json.Unmarshal([]byte(w.body), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Queue.Workers != 2 || out.Queue.Queued != 0 || out.Queue.Resources == nil {
+		t.Errorf("queue %+v", out.Queue)
+	}
+	if w := f.doAuthRecorder(http.MethodPost, "/api/v1/runs/queue", "", nil); w.code == http.StatusOK {
+		t.Errorf("a POST to the queue: %d", w.code)
+	}
+	if w := f.request(http.MethodGet, "/api/v1/runs/queue", "", nil); w.Code != http.StatusUnauthorized {
+		t.Errorf("without a session: %d", w.Code)
+	}
+}
+
+// TestPipelinesREST_Categories: a start beyond its category's runs not
+// ended answers 429 with Retry-After; one that says no wait waits its
+// category's (IMP-196).
+func TestPipelinesREST_Categories(t *testing.T) {
+	f := newPipelineFixtureWith(t, pipeline.Config{Categories: []pipeline.Category{{Name: "lenta", MaxRuns: 1}, {Name: "svelta", Wait: 5 * time.Second}}})
+	slow := "---\ntitle: Slow\ntype: pipeline\n---\n\n```pipeline\ncategory: lenta\nnodes:\n  - {id: ask, use: wait.call}\n```\n"
+	quick := "---\ntitle: Quick\ntype: pipeline\n---\n\n```pipeline\ncategory: svelta\nanswer: a\nnodes:\n  - {id: a, use: starlark, with: {code: \"output = {'text': 'ok'}\"}}\n```\n"
+	for path, content := range map[string]string{"Alpha/pipelines/slow.md": slow, "Alpha/pipelines/quick.md": quick} {
+		if w := f.doAuthRecorder(http.MethodPost, "/api/v1/notes", mustJSON(t, map[string]string{"path": path, "content": content}), nil); w.code != http.StatusCreated {
+			t.Fatalf("seed %s: %d %s", path, w.code, w.body)
+		}
+	}
+	if w := f.doAuthRecorder(http.MethodPost, "/api/v1/pipelines/Alpha/pipelines/slow.md/runs", `{}`, nil); w.code != http.StatusAccepted {
+		t.Fatalf("the first slow start: %d %s", w.code, w.body)
+	}
+	w := f.doAuthRecorder(http.MethodPost, "/api/v1/pipelines/Alpha/pipelines/slow.md/runs", `{}`, nil)
+	if w.code != http.StatusTooManyRequests || w.headers.Get("Retry-After") != "30" || !strings.Contains(w.body, "max_runs") {
+		t.Fatalf("the second slow start: %d %s %s", w.code, w.headers.Get("Retry-After"), w.body)
+	}
+	if w := f.doAuthRecorder(http.MethodPost, "/api/v1/pipelines/Alpha/pipelines/quick.md/runs", `{}`, nil); w.code != http.StatusOK || !strings.Contains(w.body, `"text":"ok"`) {
+		t.Fatalf("a start that waits its category's: %d %s", w.code, w.body)
+	}
+	if w := f.doAuthRecorder(http.MethodPost, "/api/v1/pipelines/Alpha/pipelines/quick.md/runs", `{"wait":0}`, nil); w.code != http.StatusAccepted {
+		t.Fatalf("a start that says wait 0: %d %s", w.code, w.body)
+	}
+	if w := f.doAuthRecorder(http.MethodPost, "/api/v1/pipelines/Alpha/pipelines/quick.md/runs", `{"wait":-2}`, nil); w.code != http.StatusBadRequest {
+		t.Fatalf("a negative wait: %d", w.code)
 	}
 }

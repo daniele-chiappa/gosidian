@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 // The stores are not what this test is about: each resets as its own tests say.
 vi.mock('@/stores/tree', () => ({ useTreeStore: () => ({ invalidateAll: vi.fn() }) }))
 vi.mock('@/stores/access', () => ({ useAccessStore: () => ({ reset: vi.fn() }) }))
+vi.mock('@/stores/uploads', () => ({ useUploadsStore: () => ({ reset: vi.fn() }) }))
 vi.mock('@/composables/useRecentlyViewed', () => ({ useRecentlyViewed: () => ({ clear: vi.fn() }) }))
 vi.mock('@/composables/useConfirm', () => ({ cancelAll: vi.fn() }))
 vi.mock('plancia', async (orig) => ({

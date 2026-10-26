@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gosidian/gosidian/internal/auth"
@@ -103,6 +104,41 @@ func TestSourcePath_InsideTheVault(t *testing.T) {
 	out := packageOut(t, s, ctx, map[string]any{"project": "A", "as": "package", "source_path": filepath.Join(root, "A", "sub"), "dest": "A/copy"})
 	if _, err := s.vault.Load("A/copy/own.md"); err != nil {
 		t.Errorf("own project as a source: %v (%v)", err, out)
+	}
+}
+
+// A source in a hidden folder of the vault that is no staging root is
+// refused saying how to declare it (BUG-137); the trash and another
+// project keep the plain refusal.
+func TestSourcePath_HiddenFolderSaysHowToStage(t *testing.T) {
+	s, ctx := newScopedServer(t, "", []string{auth.ScopeRead, auth.ScopeWrite})
+	root := s.vault.Root
+	for _, rel := range []string{".staging/n.md", ".gosidian/trash/1__x.md"} {
+		abs := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(abs, []byte("# x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ingest := func(src string) string {
+		t.Helper()
+		res, _ := s.handleIngest(ctx, call(map[string]any{"project": "proj", "source_path": src, "note_path": "proj/x.md"}))
+		if !res.IsError {
+			t.Fatalf("%s: want an error, got %s", src, resultText(t, res))
+		}
+		return expectError(t, res)
+	}
+	if msg := ingest(filepath.Join(root, ".staging", "n.md")); !strings.Contains(msg, "GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS") || !strings.Contains(msg, "hidden folder") {
+		t.Errorf("a staging dot folder: %q", msg)
+	}
+	if msg := ingest(filepath.Join(root, ".gosidian", "trash", "1__x.md")); strings.Contains(msg, "UPLOAD_ROOTS") {
+		t.Errorf("the trash: %q", msg)
+	}
+	s.allowedUploadRoots = []string{filepath.Join(root, ".staging")}
+	if res, _ := s.handleIngest(ctx, call(map[string]any{"project": "proj", "source_path": filepath.Join(root, ".staging", "n.md"), "note_path": "proj/x.md"})); res.IsError {
+		t.Errorf("declared as an upload root: %s", expectError(t, res))
 	}
 }
 

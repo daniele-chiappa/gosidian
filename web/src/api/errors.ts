@@ -23,6 +23,7 @@ const STATUS_KEY: Record<number, string> = {
   502: 'unavailable',
   503: 'unavailable',
   504: 'unavailable',
+  507: 'storage_full',
 }
 
 // Server codes that say more than their status: a wrong password answers
@@ -36,6 +37,9 @@ const CODE_KEY: Record<string, string> = {
   // A plugin's own error (its arguments, or its store failing): "invalid
   // data" would send the reader to fix arguments that may be right.
   'plugin.refused': 'plugin_refused',
+  // The disk under the free space the server keeps (IMP-172).
+  'storage.full': 'storage_full',
+  'request.too_large': 'too_large',
 }
 
 /** Every catalogue key describeError may name, for the catalogue test. */

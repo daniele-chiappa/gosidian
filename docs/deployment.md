@@ -83,6 +83,53 @@ created"`) and kept in `<state-dir>/initial-admin-password`. Open
 then. Then create an MCP token from `/admin/tokens` and wire your client —
 [Client setup](mcp/client-setup.md) covers Claude Code, Zed, Cursor.
 
+## Presets
+
+[`deploy/presets/`](../deploy/presets/) holds compose files that start
+gosidian ready for a purpose, configured from one `.env`: a base file,
+and a file per purpose added with `-f`.
+
+| File | What it adds |
+|---|---|
+| `docker-compose.yml` | gosidian alone, from its image, with the state dir out of the vault and the container hardened |
+| `docker-compose.rag.yml` | answers from a project's documents: docling (documents to markdown), images, the database plugin on Qdrant (the paragraphs and their embeddings), chat (the bots), the pipelines and git sync on (without a remote) |
+| `docker-compose.storage.yml` | the storage plugin: Nextcloud and other WebDAV servers, S3, Google Drive and local folders as sources of the IN folders |
+
+```bash
+cd deploy/presets
+./init.sh            # .env from .env.example, with the keys and tokens filled in
+$EDITOR .env         # the models: LLM_URL, LLM_MODEL, EMBED_URL, EMBED_MODEL, EMBED_DIMS
+sudo chown -R 65532:65532 vault state secrets   # the image's user, once
+docker compose -f docker-compose.yml -f docker-compose.rag.yml up -d
+docker compose exec gosidian /gosidian plugin accept --pending
+```
+
+- **The models are yours**: no default. `.env.example` has examples by
+  hardware (CPU only, a GPU of 16 GB as in [RAG
+  benchmarks](rag-benchmarks.md), OpenRouter). The endpoints are
+  OpenAI-compatible, up to `/v1`; a model server on the host is
+  `http://host.docker.internal:<port>/v1`.
+- **The plugins are accepted** as follows: docling, images and chat serve
+  a manifest that does not depend on the install, so the preset pins its
+  SHA (`GOSIDIAN_PLUGIN_<NAME>_ACCEPT`) and the server accepts it by
+  itself. The database's manifest names the hosts of your `.env`, and
+  storage's the sources of your `storage.yaml`: `plugin accept --pending`
+  prints what each reads and calls, then accepts it ([plugins](plugins.md#registering-a-plugin)).
+- **A project for the documents**: `memory_project_scaffold` with
+  `template: rag` brings the pipelines and a bot; turn its pipelines on in its settings, which also
+  gives it its IN folder. Its README tells the flow: a file in IN becomes
+  a note, git sync commits it, the cut stores its paragraphs, a question
+  is answered from them with its sources.
+- **Versions**: the images are pinned, and a release of gosidian moves
+  them with the manifests they serve; the CI checks that the presets pin
+  the release's own image. Pull and restart after you update the files.
+- **The smoke test**, `deploy/presets/test/smoke.py`, runs the whole rag
+  chain on a fake model endpoint, in a temporary copy (your `.env` stays
+  untouched): `SMOKE_GOSIDIAN_IMAGE=<image> python3 test/smoke.py`.
+
+Everything the presets set is an ordinary setting: a `config.toml` or
+your own compose file can say the same ([configuration](configuration.md)).
+
 ## Reverse proxy + TLS
 
 gosidian itself speaks plaintext HTTP. For anything beyond localhost,

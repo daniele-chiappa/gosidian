@@ -72,13 +72,11 @@ func Expand(body []byte, keepSpec bool, render func(spec string) string) ([]byte
 // ThisFields turns a note's parsed frontmatter (parser.ParseFrontmatterFields:
 // strings and string lists) into the this.<field> values of its views, plus
 // this.path (the vault path) and this.name (the file name without extension).
+// The note's own path and name win over frontmatter fields of those names
+// (BUG-140): a row's `path: /opt/app` made `this` link to /opt/app, and a
+// row view `stack contains this` found nothing.
 func ThisFields(notePath string, fm map[string]any) map[string][]string {
-	out := map[string][]string{"path": {notePath}}
-	base := notePath[strings.LastIndexByte(notePath, '/')+1:]
-	if i := strings.LastIndexByte(base, '.'); i > 0 {
-		base = base[:i]
-	}
-	out["name"] = []string{base}
+	out := map[string][]string{}
 	for k, v := range fm {
 		switch t := v.(type) {
 		case string:
@@ -87,6 +85,12 @@ func ThisFields(notePath string, fm map[string]any) map[string][]string {
 			out[k] = t
 		}
 	}
+	base := notePath[strings.LastIndexByte(notePath, '/')+1:]
+	if i := strings.LastIndexByte(base, '.'); i > 0 {
+		base = base[:i]
+	}
+	out["path"] = []string{notePath}
+	out["name"] = []string{base}
 	return out
 }
 

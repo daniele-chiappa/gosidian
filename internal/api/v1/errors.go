@@ -73,6 +73,12 @@ const (
 	// plugin's; "invalid format" would send the reader to fix arguments
 	// that may be right (BUG-128).
 	CodePluginRefused = "plugin.refused"
+	// CodeStorageFull refuses an upload that would take the disk under the
+	// free space the server keeps ([in] reserve_bytes, IMP-172): 507, not
+	// a conflict, so that a client waits for room instead of retrying.
+	CodeStorageFull = "storage.full"
+	// CodeTooLarge refuses what is over a cap the installer set (413).
+	CodeTooLarge = "request.too_large"
 )
 
 // WriteError writes a JSON ErrorResponse with the given HTTP status.

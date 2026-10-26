@@ -33,7 +33,8 @@ const llmOutput = `
 	"json": {"description": "The answer read as JSON, with json: true"},
 	"model": {"type": "string"},
 	"provider": {"type": "string"},
-	"usage": {"type": "object", "properties": {"prompt_tokens": {"type": "integer"}, "completion_tokens": {"type": "integer"}}},
+	"usage": {"type": "object", "properties": {"prompt_tokens": {"type": "integer"}, "completion_tokens": {"type": "integer"},
+		"estimated": {"type": "boolean", "description": "The provider's stream gave no usage: the completion counts a token a piece"}}},
 	"finish_reason": {"type": "string", "description": "Why the answer ended: length when max_tokens ran out"},
 	"reasoning": {"type": "string", "description": "The model's thinking, when it gives it"}`
 
@@ -160,7 +161,8 @@ var baseSchemas = []NodeSchema{
 	{Type: "llm.chat", Description: "Asks a language model",
 		Input: json.RawMessage(`{"type": "object", "required": ["prompt"], "properties": {
 	"prompt": {"type": "string", "format": "multiline"},
-	"system": {"type": "string", "format": "multiline"},` + llmSettings + `}}`),
+	"system": {"type": "string", "format": "multiline"},
+	"stream": {"type": "boolean", "description": "Send the answer as it comes to whoever started the run (or the run that started it) asking for a stream: what the model writes reaches them before the run's answer"},` + llmSettings + `}}`),
 		Output: json.RawMessage(`{"type": "object", "properties": {` + llmOutput + `}}`)},
 	{Type: "llm.describe", Description: "Asks a language model about an image",
 		Input: json.RawMessage(`{"type": "object", "required": ["image"], "properties": {
@@ -244,7 +246,89 @@ var baseSchemas = []NodeSchema{
 	"tag": {"type": "string"},
 	"pushed": {"type": "boolean", "description": "The branch and the tag pushed, with git sync's push on"},
 	"push_error": {"type": "string", "description": "Why the push failed: the next push of git sync takes the tag along"}}}`)},
+	{Type: "task.context", Description: "Reads the task the run holds, with its team, its role, the agent's note and the reports of the tasks it builds on, and writes its agent's prompt (IMP-195)",
+		Input: json.RawMessage(`{"type": "object", "properties": {
+	"task": {"type": "string", "format": "path", "description": "The task's note; default the one the task trigger gave ({{ trigger.task }})"},
+	"prompt": {"type": "string", "format": "multiline", "description": "Text added at the end of the prompt"}}}`),
+		Output: json.RawMessage(`{"type": "object", "properties": {
+	"task": ` + taskSchema + `,
+	"body": {"type": "string", "description": "What the task says to do, below its title"},
+	"team": {"type": "object", "properties": {"path": {"type": "string"}, "coordinator": {"type": "string"}, "split": {"type": "string"},
+	  "budget": {"type": "object", "properties": {"day_usd": {"type": "number"}, "task_usd": {"type": "number"}}},
+	  "max_agents": {"type": "integer"}, "max_rounds": {"type": "integer"}, "alert": {"type": "array", "items": {"type": "string"}},
+	  "approvers": {"type": "array", "items": {"type": "string"}}}},
+	"role": {"type": "object", "description": "The role of the task in its team: run, model, repo, host, paths, checks, writes, approve…"},
+	"system": {"type": "string", "description": "The body of the role's agent note: the agent's system prompt"},
+	"prompt": {"type": "string", "description": "The task for its agent, with the paths, the reports it builds on and, for a coordinator, its roles and sub-tasks"},
+	"max_cost": {"type": "number", "description": "The task's budget in USD, or the team's task_usd; 0 none"},
+	"paths": {"type": "array", "items": {"type": "string"}}, "forbid": {"type": "array", "items": {"type": "string"}},
+	"depends_on": {"type": "array", "items": {"type": "object"}}, "children": {"type": "array", "items": {"type": "object"}}}}`)},
+	{Type: "task.update", Description: "Moves the task the run holds: to input-required or review while a person decides, to working again, or back to submitted for another attempt (IMP-195)",
+		Input: json.RawMessage(`{"type": "object", "required": ["status"], "properties": {
+	"task": {"type": "string", "format": "path", "description": "The task's note; default {{ trigger.task }}"},
+	"status": {"type": "string", "enum": ["working", "input-required", "review", "submitted"]},
+	"message": {"type": "string", "format": "multiline", "description": "A section added to the task: what a person is asked, or what the next attempt must fix"}}}`),
+		Output: json.RawMessage(`{"type": "object", "properties": {"task": ` + taskSchema + `}}`)},
+	{Type: "task.complete", Description: "Closes the task the run holds with its report (IMP-195)",
+		Input: json.RawMessage(`{"type": "object", "properties": {
+	"task": {"type": "string", "format": "path", "description": "The task's note; default {{ trigger.task }}"},
+	"status": {"type": "string", "enum": ["completed", "failed", "canceled"], "default": "completed"},
+	"report": {"type": "string", "format": "multiline", "description": "What was done: the section Report of the task, which the tasks after it and the coordinator read"}}}`),
+		Output: json.RawMessage(`{"type": "object", "properties": {"task": ` + taskSchema + `}}`)},
 }
+
+var taskFlowSchemas = []NodeSchema{
+	{Type: "task.run", Description: "Runs the agent of the task's role, its executor (claude.run, pi.run…), with the role's agent note, model, limits, repo and MCP: the prompt of task.context, the task's budget as max_cost (IMP-195)",
+		Input: json.RawMessage(`{"type": "object", "properties": {
+	"task": {"type": "string", "format": "path", "description": "The task's note; default {{ trigger.task }}"},
+	"prompt": {"type": "string", "format": "multiline", "description": "Text added at the end of the prompt"},
+	"plan": {"type": "boolean", "description": "For a coordinator: ask for a plan (tasks, done or ask) as JSON, for task.plan"}}}`),
+		Output: json.RawMessage(`{"type": "object", "description": "The executor's output (agent-run/1): text, json, repo (branch, files, pushed, pr_url…), usage, cost; and next, what the pipeline runs after it", "properties": {
+	"next": {"type": "object", "description": "checks and preview: the role has them and the agent pushed a branch, for the when of the checks and the preview", "properties": {
+		"checks": {"type": "boolean"}, "preview": {"type": "boolean"}}}}}`)},
+	{Type: "task.gate", Description: "Looks at what the agent did: the files it changed against the role's and the task's paths, the notes it wrote in the role's folders, the checks, the preview; says whether to close, ask a person, try again or fail (IMP-195)",
+		Input: json.RawMessage(`{"type": "object", "required": ["agent"], "properties": {
+	"task": {"type": "string", "format": "path"},
+	"agent": {"type": "object", "description": "The output of task.run ({{ agent }})"},
+	"checks": {"type": "object", "description": "The output of exec.run ({{ checks }}), or none"},
+	"preview": {"type": "object", "description": "The output of preview.check ({{ look }}), or none"},
+	"choices": {"type": "object", "description": "The labels of the answers: approve, redo, discard"}}}`),
+		Output: json.RawMessage(`{"type": "object", "properties": {
+	"ok": {"type": "boolean"}, "ask": {"type": "boolean"}, "close": {"type": "boolean"}, "redo": {"type": "boolean"}, "fail": {"type": "boolean"},
+	"files": {"type": "array", "items": {"type": "string"}}, "outside": {"type": "array", "items": {"type": "string"}}, "forbidden": {"type": "array", "items": {"type": "string"}},
+	"notes": {"type": "array", "items": {"type": "string"}, "description": "The notes the run wrote in the role's folders (writes)"},
+	"pr_url": {"type": "string"}, "branch": {"type": "string"}, "image": {"type": "string"}, "link": {"type": "string"},
+	"title": {"type": "string"}, "text": {"type": "string"}, "feedback": {"type": "string"}, "choices": {"type": "array", "items": {"type": "string"}}}}`)},
+	{Type: "task.verdict", Description: "Reads the gate and the person's answer into what follows: merge, close, redo, close the pull request (IMP-195)",
+		Input: json.RawMessage(`{"type": "object", "required": ["gate"], "properties": {
+	"gate": {"type": "object", "description": "The output of task.gate"},
+	"answer": {"type": "object", "description": "The answer of wait.call (choice, by, comment), when the gate asked"}}}`),
+		Output: json.RawMessage(`{"type": "object", "properties": {
+	"merge": {"type": "boolean"}, "close": {"type": "boolean"}, "redo": {"type": "boolean"}, "close_pr": {"type": "boolean"},
+	"status": {"type": "string"}, "choice": {"type": "string"}, "by": {"type": "string"}, "report": {"type": "string"}, "feedback": {"type": "string"}}}`)},
+	{Type: "task.pr", Description: "Merges or closes the pull request of the task's agent, through the pr node of its executor's plugin, whose preset holds the credentials (IMP-195)",
+		Input: json.RawMessage(`{"type": "object", "required": ["url", "action"], "properties": {
+	"task": {"type": "string", "format": "path"},
+	"url": {"type": "string", "description": "The pull request ({{ gate.pr_url }})"},
+	"action": {"type": "string", "enum": ["merge", "close"]}}}`),
+		Output: json.RawMessage(`{"type": "object", "description": "The plugin's pr output: merged, closed, sha, branch_deleted"}`)},
+	{Type: "task.plan", Description: "Writes the tasks a coordinator planned (task.run with plan: true), for the roles it gives tasks to, under its objective; or says done or ask (IMP-195)",
+		Input: json.RawMessage(`{"type": "object", "required": ["plan"], "properties": {
+	"task": {"type": "string", "format": "path"},
+	"plan": {"type": "object", "description": "The coordinator's answer ({{ plan.json }}): action tasks, done or ask"}}}`),
+		Output: json.RawMessage(`{"type": "object", "properties": {
+	"action": {"type": "string"}, "close": {"type": "boolean"}, "ask": {"type": "boolean"}, "wait": {"type": "boolean"},
+	"summary": {"type": "string"}, "question": {"type": "string"},
+	"created": {"type": "array", "items": {"type": "object", "properties": {"key": {"type": "string"}, "path": {"type": "string"}, "assignee": {"type": "string"}, "title": {"type": "string"}}}}}}`)},
+}
+
+// taskSchema is a task as the task nodes give it.
+const taskSchema = `{"type": "object", "properties": {
+	"path": {"type": "string"}, "title": {"type": "string"}, "status": {"type": "string"}, "assignee": {"type": "string"},
+	"team": {"type": "string"}, "parent": {"type": "string"}, "depends_on": {"type": "array", "items": {"type": "string"}},
+	"paths": {"type": "array", "items": {"type": "string"}}, "forbid": {"type": "array", "items": {"type": "string"}},
+	"budget_usd": {"type": "number"}, "cost_usd": {"type": "number"}, "tokens": {"type": "integer"},
+	"attempts": {"type": "integer"}, "rounds": {"type": "integer"}}}`
 
 // inFilesOutput is the files an in.list gives.
 const inFilesOutput = `"files": {"type": "array", "items": {"type": "object", "properties": {
@@ -253,4 +337,6 @@ const inFilesOutput = `"files": {"type": "array", "items": {"type": "object", "p
 	"modified": {"type": "string"}, "batch": {"type": "string"}, "source": {"type": "string"}}}}`
 
 // BaseSchemas lists the base node types with their schemas.
-func BaseSchemas() []NodeSchema { return append([]NodeSchema(nil), baseSchemas...) }
+func BaseSchemas() []NodeSchema {
+	return append(append([]NodeSchema(nil), baseSchemas...), taskFlowSchemas...)
+}

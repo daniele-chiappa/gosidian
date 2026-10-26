@@ -19,7 +19,11 @@ vi.mock('@/components/domain/diagramView', () => ({
 }))
 vi.mock('@/api/pipelines', async (orig) => ({
   ...(await orig<typeof import('@/api/pipelines')>()),
-  getPipelineNodes: async () => ({ pipelines_enabled: false, nodes: [{ type: 'note.write', group: 'base' }] }),
+  getPipelineNodes: async () => ({
+    pipelines_enabled: false,
+    nodes: [{ type: 'note.write', group: 'base' }],
+    triggers: ['manual'],
+  }),
 }))
 vi.mock('@/stores/access', () => ({
   useAccessStore: () => ({ canWrite: (p: string) => !p.startsWith('ro/') }),

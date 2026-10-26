@@ -15,7 +15,7 @@ trial, read the [root README](../README.md) first.
 ## MCP server
 
 - [Overview](mcp/overview.md) — what MCP is, why gosidian uses it
-- [Tool catalogue](mcp/tools.md) — all 63 typed tools, grouped by purpose
+- [Tool catalogue](mcp/tools.md) — all 71 typed tools, grouped by purpose
 - [Authentication](mcp/authentication.md) — bearer tokens, scopes,
   rotation
 - [Self-improvement loop](mcp/self-improvement.md) — *experimental, off
@@ -63,6 +63,8 @@ trial, read the [root README](../README.md) first.
   when a document arrives, a service calls or the clock strikes (opt-in)
 - [Bots](chat.md) — notes `type: chat`: a chat on the documents of a
   project, served by a chat plugin, answered by a pipeline
+- [Teams of agents](agents.md) — notes `type: team` and the tasks of
+  their roles, which pipelines on task give to agents, within a budget
 - [The IN folder](in.md) — a project's files to work on, under their own
   names and in their own tree, which the pipelines take in batches
 - [Diagrams](diagrams.md) — ```` ```diagram ```` blocks of YAML: flows,

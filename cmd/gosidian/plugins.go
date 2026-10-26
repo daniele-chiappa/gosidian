@@ -39,8 +39,8 @@ func newPlugins(pc config.PipelinesConfig, sdir string, sec pipeline.Secrets, lo
 		if files == "" {
 			files = pc.FilesURL
 		}
-		cfgs = append(cfgs, plugins.Config{Name: p.Name, URL: p.URL, TokenSecret: p.TokenSecret, Timeout: p.Timeout,
-			FilesURL: strings.TrimSuffix(files, "/"), MCPURL: pluginMCPURL(pc, p, files)})
+		cfgs = append(cfgs, plugins.Config{Name: p.Name, URL: p.URL, TokenSecret: p.TokenSecret, TokenEnv: p.TokenEnv, AcceptSHA: p.AcceptSHA, Timeout: p.Timeout,
+			FilesURL: strings.TrimSuffix(files, "/"), MCPURL: pluginMCPURL(pc, p, files), MaxConcurrent: p.MaxConcurrent, Resources: p.Resources})
 	}
 	// A nil pipeline.Secrets must stay a nil plugins.Secrets.
 	var ps plugins.Secrets
@@ -73,11 +73,12 @@ func pluginMCPURL(pc config.PipelinesConfig, p config.PluginConfig, files string
 }
 
 // runTokens mints the MCP tokens of the plugins' calls in the server's
-// token store (IMP-193).
+// token store (IMP-193), a write one narrowed to writePaths when given
+// (IMP-195).
 type runTokens struct{ store *auth.Store }
 
-func (t runTokens) MintRun(name, project string, write bool, ttl time.Duration) (string, string, error) {
-	secret, tok, err := t.store.CreateRun(name, project, write, ttl)
+func (t runTokens) MintRun(name, project string, write bool, ttl time.Duration, runID string, writePaths []string) (string, string, error) {
+	secret, tok, err := t.store.CreateRun(name, project, write, ttl, runID, writePaths)
 	return tok.ID, secret, err
 }
 
@@ -99,6 +100,7 @@ func runPluginCmd(args []string) {
 	as := fs.String("as", "", "bind: the folder of the IN folder (default: the source's name)")
 	write := fs.Bool("write", false, "bind: gosidian may move files inside the source")
 	every := fs.Duration("every", 0, "bind: the time between two checks of the source (default 1m, at least 20s)")
+	pending := fs.Bool("pending", false, "accept: every plugin up whose manifest is not the accepted one, each printed first")
 	pos := parseArgs(fs, args[1:])
 	sdir := cliStateDir(*vaultDir, *stateDirFlag)
 	cfg, err := config.Load(filepath.Join(sdir, "config.toml"))
@@ -176,7 +178,19 @@ func runPluginCmd(args []string) {
 			fmt.Printf("\nThe accepted manifest is another one (version %s, sha %s): the nodes and the sources stop until you accept this one:\n  gosidian plugin accept %s %s\n",
 				st.Accepted.Manifest.Version, st.Accepted.SHA[:12], m.Name, sha[:12])
 		}
+		if want := reg.Expected(pos[0]); want != "" {
+			if strings.HasPrefix(m.SHA(), want) {
+				fmt.Printf("The preset expects this manifest (%s): the server accepts it by itself.\n", want)
+			} else {
+				fmt.Printf("The preset expects another manifest (%s): this one waits for an owner.\n", want)
+			}
+		}
 	case "accept":
+		if *pending {
+			need(0, "accept --pending")
+			acceptPending(ctx, reg)
+			return
+		}
 		need(2, "accept <name> <sha>")
 		a, err := reg.Accept(ctx, pos[0], pos[1], "cli")
 		if err != nil {
@@ -284,7 +298,52 @@ func orDash(s string) string {
 	return s
 }
 
+// acceptPending accepts, in one command, the manifest of every plugin
+// that serves one other than the accepted, or none accepted (IMP-199):
+// the first start of a preset, whose plugins with a manifest that depends
+// on the install (database, storage) cannot be pinned. Each is printed
+// first, what it reads and calls, so the installer sees the hosts their
+// configuration makes it call.
+func acceptPending(ctx context.Context, reg *plugins.Registry) {
+	reg.Check(ctx)
+	n := 0
+	for _, s := range reg.States() {
+		if (s.Status != plugins.StatusUnaccepted && s.Status != plugins.StatusChanged) || s.Live == nil {
+			continue
+		}
+		if n > 0 {
+			fmt.Println()
+		}
+		printManifestHead(s.Live)
+		nodes := make([]string, 0, len(s.Live.Nodes)+len(s.Live.Tools))
+		for _, nd := range s.Live.Nodes {
+			nodes = append(nodes, s.Live.Name+"."+nd.Name)
+		}
+		for _, t := range s.Live.Tools {
+			nodes = append(nodes, plugins.ToolName(s.Live.Name, t.Name))
+		}
+		fmt.Printf("Nodes, tools: %s\n", orDash(strings.Join(nodes, ", ")))
+		a, err := reg.Accept(ctx, s.Name, s.SHA, "cli")
+		if err != nil {
+			fmt.Printf("Not accepted: %v\n", err)
+			continue
+		}
+		fmt.Printf("Accepted %s %s (sha %s).\n", a.Manifest.Name, a.Manifest.Version, a.SHA[:12])
+		n++
+	}
+	if n == 0 {
+		fmt.Println("No plugin waits for its manifest to be accepted (gosidian plugin list).")
+	}
+}
+
 func printManifest(m *plugins.Manifest) {
+	printManifestHead(m)
+	printManifestBody(m)
+}
+
+// printManifestHead prints who a plugin is and what it may do: its files,
+// the hosts it calls, its MCP, its sources.
+func printManifestHead(m *plugins.Manifest) {
 	fmt.Printf("Plugin:      %s %s\n", m.Name, m.Version)
 	if m.Description != "" {
 		fmt.Printf("Description: %s\n", m.Description)
@@ -329,6 +388,10 @@ func printManifest(m *plugins.Manifest) {
 			}
 		}
 	}
+}
+
+// printManifestBody prints a manifest's tools, graphs and nodes.
+func printManifestBody(m *plugins.Manifest) {
 	if len(m.Tools) > 0 {
 		fmt.Println("\nTools (for the agents of the projects it is exposed in):")
 		for _, t := range m.Tools {
@@ -393,6 +456,8 @@ Actions:
   show <name>          The manifest a plugin serves now, and its sha
   accept <name> <sha>  Accept that manifest (the first 12 characters of
                        the sha shown by show)
+  accept --pending     Accept every manifest waiting, each printed first:
+                       the first start of a preset
   forget <name>        Drop the accepted manifest: the nodes stop
   bind <plugin> <source> <project>
                        Show a source of the plugin in the project's IN

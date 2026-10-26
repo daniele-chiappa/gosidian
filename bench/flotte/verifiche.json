@@ -1,0 +1,296 @@
+{
+  "version": 1,
+  "note": "Checks that a good 8-week beginner plan for each person should meet, each verifiable by reading the plan alone (yes / partly / no), grounded in a corpus passage or, for adattamento, in persone.json.",
+  "verifiche": {
+    "giulia": [
+      {
+        "id": "giulia-1",
+        "area": "linee-guida",
+        "testo": "La scheda prevede esercizi di rafforzamento per tutti i principali gruppi muscolari (gambe, schiena, addome, petto, spalle, braccia) in almeno 2 giorni a settimana e attività aerobica di intensità moderata che cresce verso i 150 minuti settimanali raccomandati dall'OMS, anche con attività fuori dalle sedute.",
+        "fonte": "who-2020-guidelines",
+        "sezione": "PHYSICAL ACTIVITY RECOMMENDATION > It is recommended that:"
+      },
+      {
+        "id": "giulia-2",
+        "area": "linee-guida",
+        "testo": "La scheda dà indicazioni per ridurre o interrompere il tempo passato seduta nelle giornate di lavoro, sostituendolo con movimento anche leggero (es. alzarsi, camminare, fare le scale).",
+        "fonte": "who-2020-guidelines",
+        "sezione": "SEDENTARY BEHAVIOUR RECOMMENDATION > It is recommended that:"
+      },
+      {
+        "id": "giulia-3",
+        "area": "sicurezza",
+        "testo": "La scheda indica di sentire un medico se, aumentando l'attività, compaiono sintomi nuovi.",
+        "fonte": "who-2020-guidelines",
+        "sezione": "BENEFITS AND HARMS"
+      },
+      {
+        "id": "giulia-4",
+        "area": "progressione",
+        "testo": "La scheda parte da quantità contenute e aumenta gradualmente frequenza, durata o intensità da una settimana all'altra o tra le due fasi.",
+        "fonte": "who-2020-guidelines",
+        "sezione": "PHYSICAL ACTIVITY RECOMMENDATION > It is recommended that:"
+      },
+      {
+        "id": "giulia-5",
+        "area": "progressione",
+        "testo": "Poiché i manubri sono fissi da 4 kg, gli esercizi di forza progrediscono senza aumentare il peso: più ripetizioni o serie, oppure varianti più difficili (es. su una gamba o con un braccio alla volta).",
+        "fonte": "iversen-2021-time-efficient-resistance-training",
+        "sezione": "4.3Bilateral and Unilateral Exercises"
+      },
+      {
+        "id": "giulia-6",
+        "area": "adattamento",
+        "testo": "La scheda prevede 3 sedute a settimana da 30–40 minuti ciascuna, riscaldamento compreso.",
+        "fonte": null,
+        "sezione": null
+      },
+      {
+        "id": "giulia-7",
+        "area": "adattamento",
+        "testo": "Gli esercizi usano solo il tappetino, i due manubri da 4 kg e il corpo libero (niente macchine, bilancieri o altra attrezzatura).",
+        "fonte": null,
+        "sezione": null
+      },
+      {
+        "id": "giulia-8",
+        "area": "fonti",
+        "testo": "La scheda cita le fonti delle sue scelte (quantità di attività, sedentarietà, forza), con il link alla nota della fonte e la pagina o la sezione.",
+        "fonte": null,
+        "sezione": null
+      }
+    ],
+    "franco": [
+      {
+        "id": "franco-1",
+        "area": "linee-guida",
+        "testo": "La scheda prevede attività multicomponente con esercizi di equilibrio e di forza funzionale (es. alzarsi dalla sedia, salire gradini) in almeno 3 giorni a settimana.",
+        "fonte": "who-2020-guidelines",
+        "sezione": "OLDER ADULTS > PHYSICAL ACTIVITY RECOMMENDATION"
+      },
+      {
+        "id": "franco-2",
+        "area": "linee-guida",
+        "testo": "La scheda prevede rafforzamento dei principali gruppi muscolari in almeno 2 giorni a settimana e attività aerobica moderata (es. camminata al parco) che cresce gradualmente verso i 150 minuti settimanali raccomandati dall'OMS.",
+        "fonte": "who-2020-guidelines",
+        "sezione": "OLDER ADULTS > PHYSICAL ACTIVITY RECOMMENDATION"
+      },
+      {
+        "id": "franco-3",
+        "area": "sicurezza",
+        "testo": "Gli esercizi di equilibrio si fanno in un ambiente sicuro, con un appoggio a portata di mano (es. lo schienale della sedia), e si passa a una variante più difficile solo quando quella attuale è padroneggiata.",
+        "fonte": "izquierdo-2021-older-adults-icfsr",
+        "sezione": "Balance training recommendations"
+      },
+      {
+        "id": "franco-4",
+        "area": "sicurezza",
+        "testo": "Per l'artrosi al ginocchio la scheda evita salti e pliometria e dice come adattare un esercizio che fa male al ginocchio (es. limitarlo all'arco di movimento senza dolore o passare a una contrazione isometrica).",
+        "fonte": "izquierdo-2021-older-adults-icfsr",
+        "sezione": "Power training recommendations"
+      },
+      {
+        "id": "franco-5",
+        "area": "progressione",
+        "testo": "Il volume cresce nelle 8 settimane: gli esercizi di forza passano da 1–2 a 2–3 serie da 8–12 ripetizioni (o a elastici più resistenti) e la camminata si allunga gradualmente.",
+        "fonte": "izquierdo-2021-older-adults-icfsr",
+        "sezione": "Resistance training recommendations"
+      },
+      {
+        "id": "franco-6",
+        "area": "adattamento",
+        "testo": "La scheda prevede 4–5 sedute a settimana da circa 30 minuti ciascuna.",
+        "fonte": null,
+        "sezione": null
+      },
+      {
+        "id": "franco-7",
+        "area": "adattamento",
+        "testo": "Gli esercizi usano solo la sedia robusta, gli elastici di resistenza, il corpo libero e il parco per camminare.",
+        "fonte": null,
+        "sezione": null
+      },
+      {
+        "id": "franco-8",
+        "area": "fonti",
+        "testo": "La scheda cita le fonti delle sue scelte, in particolare per equilibrio, prevenzione delle cadute e artrosi del ginocchio, con il link alla nota della fonte e la pagina o la sezione.",
+        "fonte": null,
+        "sezione": null
+      }
+    ],
+    "sara": [
+      {
+        "id": "sara-1",
+        "area": "linee-guida",
+        "testo": "La scheda combina attività aerobiche (es. camminata veloce con il passeggino) e di rafforzamento muscolare e porta gradualmente verso almeno 150 minuti a settimana di attività aerobica di intensità moderata.",
+        "fonte": "who-2020-guidelines",
+        "sezione": "PREGNANT AND POSTPARTUM WOMEN > PHYSICAL ACTIVITY RECOMMENDATION"
+      },
+      {
+        "id": "sara-2",
+        "area": "linee-guida",
+        "testo": "La scheda include l'allenamento dei muscoli del pavimento pelvico, che si può fare anche ogni giorno.",
+        "fonte": "who-2020-guidelines",
+        "sezione": "PREGNANT AND POSTPARTUM WOMEN > In addition:"
+      },
+      {
+        "id": "sara-3",
+        "area": "sicurezza",
+        "testo": "La scheda indica di ridurre l'intensità se un esercizio provoca dolore, fastidio o fatica.",
+        "fonte": "brites-lagos-2024-postpartum-program",
+        "sezione": "First stage: development"
+      },
+      {
+        "id": "sara-4",
+        "area": "progressione",
+        "testo": "La corsa viene reintrodotta in modo graduale (es. alternando cammino e corsa e allungando i tratti di corsa nelle settimane), non con sedute di corsa continua fin dalla prima settimana.",
+        "fonte": "who-2020-guidelines",
+        "sezione": "PREGNANT AND POSTPARTUM WOMEN > In addition:"
+      },
+      {
+        "id": "sara-5",
+        "area": "progressione",
+        "testo": "Gli esercizi di forza progrediscono aumentando gradualmente serie, ripetizioni o complessità (es. meno appoggi, più instabilità) tra le settimane o tra le due fasi.",
+        "fonte": "brites-lagos-2024-postpartum-program",
+        "sezione": "First stage: development"
+      },
+      {
+        "id": "sara-6",
+        "area": "adattamento",
+        "testo": "La scheda prevede 4 sedute a settimana da 20–30 minuti, fattibili a casa con il bambino.",
+        "fonte": null,
+        "sezione": null
+      },
+      {
+        "id": "sara-7",
+        "area": "adattamento",
+        "testo": "Gli esercizi usano solo il corpo libero, il tappetino e il passeggino per le camminate, e lavorano sugli obiettivi di Sara: addome, pavimento pelvico e ritorno alla corsa.",
+        "fonte": null,
+        "sezione": null
+      },
+      {
+        "id": "sara-8",
+        "area": "fonti",
+        "testo": "La scheda cita le fonti delle sue scelte, in particolare per il post-parto e il pavimento pelvico, con il link alla nota della fonte e la pagina o la sezione.",
+        "fonte": null,
+        "sezione": null
+      }
+    ],
+    "marco": [
+      {
+        "id": "marco-1",
+        "area": "linee-guida",
+        "testo": "La scheda combina nella stessa settimana esercizio aerobico di intensità moderata ed esercizio di forza dinamico per i principali gruppi muscolari in 2–3 giorni a settimana.",
+        "fonte": "pescatello-2015-exercise-hypertension",
+        "sezione": "An Exercise Prescription for Hypertension Update > Frequency"
+      },
+      {
+        "id": "marco-2",
+        "area": "linee-guida",
+        "testo": "L'attività aerobica moderata cresce verso almeno 150 minuti a settimana (30 minuti o più al giorno, anche in blocchi di almeno 10 minuti), anche con camminate nei giorni senza palestra.",
+        "fonte": "pescatello-2015-exercise-hypertension",
+        "sezione": "An Exercise Prescription for Hypertension Update > Time"
+      },
+      {
+        "id": "marco-3",
+        "area": "sicurezza",
+        "testo": "L'intensità resta moderata: l'aerobico a uno sforzo percepito di circa 11–13 sulla scala di Borg 6–20 (o una misura equivalente) e la forza con carichi moderati, senza sedute ad alta intensità.",
+        "fonte": "pescatello-2015-exercise-hypertension",
+        "sezione": "An Exercise Prescription for Hypertension Update > Intensity"
+      },
+      {
+        "id": "marco-4",
+        "area": "sicurezza",
+        "testo": "La scheda indica di tenere conto, con il medico, del controllo della pressione e di eventuali cambi recenti della terapia antipertensiva prima di aumentare il carico.",
+        "fonte": "pescatello-2015-exercise-hypertension",
+        "sezione": "An Exercise Prescription for Hypertension Update > Progression"
+      },
+      {
+        "id": "marco-5",
+        "area": "progressione",
+        "testo": "Frequenza, durata e soprattutto intensità crescono in modo graduale, senza grandi salti da una settimana all'altra.",
+        "fonte": "pescatello-2015-exercise-hypertension",
+        "sezione": "An Exercise Prescription for Hypertension Update > Progression"
+      },
+      {
+        "id": "marco-6",
+        "area": "adattamento",
+        "testo": "La scheda prevede 3 sedute a settimana da 45–60 minuti in palestra.",
+        "fonte": null,
+        "sezione": null
+      },
+      {
+        "id": "marco-7",
+        "area": "adattamento",
+        "testo": "Gli esercizi usano l'attrezzatura della sua palestra (macchine, manubri, tapis roulant, cyclette).",
+        "fonte": null,
+        "sezione": null
+      },
+      {
+        "id": "marco-8",
+        "area": "fonti",
+        "testo": "La scheda cita le fonti delle sue scelte, in particolare per l'esercizio con la pressione alta, con il link alla nota della fonte e la pagina o la sezione.",
+        "fonte": null,
+        "sezione": null
+      }
+    ],
+    "luca": [
+      {
+        "id": "luca-1",
+        "area": "linee-guida",
+        "testo": "Ogni gruppo muscolare principale fa almeno 4 serie a settimana, con carichi da circa 6–15 ripetizioni massime e 1–2 minuti di recupero tra le serie.",
+        "fonte": "iversen-2021-time-efficient-resistance-training",
+        "sezione": "9Practical Applications"
+      },
+      {
+        "id": "luca-2",
+        "area": "linee-guida",
+        "testo": "La scheda si basa su esercizi multiarticolari, con almeno una spinta con le gambe, una spinta e una trazione per la parte superiore del corpo (es. squat o leg press, panca, rematore).",
+        "fonte": "iversen-2021-time-efficient-resistance-training",
+        "sezione": "What should you train?"
+      },
+      {
+        "id": "luca-3",
+        "area": "sicurezza",
+        "testo": "Per gli esercizi pesanti con pesi liberi (es. squat e panca con bilanciere) la scheda insiste sulla tecnica corretta e prevede un compagno che assiste (spotter) o, in alternativa, le macchine.",
+        "fonte": "iversen-2021-time-efficient-resistance-training",
+        "sezione": "4.2Free‑Weight and Machine Exercises"
+      },
+      {
+        "id": "luca-4",
+        "area": "sicurezza",
+        "testo": "La scheda non usa drop set, rest-pause o superserie sugli esercizi multiarticolari pesanti con pesi liberi come squat e panca.",
+        "fonte": "iversen-2021-time-efficient-resistance-training",
+        "sezione": "Time saving training strategies: Drop-sets, rest-pause training and supersets"
+      },
+      {
+        "id": "luca-5",
+        "area": "progressione",
+        "testo": "Il carico o il numero di serie aumentano in modo progressivo nelle 8 settimane (sovraccarico progressivo), per esempio verso 10 o più serie settimanali per gruppo muscolare.",
+        "fonte": "iversen-2021-time-efficient-resistance-training",
+        "sezione": "9Practical Applications"
+      },
+      {
+        "id": "luca-6",
+        "area": "adattamento",
+        "testo": "La scheda prevede 3–4 sedute a settimana da circa 60 minuti.",
+        "fonte": null,
+        "sezione": null
+      },
+      {
+        "id": "luca-7",
+        "area": "adattamento",
+        "testo": "Gli esercizi usano l'attrezzatura della palestra dell'università (bilancieri, manubri, macchine, panche) e puntano all'obiettivo di Luca: più forza e più massa muscolare.",
+        "fonte": null,
+        "sezione": null
+      },
+      {
+        "id": "luca-8",
+        "area": "fonti",
+        "testo": "La scheda cita le fonti delle sue scelte (serie, carichi, recuperi, scelta degli esercizi), con il link alla nota della fonte e la pagina o la sezione.",
+        "fonte": null,
+        "sezione": null
+      }
+    ]
+  }
+}

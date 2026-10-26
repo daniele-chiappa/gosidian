@@ -46,13 +46,24 @@ func EmbeddedTemplatesFS() embed.FS { return embeddedTemplates }
 // holds the template directories.
 const EmbeddedTemplatesRoot = "assets_templates"
 
+//go:embed assets_skills/*.md
+var embeddedSkills embed.FS
+
+// EmbeddedSkillsFS exposes the skills gosidian ships for the public global
+// project (IMP-210), for seeding from main.go.
+func EmbeddedSkillsFS() embed.FS { return embeddedSkills }
+
+// EmbeddedSkillsRoot is the path inside EmbeddedSkillsFS that holds the
+// skill notes.
+const EmbeddedSkillsRoot = "assets_skills"
+
 const defaultTemplate = "karpathy-wiki"
 
 // registerScaffoldTool adds memory_project_scaffold (extended in v1.8
 // with `template` and `variables` parameters).
 func (s *Server) registerScaffoldTool() {
 	s.impl.AddTool(mcp.NewTool("memory_project_scaffold",
-		mcp.WithDescription("Populate a project with a bootstrap template. Templates live under <vault>/.gosidian/templates/<name>/ and can be inspected with memory_list_bootstrap_templates. Idempotent — existing files are skipped, never overwritten. Default template is \"karpathy-wiki\" (full Karpathy-Wiki-Stack layout); pass template=\"minimal\" for a lightweight scaffold or template=\"team\" for the team-oriented preset with pre-populated agents/."),
+		mcp.WithDescription("Populate a project with a bootstrap template. Templates live under <vault>/.gosidian/templates/<name>/ and can be inspected with memory_list_bootstrap_templates. Idempotent — existing files are skipped, never overwritten. Default template is \"karpathy-wiki\" (full Karpathy-Wiki-Stack layout); pass template=\"minimal\" for a lightweight scaffold, template=\"team\" for the team-oriented preset with pre-populated agents/, or template=\"rag\" for questions answered from the project's documents (pipelines for the IN folder, the cut and the answer, and a bot; needs the plugins of the rag compose preset)."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder) to scaffold. The folder does not need to exist yet. "+scopedProjectNote)),
 		mcp.WithString("template", mcp.Description("Template name (directory under .gosidian/templates/). Defaults to \"karpathy-wiki\". Use memory_list_bootstrap_templates to discover what's installed.")),
 		mcp.WithObject("variables", mcp.Description("Override map for template placeholders. Only variables declared in the template's _template.toml as `required` (without `auto` or `default`) need to be supplied; PROJECT and TODAY are filled automatically.")),

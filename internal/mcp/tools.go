@@ -40,7 +40,8 @@ func (s *Server) authorizeRead(ctx context.Context) (*auth.Token, *mcp.CallToolR
 }
 
 // authorizeWrite verifies the token holds the write scope and is allowed on
-// the given vault-relative path.
+// the given vault-relative path, under its write folders when it has some
+// (IMP-195).
 func (s *Server) authorizeWrite(ctx context.Context, path string) (*auth.Token, *mcp.CallToolResult) {
 	tok := s.tokenFromContext(ctx)
 	if tok == nil {
@@ -51,6 +52,9 @@ func (s *Server) authorizeWrite(ctx context.Context, path string) (*auth.Token, 
 	}
 	if !tok.AllowsPath(path) {
 		return nil, mcp.NewToolResultErrorf("path %q is outside the token's project scope %q", path, tok.ScopeLabel())
+	}
+	if !tok.InWritePaths(path) {
+		return nil, mcp.NewToolResultErrorf("path %q: this token writes only in %s", path, strings.Join(tok.WritePaths, ", "))
 	}
 	if !tok.AllowsWrite(path) {
 		return nil, mcp.NewToolResultErrorf("the account behind this token may only read project %q", auth.ProjectOf(path))
@@ -264,12 +268,15 @@ func (s *Server) registerTools() {
 	s.registerMediaTools()
 	s.registerTableTools()
 	s.registerIngestTool()
+	// The upload into an IN folder, for files of any size (IMP-172 phase 5b).
+	s.registerINUploadTool()
 	s.registerAuditTools()
 	s.registerBootstrapTool()
 	s.registerDiscoveryTools()
 	s.registerImportanceTool()
 	s.registerQueryTool()
 	s.registerHandoffTools()
+	s.registerTaskTools()
 	s.registerCompactTool()
 	s.registerSelfStatsTool()
 	s.registerScaffoldTool()

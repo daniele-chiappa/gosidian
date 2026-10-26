@@ -56,6 +56,7 @@ Quando scopri qualcosa che sopravvive al task corrente:
 | Report/dashboard HTML self-contained | nota `.html` (es. `{{PROJECT}}/docs/`) | `memory_create` path `.html` (se `capabilities.html_notes`) |
 | Dati tabellari lunghi (audit, export CSV) | table note linkata dal report | `memory_ingest` del `.csv` + caption (se `capabilities.table_notes`) |
 | File binario (screenshot, PDF, zip) | attachment/media note del vault | `memory_ingest` (bridge dir, `source_path`, `url` o ticket `transfer:"http"`; **mai** base64 per file grandi) |
+| File da far lavorare alle pipeline (un corpus, scansioni, PDF o XML da convertire, di qualunque dimensione) | la cartella `IN` del progetto (se ha `use_in`), non una nota | `memory_in_upload`: `open` con l'elenco dei file, poi i pezzi con `curl` e il ticket all'endpoint che risponde, poi `complete`; molti file piccoli in uno `.zip` con `unzip: true` |
 | Più file insieme (una cartella, uno `.zip`, una guida con i suoi link) | una cartella del progetto | `memory_ingest` con `as: "package"` e `dest`, prima con `dry_run: true`: una chiamata per tutto, link relativi già wikilink, non una chiamata per file |
 | Contenuto di terze parti (una skill, una guida da un repository) | dove serve nel progetto | nel frontmatter della nota d'ingresso `upstream` (URL), `upstream_commit` e `upstream_version` se c'è; `license` se la conosci, solo informativa (se usarlo lo decide l'utente). Se l'utente chiede se l'originale è andato avanti: `git ls-remote <upstream> HEAD` contro `upstream_commit` |
 | Fine task | `{{PROJECT}}/log.md` + `hot.md` | `memory_append` log, `memory_edit` hot |
@@ -72,6 +73,30 @@ il risultato del tool lo dice in `notices`: correggi subito con `memory_edit`. S
 sostituiti; `memory_query` con `from: <source>` elenca le righe del database. Per un numero, invece di
 una tabella, usa una vista `as: count` (con `group_by` per valore) o, nel testo,
 `` `=count(<cartella> where <condizione> and …)` ``.
+
+**Quando una raccolta diventa un database**: note o sezioni dello stesso tipo che crescono, con uno
+stato o campi da filtrare, ordinare o contare (backlog, plan, inventari come stack, host e certificati,
+scadenze) diventano una nota database; log, ADR, gotcha, `hot.md` e architettura restano testo.
+Proponi la scelta all'utente prima di scrivere. Un fatto sta in un posto solo (campo, tag o corpo): se
+una nota ha il campo `status`, il tag `status:*` lo rispecchia o manca (il lint `field-tag-mismatch`
+segnala quando divergono). Non scrivere conteggi nelle righe (viste `as: count` o campi `rollup`); i dati
+copiati da un sistema (container, porte, certificati) hanno un campo `checked` con la data; `due` solo
+per una scadenza vera; le decisioni aperte emerse lavorando diventano righe del backlog, non solo una
+riga del resoconto. Non chiamare un campo `path`, `name`, `modified`, `links`, `created_by`,
+`modified_by`, `created_at` o `modified_at`: li calcola gosidian (per una cartella usa `folder`). Nella
+nota `fields` è una **mappa**, non la lista di `databases[].fields` del bootstrap:
+
+```yaml
+type: database
+source: {{PROJECT}}/docs/stacks
+fields:
+  title: {type: text, required: true}
+  status: {type: select, required: true, options: [running, retired]}
+  checked: {type: date}
+```
+
+La procedura completa è la skill `design-project-databases` dei progetti globali, quando ci sono
+(`available_skills[]`).
 
 **Relazioni**: un campo che punta a un'altra nota si scrive come wikilink quotato
 (`related: ["[[{{PROJECT}}/docs/bugs/BUG-001]]"]`) e conta come un link: compare nei backlink (con il
@@ -149,8 +174,8 @@ consultalo prima di scegliere.
   cross-pacchetto): plan in `{{PROJECT}}/plans/` **prima** di implementare;
   chiudi con `Outcome` (hash commit, sorprese, side findings).
 
-Status dei plan: `draft` → `in-progress` → `done` | `archived` (tag
-`status:*` via `memory_edit`).
+Status dei plan: `draft` → `in-progress` → `done` | `archived`, nel campo
+`status` e nel tag `status:*` che lo rispecchia, tutti e due via `memory_edit`.
 
 ### Workflow end-of-task
 

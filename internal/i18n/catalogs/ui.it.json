@@ -856,7 +856,8 @@
     "password_change": "Prima scegli una password nuova.",
     "enrollment": "Prima attiva i due fattori.",
     "invite_invalid": "Questo invito è scaduto o è già stato usato.",
-    "plugin_refused": "Il plugin ha risposto con un errore."
+    "plugin_refused": "Il plugin ha risposto con un errore.",
+    "storage_full": "Il disco del server è quasi pieno."
   },
   "history": {
     "note": "Nota",
@@ -1409,16 +1410,40 @@
       "failed": "fallita",
       "skipped": "saltata",
       "canceled": "annullata"
-    }
+    },
+    "queue": "Coda",
+    "queue_total": "{queued} passo in coda, {running} in esecuzione su {workers} worker | {queued} passi in coda, {running} in esecuzione su {workers} worker",
+    "queue_later": "{n} in attesa di riprovare | {n} in attesa di riprovare",
+    "queue_oldest": "attesa più lunga {wait}",
+    "queue_places": "{running} di {limit} in esecuzione",
+    "queue_places_free": "{running} in esecuzione, senza limite",
+    "queue_queued": "nessuno in coda | {n} in coda | {n} in coda",
+    "queue_blocked": "aspetta un posto in {resource} ({running} di {limit} occupati)",
+    "queue_ahead": "in coda, il prossimo a partire | in coda, 1 passo prima | in coda, {n} passi prima",
+    "queue_retry": "in coda, riprova più tardi",
+    "resource": {
+      "plugin": "plugin {name}",
+      "llm": "modello {name}",
+      "res": "risorsa {name}",
+      "cat": "categoria {name}",
+      "team": "squadra {name}",
+      "agents": "agenti di tutte le squadre"
+    },
+    "category_no_rules": "Il server non ha regole per la categoria {name}: le sue run non hanno limiti di categoria.",
+    "low": "priorità bassa"
   },
   "pipeline_editor": {
     "trigger": "Avvio",
     "triggers": {
       "manual": "A mano",
       "external": "Da fuori",
+      "chat": "Da una chat",
       "ingest": "All'arrivo",
       "schedule": "A orario",
-      "in": "Nella cartella IN"
+      "in": "Nella cartella IN",
+      "commit": "A un commit",
+      "run": "Alla fine di una run",
+      "queue": "A coda lunga"
     },
     "statuses": {
       "pending": "In attesa",
@@ -1441,6 +1466,8 @@
     "zoom_in": "Ingrandisci",
     "zoom_out": "Rimpicciolisci",
     "palette": "Tipi di nodo",
+    "search_nodes": "Cerca fra i tipi di nodo",
+    "no_nodes": "Nessun tipo di nodo corrisponde.",
     "base": "Di base",
     "node": "Nodo",
     "id": "Id",
@@ -1466,6 +1493,9 @@
     "every": "Ogni",
     "match": "Nome che corrisponde",
     "batch": "Una run per lotto",
+    "skip": "Non per le scritture di",
+    "run_ends": "Esiti della run",
+    "pipelines": "Pipeline",
     "required": "obbligatorio",
     "structured": "YAML o JSON",
     "invalid_value": "YAML non valido:",
@@ -1559,7 +1589,7 @@
     "load_failed": "Non si riesce a leggere la cartella IN",
     "action_failed": "L'operazione non è riuscita",
     "nothing_found": "Nessun file corrisponde.",
-    "empty": "La cartella è vuota. I file arrivano da disco (rsync, una cartella montata), oppure da un archivio remoto che un plugin offre e che l'owner lega qui come cartella.",
+    "empty": "La cartella è vuota. Carica file, una cartella o uno zip, oppure trascinali qui; arrivano anche da disco (rsync, una cartella montata) o da un archivio remoto che un plugin offre e che l'admin lega qui come cartella.",
     "select_all": "Seleziona tutti i file mostrati",
     "name": "Nome",
     "size": "Dimensione",
@@ -1593,6 +1623,24 @@
       "no_delete": "I file di una sorgente non si eliminano da qui: spostali, o mettili da parte.",
       "no_move": "La sorgente è in sola lettura, o non sa spostare i suoi file.",
       "mixed": "Scegli file di un posto solo: il disco, o una sorgente."
+    },
+    "upload": {
+      "files": "Carica file",
+      "files_help": "Carica dei file nella cartella mostrata",
+      "folder": "Carica cartella",
+      "folder_help": "Carica una cartella, con le sue sottocartelle, nella cartella mostrata",
+      "zip": "Carica zip",
+      "zip_help": "Carica degli zip: il server li scompatta, ognuno nella sua cartella",
+      "drop_here": "Rilascia qui per caricare in {where}",
+      "hidden_left": "Nessun file nascosto lasciato fuori. | Un file o una cartella nascosti (.DS_Store, .git) lasciati fuori. | {count} file o cartelle nascosti (.DS_Store, .git) lasciati fuori.",
+      "refused_left": "Nessun nome rifiutato. | Un file lasciato fuori, perché IN non accetta il suo nome: {names}. | {count} file lasciati fuori, perché IN non accetta il loro nome: {names}…",
+      "nothing": "Niente da caricare.",
+      "zip_advised": "Per tanti file piccoli conviene uno zip: arriva in pochi pezzi e lo scompatta il server.",
+      "failed": "Il caricamento non è partito",
+      "open_window": "tutti i caricamenti",
+      "interrupted": "Nessun caricamento interrotto. | Caricamento interrotto in {where}: un file, {sent} di {total} arrivati. | Caricamento interrotto in {where}: {files} file, {sent} di {total} arrivati.",
+      "resume": "Riprendi",
+      "resume_help": "Scegli di nuovo gli stessi file: il caricamento riparte da dove si era fermato"
     }
   },
   "chat": {
@@ -1612,5 +1660,67 @@
     "users_off": "Il bot non accetta gli utenti di gosidian (access.users: false): si prova dal sito.",
     "snippet_hint": "Incolla nella pagina del sito: il widget si apre nel contenitore con quell'id.",
     "snippet_key": "<valore della chiave {key}>"
+  },
+  "uploads": {
+    "window_title": "Caricamenti",
+    "badge_active": "Nessun caricamento | Un caricamento in corso, {percent}% | {count} caricamenti in corso, {percent}%",
+    "badge_done": "Caricamenti finiti",
+    "files": "nessun file | {count} file | {count} file",
+    "open_in": "Apri IN",
+    "pause": "Pausa",
+    "resume": "Riprendi",
+    "cancel": "Annulla",
+    "remove": "Togli",
+    "retry": "Riprova",
+    "drop": "Lascia fuori questo file",
+    "progress": "{sent} di {total} ({percent}%)",
+    "left": "mancano {time}",
+    "seconds": "{n} s",
+    "minutes": "{n} min",
+    "hours": "{h} h {m} min",
+    "taken": "Nessun file c'è già. | Un file c'è già in IN. Cosa fare? | {count} file ci sono già in IN. Cosa fare?",
+    "policy": {
+      "replace": "Sostituisci (i vecchi vanno nel cestino)",
+      "keep": "Tieni entrambi",
+      "skip": "Salta"
+    },
+    "full": "Il disco del server è quasi pieno: il caricamento è in pausa. Libera spazio, poi Riprendi.",
+    "failed": "Il caricamento si è fermato",
+    "stopped": "Il server si è fermato mentre metteva a posto i file: {why}. Riprendi per riprovare.",
+    "missing": "Nessun file da riscegliere. | Un file non è ancora arrivato tutto: sceglilo di nuovo dalla finestra IN, o lascialo fuori. | {count} file non sono ancora arrivati tutti: sceglili di nuovo dalla finestra IN, o lasciali fuori.",
+    "failed_files": "Nessun file non riuscito. | Un file non è riuscito: apri Caricamenti. | {count} file non sono riusciti: apri Caricamenti.",
+    "result": {
+      "new": "nessuno nuovo | {count} nuovo | {count} nuovi",
+      "replaced": "nessuno sostituito | {count} sostituito | {count} sostituiti",
+      "renamed": "nessuno rinominato | {count} con un nome nuovo | {count} con un nome nuovo",
+      "skipped": "nessuno saltato | {count} saltato | {count} saltati",
+      "same": "nessuno uguale | {count} uguale a quello che c'era | {count} uguali a quelli che c'erano",
+      "unzipped": "nessuno zip | {count} zip scompattato | {count} zip scompattati",
+      "dropped": "nessuno lasciato fuori | {count} lasciato fuori | {count} lasciati fuori",
+      "error": "nessun errore | {count} con errore | {count} con errore"
+    },
+    "show_files": "File",
+    "show_all": "Mostra tutti i {count} file",
+    "item": {
+      "waiting": "in coda",
+      "sending": "in invio",
+      "paused": "in pausa",
+      "sent": "arrivato",
+      "error": "errore",
+      "dropped": "lasciato fuori",
+      "missing": "da riscegliere"
+    },
+    "state": {
+      "opening": "in apertura",
+      "asking": "da decidere",
+      "sending": "in invio",
+      "paused": "in pausa",
+      "completing": "in sistemazione",
+      "done": "finito",
+      "error": "fermo"
+    },
+    "confirm_cancel": "Annullare il caricamento in {where}? Quello che è già arrivato viene cancellato; i file già messi a posto restano.",
+    "clear_done": "Togli i finiti",
+    "empty": "Nessun caricamento in questa scheda. Un caricamento interrotto da un ricaricamento si riprende dalla finestra IN del progetto, scegliendo di nuovo gli stessi file."
   }
 }

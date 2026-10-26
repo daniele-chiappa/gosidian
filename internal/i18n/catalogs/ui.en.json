@@ -856,7 +856,8 @@
     "password_change": "Choose a new password first.",
     "enrollment": "Set up two-factor first.",
     "invite_invalid": "This invite has expired or was already used.",
-    "plugin_refused": "The plugin answered with an error."
+    "plugin_refused": "The plugin answered with an error.",
+    "storage_full": "The server's disk is nearly full."
   },
   "history": {
     "note": "Note",
@@ -1409,16 +1410,40 @@
       "failed": "failed",
       "skipped": "skipped",
       "canceled": "canceled"
-    }
+    },
+    "queue": "Queue",
+    "queue_total": "{queued} step queued, {running} running on {workers} workers | {queued} steps queued, {running} running on {workers} workers",
+    "queue_later": "{n} waiting to try again | {n} waiting to try again",
+    "queue_oldest": "longest wait {wait}",
+    "queue_places": "{running} of {limit} running",
+    "queue_places_free": "{running} running, no limit",
+    "queue_queued": "none queued | {n} queued | {n} queued",
+    "queue_blocked": "waits for a place in {resource} ({running} of {limit} taken)",
+    "queue_ahead": "queued, next to start | queued, 1 step before it | queued, {n} steps before it",
+    "queue_retry": "queued, tries again later",
+    "resource": {
+      "plugin": "plugin {name}",
+      "llm": "model {name}",
+      "res": "resource {name}",
+      "cat": "category {name}",
+      "team": "team {name}",
+      "agents": "agents of every team"
+    },
+    "category_no_rules": "The server has no rules for the category {name}: its runs have no category limits.",
+    "low": "low priority"
   },
   "pipeline_editor": {
     "trigger": "Start",
     "triggers": {
       "manual": "By hand",
       "external": "From outside",
+      "chat": "From a chat",
       "ingest": "On arrival",
       "schedule": "On schedule",
-      "in": "In the IN folder"
+      "in": "In the IN folder",
+      "commit": "On a commit",
+      "run": "When a run ends",
+      "queue": "When the queue is long"
     },
     "statuses": {
       "pending": "Pending",
@@ -1441,6 +1466,8 @@
     "zoom_in": "Zoom in",
     "zoom_out": "Zoom out",
     "palette": "Node types",
+    "search_nodes": "Search the node types",
+    "no_nodes": "No node type matches.",
     "base": "Base",
     "node": "Node",
     "id": "Id",
@@ -1466,6 +1493,9 @@
     "every": "Every",
     "match": "Name matching",
     "batch": "One run per batch",
+    "skip": "Not for the writes of",
+    "run_ends": "Run ends",
+    "pipelines": "Pipelines",
     "required": "needed",
     "structured": "YAML or JSON",
     "invalid_value": "Not valid YAML:",
@@ -1559,7 +1589,7 @@
     "load_failed": "Could not read the IN folder",
     "action_failed": "The action failed",
     "nothing_found": "No file matches.",
-    "empty": "The folder is empty. Files arrive from disk (rsync, a mounted folder), or from a remote store a plugin offers, which the owner binds here as a folder.",
+    "empty": "The folder is empty. Upload files, a folder or a zip, or drop them here; files also arrive from disk (rsync, a mounted folder), or from a remote store a plugin offers, which the owner binds here as a folder.",
     "select_all": "Select all the files shown",
     "name": "Name",
     "size": "Size",
@@ -1593,6 +1623,24 @@
       "no_delete": "The files of a source are not deleted from here: move them, or set them aside.",
       "no_move": "The source is read-only, or cannot move its files.",
       "mixed": "Choose files of one place: the disk, or one source."
+    },
+    "upload": {
+      "files": "Upload files",
+      "files_help": "Upload files into the folder shown",
+      "folder": "Upload folder",
+      "folder_help": "Upload a folder, with its subfolders, into the folder shown",
+      "zip": "Upload zip",
+      "zip_help": "Upload zips: the server unpacks them, each into a folder of its own",
+      "drop_here": "Drop here to upload into {where}",
+      "hidden_left": "No hidden file left out. | A hidden file or folder (.DS_Store, .git) left out. | {count} hidden files or folders (.DS_Store, .git) left out.",
+      "refused_left": "No name refused. | A file left out, as IN does not take its name: {names}. | {count} files left out, as IN does not take their names: {names}…",
+      "nothing": "Nothing to upload.",
+      "zip_advised": "Many small files go better as a zip: it arrives in a few pieces and the server unpacks it.",
+      "failed": "The upload did not start",
+      "open_window": "all uploads",
+      "interrupted": "No upload cut short. | Upload cut short into {where}: one file, {sent} of {total} arrived. | Upload cut short into {where}: {files} files, {sent} of {total} arrived.",
+      "resume": "Resume",
+      "resume_help": "Choose the same files again: the upload goes on from where it stopped"
     }
   },
   "chat": {
@@ -1612,5 +1660,67 @@
     "users_off": "The bot does not take gosidian's users (access.users: false): try it from the site.",
     "snippet_hint": "Paste it in the site's page: the widget opens in the container with that id.",
     "snippet_key": "<value of the key {key}>"
+  },
+  "uploads": {
+    "window_title": "Uploads",
+    "badge_active": "No upload | One upload on its way, {percent}% | {count} uploads on their way, {percent}%",
+    "badge_done": "Uploads done",
+    "files": "no files | {count} file | {count} files",
+    "open_in": "Open IN",
+    "pause": "Pause",
+    "resume": "Resume",
+    "cancel": "Cancel",
+    "remove": "Remove",
+    "retry": "Retry",
+    "drop": "Leave this file out",
+    "progress": "{sent} of {total} ({percent}%)",
+    "left": "{time} left",
+    "seconds": "{n} s",
+    "minutes": "{n} min",
+    "hours": "{h} h {m} min",
+    "taken": "No file is there already. | A file is in IN already. What to do? | {count} files are in IN already. What to do?",
+    "policy": {
+      "replace": "Replace (the old ones go to the trash)",
+      "keep": "Keep both",
+      "skip": "Skip"
+    },
+    "full": "The server's disk is nearly full: the upload is paused. Free some space, then Resume.",
+    "failed": "The upload stopped",
+    "stopped": "The server stopped while placing the files: {why}. Resume to try again.",
+    "missing": "No file to choose again. | A file has not arrived whole: choose it again from the IN window, or leave it out. | {count} files have not arrived whole: choose them again from the IN window, or leave them out.",
+    "failed_files": "No file failed. | A file failed: open Uploads. | {count} files failed: open Uploads.",
+    "result": {
+      "new": "none new | {count} new | {count} new",
+      "replaced": "none replaced | {count} replaced | {count} replaced",
+      "renamed": "none renamed | {count} under a new name | {count} under a new name",
+      "skipped": "none skipped | {count} skipped | {count} skipped",
+      "same": "none the same | {count} the same as the one there | {count} the same as those there",
+      "unzipped": "no zip | {count} zip unpacked | {count} zips unpacked",
+      "dropped": "none left out | {count} left out | {count} left out",
+      "error": "no error | {count} failed | {count} failed"
+    },
+    "show_files": "Files",
+    "show_all": "Show all {count} files",
+    "item": {
+      "waiting": "waiting",
+      "sending": "sending",
+      "paused": "paused",
+      "sent": "arrived",
+      "error": "error",
+      "dropped": "left out",
+      "missing": "to choose again"
+    },
+    "state": {
+      "opening": "opening",
+      "asking": "to decide",
+      "sending": "sending",
+      "paused": "paused",
+      "completing": "placing",
+      "done": "done",
+      "error": "stopped"
+    },
+    "confirm_cancel": "Cancel the upload into {where}? What arrived is deleted; the files already placed stay.",
+    "clear_done": "Remove the done ones",
+    "empty": "No upload in this tab. An upload a reload cut short resumes from the project's IN window, by choosing the same files again."
   }
 }

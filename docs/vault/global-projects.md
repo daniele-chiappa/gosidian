@@ -80,13 +80,20 @@ skills and agents with the global ones. The rules:
 ## Templates live in the global project too
 
 When global is enabled, the bootstrap **scaffold templates**
-(`karpathy-wiki`, `minimal`, `team`) are seeded as editable notes under
+(`karpathy-wiki`, `minimal`, `team`, `rag`) are seeded as editable notes under
 `global/templates/<name>/` instead of the machine-owned
 `.gosidian/templates/`. That means you can edit, extend, or add presets
 as ordinary vault notes, and `memory_project_scaffold` will pick them
 up. Template-definition files under `global/templates/` are **excluded**
 from the skill/agent merge — they are scaffold sources (with
 `{{PLACEHOLDER}}` content), not runnable skills.
+
+The **skills gosidian ships** are seeded the same way, into
+`global/skills/`: today `design-project-databases`, how to decide which
+collections of a project become [database notes](databases.md) and how to
+design and fill them. A skill that is already there is never overwritten,
+so an edited copy survives upgrades; delete it to get the shipped one
+back at the next start.
 
 ## Promoting private → public
 

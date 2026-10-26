@@ -52,6 +52,13 @@ type Options struct {
 	// OnChange is told, after the change is saved, that a run changed: a
 	// step started or ended, the run's status moved. For live updates.
 	OnChange func(runID string)
+	// Gate limits the steps under way of each resource (IMP-196); nil: no
+	// limits.
+	Gate *Gate
+	// Fair takes the steps of a priority in turn among the projects, the
+	// one with the fewest running first, instead of in the order of their
+	// runs (IMP-196).
+	Fair bool
 }
 
 // Runner runs the queued steps of the store on a pool of goroutines.
@@ -83,7 +90,7 @@ func NewRunner(store *Store, opts Options) *Runner {
 	if opts.Now == nil {
 		opts.Now = func() time.Time { return time.Now().UTC() }
 	}
-	return &Runner{
+	r := &Runner{
 		store:    store,
 		opts:     opts,
 		wake:     make(chan struct{}, 1),
@@ -91,7 +98,20 @@ func NewRunner(store *Store, opts Options) *Runner {
 		running:  map[string]map[string]context.CancelFunc{},
 		runLocks: map[string]*sync.Mutex{},
 	}
+	if g := opts.Gate; g != nil {
+		// A place freed by a call outside the runner lets a queued step go.
+		g.mu.Lock()
+		g.onRelease = r.Wake
+		g.mu.Unlock()
+	}
+	return r
 }
+
+// Gate is the runner's gate, nil when its resources have no limits.
+func (r *Runner) Gate() *Gate { return r.opts.Gate }
+
+// Workers are the runner's workers, and those of the interactive lane.
+func (r *Runner) Workers() (int, int) { return r.opts.Workers, r.opts.InteractiveWorkers }
 
 func (r *Runner) changed(runID string) {
 	if r.opts.OnChange != nil {
@@ -245,7 +265,10 @@ func (r *Runner) RunAgain(runID, step string) error {
 
 // Cancel stops a run: the steps not ended yet are canceled, the running
 // ones see their context end.
-func (r *Runner) Cancel(runID string) error {
+func (r *Runner) Cancel(runID string) error { return r.CancelFor(runID, "canceled") }
+
+// CancelFor is Cancel with the reason the run's error says.
+func (r *Runner) CancelFor(runID, reason string) error {
 	l := r.runLock(runID)
 	l.Lock()
 	run, err := r.store.Run(runID)
@@ -266,10 +289,10 @@ func (r *Runner) Cancel(runID string) error {
 	var changes []StepChange
 	for _, st := range steps {
 		if !st.Status.Terminal() {
-			changes = append(changes, StepChange{Name: st.Name, Status: Canceled, Error: "canceled", Finished: now})
+			changes = append(changes, StepChange{Name: st.Name, Status: Canceled, Error: reason, Finished: now})
 		}
 	}
-	err = r.store.apply(runID, changes, &RunChange{Status: Canceled, Error: "canceled", Finished: now})
+	err = r.store.apply(runID, changes, &RunChange{Status: Canceled, Error: reason, Finished: now})
 	r.mu.Lock()
 	for _, cancel := range r.running[runID] {
 		cancel()
@@ -309,9 +332,15 @@ func (r *Runner) advance(runID string) error {
 		return err
 	}
 	changes, rc := e.Next(run, steps)
+	now := r.opts.Now()
+	for i := range changes {
+		if changes[i].Status == Queued && changes[i].Queued.IsZero() {
+			changes[i].Queued = now
+		}
+	}
 	steps = applied(steps, changes)
 	if rc == nil {
-		rc = derive(run, steps, r.opts.Now())
+		rc = derive(run, steps, now)
 	}
 	if rc != nil && rc.Status.Terminal() {
 		// The steps left behind by the end of the run.
@@ -428,6 +457,7 @@ func (r *Runner) Start(ctx context.Context) {
 			go func(st Step) {
 				defer wg.Done()
 				defer func() { <-slots; r.Wake() }()
+				defer r.opts.Gate.Release(st.Resources)
 				r.runStep(ctx, st)
 			}(st)
 		}
@@ -449,14 +479,14 @@ func (r *Runner) Start(ctx context.Context) {
 		// The interactive lane first, so its workers take the interactive
 		// steps and leave the others' workers to the rest.
 		if free := cap(islots) - len(islots); free > 0 {
-			steps, err := r.store.claim(now, free, r.opts.Lease, true)
+			steps, err := r.store.claim(now, free, r.opts.Lease, true, r.opts.Gate, r.opts.Fair)
 			if err != nil {
 				r.opts.Logger.Error("jobs: reading the queue", "err", err)
 			}
 			launch(steps, islots)
 		}
 		if free := r.opts.Workers - len(slots); free > 0 {
-			steps, err := r.store.claim(now, free, r.opts.Lease, false)
+			steps, err := r.store.claim(now, free, r.opts.Lease, false, r.opts.Gate, r.opts.Fair)
 			if err != nil {
 				r.opts.Logger.Error("jobs: reading the queue", "err", err)
 			}
@@ -535,7 +565,7 @@ func (r *Runner) runStep(ctx context.Context, st Step) {
 	case Done, Failed:
 		c.Finished = now
 	case Queued:
-		c.NotBefore = out.RetryAt
+		c.NotBefore, c.Queued = out.RetryAt, now
 	case Waiting:
 		c.WaitUntil = out.WaitUntil
 	default:

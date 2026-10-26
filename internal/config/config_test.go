@@ -3,6 +3,8 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -499,13 +501,75 @@ timeout = "20m"
 		t.Fatalf("plugins = %+v", cfg.Pipelines.Plugins)
 	}
 	for i := range want {
-		if cfg.Pipelines.Plugins[i] != want[i] {
+		if !reflect.DeepEqual(cfg.Pipelines.Plugins[i], want[i]) {
 			t.Errorf("plugin %d = %+v, want %+v", i, cfg.Pipelines.Plugins[i], want[i])
 		}
 	}
 	t.Setenv("GOSIDIAN_PIPELINES_PLUGINS", "docling")
 	if err := Default().ApplyEnv(); err == nil {
 		t.Error("an entry without =url is accepted")
+	}
+}
+
+// A plugin's token and expected manifest come from the environment, named
+// after the plugin (IMP-199): the token replaces a token_secret; a bad sha
+// or two token sources are refused.
+func TestPipelinesPluginsTokenAndAcceptEnv(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	body := "[[pipelines.plugins]]\nname = \"docling\"\nurl = \"http://d:8000/mcp\"\ntoken_secret = \"docling-token\"\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOSIDIAN_PIPELINES_PLUGINS", "vec-qdrant=http://v:8000/mcp")
+	t.Setenv("GOSIDIAN_PLUGIN_DOCLING_TOKEN", "t1")
+	t.Setenv("GOSIDIAN_PLUGIN_VEC_QDRANT_TOKEN", "t2")
+	t.Setenv("GOSIDIAN_PLUGIN_VEC_QDRANT_ACCEPT", "ABCDEF0123")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.ApplyEnv(); err != nil {
+		t.Fatal(err)
+	}
+	want := []PluginConfig{
+		{Name: "docling", URL: "http://d:8000/mcp", TokenEnv: "GOSIDIAN_PLUGIN_DOCLING_TOKEN"},
+		{Name: "vec-qdrant", URL: "http://v:8000/mcp", TokenEnv: "GOSIDIAN_PLUGIN_VEC_QDRANT_TOKEN", AcceptSHA: "abcdef0123"},
+	}
+	for i := range want {
+		if !reflect.DeepEqual(cfg.Pipelines.Plugins[i], want[i]) {
+			t.Errorf("plugin %d = %+v, want %+v", i, cfg.Pipelines.Plugins[i], want[i])
+		}
+	}
+	t.Setenv("GOSIDIAN_PLUGIN_VEC_QDRANT_ACCEPT", "xyz")
+	if err := Default().ApplyEnv(); err == nil || !strings.Contains(err.Error(), "accept_sha") {
+		t.Errorf("a bad accept_sha: %v", err)
+	}
+	t.Setenv("GOSIDIAN_PLUGIN_VEC_QDRANT_ACCEPT", "")
+	t.Setenv("GOSIDIAN_PIPELINES_LLM_URL", "http://llm:8000/v1")
+	t.Setenv("GOSIDIAN_PIPELINES_LLM_KEY_ENV", "LLM_KEY")
+	cfg = Default()
+	if err := cfg.ApplyEnv(); err != nil || cfg.Pipelines.LLM[0].APIKeyEnv != "LLM_KEY" {
+		t.Errorf("llm key env: %+v %v", cfg.Pipelines.LLM, err)
+	}
+	// One variable per plugin registers it, so compose files add theirs.
+	t.Setenv("GOSIDIAN_PLUGIN_STORAGE_URL", "http://storage:8000/mcp")
+	t.Setenv("GOSIDIAN_PLUGIN_VEC_QDRANT_URL", "http://v2:8000/mcp")
+	t.Setenv("GOSIDIAN_PLUGIN_EMPTY_URL", "")
+	cfg = Default()
+	if err := cfg.ApplyEnv(); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]PluginConfig{}
+	for _, p := range cfg.Pipelines.Plugins {
+		got[p.Name] = p
+	}
+	if len(got) != 2 || got["storage"].URL != "http://storage:8000/mcp" || got["vec-qdrant"].URL != "http://v2:8000/mcp" ||
+		got["vec-qdrant"].TokenEnv != "GOSIDIAN_PLUGIN_VEC_QDRANT_TOKEN" {
+		t.Errorf("plugins from their variables: %+v", cfg.Pipelines.Plugins)
+	}
+	both := []PluginConfig{{Name: "x", URL: "http://x", TokenEnv: "A", TokenSecret: "b"}}
+	if err := applyPluginEnv(both); err == nil {
+		t.Error("two token sources are accepted")
 	}
 }
 
@@ -632,6 +696,239 @@ func TestPipelinesInteractiveSettings(t *testing.T) {
 			t.Setenv(k, bad)
 			if err := Default().ApplyEnv(); err == nil {
 				t.Errorf("%s=%q accepted", k, bad)
+			}
+		})
+	}
+}
+
+// The caps of the uploads into IN (IMP-172): a reserve of 5 GiB and the
+// zips' caps by default, no other; 0 turns one off, in the file and in the
+// environment.
+func TestINDefaultsAndEnv(t *testing.T) {
+	c := Default()
+	if c.IN.ReserveBytes != 5<<30 || c.IN.ZipMaxEntries != 100000 || c.IN.ZipMaxRatio != 200 || c.IN.SessionTTL != 24*time.Hour ||
+		c.IN.MaxINBytes != 0 || c.IN.Web.MaxFileBytes != 0 || c.IN.Web.MaxUploadBytes != 0 || len(c.IN.Web.Extensions) != 0 {
+		t.Fatalf("defaults: %+v", c.IN)
+	}
+	p := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(p, []byte("[in]\nreserve_bytes = 0\nzip_max_ratio = 0\n[in.web]\nextensions = [\".PDF\", \"xml\", \"pdf\"]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.IN.ReserveBytes != 0 || c.IN.ZipMaxRatio != 0 || c.IN.ZipMaxEntries != 100000 || !slices.Equal(c.IN.Web.Extensions, []string{"pdf", "xml"}) {
+		t.Fatalf("from the file: %+v", c.IN)
+	}
+	t.Setenv("GOSIDIAN_IN_RESERVE_BYTES", "1073741824")
+	t.Setenv("GOSIDIAN_IN_WEB_MAX_FILE_BYTES", "0")
+	t.Setenv("GOSIDIAN_IN_WEB_MAX_UPLOAD_BYTES", "100")
+	t.Setenv("GOSIDIAN_IN_SESSION_TTL", "2h")
+	t.Setenv("GOSIDIAN_IN_WEB_EXTENSIONS", "zip, Csv")
+	t.Setenv("GOSIDIAN_IN_MCP_MAX_FILE_BYTES", "7")
+	t.Setenv("GOSIDIAN_IN_MCP_EXTENSIONS", "PDF")
+	if err := c.ApplyEnv(); err != nil {
+		t.Fatal(err)
+	}
+	if c.IN.ReserveBytes != 1<<30 || c.IN.Web.MaxUploadBytes != 100 || c.IN.SessionTTL != 2*time.Hour || !slices.Equal(c.IN.Web.Extensions, []string{"zip", "csv"}) ||
+		c.IN.MCP.MaxFileBytes != 7 || !slices.Equal(c.IN.MCP.Extensions, []string{"pdf"}) {
+		t.Fatalf("from the environment: %+v", c.IN)
+	}
+	t.Setenv("GOSIDIAN_IN_MAX_IN_BYTES", "-1")
+	if err := c.ApplyEnv(); err == nil {
+		t.Fatal("a cap below 0 is taken")
+	}
+}
+
+// The limits of IMP-196: max_concurrent and resources of the plugins and
+// providers, the shared resources, from the file and the environment; a
+// resource no [[pipelines.resources]] names, or named twice, is refused.
+func TestPipelinesResourceLimits(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	body := `[[pipelines.resources]]
+name = "gpu"
+max = 1
+
+[[pipelines.llm]]
+name = "ollama"
+base_url = "http://o:11434/v1"
+max_concurrent = 2
+resources = ["gpu"]
+
+[[pipelines.plugins]]
+name = "ocr"
+url = "http://ocr:8000/mcp"
+resources = ["gpu"]
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOSIDIAN_PLUGIN_OCR_MAX_CONCURRENT", "1")
+	t.Setenv("GOSIDIAN_PLUGIN_DOCLING_URL", "http://d:8000/mcp")
+	t.Setenv("GOSIDIAN_PLUGIN_DOCLING_RESOURCES", "gpu, cpu")
+	t.Setenv("GOSIDIAN_PIPELINES_RESOURCES", "gpu=1, cpu=4")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.ApplyEnv(); err != nil {
+		t.Fatal(err)
+	}
+	pc := cfg.Pipelines
+	if !reflect.DeepEqual(pc.Resources, []ResourceConfig{{"gpu", 1}, {"cpu", 4}}) {
+		t.Errorf("resources %+v", pc.Resources)
+	}
+	if p := pc.LLM[0]; p.MaxConcurrent != 2 || !slices.Equal(p.Resources, []string{"gpu"}) {
+		t.Errorf("provider %+v", p)
+	}
+	byName := map[string]PluginConfig{}
+	for _, p := range pc.Plugins {
+		byName[p.Name] = p
+	}
+	if p := byName["ocr"]; p.MaxConcurrent != 1 || !slices.Equal(p.Resources, []string{"gpu"}) {
+		t.Errorf("ocr %+v", p)
+	}
+	if p := byName["docling"]; !slices.Equal(p.Resources, []string{"gpu", "cpu"}) {
+		t.Errorf("docling %+v", p)
+	}
+
+	t.Setenv("GOSIDIAN_PLUGIN_DOCLING_RESOURCES", "disk")
+	if err := Default().ApplyEnv(); err == nil || !strings.Contains(err.Error(), `resource "disk"`) {
+		t.Errorf("an unknown resource: %v", err)
+	}
+	t.Setenv("GOSIDIAN_PLUGIN_DOCLING_RESOURCES", "")
+	for _, v := range []string{"gpu=1,gpu=2", "gpu", "gpu=-1", "g p u=1"} {
+		t.Setenv("GOSIDIAN_PIPELINES_RESOURCES", v)
+		if err := Default().ApplyEnv(); err == nil {
+			t.Errorf("GOSIDIAN_PIPELINES_RESOURCES=%q accepted", v)
+		}
+	}
+	t.Setenv("GOSIDIAN_PIPELINES_RESOURCES", "")
+	t.Setenv("GOSIDIAN_PLUGIN_OCR_MAX_CONCURRENT", "some")
+	t.Setenv("GOSIDIAN_PLUGIN_OCR_URL", "http://ocr:8000/mcp")
+	if err := Default().ApplyEnv(); err == nil || !strings.Contains(err.Error(), "MAX_CONCURRENT") {
+		t.Errorf("a max_concurrent not a number: %v", err)
+	}
+}
+
+// The categories of IMP-196 from the file, checked; fair is on unless the
+// file turns it off.
+func TestPipelinesCategories(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	body := `[pipelines]
+fair = false
+
+[[pipelines.categories]]
+name = "taglio"
+max_running = 1
+max_runs = 500
+replace = true
+priority = "low"
+wait = "30s"
+projects = ["rag"]
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.ApplyEnv(); err != nil {
+		t.Fatal(err)
+	}
+	want := CategoryConfig{Name: "taglio", MaxRunning: 1, MaxRuns: 500, Replace: true, Priority: "low", Wait: 30 * time.Second, Projects: []string{"rag"}}
+	if len(cfg.Pipelines.Categories) != 1 || !reflect.DeepEqual(cfg.Pipelines.Categories[0], want) || cfg.Pipelines.FairOn() {
+		t.Fatalf("categories %+v, fair %v", cfg.Pipelines.Categories, cfg.Pipelines.FairOn())
+	}
+	if !Default().Pipelines.FairOn() {
+		t.Error("fair is off by default")
+	}
+	for _, bad := range []CategoryConfig{{Name: "a b"}, {Name: "x", Priority: "urgent"}, {Name: "x", MaxRuns: -1}, {Name: "x", Wait: -time.Second}} {
+		pc := PipelinesConfig{Categories: []CategoryConfig{bad}}
+		if err := checkResources(pc); err == nil {
+			t.Errorf("%+v accepted", bad)
+		}
+	}
+	if err := checkResources(PipelinesConfig{Categories: []CategoryConfig{{Name: "x"}, {Name: "x"}}}); err == nil {
+		t.Error("a category named twice")
+	}
+}
+
+// The settings of the agent teams (IMP-195): their defaults, the file, the
+// environment over it, and the values refused, from either.
+func TestAgents(t *testing.T) {
+	if a := Default().Agents; a != (AgentsConfig{MaxRunning: 0, Lease: 15 * time.Minute, MaxAttempts: 3, MaxTasks: 50}) {
+		t.Fatalf("defaults %+v", a)
+	}
+	if err := Default().ApplyEnv(); err != nil {
+		t.Fatalf("the defaults are refused: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[agents]\nmax_running = 4\nlease = \"30m\"\nmax_attempts = 5\nmax_tasks = 200\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.ApplyEnv(); err != nil {
+		t.Fatal(err)
+	}
+	want := AgentsConfig{MaxRunning: 4, Lease: 30 * time.Minute, MaxAttempts: 5, MaxTasks: 200}
+	if c.Agents != want {
+		t.Errorf("from the file: %+v", c.Agents)
+	}
+	if err := Save(path, c); err != nil {
+		t.Fatal(err)
+	}
+	if again, err := Load(path); err != nil || again.Agents != want {
+		t.Errorf("saved and loaded: %+v %v", again.Agents, err)
+	}
+
+	t.Setenv("GOSIDIAN_AGENTS_MAX_RUNNING", "8")
+	t.Setenv("GOSIDIAN_AGENTS_LEASE", "1h")
+	t.Setenv("GOSIDIAN_AGENTS_MAX_ATTEMPTS", "1")
+	t.Setenv("GOSIDIAN_AGENTS_MAX_TASKS", "1000")
+	if err := c.ApplyEnv(); err != nil {
+		t.Fatal(err)
+	}
+	if want := (AgentsConfig{MaxRunning: 8, Lease: time.Hour, MaxAttempts: 1, MaxTasks: 1000}); c.Agents != want {
+		t.Errorf("from the environment: %+v", c.Agents)
+	}
+
+	for k, bads := range map[string][]string{
+		"GOSIDIAN_AGENTS_MAX_RUNNING":  {"-1", "lots"},
+		"GOSIDIAN_AGENTS_LEASE":        {"0", "30s", "25h", "soon", "-5m"},
+		"GOSIDIAN_AGENTS_MAX_ATTEMPTS": {"0", "21", "-3"},
+		"GOSIDIAN_AGENTS_MAX_TASKS":    {"0", "1001", "x"},
+	} {
+		for _, bad := range bads {
+			t.Run(k+"="+bad, func(t *testing.T) {
+				t.Setenv(k, bad)
+				if err := Default().ApplyEnv(); err == nil || !strings.Contains(err.Error(), k) {
+					t.Errorf("%s=%q: %v", k, bad, err)
+				}
+			})
+		}
+	}
+
+	for _, body := range []string{"lease = \"10s\"", "max_running = -2", "max_attempts = -1", "max_tasks = 5000"} {
+		t.Run(body, func(t *testing.T) {
+			for _, k := range []string{"GOSIDIAN_AGENTS_MAX_RUNNING", "GOSIDIAN_AGENTS_LEASE", "GOSIDIAN_AGENTS_MAX_ATTEMPTS", "GOSIDIAN_AGENTS_MAX_TASKS"} {
+				t.Setenv(k, "")
+			}
+			p := filepath.Join(t.TempDir(), "config.toml")
+			if err := os.WriteFile(p, []byte("[agents]\n"+body+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			c, err := Load(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := c.ApplyEnv(); err == nil || !strings.Contains(err.Error(), "[agents]") {
+				t.Errorf("%s in the file: %v", body, err)
 			}
 		})
 	}

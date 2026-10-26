@@ -1,0 +1,55 @@
+# gosidian presets: the base. The server alone, from its published image;
+# a purpose adds its own file with -f (docs/deployment.md#presets):
+#
+#   ./init.sh                      # once: .env with the keys and the tokens
+#   docker compose up -d           # gosidian alone
+#   docker compose -f docker-compose.yml -f docker-compose.rag.yml up -d
+#   docker compose -f docker-compose.yml -f docker-compose.rag.yml \
+#                  -f docker-compose.storage.yml up -d
+#
+# The images are pinned: a release of gosidian moves them, with the
+# manifests the plugins are expected to serve.
+
+name: gosidian
+
+services:
+  gosidian:
+    image: ghcr.io/daniele-chiappa/gosidian:v2.118.0
+    restart: unless-stopped
+
+    # The image runs as uid 65532 and writes only to /vault, /data and the
+    # temporary directory: the rest is read-only, without capabilities.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    # On the loopback by default: put a reverse proxy in front for TLS, or
+    # set GOSIDIAN_BIND=0.0.0.0 in .env to reach it on the network.
+    ports:
+      - "${GOSIDIAN_BIND:-127.0.0.1}:${GOSIDIAN_PORT:-8080}:8080"
+
+    volumes:
+      - ./vault:/vault
+      # Credentials, configuration, audit log and index, out of the vault.
+      - ./state:/data
+
+    environment:
+      GOSIDIAN_VAULT: /vault
+      GOSIDIAN_STATE_DIR: /data
+      GOSIDIAN_ADDR: ":8080"
+      # Seals the secrets the server keeps (a bot's tokens, a git token set
+      # from the web UI): 32 bytes in base64, written by init.sh.
+      GOSIDIAN_SECRETS_KEY: ${GOSIDIAN_SECRETS_KEY:?run ./init.sh first}
+      # The zone of the times and days gosidian writes into notes.
+      TZ: ${TZ:-UTC}
+
+    healthcheck:
+      test: ["CMD", "/gosidian", "healthcheck"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s

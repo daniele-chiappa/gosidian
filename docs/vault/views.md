@@ -83,7 +83,12 @@ Relative values:
   list, `=` matches an element; `contains` would match text inside one,
   so `IMP-12` would find `IMP-124` too).
   `this.path` and `this.name` (the file name without extension) always
-  exist.
+  exist, and are the note's own: a frontmatter field named `path` or
+  `name` does not replace them. Do not name a field `path`, `name`,
+  `modified`, `links`, `created_by`, `modified_by`, `created_at` or
+  `modified_at`: views and queries compute those from the note or the
+  audit, and lint warns about a database that declares one (call it
+  `folder`, say).
 - `today`, `today-7d`, `today+30d` are dates relative to the day the view
   is computed, in the server's [time zone](../configuration.md#time-zone):
   `closed >= today-30d` lists what closed in the last month.

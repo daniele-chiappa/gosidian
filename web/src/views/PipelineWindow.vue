@@ -479,6 +479,7 @@ onBeforeUnmount(() => {
         v-if="writable"
         v-model:source="draft"
         :catalog="catalog?.nodes ?? []"
+        :trigger-kinds="catalog?.triggers.length ? catalog.triggers : undefined"
         :run="run"
         :problems="problems"
         :labels="labels"

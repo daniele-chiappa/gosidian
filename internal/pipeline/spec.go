@@ -52,7 +52,26 @@ const (
 	// the trigger's statuses (IMP-206): one run per run that ended. A run
 	// it starts starts none when it ends (runtrigger.go).
 	TriggerRun = "run"
+	// TriggerQueue: the project's queue of steps is long, or one has
+	// waited long (IMP-196): one run each time it becomes so
+	// (queuetrigger.go).
+	TriggerQueue = "queue"
+	// TriggerTask: a task of a team of agents is ready, an objective's
+	// sub-tasks closed, or a team spent its budget (IMP-195,
+	// tasktrigger.go).
+	TriggerTask = "task"
 )
+
+// Triggers are the triggers a pipeline declares, in the order of the docs:
+// the web UI's editor offers them (GET /api/v1/pipeline-nodes, IMP-207).
+// TriggerPipeline is no trigger a pipeline declares.
+var Triggers = []string{TriggerManual, TriggerExternal, TriggerChat, TriggerIngest, TriggerSchedule, TriggerIN, TriggerCommit, TriggerRun, TriggerQueue, TriggerTask}
+
+// roleName is how a role of a team is named (fleet).
+var roleName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
+
+// categoryName is how a category is named.
+var categoryName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
 // runStatuses are the ends of a run a run trigger may take.
 var runStatuses = []string{string(jobs.Done), string(jobs.Failed), string(jobs.Canceled)}
@@ -104,6 +123,23 @@ type Trigger struct {
 	// whose runs it takes, relative to the project (pipelines/*); empty:
 	// all of the project's.
 	Pipelines string `json:"pipelines,omitempty"`
+	// Resource, for queue, is the resource whose queue it watches
+	// (plugin:<name>, llm:<provider>, res:<name>); empty: every step of
+	// the project. Queued is how many steps queued make the queue long,
+	// Waited how long the oldest one waits; 0 does not count.
+	Resource string        `json:"resource,omitempty"`
+	Queued   int           `json:"queued,omitempty"`
+	Waited   time.Duration `json:"waited,omitempty"`
+	// Team, for task, is the team whose tasks it takes, a link to its
+	// note as written (squadra, [[fitness/squadra]]); empty: every team of
+	// the project. Roles are the roles whose tasks it takes; empty: all.
+	// Events are ready, children_done and budget; ready when it names none.
+	Team   string   `json:"team,omitempty"`
+	Roles  []string `json:"roles,omitempty"`
+	Events []string `json:"events,omitempty"`
+	// Coordinator, for task: true takes only the tasks of the team's
+	// coordinator, false only the others'; unset, both.
+	Coordinator *bool `json:"coordinator,omitempty"`
 }
 
 // Retry says how often a failed node is tried again.
@@ -140,6 +176,29 @@ type Spec struct {
 	Answer string `json:"answer,omitempty"`
 	// Priority is PriorityInteractive, or empty for a normal pipeline.
 	Priority string `json:"priority,omitempty"`
+	// Category is the category of its runs (IMP-196): the rules of the
+	// server's [[pipelines.categories]] of that name; empty is default,
+	// chat for a pipeline that starts on chat (CategoryOf).
+	Category string `json:"category,omitempty"`
+}
+
+// The categories a pipeline is in when it names none (IMP-196), and the
+// low priority a category may give its runs.
+const (
+	CategoryDefault = "default"
+	CategoryChat    = "chat"
+	CategoryLow     = "low"
+)
+
+// CategoryOf is the category of the pipeline's runs.
+func (s *Spec) CategoryOf() string {
+	switch {
+	case s.Category != "":
+		return s.Category
+	case s.Trigger.On == TriggerChat:
+		return CategoryChat
+	}
+	return CategoryDefault
 }
 
 // Interactive says whether the pipeline's runs are interactive: it says
@@ -205,10 +264,19 @@ type rawSpec struct {
 		Skip      []string `yaml:"skip"`
 		Status    []string `yaml:"status"`
 		Pipelines string   `yaml:"pipelines"`
+		Resource  string   `yaml:"resource"`
+		Queued    int      `yaml:"queued"`
+		Waited    string   `yaml:"waited"`
+		Team      string   `yaml:"team"`
+		Roles     []string `yaml:"roles"`
+		Events    []string `yaml:"events"`
+		// Coordinator, for task (IMP-195 phase 1b).
+		Coordinator *bool `yaml:"coordinator"`
 	} `yaml:"trigger"`
 	Nodes    yaml.Node `yaml:"nodes"`
 	Answer   string    `yaml:"answer"`
 	Priority string    `yaml:"priority"`
+	Category string    `yaml:"category"`
 }
 
 // Types tells which node types exist, for Parse to check `use`.
@@ -286,11 +354,58 @@ func Parse(src string, types Types) (*Spec, error) {
 			return nil, fmt.Errorf("trigger run: pipelines %q is a glob on the project's pipeline notes, relative to it (pipelines/*)", r.Trigger.Pipelines)
 		}
 		s.Trigger.Pipelines = g
+	case TriggerQueue:
+		res := strings.TrimSpace(r.Trigger.Resource)
+		if res != "" && !strings.HasPrefix(res, ResourcePlugin) && !strings.HasPrefix(res, ResourceLLM) && !strings.HasPrefix(res, ResourceShared) && !strings.HasPrefix(res, ResourceCategory) {
+			return nil, fmt.Errorf("trigger queue: resource %q is plugin:<name>, llm:<provider>, res:<name> or cat:<category>; empty for every step", res)
+		}
+		s.Trigger.Resource, s.Trigger.Queued = res, r.Trigger.Queued
+		if w := strings.TrimSpace(r.Trigger.Waited); w != "" {
+			d, err := time.ParseDuration(w)
+			if err != nil || d < 0 {
+				return nil, fmt.Errorf("trigger queue: waited %q is a time (30m, 2h)", w)
+			}
+			s.Trigger.Waited = d
+		}
+		if s.Trigger.Queued < 0 || (s.Trigger.Queued == 0 && s.Trigger.Waited == 0) {
+			return nil, fmt.Errorf("trigger queue: queued (steps queued) or waited (how long the oldest waits: 30m) says when the queue is long")
+		}
+	case TriggerTask:
+		s.Trigger.Team = strings.TrimSpace(r.Trigger.Team)
+		if strings.Contains(s.Trigger.Team, "..") || strings.Contains(s.Trigger.Team, "{{") {
+			return nil, fmt.Errorf("trigger task: team %q is the team's note, a link to it ([[fitness/squadra]])", s.Trigger.Team)
+		}
+		for _, ro := range r.Trigger.Roles {
+			ro = strings.TrimSpace(ro)
+			if !roleName.MatchString(ro) {
+				return nil, fmt.Errorf("trigger task: role %q is a role of the team (lower-case letters, digits and -)", ro)
+			}
+			s.Trigger.Roles = append(s.Trigger.Roles, ro)
+		}
+		for _, ev := range r.Trigger.Events {
+			ev = strings.TrimSpace(ev)
+			if !slices.Contains(taskEvents, ev) {
+				return nil, fmt.Errorf("trigger task: event %q is %s", ev, strings.Join(taskEvents, ", "))
+			}
+			if !slices.Contains(s.Trigger.Events, ev) {
+				s.Trigger.Events = append(s.Trigger.Events, ev)
+			}
+		}
+		if len(s.Trigger.Events) == 0 {
+			s.Trigger.Events = []string{EventReady}
+		}
+		s.Trigger.Coordinator = r.Trigger.Coordinator
 	default:
-		return nil, fmt.Errorf("trigger on %q: it is manual, external, chat, ingest, schedule, in, commit or run", s.Trigger.On)
+		return nil, fmt.Errorf("trigger on %q: it is %s or %s", s.Trigger.On, strings.Join(Triggers[:len(Triggers)-1], ", "), Triggers[len(Triggers)-1])
 	}
 	if s.Trigger.On != TriggerRun && (len(r.Trigger.Status) > 0 || strings.TrimSpace(r.Trigger.Pipelines) != "") {
 		return nil, fmt.Errorf("trigger %s: status and pipelines are for the run trigger (the runs whose end starts it)", s.Trigger.On)
+	}
+	if s.Trigger.On != TriggerQueue && (strings.TrimSpace(r.Trigger.Resource) != "" || r.Trigger.Queued != 0 || strings.TrimSpace(r.Trigger.Waited) != "") {
+		return nil, fmt.Errorf("trigger %s: resource, queued and waited are for the queue trigger (a queue grown long)", s.Trigger.On)
+	}
+	if s.Trigger.On != TriggerTask && (strings.TrimSpace(r.Trigger.Team) != "" || len(r.Trigger.Roles) > 0 || len(r.Trigger.Events) > 0 || r.Trigger.Coordinator != nil) {
+		return nil, fmt.Errorf("trigger %s: team, roles, events and coordinator are for the task trigger (the tasks of a team of agents)", s.Trigger.On)
 	}
 	if r.Trigger.Take != nil && s.Trigger.On != TriggerIN {
 		return nil, fmt.Errorf("trigger %s: take is for the in trigger (take: false leaves the files' status alone)", s.Trigger.On)
@@ -304,6 +419,12 @@ func Parse(src string, types Types) (*Spec, error) {
 			return nil, fmt.Errorf("trigger commit: skip %q is a pipeline of the project, as pipeline.run names it", p)
 		}
 		s.Trigger.Skip = append(s.Trigger.Skip, p)
+	}
+	if c := strings.TrimSpace(r.Category); c != "" {
+		if !categoryName.MatchString(c) {
+			return nil, fmt.Errorf("category %q: letters, digits, - and _ (a category of the server's [[pipelines.categories]])", c)
+		}
+		s.Category = c
 	}
 	switch s.Priority {
 	case "", "normal":

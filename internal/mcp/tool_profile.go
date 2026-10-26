@@ -46,6 +46,13 @@ var coreToolSet = map[string]struct{}{
 	"memory_claim_handoff":    {},
 	"memory_complete_handoff": {},
 	"memory_wait_changes":     {},
+	// The tasks of the teams of agents (IMP-195): the run tokens are core.
+	"memory_tasks":          {},
+	"memory_task_create":    {},
+	"memory_task_claim":     {},
+	"memory_task_heartbeat": {},
+	"memory_task_update":    {},
+	"memory_task_complete":  {},
 }
 
 // filterToolsByProfile is the ToolFilterFunc wired into the MCPServer. The

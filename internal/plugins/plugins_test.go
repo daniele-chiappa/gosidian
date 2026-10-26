@@ -655,10 +655,12 @@ func TestNode_OptionalFiles(t *testing.T) {
 	if _, err := reg.Accept(ctx, "agent", st.SHA, "test"); err != nil {
 		t.Fatal(err)
 	}
-	// A file field the node's schema does not require: left out, or an empty list.
+	// A file field the node's schema does not require: left out, an empty
+	// list, or empty (a template's "{{ gate.image }}" with no image).
 	for name, body := range map[string]string{
 		"left out":   "{id: c, use: agent.peek, with: {q: x}}",
 		"empty list": "{id: c, use: agent.peek, with: {q: x, docs: []}}",
+		"empty":      "{id: c, use: agent.peek, with: {q: x, docs: \"\"}}",
 	} {
 		t.Run(name, func(t *testing.T) {
 			e, host := newEngine(t, reg)
@@ -765,7 +767,7 @@ type fakeRunTokens struct {
 	minted []string
 }
 
-func (f *fakeRunTokens) MintRun(name, project string, write bool, ttl time.Duration) (string, string, error) {
+func (f *fakeRunTokens) MintRun(name, project string, write bool, ttl time.Duration, runID string, writePaths []string) (string, string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.n++
@@ -774,7 +776,7 @@ func (f *fakeRunTokens) MintRun(name, project string, write bool, ttl time.Durat
 		f.live = map[string]string{}
 	}
 	f.live[id] = secret
-	f.minted = append(f.minted, fmt.Sprintf("%s %s write=%v ttl=%v", name, project, write, ttl > runTokenSlack))
+	f.minted = append(f.minted, fmt.Sprintf("%s %s write=%v ttl=%v run=%s paths=%v", name, project, write, ttl > runTokenSlack, runID, writePaths))
 	return id, secret, nil
 }
 
@@ -873,7 +875,7 @@ func TestNode_MCPToken(t *testing.T) {
 	tokens.mu.Lock()
 	minted, live := fmt.Sprint(tokens.minted), len(tokens.live)
 	tokens.mu.Unlock()
-	if minted != fmt.Sprintf("[run-%s-a p write=false ttl=true]", run.ID) || live != 0 {
+	if minted != fmt.Sprintf("[run-%s-a p write=false ttl=true run=%s paths=[]]", run.ID, run.ID) || live != 0 {
 		t.Errorf("minted %s, %d still live", minted, live)
 	}
 	// write is more than the manifest was accepted with.
@@ -903,5 +905,116 @@ func TestNode_MCPToken(t *testing.T) {
 	}
 	if run = waitEnd(t, e2, run.ID); run.Status != jobs.Failed || !strings.Contains(run.Error, "mcp_url") {
 		t.Errorf("no minter: %s, %q", run.Status, run.Error)
+	}
+}
+
+// fakeRunScopes holds the role's folders of the runs of a team's tasks:
+// a run absent is not a task's; "broken" fails.
+type fakeRunScopes map[string][]string
+
+func (f fakeRunScopes) RunWritePaths(runID string) ([]string, bool, error) {
+	if runID == "broken" {
+		return nil, false, errors.New("task not found")
+	}
+	paths, ok := f[runID]
+	return paths, ok, nil
+}
+
+// A write token of a run of a team's task writes only in its role's
+// folders, and none is minted when the role writes nowhere; another run's
+// writes the whole project, and a read token is never narrowed (IMP-195).
+func TestNode_RunTokenScopes(t *testing.T) {
+	tokens := &fakeRunTokens{}
+	reg, err := New(nil, t.TempDir(), nil, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.SetRunTokens(tokens)
+	reg.SetRunScopes(fakeRunScopes{"task": {"p/kb/", "p/out/"}, "mute": nil})
+	e, _ := newEngine(t, reg)
+	c := Config{Name: "coder", MCPURL: "http://gosidian.test/mcp"}
+	acc := Accepted{Manifest: Manifest{Permissions: Permissions{MCP: []string{AccessRead, AccessWrite}}}}
+	n := node{r: reg, use: "coder.run"}
+	mint := func(runID, level string) (string, error) {
+		t.Helper()
+		env := &pipeline.Env{Run: jobs.Run{ID: runID}, Project: "p", Engine: e}
+		before := len(tokens.minted)
+		secret, revoke, err := n.runToken(context.Background(), env, c, acc, map[string]any{"mcp": level})
+		if revoke != nil {
+			revoke()
+		}
+		if err != nil || secret == "" {
+			if len(tokens.minted) != before {
+				t.Errorf("%s %s: refused, yet minted %v", runID, level, tokens.minted[before:])
+			}
+			return "", err
+		}
+		return tokens.minted[len(tokens.minted)-1], nil
+	}
+	for _, tc := range []struct{ run, level, want string }{
+		{"task", "write", "run-task p write=true ttl=true run=task paths=[p/kb/ p/out/]"},
+		{"plain", "write", "run-plain p write=true ttl=true run=plain paths=[]"},
+		{"task", "read", "run-task p write=false ttl=true run=task paths=[]"},
+		{"mute", "read", "run-mute p write=false ttl=true run=mute paths=[]"},
+	} {
+		if got, err := mint(tc.run, tc.level); err != nil || got != tc.want {
+			t.Errorf("%s %s: %q, %v; want %q", tc.run, tc.level, got, err, tc.want)
+		}
+	}
+	if _, err := mint("mute", "write"); err == nil || err.Error() != "with.mcp write: the run's role writes nowhere in the vault (writes in the team)" {
+		t.Errorf("a role that writes nowhere: %v", err)
+	}
+	if _, err := mint("broken", "write"); err == nil || !strings.Contains(err.Error(), "with.mcp write: task not found") {
+		t.Errorf("a failing lookup: %v", err)
+	}
+	if len(tokens.live) != 0 {
+		t.Errorf("%d tokens still live", len(tokens.live))
+	}
+}
+
+// A plugin configured from the environment (IMP-199): its token from a
+// variable, and the manifest the preset expects accepted by the check, by
+// "preset". Another manifest waits for an owner; pinning the new one in the
+// preset lets it through.
+func TestRegistry_TokenEnvAndAcceptExpected(t *testing.T) {
+	var version atomic.Value
+	version.Store("1.0")
+	ts := fakePlugin(t, &version)
+	t.Setenv("GOSIDIAN_PLUGIN_DOCLING_TOKEN", "t0k")
+	dir := t.TempDir()
+	ctx := context.Background()
+	newReg := func(accept string) *Registry {
+		t.Helper()
+		reg, err := New([]Config{{Name: "docling", URL: ts.URL + "/mcp", TokenEnv: "GOSIDIAN_PLUGIN_DOCLING_TOKEN", AcceptSHA: accept}}, dir, nil, "test", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reg.Check(ctx)
+		return reg
+	}
+	st, _ := newReg("").State("docling")
+	if st.Status != StatusUnaccepted || len(st.SHA) != 64 {
+		t.Fatalf("with the token from the environment: %+v", st)
+	}
+	v1 := st.SHA
+	if st, _ = newReg("deadbeef00").State("docling"); st.Status != StatusUnaccepted {
+		t.Fatalf("another expected manifest: %+v", st)
+	}
+	st, _ = newReg(v1[:12]).State("docling")
+	if st.Status != StatusOK || st.Accepted == nil || st.Accepted.By != "preset" || st.Accepted.SHA != v1 {
+		t.Fatalf("the expected manifest: %+v", st)
+	}
+	version.Store("2.0")
+	st, _ = newReg(v1[:12]).State("docling")
+	if st.Status != StatusChanged || st.Accepted.SHA != v1 {
+		t.Fatalf("a new manifest, the old one pinned: %+v", st)
+	}
+	v2 := st.SHA
+	if st, _ = newReg(v2[:12]).State("docling"); st.Status != StatusOK || st.Accepted.SHA != v2 {
+		t.Fatalf("the new manifest pinned: %+v", st)
+	}
+	t.Setenv("GOSIDIAN_PLUGIN_DOCLING_TOKEN", "")
+	if st, _ = newReg(v2[:12]).State("docling"); st.Status != StatusDown || !strings.Contains(st.Error, "GOSIDIAN_PLUGIN_DOCLING_TOKEN") {
+		t.Fatalf("an empty token variable: %+v", st)
 	}
 }

@@ -36,6 +36,9 @@ type RuleState struct {
 	Error string `json:"error,omitempty"`
 	// Warning is a rule over MaxRows rows, logged once until it changes.
 	Warning string `json:"warning,omitempty"`
+	// Pending holds the keys of Fired whose action is queued on the job
+	// runner, each with its run's id (IMP-166): not fired again meanwhile.
+	Pending map[string]string `json:"pending,omitempty"`
 }
 
 // Run is one execution of a rule, or its failure.
@@ -49,6 +52,8 @@ type Run struct {
 	Rows    []string `json:"rows,omitempty"`
 	Error   string   `json:"error,omitempty"`
 	Warning string   `json:"warning,omitempty"`
+	// Job is the run of the job runner the action went to, if it did.
+	Job string `json:"job,omitempty"`
 }
 
 // Store keeps the State in a JSON file, written whole through a temporary

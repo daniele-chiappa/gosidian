@@ -27,7 +27,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_GIT_AUTHOR_EMAIL` | `git.author_email` | `gosidian@localhost` |
 | `GOSIDIAN_GIT_DEBOUNCE` | `git.commit_debounce` | `30s` |
 | `GOSIDIAN_GIT_PUSH` | `git.push` | `false` (when on, each commit is pushed, with the annotated tags of the branch the remote lacks: those of [`vault.commit`](pipelines.md#revisions-as-git-history)) |
-| `GOSIDIAN_GIT_TOKEN_ENV` | `git.token_env` | empty |
+| `GOSIDIAN_GIT_TOKEN_ENV` | `git.token_env` | empty (the variable holding the push token; the push hands it to git as an `http.extraheader` in the environment, after any `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n` you set yourself, such as a `safe.directory` for a vault another uid owns: those stay) |
 | `GOSIDIAN_GIT_MAINTENANCE` | `git.maintenance` | `03:30` (when git packs the repository: a time of day in the server's time zone, `auto` for git's own after each commit, or `off`; see [Git maintenance](#git-maintenance)) |
 | `GOSIDIAN_MCP_WRITE_PER_MINUTE` | `mcp.write_per_minute` | `60` (writes per minute of one MCP session, rolling window; all the sessions of a token together get 5× that, IMP-141) |
 | `GOSIDIAN_MCP_MAX_NOTE_BYTES` | `mcp.max_note_bytes` | `1048576` (1 MiB) |
@@ -40,9 +40,21 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_MCP_SHRINK_GUARD_MIN_BYTES` | `mcp.shrink_guard_min_bytes` | `1024` (the guard looks only at notes of at least this size) |
 | `GOSIDIAN_UPLOAD_QUOTA_BYTES` | `uploads.quota_bytes` | `0` (no limit; bytes of attachments an account may upload per window, its MCP tokens and web uploads together) |
 | `GOSIDIAN_UPLOAD_QUOTA_WINDOW` | `uploads.quota_window` | `24h` (the sliding window of the quota) |
+| `GOSIDIAN_IN_RESERVE_BYTES` | `in.reserve_bytes` | `5368709120` (5 GiB: the free disk an [upload into IN](in.md#uploading) leaves on the IN folders' filesystem; under it a session, a piece or a zip's next file is refused with 507; `0` turns it off; see [Uploads into IN](#uploads-into-in)) |
+| `GOSIDIAN_IN_MAX_IN_BYTES` | `in.max_in_bytes` | `0` (no cap: the bytes of the files on the disk of a project's IN folder, an upload included) |
+| `GOSIDIAN_IN_SESSION_TTL` | `in.session_ttl` | `24h` (an upload with no piece for that long goes, with what arrived; a done one is forgotten as long after) |
+| `GOSIDIAN_IN_ZIP_MAX_ENTRIES` | `in.zip_max_entries` | `100000` (the files of a zip the server unpacks; `0`: no cap) |
+| `GOSIDIAN_IN_ZIP_MAX_BYTES` | `in.zip_max_bytes` | `0` (no cap, the reserve holds: their bytes) |
+| `GOSIDIAN_IN_ZIP_MAX_RATIO` | `in.zip_max_ratio` | `200` (their bytes over the zip's, for a zip whose files are over 100 MiB; `0`: no cap) |
+| `GOSIDIAN_IN_WEB_MAX_FILE_BYTES` | `in.web.max_file_bytes` | `0` (no cap: a file uploaded from the web UI or the REST API, a zip before it is unpacked) |
+| `GOSIDIAN_IN_WEB_MAX_UPLOAD_BYTES` | `in.web.max_upload_bytes` | `0` (no cap: the files of one upload together) |
+| `GOSIDIAN_IN_WEB_EXTENSIONS` | `in.web.extensions` | empty (any kind; comma-separated, `pdf,xml`: the only kinds taken, in a zip too, which is taken whatever they say) |
+| `GOSIDIAN_IN_MCP_MAX_FILE_BYTES` | `in.mcp.max_file_bytes` | `0` (no cap: a file an agent uploads with `memory_in_upload`) |
+| `GOSIDIAN_IN_MCP_MAX_UPLOAD_BYTES` | `in.mcp.max_upload_bytes` | `0` (no cap: the files of one upload of an agent) |
+| `GOSIDIAN_IN_MCP_EXTENSIONS` | `in.mcp.extensions` | empty (any kind: the kinds an agent may upload, as for `in.web`) |
 | `GOSIDIAN_MCP_OPEN` | `mcp.open` | `false` (`true` lets MCP requests without a token run as admin while no token exists, for local use only; the first token closes it) |
-| `GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS` | `mcp.allowed_upload_roots` | empty (vault only) |
-| `GOSIDIAN_MCP_BRIDGE_DIR` | `mcp.bridge_dir` | empty (off; staging dir for cheap `bridge_filename` uploads, IMP-059) |
+| `GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS` | `mcp.allowed_upload_roots` | empty (vault only). A folder that stages files for `source_path` imports inside the vault, a hidden one included, must be listed here or be the bridge dir: the vault itself serves only what the token may read, and no hidden folder ([upload](mcp/upload.md)) |
+| `GOSIDIAN_MCP_BRIDGE_DIR` | `mcp.bridge_dir` | empty (off; staging dir for cheap `bridge_filename` uploads, IMP-059). Set inside the vault, it and the upload roots there stay out of git sync: the managed `.gitignore` names them, and a commit that already holds them drops them from the index (the history keeps what was pushed); the log says so at each start |
 | `GOSIDIAN_OAUTH_ENABLED` | `oauth.enabled` | `false` (embedded OAuth 2.1 authorization server for claude.ai / ChatGPT / Claude Code logins, see [Authentication](mcp/authentication.md#oauth-21-for-hosted-clients-claudeai-chatgpt-claude-code)) |
 | `GOSIDIAN_OAUTH_ISSUER` | `oauth.issuer` | empty (required when enabled: the public HTTPS origin clients use, e.g. `https://notes.example.com`, without a path, which is refused at start; the MCP resource is `<issuer>/mcp`) |
 | `GOSIDIAN_OAUTH_ACCESS_TTL` | `oauth.access_ttl` | `1h` (in-memory access tokens) |
@@ -79,8 +91,16 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_PIPELINES_FILES_URL` | `pipelines.files_url` | the public URL (the server's address as the [plugins](plugins.md#files-by-reference) reach it, for the files they fetch by reference: `http://gosidian:8080` on a compose network; a plugin's own `files_url` wins) |
 | `GOSIDIAN_PIPELINES_MCP_URL` | `pipelines.mcp_url` | `files_url` (else the public URL) with `/mcp`: gosidian's MCP endpoint as the plugins reach it, for the nodes that ask for it with a token of the call ([plugins](plugins.md#gosidians-mcp-for-a-call)); a plugin's own `mcp_url` wins |
 | `GOSIDIAN_PIPELINES_TIMEZONE` | `pipelines.timezone` | the automations' zone, else `TZ` (the days and times of the `schedule` triggers and the days of the `<pipeline>-runs.md` lines) |
-| `GOSIDIAN_PIPELINES_LLM_URL`, `_LLM_MODEL`, `_LLM_KEY_SECRET` | `[[pipelines.llm]]` | none (one OpenAI-compatible provider named `default`: its URL up to `/v1`, its model, the name of the secret with its key; more providers in the file) |
-| `GOSIDIAN_PIPELINES_PLUGINS` | `[[pipelines.plugins]]` | none (comma-separated `name=url` entries: [plugins](plugins.md) whose MCP endpoint is the url, without a token; an entry replaces the url of the file's plugin of the same name. A token needs `token_secret` in the file) |
+| `GOSIDIAN_PIPELINES_LLM_URL`, `_LLM_MODEL`, `_LLM_KEY_SECRET`, `_LLM_KEY_ENV` | `[[pipelines.llm]]` | none (one OpenAI-compatible provider named `default`: its URL up to `/v1`, its model, and its key, as the name of a secret or the name of the variable that holds it (`api_key_env` in the file; an empty variable is no key); more providers in the file) |
+| `GOSIDIAN_PIPELINES_PLUGINS` | `[[pipelines.plugins]]` | none (comma-separated `name=url` entries: [plugins](plugins.md) whose MCP endpoint is the url, without a token; an entry replaces the url of the file's plugin of the same name) |
+| `GOSIDIAN_PLUGIN_<NAME>_URL`, `_TOKEN`, `_ACCEPT` | `url`, `token_env`, `accept_sha` of `[[pipelines.plugins]]` | none (a plugin registered from its own variables, `<NAME>` in upper case with `_` for `-`: its MCP endpoint, its bearer token in place of a `token_secret`, and the manifest the installer expects, which the server then accepts by itself: [plugins](plugins.md#registering-a-plugin)) |
+| `GOSIDIAN_PLUGIN_<NAME>_MAX_CONCURRENT`, `_RESOURCES` | `max_concurrent`, `resources` of `[[pipelines.plugins]]` | its manifest's suggestion, else no limit; none (the plugin's calls at once, the steps' and the agents' together, and the shared resources it takes a place in: [calls at once](pipelines.md#calls-at-once)) |
+| `GOSIDIAN_PIPELINES_RESOURCES` | `[[pipelines.resources]]` | none (comma-separated `name=calls`: resources several plugins or providers share, such as one GPU) |
+| `GOSIDIAN_PIPELINES_LLM_MAX_CONCURRENT`, `_LLM_RESOURCES` | `max_concurrent`, `resources` of `[[pipelines.llm]]` | no limit; none (the provider `default`'s calls at once from the steps, and its shared resources) |
+| `GOSIDIAN_AGENTS_MAX_RUNNING` | `agents.max_running` | `0` (no cap: the agents of all the teams at work at once, on the tasks of every project; see [Agent teams](#agent-teams)) |
+| `GOSIDIAN_AGENTS_LEASE` | `agents.lease` | `15m` (how long a task an outside agent takes stays its own, each heartbeat renewing it; from `1m` to `24h`) |
+| `GOSIDIAN_AGENTS_MAX_ATTEMPTS` | `agents.max_attempts` | `3` (the attempts after which a task goes failed; from 1 to 20) |
+| `GOSIDIAN_AGENTS_MAX_TASKS` | `agents.max_tasks` | `50` (the most sub-tasks an objective may have; from 1 to 1000) |
 | `GOSIDIAN_WEB_GRAPH_DEFAULT_NODES` | `web.graph_default_nodes` | `2000` (the most linked nodes a graph asked without a limit keeps; at most `graph_max_nodes`) |
 | `GOSIDIAN_WEB_GRAPH_MAX_NODES` | `web.graph_max_nodes` | `5000` (the most nodes a graph, a `graph` block or a plugin's graph may have) |
 | `GOSIDIAN_WEB_GRAPH_MAX_EDGES` | `web.graph_max_edges` | `50000` (the most edges of a plugin's graph) |
@@ -165,6 +185,59 @@ disk, which is what a power loss cannot take back:
 The index is rebuilt from the notes, so it needs no sync of its own: the
 boot scan re-indexes what changed. The log says the setting at start:
 `vault durability: batch`.
+
+## Uploads into IN
+
+The web UI and the REST API upload files into a project's IN folder in
+pieces, with pauses and resumes ([Uploading](in.md#uploading)). Nothing
+caps them by default but the free disk the server keeps: an upload that
+would take the IN folders' filesystem under `reserve_bytes` is refused
+when it opens, and so is each piece, and each file of a zip as it is
+unpacked. The caps are the installer's to set, by way in (`[in.web]` for
+the web UI and the REST API, `[in.mcp]` for the agents' `memory_in_upload`):
+
+```toml
+[in]
+reserve_bytes = 10737418240   # keep 10 GiB free
+max_in_bytes = 0              # a project's IN folder, no cap
+session_ttl = "24h"
+zip_max_entries = 100000
+zip_max_bytes = 0
+zip_max_ratio = 200
+
+[in.web]
+max_file_bytes = 4294967296   # 4 GiB a file
+max_upload_bytes = 0
+extensions = ["pdf", "xml", "zip"]
+
+[in.mcp]
+max_upload_bytes = 21474836480  # 20 GiB an upload of an agent
+```
+
+A piece is at most 64 MiB, under the 100 MB a request may carry through
+Cloudflare; a proxy in front of gosidian must let that through
+(`client_max_body_size 64m` for nginx; nginx-proxy-manager's default is
+larger). The pieces go to `<project>/IN/.uploads/<id>/`, on the IN
+folder's own filesystem, so that a file that arrived takes its place with
+a rename even when IN is a volume of its own.
+
+## Agent teams
+
+The tasks of a project are notes its agent teams work on: a pipeline the
+`on: task` trigger starts, or an outside agent that takes the task. Four
+limits of the installation hold for every project:
+
+```toml
+[agents]
+max_running = 0    # the agents at work at once, all the teams together; 0: no cap
+lease = "15m"      # a task an outside agent takes, renewed by its heartbeat
+max_attempts = 3   # then the task goes failed
+max_tasks = 50     # the sub-tasks of an objective
+```
+
+A value out of range (a negative `max_running`, a `lease` under `1m` or
+over `24h`, `max_attempts` outside 1 to 20, `max_tasks` outside 1 to
+1000) stops the server at start, with a line that names the setting.
 
 ## Git maintenance
 
@@ -374,7 +447,8 @@ Run `gosidian token -h` etc. for per-subcommand options.
 `<state-dir>` is where gosidian keeps its machine-owned files: `auth.json`
 (web accounts), `tokens.json` and `spa_tokens.json` (hashed tokens),
 `gitsync.json`, `config.toml`, `projects.json`, `audit.jsonl` and the
-SQLite index, with [pipelines](pipelines.md) on `jobs.db` (the runs),
+SQLite index, `jobs.db` (the job runner's runs: the [pipelines](pipelines.md)' and the
+automations' actions, with either on),
 `secrets.json` (sealed under `GOSIDIAN_SECRETS_KEY`) and `plugins.json`
 (the accepted plugin manifests), and, until the owner of the first start has chosen its own
 password, `initial-admin-password`. By default it is `<vault>/.gosidian/`, unchanged from earlier

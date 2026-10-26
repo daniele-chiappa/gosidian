@@ -556,6 +556,31 @@ nodes:
 	}
 }
 
+// A provider's key can come from an environment variable (IMP-199), for
+// an install configured from a .env; an empty one sends no key.
+func TestEngine_LLMKeyFromEnv(t *testing.T) {
+	var auth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth = r.Header.Get("Authorization")
+		_, _ = io.WriteString(w, `{"model":"m","choices":[{"message":{"content":"ok"}}],"usage":{"total_tokens":3}}`)
+	}))
+	defer srv.Close()
+	t.Setenv("TEST_LLM_KEY", "sk-env")
+	e, host := newEngine(t, Config{Providers: []Provider{{Name: "env", BaseURL: srv.URL + "/v1", APIKeyEnv: "TEST_LLM_KEY", Model: "m"}}})
+	host.notes["p/pl.md"] = pipelineNote("nodes:\n  - {id: a, use: llm.chat, with: {prompt: hi}}\n")
+	run, _, _ := e.Start(StartRequest{Path: "p/pl.md", Trigger: TriggerManual})
+	waitStatus(t, e, run.ID, jobs.Done)
+	if auth != "Bearer sk-env" {
+		t.Fatalf("auth %q", auth)
+	}
+	t.Setenv("TEST_LLM_KEY", "")
+	run, _, _ = e.Start(StartRequest{Path: "p/pl.md", Trigger: TriggerManual})
+	waitStatus(t, e, run.ID, jobs.Done)
+	if auth != "" {
+		t.Fatalf("an empty key sent %q", auth)
+	}
+}
+
 // llm.chat passes reasoning_effort on, and gives the finish reason and a
 // thinking model's reasoning: an empty text that ran out of max_tokens
 // while the model thought shows as such.

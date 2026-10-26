@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -16,6 +17,8 @@ import (
 	"github.com/gosidian/gosidian/internal/attach"
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/auth"
+	"github.com/gosidian/gosidian/internal/jobs"
+	"github.com/gosidian/gosidian/internal/pipeline"
 	"github.com/gosidian/gosidian/internal/plugins"
 )
 
@@ -382,5 +385,40 @@ func TestPluginManifest_ToolFiles(t *testing.T) {
 		if (err == nil) != (c.want == "") || err != nil && !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: %v, want %q", name, err, c.want)
 		}
+	}
+}
+
+// TestPluginTools_BusyPlugin: an agent's call of a plugin whose calls at
+// once are all under way waits, up to its timeout, then says the plugin is
+// busy (IMP-196); a place freed lets the next call through.
+func TestPluginTools_BusyPlugin(t *testing.T) {
+	s, reg := vecServer(t)
+	if _, err := reg.Expose("vec", "p", "test"); err != nil {
+		t.Fatal(err)
+	}
+	store, err := jobs.Open(filepath.Join(t.TempDir(), "jobs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	gate := jobs.NewGate(func(r string) int { return map[string]int{"plugin:vec": 1}[r] })
+	runner := jobs.NewRunner(store, jobs.Options{Gate: gate})
+	s.SetPipelines(pipeline.New(s.PipelineHost(), runner, pipeline.Config{Location: time.UTC}, nil, nil))
+	s.SetPluginToolTimeout(100 * time.Millisecond)
+	reader := ctxWithToken(&auth.Token{ID: "r1", Name: "reader", Project: "p", Scopes: []string{auth.ScopeRead}})
+
+	// A step of the plugin holds its only place.
+	if !gate.TryTake([]string{"plugin:vec"}) {
+		t.Fatal("take")
+	}
+	if out := rpcMessage(t, s, reader, "tools/call", `{"name":"vec_search","arguments":{"query":"x"}}`); !strings.Contains(out, "is busy") {
+		t.Fatalf("a call of a full plugin: %s", out)
+	}
+	gate.Release([]string{"plugin:vec"})
+	if out := rpcMessage(t, s, reader, "tools/call", `{"name":"vec_search","arguments":{"query":"x"}}`); strings.Contains(out, "isError\":true") {
+		t.Fatalf("a call with the place free: %s", out)
+	}
+	if got := gate.Running(); len(got) != 0 {
+		t.Fatalf("the call kept its place: %+v", got)
 	}
 }

@@ -8,6 +8,7 @@ package mcp
 
 import (
 	"context"
+	"strings"
 
 	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -60,10 +61,21 @@ func (s *Server) tokenAccess(tok *auth.Token) []selfStatsAccess {
 
 // accessLevel is "write" when tok may write in project, "read" otherwise.
 func accessLevel(tok *auth.Token, project string) string {
-	if tok != nil && tok.AllowsWrite(project) {
+	if tok != nil && (tok.AllowsWrite(project) || writesIn(tok, project)) {
 		return "write"
 	}
 	return "read"
+}
+
+// writesIn says whether a token that writes only in some folders (a run of
+// a team's task, IMP-195) writes in one of project's.
+func writesIn(tok *auth.Token, project string) bool {
+	for _, p := range tok.WritePaths {
+		if strings.HasPrefix(p, project+"/") && tok.AllowsWrite(p+"x.md") {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) handleSelfStats(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

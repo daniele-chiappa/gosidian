@@ -1,0 +1,25 @@
+name = "rag"
+description = "Questions answered from a project's documents: files dropped in its IN folder become notes (docling, images), are cut into paragraphs and stored with their embeddings (database), and a bot answers from them with the sources (chat). Fits the rag preset of deploy/presets, or any install with plugins of those names."
+
+prompt = """
+Use this template for a project whose documents people ask questions
+about: manuals, procedures, policies. It brings the pipelines and the
+bot; the documents come in through the project's IN folder.
+
+The plugins it names are those of the rag preset: docling, images,
+database (with a collection `documents`) and chat. With other names,
+change the `use:` of the pipelines. The project needs its pipelines on
+(project settings), which also gives it its IN folder, and git sync on
+the server, whose commits start the cut.
+
+The operating conventions are served by `memory_bootstrap` in the
+`directives_block` field, as for every project: read and follow that.
+"""
+
+[[variables]]
+name = "PROJECT"
+required = true
+
+[[variables]]
+name = "TODAY"
+auto = "date"

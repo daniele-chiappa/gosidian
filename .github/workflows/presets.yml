@@ -1,0 +1,70 @@
+name: Presets
+# The compose presets of deploy/presets: their files parse at each push or
+# pull request that touches them, and a version tag checks that they pin
+# its image. On demand (workflow_dispatch) the whole rag chain runs with
+# test/smoke.py, on a gosidian image built from the checkout and the
+# plugins the presets pin, from GitHub Container Registry.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+    # Path filters are not evaluated for tags: a tag always runs.
+    paths: ["deploy/presets/**", ".github/workflows/presets.yml"]
+  pull_request:
+    branches: [main]
+    paths: ["deploy/presets/**", ".github/workflows/presets.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  config:
+    name: Check the compose presets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: docker compose config
+        working-directory: deploy/presets
+        run: |
+          set -eu
+          docker compose version
+          sh ./init.sh >/dev/null
+          sed -i 's|^LLM_URL=$|LLM_URL=http://llm.example:11434/v1|; s|^LLM_MODEL=$|LLM_MODEL=model|; s|^EMBED_URL=$|EMBED_URL=http://llm.example:11434/v1|; s|^EMBED_MODEL=$|EMBED_MODEL=embed|; s|^EMBED_DIMS=$|EMBED_DIMS=768|' .env
+          for extra in "" "-f docker-compose.rag.yml" "-f docker-compose.storage.yml" \
+                       "-f docker-compose.rag.yml -f docker-compose.storage.yml" \
+                       "-f docker-compose.rag.yml -f test/docker-compose.smoke.yml"; do
+            echo "docker-compose.yml $extra"
+            docker compose -f docker-compose.yml $extra config -q
+          done
+
+      - name: The presets pin this release's image
+        if: github.ref_type == 'tag'
+        working-directory: deploy/presets
+        run: |
+          set -eu
+          for f in docker-compose.yml test/docker-compose.smoke.yml; do
+            grep -q "ghcr.io/daniele-chiappa/gosidian:${GITHUB_REF_NAME}" "$f" || {
+              echo "$f pins another gosidian than ${GITHUB_REF_NAME}: move it with the release"; exit 1; }
+          done
+
+  smoke:
+    name: Smoke test of the rag preset
+    needs: config
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Build gosidian
+        run: docker build -t gosidian:smoke .
+
+      - name: smoke.py
+        env:
+          SMOKE_GOSIDIAN_IMAGE: gosidian:smoke
+        run: python3 deploy/presets/test/smoke.py

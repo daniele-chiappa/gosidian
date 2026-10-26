@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -404,6 +405,60 @@ func TestSync_GitignoreNamesOneFolder(t *testing.T) {
 	}
 }
 
+// The staging folders inside the vault, the bridge dir and the upload roots,
+// stay off git (BUG-138): one set before the first commit is never tracked,
+// one a commit already holds leaves the index, and the files stay on disk.
+func TestSync_GitignoreLeavesOutStagingDirs(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	for _, rel := range []string{".staging/x.pdf", "imports/y.pdf", "notes/a.md"} {
+		full := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(rel), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := New(dir, testCfg())
+	s.SetStagingDirs([]string{".staging"})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := s.Start(ctx); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	s.TriggerCommit()
+	s.Flush()
+	tracked := func() string {
+		t.Helper()
+		out, err := exec.Command("git", "-C", dir, "ls-files").Output()
+		if err != nil {
+			t.Fatalf("git ls-files: %v", err)
+		}
+		return string(out)
+	}
+	if got := tracked(); strings.Contains(got, ".staging/") || !strings.Contains(got, "imports/y.pdf") || !strings.Contains(got, "notes/a.md") {
+		t.Fatalf("tracked =\n%s", got)
+	}
+
+	// An upload root declared after a commit took its files.
+	s.SetStagingDirs([]string{".staging", "imports"})
+	s.TriggerCommit()
+	s.Flush()
+	if got := tracked(); strings.Contains(got, "imports/") || !strings.Contains(got, "notes/a.md") {
+		t.Errorf("tracked =\n%s", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "imports", "y.pdf")); err != nil {
+		t.Errorf("untracking removed the file: %v", err)
+	}
+	body, _ := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	for _, line := range []string{"/.staging/", "/imports/"} {
+		if !strings.Contains(string(body), "\n"+line+"\n") {
+			t.Errorf(".gitignore lacks %q:\n%s", line, body)
+		}
+	}
+}
+
 // realRemoteCorruption is what git 2.x printed on 2026-10-07 for a push to a
 // bare repository whose object files were emptied, as flush receives it
 // (IMP-056). Over a file:// remote git also repeats the remote's lines
@@ -605,6 +660,49 @@ func TestSync_PushTokenNotInArgs(t *testing.T) {
 	}
 }
 
+// The push token keeps the GIT_CONFIG_* pairs the operator set, such as a
+// safe.directory for a vault another uid owns (BUG-139): git reads both.
+func TestPushAuthEnv_KeepsTheOperatorsConfig(t *testing.T) {
+	requireGit(t)
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "safe.directory")
+	t.Setenv("GIT_CONFIG_VALUE_0", "*")
+	env, err := pushAuthEnv("secret-push-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"GIT_CONFIG_COUNT=2", "GIT_CONFIG_KEY_1=http.extraheader", "GIT_CONFIG_VALUE_1=Authorization: token secret-push-token"}
+	if !slices.Equal(env, want) {
+		t.Fatalf("env = %q", env)
+	}
+	read := func(key string) string {
+		t.Helper()
+		c := exec.Command("git", "config", "--get", key)
+		c.Dir = t.TempDir()
+		c.Env = append(os.Environ(), env...)
+		out, err := c.Output()
+		if err != nil {
+			t.Fatalf("git config --get %s: %v", key, err)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	if got := read("safe.directory"); got != "*" {
+		t.Errorf("safe.directory = %q", got)
+	}
+	if got := read("http.extraheader"); got != "Authorization: token secret-push-token" {
+		t.Errorf("http.extraheader = %q", got)
+	}
+
+	t.Setenv("GIT_CONFIG_COUNT", "")
+	if env, err := pushAuthEnv("t"); err != nil || env[0] != "GIT_CONFIG_COUNT=1" || env[1] != "GIT_CONFIG_KEY_0=http.extraheader" {
+		t.Errorf("no count: %q %v", env, err)
+	}
+	t.Setenv("GIT_CONFIG_COUNT", "two")
+	if _, err := pushAuthEnv("t"); err == nil || !strings.Contains(err.Error(), "not a count") {
+		t.Errorf("a bogus count: %v", err)
+	}
+}
+
 // A branch name git would read as an option, or not as a branch, is
 // refused (BUG-115, S5-8).
 func TestCheckBranch(t *testing.T) {
@@ -657,7 +755,8 @@ func TestSync_WorktreeVaultIsARepository(t *testing.T) {
 }
 
 // An IN folder stays out of git, unless its project tracks it; then its
-// files over the cap stay out (IMP-172).
+// files over the cap stay out, and so do the uploads on their way
+// (IMP-172).
 func TestSync_INFolders(t *testing.T) {
 	requireGit(t)
 	dir := t.TempDir()
@@ -665,7 +764,7 @@ func TestSync_INFolders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, rel := range []string{"p/a.md", "p/IN/small.pdf", "p/IN/sub/note.md"} {
+	for _, rel := range []string{"p/a.md", "p/IN/small.pdf", "p/IN/sub/note.md", "p/IN/.uploads/0123456789abcdef/0.part"} {
 		full := filepath.Join(dir, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 			t.Fatal(err)
@@ -710,7 +809,7 @@ func TestSync_INFolders(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := files()
-	if !strings.Contains(out, "p/IN/small.pdf") || !strings.Contains(out, "p/IN/sub/note.md") || strings.Contains(out, "big") {
+	if !strings.Contains(out, "p/IN/small.pdf") || !strings.Contains(out, "p/IN/sub/note.md") || strings.Contains(out, "big") || strings.Contains(out, ".uploads") {
 		t.Errorf("a tracked IN folder, tracked:\n%s", out)
 	}
 	ignore, _ := os.ReadFile(filepath.Join(dir, ".gitignore"))

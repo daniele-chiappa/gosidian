@@ -11,6 +11,7 @@ vi.mock('@/api/pipelines', async (orig) => ({
   listPlugins: vi.fn(),
   listRuns: vi.fn(),
   getRun: vi.fn(),
+  getQueue: vi.fn(),
   startRun: vi.fn(),
   resumeRun: vi.fn(),
   cancelRun: vi.fn(),
@@ -48,7 +49,7 @@ vi.mock('plancia', async (orig) => ({
   useWindowsStore: () => ({ windows: [], open: vi.fn() }),
 }))
 
-import { getRun, listPipelines, listPlugins, listRuns, resumeRun, startRun } from '@/api/pipelines'
+import { getQueue, getRun, listPipelines, listPlugins, listRuns, resumeRun, startRun } from '@/api/pipelines'
 import { askText } from '@/composables/useConfirm'
 import PipelinesView from '@/views/PipelinesView.vue'
 
@@ -76,6 +77,9 @@ describe('PipelinesView (IMP-166)', () => {
     setActivePinia(createPinia())
     vi.mocked(listPipelines).mockResolvedValue(pipelines)
     vi.mocked(listPlugins).mockResolvedValue([])
+    vi.mocked(getQueue).mockResolvedValue({
+      queued: 0, later: 0, running: 0, workers: 2, interactive_workers: 1, oldest_wait_seconds: 0, resources: [],
+    })
     vi.mocked(listRuns).mockResolvedValue([
       run({ id: 'r1', status: 'waiting' }),
       run({ id: 'r2', status: 'failed', error: 'boom', pipeline: 'theirs/pipelines/copy.md', project: 'theirs' }),
@@ -204,5 +208,79 @@ describe('PipelinesView (IMP-166)', () => {
       title: 'Pipeline · copy',
       props: { path: 'mine/pipelines/copy.md' },
     })
+  })
+
+  it('shows the queue by resource and why a queued step waits (IMP-196)', async () => {
+    vi.mocked(getQueue).mockResolvedValue({
+      queued: 3, later: 1, running: 2, workers: 2, interactive_workers: 1, oldest_wait_seconds: 750,
+      resources: [
+        { resource: 'plugin:ocr', queued: 2, running: 1, limit: 1, oldest_wait_seconds: 750 },
+        { resource: 'llm:default', queued: 1, running: 1, limit: 0, oldest_wait_seconds: 20 },
+      ],
+    })
+    vi.mocked(getRun).mockResolvedValue({
+      run: run({ id: 'r1', status: 'running' }),
+      steps: [
+        { name: 'read', status: 'done' },
+        { name: 'ocr', use: 'ocr.run', status: 'queued', resources: ['plugin:ocr'], queue: { ahead: 1, blocked_by: 'plugin:ocr', running: 1, limit: 1 } },
+        { name: 'sum', use: 'llm.chat', status: 'queued', queue: { ahead: 3 } },
+      ],
+    })
+    const w = mount(PipelinesView, { global: { plugins: [i18n()] } })
+    await flushPromises()
+    expect(w.get('[data-queue-total]').text()).toContain('3 steps queued, 2 running on 2 workers')
+    expect(w.get('[data-queue-total]').text()).toContain('longest wait 13 min')
+    const rows = w.findAll('[data-queue] li')
+    expect(rows).toHaveLength(2)
+    expect(rows[0]!.text()).toContain('plugin ocr')
+    expect(rows[0]!.text()).toContain('1 of 1 running')
+    expect(rows[0]!.text()).toContain('2 queued')
+    expect(rows[1]!.text()).toContain('model default')
+    expect(rows[1]!.text()).toContain('1 running, no limit')
+    await w.get('[data-runs] button').trigger('click')
+    await flushPromises()
+    const reasons = w.findAll('[data-step-queue]').map((e) => e.text())
+    expect(reasons).toEqual(['waits for a place in plugin ocr (1 of 1 taken)', 'queued, 3 steps before it'])
+  })
+
+  it('hides the queue when nothing waits or runs', async () => {
+    const w = mount(PipelinesView, { global: { plugins: [i18n()] } })
+    await flushPromises()
+    expect(w.find('[data-queue-total]').exists()).toBe(false)
+  })
+
+  it('names a category beside its pipeline, says when it has no rules, and marks a low run (IMP-196)', async () => {
+    vi.mocked(listPipelines).mockResolvedValue([
+      { path: 'mine/pipelines/cut.md', title: 'Cut', project: 'mine', trigger: 'manual', category: 'taglio', category_rules: true },
+      { path: 'mine/pipelines/odd.md', title: 'Odd', project: 'mine', trigger: 'manual', category: 'strana', category_rules: false },
+      { path: 'mine/pipelines/plain.md', title: 'Plain', project: 'mine', trigger: 'manual', category: 'default' },
+    ])
+    vi.mocked(listRuns).mockResolvedValue([run({ id: 'r9', status: 'queued', low: true, category: 'taglio' })])
+    vi.mocked(getQueue).mockResolvedValue({
+      queued: 1, later: 0, running: 0, workers: 2, interactive_workers: 1, oldest_wait_seconds: 5,
+      resources: [{ resource: 'cat:taglio', queued: 1, running: 0, limit: 1, oldest_wait_seconds: 5 }],
+    })
+    const w = mount(PipelinesView, { global: { plugins: [i18n()] } })
+    await flushPromises()
+    expect(w.findAll('[data-pipeline-category]').map((e) => e.text())).toEqual(['category taglio', 'category strana'])
+    expect(w.findAll('[data-category-no-rules]')).toHaveLength(1)
+    expect(w.get('[data-category-no-rules]').text()).toContain('no rules for the category strana')
+    expect(w.find('[data-run-low]').exists()).toBe(true)
+    expect(w.get('[data-queue] li').text()).toContain('category taglio')
+  })
+
+  it('names the places of a team of agents and of every team (IMP-195)', async () => {
+    vi.mocked(getQueue).mockResolvedValue({
+      queued: 2, later: 0, running: 1, workers: 2, interactive_workers: 1, oldest_wait_seconds: 5,
+      resources: [
+        { resource: 'team:mine/squadra', queued: 1, running: 1, limit: 1, oldest_wait_seconds: 5 },
+        { resource: 'agents', queued: 1, running: 1, limit: 4, oldest_wait_seconds: 5 },
+      ],
+    })
+    const w = mount(PipelinesView, { global: { plugins: [i18n()] } })
+    await flushPromises()
+    const items = w.findAll('[data-queue] li').map((e) => e.text())
+    expect(items[0]).toContain('team mine/squadra')
+    expect(items[1]).toContain('agents of every team')
   })
 })

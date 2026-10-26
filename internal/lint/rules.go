@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,11 +33,13 @@ var allRules = []ruleSpec{
 	{name: "hot-oversize", defaultSeverity: SeverityWarning, fn: checkHotOversize},
 	{name: "skill-oversize", defaultSeverity: SeverityWarning, fn: checkSkillOversize},
 	{name: "database-field-invalid", defaultSeverity: SeverityWarning, fn: checkDatabaseFields},
+	{name: "field-tag-mismatch", defaultSeverity: SeverityWarning, fn: checkFieldTagMismatch},
 	{name: "pipeline-invalid", defaultSeverity: SeverityWarning, fn: checkPipelines},
 	{name: "diagram-invalid", defaultSeverity: SeverityWarning, fn: checkDiagrams},
 	{name: "diagram-twin-stale", defaultSeverity: SeverityWarning, fn: checkDiagramTwins},
 	{name: "graph-invalid", defaultSeverity: SeverityWarning, fn: checkGraphs},
 	{name: "chat-invalid", defaultSeverity: SeverityWarning, fn: checkChats},
+	{name: "team-invalid", defaultSeverity: SeverityWarning, fn: checkTeams},
 }
 
 // checkDatabaseFields checks the rows of each database note of the project
@@ -65,6 +68,16 @@ func checkDatabaseFields(_ context.Context, l *Linter, project string) ([]Issue,
 		})
 	}
 	for _, s := range schemas {
+		for _, name := range s.ReservedFields() {
+			meaning, _ := dbschema.Reserved(name)
+			issues = append(issues, Issue{
+				Severity: SeverityWarning,
+				File:     s.Path,
+				Rule:     "database-field-invalid",
+				Message:  fmt.Sprintf("field %q is a name gosidian already gives a meaning: %s", name, meaning),
+				FixHint:  "rename the field in the schema and in its rows, e.g. path → folder",
+			})
+		}
 		issues = append(issues, checkRowViews(l, s)...)
 		issues = append(issues, checkAutomations(l, s)...)
 	}
@@ -607,6 +620,9 @@ var knownTagValues = map[string]map[string]struct{}{
 		"insight": {},
 		"image":   {},
 		"table":   {},
+		// The teams of agents and their tasks (IMP-195).
+		"team": {},
+		"task": {},
 	},
 	"status": {
 		"draft":       {},
@@ -828,6 +844,74 @@ func checkFrontmatterTagUnknown(ctx context.Context, l *Linter, project string) 
 				Rule:     "frontmatter-tag-unknown",
 				Message:  fmt.Sprintf("tag %q is outside the closed vocabulary", tag),
 				FixHint:  fixHint,
+			})
+		}
+	}
+	return issues, nil
+}
+
+// ---- field-tag-mismatch ----
+
+// checkFieldTagMismatch reports a note whose namespaced tag says one value
+// and whose field of that name says another (IMP-210): queries read the
+// field when there is one and the tag only when there is not, so a tag left
+// behind by a change of the field misleads whoever reads the tags. Checked:
+// status on every note, and on the rows of a database every select and
+// multi-select field of its schema. Other namespaces are left alone: a
+// database note's type: database and its type:index tag mean different
+// things by convention.
+func checkFieldTagMismatch(_ context.Context, l *Linter, project string) ([]Issue, error) {
+	notes, err := l.notesInProject(project)
+	if err != nil {
+		return nil, err
+	}
+	schemas, _, err := dbschema.ForProject(l.index, l.vault, project)
+	if err != nil {
+		return nil, err
+	}
+	var issues []Issue
+	for _, n := range notes {
+		raw := rawFrontmatter(n)
+		if strings.TrimSpace(raw) == "" {
+			continue
+		}
+		fm := parser.ParseFrontmatterFields(raw)
+		tags, ok := fm["tags"].([]string)
+		if !ok {
+			continue
+		}
+		checked := map[string]bool{"status": true}
+		for _, s := range schemas {
+			if !s.IsRow(n.Path, raw) {
+				continue
+			}
+			for _, f := range s.Fields {
+				if f.Type == "select" || f.Type == "multi-select" {
+					checked[f.Name] = true
+				}
+			}
+		}
+		for _, tag := range tags {
+			ns, val, ok := strings.Cut(tag, ":")
+			if !ok || val == "" || !checked[ns] {
+				continue
+			}
+			var have []string
+			switch v := fm[ns].(type) {
+			case string:
+				have = []string{v}
+			case []string:
+				have = v
+			}
+			if len(have) == 0 || slices.ContainsFunc(have, func(h string) bool { return strings.EqualFold(strings.TrimSpace(h), val) }) {
+				continue
+			}
+			issues = append(issues, Issue{
+				Severity: SeverityWarning,
+				File:     n.Path,
+				Rule:     "field-tag-mismatch",
+				Message:  fmt.Sprintf("tag %q disagrees with the field %s: %s", tag, ns, strings.Join(have, ", ")),
+				FixHint:  "queries read the field: make the tag match it with memory_edit, or drop the tag",
 			})
 		}
 	}

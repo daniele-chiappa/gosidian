@@ -116,3 +116,24 @@ func TestNoticeInvalidYAML(t *testing.T) {
 		t.Errorf("notice = %s", n)
 	}
 }
+
+// A database note that declares a field named as something gosidian
+// computes gets a notice when written (BUG-140).
+func TestWrite_NoticeOnReservedField(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	req := call(map[string]any{"path": "p/docs/stacks.md", "content": "---\ntitle: Stacks\ntags: [p, type:index]\ntype: database\nsource: p/docs/stacks\nfields:\n  path: {type: text}\n  host: {type: text}\n---\n\n# Stacks\n"})
+	req.Params.Name = "memory_create"
+	res, err := callNotesMiddleware(s.handleCreate)(context.Background(), req)
+	if err != nil || res == nil || res.IsError {
+		t.Fatalf("create: %v %+v", err, res)
+	}
+	n := strings.Join(resultNotices(t, res), " ")
+	for _, want := range []string{`declares the field "path"`, "the note's own path", "path → folder"} {
+		if !strings.Contains(n, want) {
+			t.Errorf("notice %q lacks %q", n, want)
+		}
+	}
+	if strings.Contains(n, `"host"`) {
+		t.Errorf("host is no reserved name: %q", n)
+	}
+}

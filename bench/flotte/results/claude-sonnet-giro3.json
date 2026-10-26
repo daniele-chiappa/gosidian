@@ -1,0 +1,646 @@
+{
+ "variant": "claude-sonnet-giro3",
+ "date": "2026-10-25",
+ "judges": [
+  "gemma4:12b-12k",
+  "qwen3:14b-12k"
+ ],
+ "knowledge": {
+  "conoscenza": {
+   "judges": {
+    "gemma4": {
+     "mean": 2.0,
+     "right": 10,
+     "zero": 2,
+     "wrong": 8,
+     "invented": 8,
+     "judged": 20
+    },
+    "qwen3": {
+     "mean": 3.0,
+     "right": 13,
+     "zero": 1,
+     "wrong": 6,
+     "invented": 16,
+     "judged": 20
+    }
+   },
+   "questions": [
+    {
+     "id": "q01",
+     "folder": "conoscenza",
+     "cost_usd": 0.002112,
+     "scores": {
+      "gemma4": -5.0,
+      "qwen3": 9.0
+     },
+     "invented": {
+      "gemma4": true,
+      "qwen3": false
+     }
+    },
+    {
+     "id": "q02",
+     "folder": "conoscenza",
+     "cost_usd": 0.002354,
+     "scores": {
+      "gemma4": -7.0,
+      "qwen3": -5.0
+     },
+     "invented": {
+      "gemma4": true,
+      "qwen3": true
+     }
+    },
+    {
+     "id": "q03",
+     "folder": "conoscenza",
+     "cost_usd": 0.000962,
+     "scores": {
+      "gemma4": -5.0,
+      "qwen3": -5.0
+     },
+     "invented": {
+      "gemma4": true,
+      "qwen3": true
+     }
+    },
+    {
+     "id": "q04",
+     "folder": "conoscenza",
+     "cost_usd": 0.002008,
+     "scores": {
+      "gemma4": 7.0,
+      "qwen3": 6.0
+     },
+     "invented": {
+      "gemma4": false,
+      "qwen3": true
+     }
+    },
+    {
+     "id": "q05",
+     "folder": "conoscenza",
+     "cost_usd": 0.002657,
+     "scores": {
+      "gemma4": -5.0,
+      "qwen3": 5.0
+     },
+     "invented": {
+      "gemma4": true,
+      "qwen3": true
+     }
+    },
+    {
+     "id": "q06",
+     "folder": "conoscenza",
+     "cost_usd": 0.001046,
+     "scores": {
+      "gemma4": 10.0,
+      "qwen3": 9.0
+     },
+     "invented": {
+      "gemma4": false,
+      "qwen3": false
+     }
+    },
+    {
+     "id": "q07",
+     "folder": "conoscenza",
+     "cost_usd": 0.002711,
+     "scores": {
+      "gemma4": 7.0,
+      "qwen3": 6.0
+     },
+     "invented": {
+      "gemma4": false,
+      "qwen3": true
+     }
+    },
+    {
+     "id": "q08",
+     "folder": "conoscenza",
+     "cost_usd": 0.002121,
+     "scores": {
+      "gemma4": -5.0,
+      "qwen3": 3.0
+     },
+     "invented": {
+      "gemma4": true,
+      "qwen3": true
+     }
+    },
+    {
+     "id": "q09",
+     "folder": "conoscenza",
+     "cost_usd": 0.002437,
+     "scores": {
+      "gemma4": 7.0,
+      "qwen3": -5.0
+     },
+     "invented": {
+      "gemma4": false,
+      "qwen3": true
+     }
+    },
+    {
+     "id": "q10",
+     "folder": "conoscenza",
+     "cost_usd": 0.002314,
+     "scores": {
+      "gemma4": 9.0,
+      "qwen3": 9.0
+     },
+     "invented": {
+      "gemma4": false,
+      "qwen3": false
+     }
+    },
+    {
+     "id": "q11",
+     "folder": "conoscenza",
+     "cost_usd": 0.002127,
+     "scores": {
+      "gemma4": 8.0,
+      "qwen3": 6.0
+     },
+     "invented": {
+      "gemma4": false,
+      "qwen3": true
+     }
+    },
+    {
+     "id": "q12",
+     "folder": "conoscenza",
+     "cost_usd": 0.000924,
+     "scores": {
+      "gemma4": -5.0,
+      "qwen3": 7.0
+     },
+     "invented": {
+      "gemma4": true,
+      "qwen3": true
+     }
+    },
+    {
+     "id": "q13",
+     "folder": "conoscenza",
+     "cost_usd": 0.001735,
+     "scores": {
+      "gemma4": 8.0,
+      "qwen3": 8.0
+     },
+     "invented": {
+      "gemma4": false,
+      "qwen3": true
+     }
+    },
+    {
+     "id": "q14",
+     "folder": "conoscenza",
+     "cost_usd": 0.001272,
+     "scores": {
+      "gemma4": -4.0,
+      "qwen3": -3.0
+     },
+     "invented": {
+      "gemma4": true,
+      "qwen3": true
+     }
+    },
+    {
+     "id": "q15",
+     "folder": "conoscenza",
+     "cost_usd": 0.001222,
+     "scores": {
+      "gemma4": 8.0,
+      "qwen3": 7.0
+     },
+     "invented": {
+      "gemma4": false,
+      "qwen3": true
+     }
+    },
+    {
+     "id": "q16",
+     "folder": "conoscenza",
+     "cost_usd": 0.001852,
+     "scores": {
+      "gemma4": -5.0,
+      "qwen3": -5.0
+     },
+     "invented": {
+      "gemma4": true,
+      "qwen3": true
+     }
+    },
+    {
+     "id": "q17",
+     "folder": "conoscenza",
+     "cost_usd": 0.001306,
+     "scores": {
+      "gemma4": 8.0,
+      "qwen3": 6.0
+     },
+     "invented": {
+      "gemma4": false,
+      "qwen3": true
+     }
+    },
+    {
+     "id": "q18",
+     "folder": "conoscenza",
+     "cost_usd": 0.0012,
+     "scores": {
+      "gemma4": 9.0,
+      "qwen3": 7.0
+     },
+     "invented": {
+      "gemma4": false,
+      "qwen3": true
+     }
+    },
+    {
+     "id": "q19",
+     "folder": "conoscenza",
+     "cost_usd": 0.001866,
+     "scores": {
+      "gemma4": 0.0,
+      "qwen3": -5.0
+     },
+     "invented": {
+      "gemma4": false,
+      "qwen3": true
+     }
+    },
+    {
+     "id": "q20",
+     "folder": "conoscenza",
+     "cost_usd": 0.00119,
+     "scores": {
+      "gemma4": 0.0,
+      "qwen3": 0.0
+     },
+     "invented": {
+      "gemma4": false,
+      "qwen3": false
+     }
+    }
+   ],
+   "cost_usd": 0.0354
+  }
+ },
+ "plans": [
+  {
+   "id": "giulia",
+   "plan": "fitness/conoscenza/schede/giulia.md",
+   "judges": {
+    "gemma4": {
+     "points": 7.0,
+     "of": 8,
+     "outcomes": null
+    },
+    "qwen3": {
+     "points": 6.5,
+     "of": 8,
+     "outcomes": null
+    }
+   }
+  },
+  {
+   "id": "franco",
+   "plan": "fitness/conoscenza/schede/franco.md",
+   "judges": {
+    "gemma4": {
+     "points": 6.5,
+     "of": 8,
+     "outcomes": null
+    },
+    "qwen3": {
+     "points": 8.0,
+     "of": 8,
+     "outcomes": null
+    }
+   }
+  },
+  {
+   "id": "sara",
+   "plan": "fitness/conoscenza/schede/sara.md",
+   "judges": {
+    "gemma4": {
+     "points": 6.5,
+     "of": 8,
+     "outcomes": null
+    },
+    "qwen3": {
+     "points": 8.0,
+     "of": 8,
+     "outcomes": null
+    }
+   }
+  },
+  {
+   "id": "marco",
+   "plan": "fitness/conoscenza/schede/marco.md",
+   "judges": {
+    "gemma4": {
+     "points": 6.5,
+     "of": 8,
+     "outcomes": null
+    },
+    "qwen3": {
+     "points": 6.5,
+     "of": 8,
+     "outcomes": null
+    }
+   }
+  },
+  {
+   "id": "luca",
+   "plan": "fitness/conoscenza/schede/luca.md",
+   "judges": {
+    "gemma4": {
+     "points": 6.5,
+     "of": 8,
+     "outcomes": null
+    },
+    "qwen3": {
+     "points": 6.0,
+     "of": 8,
+     "outcomes": null
+    }
+   }
+  }
+ ],
+ "app": {
+  "run": "d62cc6948fbb5165",
+  "status": "done",
+  "build_exit": 0.0,
+  "computer": {
+   "console": 0.0,
+   "ok": true,
+   "passi": 24.0,
+   "passi_ok": 24.0,
+   "richieste_fallite": 0.0
+  },
+  "phone": {
+   "console": 0.0,
+   "ok": true,
+   "passi": 24.0,
+   "passi_ok": 24.0,
+   "richieste_fallite": 0.0
+  }
+ },
+ "cost": {
+  "objective": "canceled",
+  "tasks": 18,
+  "by_status": {
+   "canceled": 3,
+   "completed": 13,
+   "failed": 2
+  },
+  "cost_usd": 8.9819,
+  "tokens": 29284350,
+  "wall_minutes": 105.3,
+  "by_role": {
+   "coordinatore": {
+    "tasks": 1,
+    "cost_usd": 0.4135,
+    "tokens": 219440,
+    "attempts": 1
+   },
+   "sviluppo": {
+    "tasks": 4,
+    "cost_usd": 2.7192,
+    "tokens": 18739314,
+    "attempts": 8
+   },
+   "conoscenza": {
+    "tasks": 10,
+    "cost_usd": 5.27,
+    "tokens": 8993506,
+    "attempts": 10
+   },
+   "revisore": {
+    "tasks": 3,
+    "cost_usd": 0.5792,
+    "tokens": 1332090,
+    "attempts": 1
+   }
+  },
+  "answers": [
+   {
+    "run": "87524a73a070713f",
+    "by": "approver",
+    "choice": "approve",
+    "at": "2026-10-25T18:50:44.178Z"
+   },
+   {
+    "run": "f285319cca3fe81a",
+    "by": "approver",
+    "choice": "approve",
+    "at": "2026-10-25T18:06:53.557Z"
+   }
+  ],
+  "rows": [
+   {
+    "path": "fitness/tasks/20261025-182820-schede-di-allenamento-per-principianti.md",
+    "title": "Schede di allenamento per principianti",
+    "role": "coordinatore",
+    "status": "canceled",
+    "attempts": 1,
+    "cost_usd": 0.4135,
+    "tokens": 219440,
+    "created": "2026-10-25T18:28:20+01:00",
+    "updated": "2026-10-25T19:50:00+01:00"
+   },
+   {
+    "path": "fitness/tasks/20261025-182858-app-statica-pagine-stile-mobile-test-su-data-jso.md",
+    "title": "App statica: pagine, stile mobile, test su data/*.json",
+    "role": "sviluppo",
+    "status": "completed",
+    "attempts": 1,
+    "cost_usd": 0.4379,
+    "tokens": 422250,
+    "created": "2026-10-25T18:28:58+01:00",
+    "updated": "2026-10-25T19:06:54+01:00"
+   },
+   {
+    "path": "fitness/tasks/20261025-182858-argomenti-equilibrio-e-cadute-artrosi-del-ginocc.md",
+    "title": "Argomenti: equilibrio e cadute, artrosi del ginocchio, pressione alta, dopo il parto",
+    "role": "conoscenza",
+    "status": "completed",
+    "attempts": 1,
+    "cost_usd": 0.527,
+    "tokens": 1276140,
+    "created": "2026-10-25T18:28:58+01:00",
+    "updated": "2026-10-25T18:33:43+01:00"
+   },
+   {
+    "path": "fitness/tasks/20261025-182858-argomenti-linee-guida-oms-sedentariet-forza-risc.md",
+    "title": "Argomenti: linee guida OMS, sedentarietà, forza, riscaldamento e sicurezza",
+    "role": "conoscenza",
+    "status": "completed",
+    "attempts": 1,
+    "cost_usd": 0.483,
+    "tokens": 1145977,
+    "created": "2026-10-25T18:28:58+01:00",
+    "updated": "2026-10-25T18:35:56+01:00"
+   },
+   {
+    "path": "fitness/tasks/20261025-182858-catalogo-esercizi-a-gambe-glutei-core-equilibrio.md",
+    "title": "Catalogo esercizi A: gambe, glutei, core, equilibrio, aerobico",
+    "role": "conoscenza",
+    "status": "completed",
+    "attempts": 1,
+    "cost_usd": 0.2946,
+    "tokens": 320174,
+    "created": "2026-10-25T18:28:58+01:00",
+    "updated": "2026-10-25T18:37:51+01:00"
+   },
+   {
+    "path": "fitness/tasks/20261025-182858-catalogo-esercizi-b-parte-superiore-schiena-mobi.md",
+    "title": "Catalogo esercizi B: parte superiore, schiena, mobilità, riscaldamento",
+    "role": "conoscenza",
+    "status": "completed",
+    "attempts": 1,
+    "cost_usd": 0.4984,
+    "tokens": 804833,
+    "created": "2026-10-25T18:28:58+01:00",
+    "updated": "2026-10-25T18:40:42+01:00"
+   },
+   {
+    "path": "fitness/tasks/20261025-182858-genera-data-json-dalle-note-del-vault-e-collega.md",
+    "title": "Genera data/*.json dalle note del vault e collega l'app",
+    "role": "sviluppo",
+    "status": "failed",
+    "attempts": 3,
+    "cost_usd": 0,
+    "tokens": 9495995,
+    "created": "2026-10-25T18:28:58+01:00",
+    "updated": "2026-10-25T19:36:59+01:00"
+   },
+   {
+    "path": "fitness/tasks/20261025-182858-revisione-della-coerenza-dell-app-con-il-vault.md",
+    "title": "Revisione della coerenza dell'app con il vault",
+    "role": "revisore",
+    "status": "canceled",
+    "attempts": 0,
+    "cost_usd": 0,
+    "tokens": 0,
+    "created": "2026-10-25T18:28:58+01:00",
+    "updated": null
+   },
+   {
+    "path": "fitness/tasks/20261025-182858-revisione-di-conoscenza-catalogo-e-schede.md",
+    "title": "Revisione di conoscenza, catalogo e schede",
+    "role": "revisore",
+    "status": "completed",
+    "attempts": 1,
+    "cost_usd": 0.5792,
+    "tokens": 1332090,
+    "created": "2026-10-25T18:28:58+01:00",
+    "updated": "2026-10-25T18:52:02+01:00"
+   },
+   {
+    "path": "fitness/tasks/20261025-182858-schede-di-franco-giulia-e-luca.md",
+    "title": "Schede di Franco, Giulia e Luca",
+    "role": "conoscenza",
+    "status": "completed",
+    "attempts": 1,
+    "cost_usd": 0.8096,
+    "tokens": 403434,
+    "created": "2026-10-25T18:28:58+01:00",
+    "updated": "2026-10-25T18:46:00+01:00"
+   },
+   {
+    "path": "fitness/tasks/20261025-182858-schede-di-marco-e-sara.md",
+    "title": "Schede di Marco e Sara",
+    "role": "conoscenza",
+    "status": "completed",
+    "attempts": 1,
+    "cost_usd": 0.6397,
+    "tokens": 492323,
+    "created": "2026-10-25T18:28:58+01:00",
+    "updated": "2026-10-25T18:49:57+01:00"
+   },
+   {
+    "path": "fitness/tasks/20261025-193724-correggi-il-catalogo-secondo-la-revisione-e-cont.md",
+    "title": "Correggi il catalogo secondo la revisione e controlla i link",
+    "role": "conoscenza",
+    "status": "completed",
+    "attempts": 1,
+    "cost_usd": 0.313,
+    "tokens": 437924,
+    "created": "2026-10-25T19:37:24+01:00",
+    "updated": "2026-10-25T19:38:23+01:00"
+   },
+   {
+    "path": "fitness/tasks/20261025-193724-correggi-le-schede-di-franco-e-luca-durata-delle.md",
+    "title": "Correggi le schede di Franco e Luca (durata delle sedute)",
+    "role": "conoscenza",
+    "status": "completed",
+    "attempts": 1,
+    "cost_usd": 0.6107,
+    "tokens": 1331293,
+    "created": "2026-10-25T19:37:24+01:00",
+    "updated": "2026-10-25T19:41:38+01:00"
+   },
+   {
+    "path": "fitness/tasks/20261025-193724-correggi-le-schede-di-giulia-e-sara-attrezzatura.md",
+    "title": "Correggi le schede di Giulia e Sara (attrezzatura, rematore)",
+    "role": "conoscenza",
+    "status": "completed",
+    "attempts": 1,
+    "cost_usd": 0.3483,
+    "tokens": 624119,
+    "created": "2026-10-25T19:37:24+01:00",
+    "updated": "2026-10-25T19:43:11+01:00"
+   },
+   {
+    "path": "fitness/tasks/20261025-193724-scrivi-data-exercises-json-dalle-note-del-catalo.md",
+    "title": "Scrivi data/exercises.json dalle note del catalogo",
+    "role": "sviluppo",
+    "status": "completed",
+    "attempts": 1,
+    "cost_usd": 0.7176,
+    "tokens": 833532,
+    "created": "2026-10-25T19:37:24+01:00",
+    "updated": "2026-10-25T19:50:45+01:00"
+   },
+   {
+    "path": "fitness/tasks/20261025-193724-scrivi-data-people-json-dalle-schede-e-collega-l.md",
+    "title": "Scrivi data/people.json dalle schede e collega l'app",
+    "role": "sviluppo",
+    "status": "failed",
+    "attempts": 3,
+    "cost_usd": 1.5637,
+    "tokens": 7987537,
+    "created": "2026-10-25T19:37:24+01:00",
+    "updated": "2026-10-25T20:13:36+01:00"
+   },
+   {
+    "path": "fitness/tasks/20261025-193724-seconda-revisione-schede-corrette-catalogo-e-coe.md",
+    "title": "Seconda revisione: schede corrette, catalogo e coerenza con l'app",
+    "role": "revisore",
+    "status": "canceled",
+    "attempts": 0,
+    "cost_usd": 0,
+    "tokens": 0,
+    "created": "2026-10-25T19:37:24+01:00",
+    "updated": null
+   },
+   {
+    "path": "fitness/tasks/20261025-194639-controlla-progressione-e-preferenze-nelle-cinque.md",
+    "title": "Controlla progressione e preferenze nelle cinque schede e correggi",
+    "role": "conoscenza",
+    "status": "completed",
+    "attempts": 1,
+    "cost_usd": 0.7457,
+    "tokens": 2157289,
+    "created": "2026-10-25T19:46:39+01:00",
+    "updated": "2026-10-25T19:49:54+01:00"
+   }
+  ]
+ }
+}

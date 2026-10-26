@@ -68,9 +68,89 @@ at once when a file named `.done` appears in it (a marker that a copy
 script writes last; the server removes it when it can, and a marker it
 cannot remove counts once). A closed batch is what the `in` pipelines take.
 
-Files also arrive from a remote store through a plugin's source (below).
-Loading files from the web UI, with pauses and resumes for large ones, is
-a next step of IMP-172.
+Files also arrive from a remote store through a plugin's source (below),
+and from the web UI and the REST API, uploaded (next).
+
+## Uploading
+
+Who writes in the project uploads files into the folder the IN window
+shows (IMP-172 phase 5):
+
+- **Upload files**, **Upload folder** (with its subfolders, under its own
+  name) and **Upload zip**, or files and folders dropped on the window;
+- a zip chosen with **Upload zip** is unpacked on the server: into its own
+  folder when all its files are in one (a zip of a folder), else into a
+  folder named after it. A zip uploaded as a file, or dropped, stays a zip;
+- hidden files and folders (`.DS_Store`, `.git/`) are left out, and so are
+  names IN does not take (a `\`, a control character, spaces around a
+  name); the window says how many;
+- for many small files a zip goes better: it arrives in a few pieces, and
+  the window says so.
+
+The uploads go on in the background, three files at a time, whatever
+window is open: the top bar shows how far they are, and the **Uploads**
+window has each one with its speed, the time left, pause, resume, cancel,
+and its files, each with a retry. A file arrives in pieces of 1 to 32 MiB,
+which follow the line's speed. A piece the network lost is sent again from
+the bytes the server has; a network error waits and tries again; a server
+whose disk is nearly full pauses the upload. Closing the tab while an
+upload is on its way asks first.
+
+**A file whose place is taken**: the upload asks once what to do with all
+of them: **Replace** (the old file goes to the trash, or for good without
+it; a folder is never replaced by a file), **Keep both** (the new one as
+`name (2).ext`) or **Skip**. A file that is the same as the one there
+(same size and SHA-256) is left as it is, whatever the choice: uploading
+a folder again sends only what changed.
+
+**After a reload**, or in another browser, the browser no longer has the
+files, but the server has the bytes that arrived: the IN window shows the
+upload cut short, and **Resume** asks for the same files (or folder, or
+zips) again, then goes on from there. The same files opened again into
+the same folder resume too.
+
+When every file has arrived, the server places them in the background:
+each with a rename (the zips unpacked first, see the
+[caps](configuration.md#uploads-into-in)), their rows written with their
+hash, and the upload is **one batch** of each first-level folder it fills,
+closed at once: the `in` pipelines take it without waiting for the quiet
+time. An upload with no piece for 24 hours (`[in] session_ttl`) goes, with
+what arrived.
+
+The free disk the server keeps (5 GiB by default) is the only limit out of
+the box; the installer sets the others, by way in
+([configuration](configuration.md#uploads-into-in)).
+
+### With curl
+
+The same protocol, for a script (a session token from `POST /api/v1/login`
+in `$T`):
+
+```sh
+F=big.pdf; S=$(stat -c %s "$F")
+ID=$(curl -s -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
+  -d "{\"dir\":\"scans\",\"files\":[{\"path\":\"$F\",\"size\":$S}]}" \
+  https://notes.example.com/api/v1/in/archive/uploads | jq -r .id)
+# 32 MiB pieces, each from the bytes the server has: a piece cut short
+# keeps what arrived, and the next goes on from there.
+OFF=0
+while [ "$OFF" -lt "$S" ]; do
+  tail -c +$((OFF + 1)) "$F" | head -c 33554432 |
+    curl -s -X PUT -H "Authorization: Bearer $T" -H 'Content-Type: application/octet-stream' --data-binary @- \
+      "https://notes.example.com/api/v1/in/archive/uploads/$ID/files/0?offset=$OFF" > /dev/null
+  OFF=$(curl -s -H "Authorization: Bearer $T" https://notes.example.com/api/v1/in/archive/uploads/$ID | jq '.files[0].received')
+done
+curl -s -X POST -H "Authorization: Bearer $T" https://notes.example.com/api/v1/in/archive/uploads/$ID/complete
+```
+
+### From an agent (MCP)
+
+An agent uploads with `memory_in_upload`, the same protocol without a
+session of the web UI ([upload flow](mcp/upload.md#files-for-the-pipelines-memory_in_upload)):
+`open` lists the files and answers with a **ticket**, which the agent's
+shell sends the pieces with, as its bearer, to `<mcp>/in-upload/<id>`;
+then `complete`. The upload is the token's account's, so its IN window
+shows it too, and `[in.mcp]` caps it.
 
 ## Sources
 
@@ -156,6 +236,8 @@ project chooses files and:
 - sets them aside, or back as new;
 - deletes them, into the trash (a folder needs the trash, a file without it
   goes for good, as the confirmation says);
+- uploads files, a folder or zips into the folder shown, or those dropped
+  on the window ([Uploading](#uploading));
 - starts on them a pipeline of the project, by hand, the way its trigger
   would: an `in` pipeline per file once per file, an `in` pipeline per batch
   once with the files, both with the files their trigger takes only (the
@@ -167,7 +249,8 @@ folder as a zip. The window follows the folder live.
 
 ## Git
 
-The managed block of the vault's `.gitignore` leaves each IN folder out.
+The managed block of the vault's `.gitignore` leaves each IN folder out,
+and the uploads on their way (`IN/.uploads/`) of a tracked one.
 A project that wants its IN folder in the history sets `track_in_git`
 (chip **IN git**, asked first): git then tracks it, but its files over
 50 MiB, which a commit takes out again and the `.gitignore` names from then
@@ -184,8 +267,13 @@ the files stay on disk, the history keeps what was pushed.
 | `POST /api/v1/in/<project>/delete` `{paths}` | into the trash |
 | `POST /api/v1/in/<project>/run` `{pipeline, paths}` | a pipeline of the project on files, by hand, as its trigger would: `{runs, skipped}` |
 | `POST /api/v1/in/<project>/scan` `{folder}` | a check now: of a source's folder, or of all of them and the disk |
+| `GET /api/v1/in/<project>/uploads` | the account's uploads into the IN folder |
+| `POST /api/v1/in/<project>/uploads` `{dir, policy, files: [{path, size, unzip, modified}]}` | opens an upload (the same files again: the same upload), with whether each file's place is taken |
+| `PUT /api/v1/in/<project>/uploads/<id>/files/<n>?offset=X` | a piece of a file, at most 64 MiB, from at most the bytes received (those the server has are skipped; past them, 409 says how many) |
+| `POST /api/v1/in/<project>/uploads/<id>/complete` `{policy, drop}` | places the files in the background; `GET …/uploads/<id>` follows it to its results |
+| `DELETE /api/v1/in/<project>/uploads/<id>` | drops an upload with what arrived |
 | `GET /vault-files/<project>/IN/<path>` | a file, with ranges |
 
 Paths are vault paths, or relative to the IN folder. Reading needs read
-access to the project, the rest write access. Reference:
+access to the project, the rest write access; an upload is its opener's. Reference:
 `internal/api/v1/spec/openapi.yaml`, tag `in`.

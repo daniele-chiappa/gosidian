@@ -51,6 +51,10 @@ type Sync struct {
 	// the vault ("" otherwise): one more managed line keeps the credentials
 	// off the remote (BUG-098).
 	stateRel string
+	// stagingRels are the folders inside the vault where files wait for an
+	// import, the bridge dir and the upload roots (BUG-138): managed lines
+	// keep them off the remote too.
+	stagingRels []string
 	// untracked holds the ignored folders a commit has taken out of git's
 	// index in this process: the state dir, the projects with git sync off.
 	// The ignore lines keep them out afterwards. Used by commitAndPush only.
@@ -167,6 +171,18 @@ func (s *Sync) SetStateDir(rel string) {
 	}
 	s.mu.Lock()
 	s.stateRel = rel
+	s.mu.Unlock()
+}
+
+// SetStagingDirs names the vault-relative folders where files are staged
+// for an import: the bridge dir and the upload roots set inside the vault
+// (BUG-138). The managed .gitignore leaves them out, as it does the state
+// dir: what passes through them is no vault content, and a commit in the
+// debounce window pushed it to the remote, along with files meant for a
+// project whose git sync is off. Safe to call before Start.
+func (s *Sync) SetStagingDirs(rels []string) {
+	s.mu.Lock()
+	s.stagingRels = append([]string(nil), rels...)
 	s.mu.Unlock()
 }
 
@@ -551,6 +567,9 @@ func (s *Sync) refreshGitignore() error {
 	if s.stateRel != "" {
 		managedLines = append(managedLines, gitignoreDir(s.stateRel))
 	}
+	for _, rel := range s.stagingRels {
+		managedLines = append(managedLines, gitignoreDir(rel))
+	}
 	if s.projects != nil {
 		for _, name := range s.projects.SkipNamesForGit() {
 			managedLines = append(managedLines, gitignoreDir(name))
@@ -560,6 +579,10 @@ func (s *Sync) refreshGitignore() error {
 		ignored, tracked := s.projects.INFoldersForGit()
 		for _, name := range ignored {
 			managedLines = append(managedLines, gitignoreDir(name+"/"+vault.INFolder))
+		}
+		// The uploads on their way stay out of a tracked IN folder too.
+		for _, name := range tracked {
+			managedLines = append(managedLines, gitignoreDir(name+"/"+vault.INFolder+"/"+vault.INUploads))
 		}
 		for _, p := range s.bigINUnder(tracked) {
 			managedLines = append(managedLines, gitignoreFile(p))
@@ -799,6 +822,9 @@ func (s *Sync) untrackIgnored() error {
 	if s.stateRel != "" {
 		want[s.stateRel] = true
 	}
+	for _, rel := range s.stagingRels {
+		want[rel] = true
+	}
 	if s.projects != nil {
 		for _, name := range s.projects.SkipNamesForGit() {
 			want[name] = true
@@ -837,13 +863,38 @@ func (s *Sync) push(ctx context.Context, refs ...string) error {
 		// A per-invocation header, so the token never lands in git config,
 		// passed in the environment: on the command line any process of the
 		// host read it in ps and /proc/<pid>/cmdline (BUG-115, S5-7).
-		env = []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=http.extraheader", "GIT_CONFIG_VALUE_0=Authorization: token " + tok}
+		var err error
+		if env, err = pushAuthEnv(tok); err != nil {
+			return fmt.Errorf("git push: %w", err)
+		}
 	}
 	args := append([]string{"push", "-q", "--follow-tags", "origin", s.cfg.Branch}, refs...)
 	if err := s.runEnv(ctx, env, "git", args...); err != nil {
 		return fmt.Errorf("git push: %w", err)
 	}
 	return nil
+}
+
+// pushAuthEnv is the environment that hands git the push token as an
+// http.extraheader. The header takes the next free index of the
+// GIT_CONFIG_* pairs the operator may already set (BUG-139): at index 0
+// with a count of 1 it replaced the operator's first pair and hid the
+// others, and a safe.directory set that way made every push fail while the
+// commits went on. A count git cannot read is refused, as git would.
+func pushAuthEnv(tok string) ([]string, error) {
+	n := 0
+	if v, ok := os.LookupEnv("GIT_CONFIG_COUNT"); ok && strings.TrimSpace(v) != "" {
+		c, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil || c < 0 {
+			return nil, fmt.Errorf("GIT_CONFIG_COUNT %q in the environment is not a count", v)
+		}
+		n = c
+	}
+	return []string{
+		fmt.Sprintf("GIT_CONFIG_COUNT=%d", n+1),
+		fmt.Sprintf("GIT_CONFIG_KEY_%d=http.extraheader", n),
+		fmt.Sprintf("GIT_CONFIG_VALUE_%d=Authorization: token %s", n, tok),
+	}, nil
 }
 
 // authToken resolves the PAT for `git push`. Precedence aligns with the

@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "note": "Five invented people, fixed for every run of the pilot. Any likeness to real people is chance. The text is Italian, as the team works in Italian.",
+  "persone": [
+    {
+      "id": "giulia",
+      "nome": "Giulia",
+      "eta": 29,
+      "sesso": "donna",
+      "lavoro": "impiegata in un ufficio, seduta 8-9 ore al giorno",
+      "salute": "nessuna malattia nota; rigidità alla schiena a fine giornata",
+      "abitudini": "non fa sport da anni; va al lavoro in auto",
+      "obiettivo": "muoversi di più, sentirsi meno rigida, prendere l'abitudine",
+      "tempo": "3 volte a settimana, 30-40 minuti",
+      "attrezzatura": "a casa: un tappetino e due manubri da 4 kg"
+    },
+    {
+      "id": "franco",
+      "nome": "Franco",
+      "eta": 67,
+      "sesso": "uomo",
+      "lavoro": "pensionato",
+      "salute": "artrosi lieve al ginocchio destro, diagnosticata; una caduta in casa l'anno scorso, senza fratture; il medico gli ha detto che può allenarsi",
+      "abitudini": "cammina 20 minuti due volte a settimana",
+      "obiettivo": "sentirsi sicuro in piedi, salire le scale senza fatica, non cadere",
+      "tempo": "4-5 volte a settimana, 30 minuti",
+      "attrezzatura": "una sedia robusta, elastici di resistenza, un parco vicino a casa"
+    },
+    {
+      "id": "sara",
+      "nome": "Sara",
+      "eta": 34,
+      "sesso": "donna",
+      "lavoro": "in maternità",
+      "salute": "6 mesi dopo un parto naturale senza complicazioni; il controllo dopo il parto è fatto; allatta",
+      "abitudini": "prima della gravidanza correva due volte a settimana",
+      "obiettivo": "tornare in forma, rinforzare l'addome e il pavimento pelvico, tornare a correre",
+      "tempo": "4 volte a settimana, 20-30 minuti, a casa con il bambino",
+      "attrezzatura": "un tappetino, un passeggino per le camminate"
+    },
+    {
+      "id": "marco",
+      "nome": "Marco",
+      "eta": 45,
+      "sesso": "uomo",
+      "lavoro": "commerciante",
+      "salute": "sovrappeso (indice di massa corporea 31); pressione alta, in terapia e controllata",
+      "abitudini": "giocava a calcio da giovane, fermo da 15 anni",
+      "obiettivo": "perdere peso e abbassare la pressione",
+      "tempo": "3 volte a settimana, 45-60 minuti",
+      "attrezzatura": "una palestra di quartiere: macchine, manubri, tapis roulant, cyclette"
+    },
+    {
+      "id": "luca",
+      "nome": "Luca",
+      "eta": 19,
+      "sesso": "uomo",
+      "lavoro": "studente universitario",
+      "salute": "nessuna malattia nota; magro",
+      "abitudini": "non ha mai usato i pesi; va in bici all'università",
+      "obiettivo": "diventare più forte e mettere massa muscolare",
+      "tempo": "3-4 volte a settimana, 60 minuti",
+      "attrezzatura": "la palestra dell'università: bilancieri, manubri, macchine, panche"
+    }
+  ]
+}

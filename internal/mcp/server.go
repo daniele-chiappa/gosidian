@@ -583,10 +583,15 @@ func (s *Server) SetAuditLog(a *audit.Log) { s.audit = a }
 // correlation id so multiple operations from the same MCP session can be
 // grouped at retrospect time.
 func (s *Server) auditWrite(ctx context.Context, action audit.Action, path, to string, size int64) {
+	tok := s.tokenFromContext(ctx)
+	// What a run's token writes, the gate of its team's task reads (IMP-195).
+	if tok != nil && tok.Kind == auth.KindRun && tok.RunID != "" && s.pipelines != nil {
+		s.pipelines.RunWrote(tok.RunID, path)
+		s.pipelines.RunWrote(tok.RunID, to)
+	}
 	if s.audit == nil {
 		return
 	}
-	tok := s.tokenFromContext(ctx)
 	tokenID := ""
 	tokenName := ""
 	if tok != nil {
@@ -686,7 +691,8 @@ func New(v *vault.Vault, idx *index.Index, tokens *auth.Store) *Server {
 //     subscriptions/listen of protocol 2026-07-28 (endListensOnClose).
 //   - <basePath>/sse      HTTP+SSE, the legacy transport, kept for older
 //     clients; <basePath>/message carries its client→server messages.
-//   - <basePath>/upload, /download, /append, /ingest/<ticket>  byte endpoints.
+//   - <basePath>/upload, /download, /append, /ingest/<ticket>,
+//     /in-upload/<id>  byte endpoints.
 //
 // basePath is the prefix the transports announce to clients (the SSE
 // handshake ships back the /message URL to POST to; tickets advertise the
@@ -736,6 +742,9 @@ func (s *Server) Handler(basePath string) http.Handler {
 	// No bearer here: the unguessable ticket id, bound to the minting token,
 	// is the credential.
 	mux.HandleFunc(basePath+"/ingest/", s.handleIngestTicketRedeem)
+	// The pieces of an upload into IN by an agent (IMP-172 phase 5b): the
+	// upload's ticket from memory_in_upload is the bearer.
+	mux.HandleFunc(basePath+"/in-upload/", s.handleINUploadHTTP)
 	if basePath != "" {
 		streamable := server.NewStreamableHTTPServer(s.impl,
 			server.WithHTTPContextFunc(ctxFn),

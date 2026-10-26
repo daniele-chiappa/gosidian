@@ -59,6 +59,10 @@ func (e *Engine) Infos(ps []Pipeline) []Info {
 		if off && p.Spec != nil && p.Spec.Trigger.On == TriggerCommit {
 			out[i].Notice = commitNotice
 		}
+		if p.Spec != nil {
+			out[i].Category = p.Spec.CategoryOf()
+			_, out[i].CategoryRules = e.Category(out[i].Category)
+		}
 	}
 	return out
 }
