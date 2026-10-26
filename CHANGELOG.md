@@ -10,6 +10,21 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.118.2] — 2026-10-26 — "Pillow 13 for the rag preset"
+
+The `rag` compose preset takes docling 0.5.5; gosidian itself is the same
+as 2.118.1. Pull the preset again (or set the docling image and its
+`GOSIDIAN_PLUGIN_DOCLING_ACCEPT` by hand) and restart.
+
+### Security
+- **The `rag` preset takes docling 0.5.5**, manifest `15da2dcf635c`
+  (0.5.4 before): its image carries Pillow 13.0.0, for twelve advisories
+  of Pillow 12.3.0 fixed only there (one critical, in FlashPix decoding,
+  and six high, among them the bundled OpenJPEG) in the decoders a
+  document's pictures go through, and docling 2.138.0. See the plugin's
+  [release notes](https://github.com/daniele-chiappa/gosidian-plugins/releases/tag/docling/v0.5.5).
+  The OCR plugin (0.1.1) takes Pillow 13 as well.
+
 ## [2.118.1] — 2026-10-26 — "DOMPurify"
 
 A security update of the web UI's sanitizer, a change in how a plugin's

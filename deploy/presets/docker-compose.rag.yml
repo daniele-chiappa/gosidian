@@ -49,7 +49,7 @@ services:
       # .env, so it waits for plugin accept --pending.
       GOSIDIAN_PLUGIN_DOCLING_URL: http://docling:8000/mcp
       GOSIDIAN_PLUGIN_DOCLING_TOKEN: ${DOCLING_TOKEN:?run ./init.sh first}
-      GOSIDIAN_PLUGIN_DOCLING_ACCEPT: 5bf7c2419f1d
+      GOSIDIAN_PLUGIN_DOCLING_ACCEPT: 15da2dcf635c
       GOSIDIAN_PLUGIN_IMAGES_URL: http://images:8000/mcp
       GOSIDIAN_PLUGIN_IMAGES_TOKEN: ${IMAGES_TOKEN:?run ./init.sh first}
       GOSIDIAN_PLUGIN_IMAGES_ACCEPT: e1a034f2a848
@@ -61,7 +61,7 @@ services:
 
   # Documents to markdown, with their pictures.
   docling:
-    image: ghcr.io/daniele-chiappa/gosidian-docling:0.5.4
+    image: ghcr.io/daniele-chiappa/gosidian-docling:0.5.5
     restart: unless-stopped
     read_only: true
     tmpfs:
