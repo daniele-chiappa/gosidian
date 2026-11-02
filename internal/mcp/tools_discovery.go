@@ -320,7 +320,7 @@ func (s *Server) resolveProject(tok *auth.Token, req mcp.CallToolRequest) (strin
 
 // scopedProjectNote describes scopedProject to agents, appended to the
 // description of every project argument it resolves.
-const scopedProjectNote = "A token scoped to a single project may omit it (that project is used); a project outside the token's scope is refused with an error."
+const scopedProjectNote = "A single-project token may omit it (its project is used); a project outside the token's scope is refused."
 
 // scopedProject applies the token scope to an optional project argument:
 // admin tokens pass it through unchanged ("" = vault-wide where the caller

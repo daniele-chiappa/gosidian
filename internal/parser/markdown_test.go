@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"flag"
+	"os"
 	"strings"
 	"testing"
 )
@@ -155,6 +157,59 @@ func TestRenderer_SyntaxHighlighting(t *testing.T) {
 	// A block too wide for the page scrolls, and the keyboard reaches it.
 	if !strings.Contains(out, `<pre tabindex="0" class="chroma"><code>`) || !strings.Contains(out, `</code></pre>`) {
 		t.Errorf("the code block's <pre> takes no focus: %s", out)
+	}
+}
+
+var updateGolden = flag.Bool("update", false, "rewrite the golden files in testdata")
+
+// The rendering of fenced code is fixed by a golden file: the languages,
+// unknown ones, the attributes of the info string ({linenos}, {hl_lines},
+// {nohl}) and code in lists and callouts. -update rewrites it.
+func TestRenderer_CodeBlocksGolden(t *testing.T) {
+	src, err := os.ReadFile("testdata/code_blocks.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := NewRenderer().Render(src, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const golden = "testdata/code_blocks.html"
+	if *updateGolden {
+		if err := os.WriteFile(golden, []byte(out), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	want, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, exp := strings.Split(out, "\n"), strings.Split(string(want), "\n")
+	for i := range max(len(got), len(exp)) {
+		var g, e string
+		if i < len(got) {
+			g = got[i]
+		}
+		if i < len(exp) {
+			e = exp[i]
+		}
+		if g != e {
+			t.Fatalf("%s, line %d:\n got %q\nwant %q", golden, i+1, g, e)
+		}
+	}
+}
+
+func BenchmarkRenderer_CodeBlocks(b *testing.B) {
+	src, err := os.ReadFile("testdata/code_blocks.md")
+	if err != nil {
+		b.Fatal(err)
+	}
+	r := NewRenderer()
+	for b.Loop() {
+		if _, err := r.Render(src, nil); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 

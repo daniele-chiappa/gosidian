@@ -375,7 +375,7 @@ func TestRender_StubHasVersionMarker(t *testing.T) {
 // TestRenderDirectives verifies the bootstrap-served directives render with the
 // project name + version marker resolved and no dangling placeholders.
 func TestRenderDirectives(t *testing.T) {
-	body, ver, err := RenderDirectives("myproj")
+	body, ver, err := RenderDirectives("myproj", Features{})
 	if err != nil {
 		t.Fatalf("RenderDirectives failed: %v", err)
 	}
@@ -397,26 +397,122 @@ func TestRenderDirectives(t *testing.T) {
 			t.Errorf("directives contains unresolved %s", ph)
 		}
 	}
-	if _, _, err := RenderDirectives("  "); err == nil {
+	if _, _, err := RenderDirectives("  ", Features{}); err == nil {
 		t.Error("expected error for empty project")
 	}
 }
 
-// The template's own comment describes it without naming its placeholders:
-// they were filled in there too, into "parametrico solo su myproj e 13"
-// (BUG-073).
-func TestRenderDirectives_CommentNamesNoPlaceholder(t *testing.T) {
-	raw, err := assetsFS.ReadFile(sharedDirectivesTemplate)
-	if err != nil {
-		t.Fatal(err)
+// The block is all for the agent: besides its two markers it carries no
+// HTML comment, which every session would read for nothing (M1.3).
+func TestRenderDirectives_NoCommentButItsMarkers(t *testing.T) {
+	for name, render := range map[string]func(string, Features) (string, int, error){
+		"full": RenderDirectives, "read": RenderReadDirectives,
+	} {
+		for _, f := range []Features{{}, allFeatures} {
+			body, _, err := render("myproj", f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if n := strings.Count(body, "<!--"); n != 2 {
+				t.Errorf("%s block (%+v) carries %d HTML comments, want only its two markers", name, f, n)
+			}
+		}
 	}
-	_, afterMarker, _ := strings.Cut(string(raw), "-->")
-	comment, _, ok := strings.Cut(afterMarker, "-->")
-	if !ok || !strings.HasPrefix(strings.TrimSpace(comment), "<!--") {
-		t.Fatal("directives template lost its leading comment")
+}
+
+var allFeatures = Features{HTMLNotes: true, MediaNotes: true, TableNotes: true, IN: true, TagVocabulary: true}
+
+// featureParts are, for each feature, a phrase of the part of the
+// directives said only when it is on, and of the part said only when it is
+// off ("" for none). read: the part is in the read block too.
+var featureParts = []struct {
+	name    string
+	set     func(*Features)
+	on, off string
+	read    bool
+}{
+	{"html_notes", func(f *Features) { f.HTMLNotes = true }, "**Note `.html`**", "", false},
+	{"media_notes", func(f *Features) { f.MediaNotes = true }, "**Media notes**", "", false},
+	{"table_notes", func(f *Features) { f.TableNotes = true }, "**Table notes**", "", false},
+	{"in", func(f *Features) { f.IN = true }, "memory_in_upload", "", false},
+	{"tag_vocabulary", func(f *Features) { f.TagVocabulary = true }, "max 64 voci", "spenta in questo progetto", true},
+}
+
+// The directives speak of a note format, the IN folder and the tag
+// vocabulary only where they are on, in each of the 32 combinations, with
+// one version for all (M1.3).
+func TestRenderDirectives_SaysOnlyWhatIsOn(t *testing.T) {
+	for mask := 0; mask < 1<<len(featureParts); mask++ {
+		var f Features
+		for i, p := range featureParts {
+			if mask&(1<<i) != 0 {
+				p.set(&f)
+			}
+		}
+		full, fv, err := RenderDirectives("myproj", f)
+		if err != nil {
+			t.Fatalf("%+v: %v", f, err)
+		}
+		read, rv, err := RenderReadDirectives("myproj", f)
+		if err != nil {
+			t.Fatalf("%+v: %v", f, err)
+		}
+		if fv != DirectivesVersion || rv != DirectivesVersion {
+			t.Errorf("%+v: versions %d and %d, want %d", f, fv, rv, DirectivesVersion)
+		}
+		for i, p := range featureParts {
+			on := mask&(1<<i) != 0
+			blocks := map[string]string{"full": full}
+			if p.read {
+				blocks["read"] = read
+			}
+			for name, body := range blocks {
+				if strings.Contains(body, p.on) != on {
+					t.Errorf("%s block with %+v: the part on %s said = %v", name, f, p.name, !on)
+				}
+				if p.off != "" && strings.Contains(body, p.off) == on {
+					t.Errorf("%s block with %+v: the part without %s said = %v", name, f, p.name, on)
+				}
+			}
+		}
 	}
-	if ph := placeholderRE.FindString(comment); ph != "" {
-		t.Errorf("leading comment names %s, which is filled in when the block renders", ph)
+}
+
+// Each variant of the block has its own number, so an agent that hands one
+// back gets a block it does not hold sent again; the version of the
+// template stays readable in it (M1.3).
+func TestDirectivesID_OnePerVariant(t *testing.T) {
+	seen := map[int]string{}
+	for mask := 0; mask < 1<<(len(featureParts)+1); mask++ {
+		var f Features
+		for i, p := range featureParts {
+			if mask&(1<<i) != 0 {
+				p.set(&f)
+			}
+		}
+		read := mask&(1<<len(featureParts)) != 0
+		id := DirectivesID(f, read)
+		if id/100 != DirectivesVersion {
+			t.Errorf("%+v read=%v: id %d is not of version %d", f, read, id, DirectivesVersion)
+		}
+		key := fmt.Sprintf("%+v read=%v", f, read)
+		if other, dup := seen[id]; dup {
+			t.Errorf("%s and %s share id %d", key, other, id)
+		}
+		seen[id] = key
+	}
+}
+
+func TestApplyFeatures_RefusesABrokenTemplate(t *testing.T) {
+	for name, body := range map[string]string{
+		"unknown feature": "a\n<!-- if pdf_notes -->\nb\n<!-- end -->\n",
+		"end without if":  "a\n<!-- end -->\n",
+		"if in an if":     "<!-- if in -->\n<!-- if !html_notes -->\nb\n<!-- end -->\n<!-- end -->\n",
+		"if without end":  "<!-- if in -->\nb\n",
+	} {
+		if _, err := applyFeatures(body, Features{}); err == nil {
+			t.Errorf("%s: no error", name)
+		}
 	}
 }
 
@@ -431,8 +527,8 @@ func TestStubVersion_PinnedToContent(t *testing.T) {
 }
 
 func TestDirectivesVersion_PinnedToContent(t *testing.T) {
-	assertPinned(t, sharedDirectivesTemplate, DirectivesVersion, 27,
-		"47ad82882626ceb9ae365bff83bc606d60526e9f897c066891920ebb7f4f2b26")
+	assertPinned(t, sharedDirectivesTemplate, DirectivesVersion, 28,
+		"1e58686cf6c1eedb6a9db6b30f99e26b984506a400531dcd4ce2086c5b912b25")
 }
 
 func assertPinned(t *testing.T, asset string, gotVersion, wantVersion int, wantHash string) {
@@ -454,11 +550,11 @@ func assertPinned(t *testing.T, asset string, gotVersion, wantVersion int, wantH
 }
 
 func TestRenderReadDirectives_KeepsReadingSections(t *testing.T) {
-	full, fv, err := RenderDirectives("proj")
+	full, fv, err := RenderDirectives("proj", Features{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	read, rv, err := RenderReadDirectives("proj")
+	read, rv, err := RenderReadDirectives("proj", Features{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -16,10 +16,14 @@ type SearchHit struct {
 	// Why names the signals behind Score: title match, backlinks,
 	// importance, recency, pinned, archived, fused phrasings.
 	Why []string
+	// Missing lists the words of the query a partial hit's note lacks
+	// (partial.go), as Why says them; nil for a note with every word.
+	Missing []string
 }
 
 // Search runs a ranked FTS query over the whole vault. Plain user input is
-// sanitized (every word quoted, prefix-matched, ANDed). Callers that filter
+// sanitized (every word quoted, prefix-matched, ANDed), and partial hits
+// follow when the full ones fall short (partial.go). Callers that filter
 // by project or access use SearchWith, which applies the filter before the
 // limit.
 func (i *Index) Search(q string, limit int) ([]SearchHit, error) {
@@ -190,12 +194,12 @@ func (i *Index) RecentNotes(project string, since int64, limit int) ([]RecentNot
 	)
 	if project == "" {
 		rows, err = i.db.Query(
-			`SELECT path, title, mtime FROM notes WHERE mtime >= ? ORDER BY mtime DESC LIMIT ?`,
+			`SELECT path, title, mtime FROM notes WHERE mtime >= ? ORDER BY mtime DESC, path LIMIT ?`,
 			since, limit,
 		)
 	} else {
 		rows, err = i.db.Query(
-			`SELECT path, title, mtime FROM notes WHERE path LIKE ? ESCAPE '\' AND mtime >= ? ORDER BY mtime DESC LIMIT ?`,
+			`SELECT path, title, mtime FROM notes WHERE path LIKE ? ESCAPE '\' AND mtime >= ? ORDER BY mtime DESC, path LIMIT ?`,
 			likeUnder(project), since, limit,
 		)
 	}
@@ -219,7 +223,7 @@ func (i *Index) RecentNotesIn(projects []string, limit int) ([]RecentNote, error
 	limit = min(limit, 500)
 	scope, args := scopeClause(projects, nil)
 	rows, err := i.db.Query(
-		`SELECT n.path, n.title, n.mtime FROM notes n WHERE 1=1`+scope+` ORDER BY n.mtime DESC LIMIT ?`,
+		`SELECT n.path, n.title, n.mtime FROM notes n WHERE 1=1`+scope+` ORDER BY n.mtime DESC, n.path LIMIT ?`,
 		append(args, limit)...,
 	)
 	if err != nil {
@@ -277,7 +281,7 @@ func (i *Index) StaleNotes(project string, before int64, limit int, excludeClose
 	if excludeClosed {
 		q += ` AND NOT ` + closedNoteExpr
 	}
-	q += ` ORDER BY n.mtime ASC LIMIT ?`
+	q += ` ORDER BY n.mtime ASC, n.path LIMIT ?`
 	args = append(args, limit)
 
 	rows, err := i.db.Query(q, args...)

@@ -1,7 +1,9 @@
 # The first team of the pilot: Claude Code with sonnet in every role. The
 # block goes as it is into fitness/squadra.md; the roles' prompts are in
 # ../ruoli/. Another team changes only this file: the models, the
-# executors (pi.run), the limits.
+# executors (pi.run), the limits. From the fifth run (gosidian v2.119.0)
+# the developer runs commands (access: exec): its own tests and the build,
+# before the pipeline runs them again; the first four ran without.
 coordinator: coordinatore
 split: context
 budget: {day_usd: 40, task_usd: 3}
@@ -29,6 +31,7 @@ roles:
     model: sonnet
     max_turns: 40
     max_seconds: 780
+    access: exec
     repo: agents-fitness
     paths: [web/, data/, test/]
     forbid: [package.json, build.js]

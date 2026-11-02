@@ -12,6 +12,8 @@ type searchHit struct {
 	Path    string `json:"path"`
 	Title   string `json:"title"`
 	Snippet string `json:"snippet"`
+	// Missing: the words of the query a partial hit's note lacks.
+	Missing []string `json:"missing,omitempty"`
 }
 
 // handleSearch runs the FTS index against the query and returns
@@ -57,6 +59,7 @@ func (r *Router) handleSearch(w http.ResponseWriter, req *http.Request) {
 
 	// canSee repeats the query's filter as defence in depth.
 	out := make([]searchHit, 0, len(hits))
+	partial := 0
 	for _, h := range hits {
 		if !r.canSee(p, h.Path) {
 			continue
@@ -65,9 +68,13 @@ func (r *Router) handleSearch(w http.ResponseWriter, req *http.Request) {
 			Path:    h.Path,
 			Title:   h.Title,
 			Snippet: stripMarkAPI(h.Snippet),
+			Missing: h.Missing,
 		})
+		if len(h.Missing) > 0 {
+			partial++
+		}
 	}
-	metrics.CountSearch("web", len(out))
+	metrics.CountSearch("web", len(out), partial)
 	WriteJSON(w, http.StatusOK, map[string]any{"hits": out})
 }
 

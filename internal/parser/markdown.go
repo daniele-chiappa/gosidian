@@ -7,9 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	chromahtml "github.com/alecthomas/chroma/v2/formatters/html"
 	"github.com/yuin/goldmark"
-	highlighting "github.com/yuin/goldmark-highlighting/v2"
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/parser"
 	gmhtml "github.com/yuin/goldmark/renderer/html"
@@ -51,12 +49,7 @@ func NewRenderer() *Renderer {
 			extension.GFM,
 			extension.Footnote,
 			extension.Typographer,
-			// Classes, not inline colours: web/src/styles/code.css paints
-			// them from the preset's tokens, so code follows every theme,
-			// the light ones included (IMP-154).
-			highlighting.NewHighlighting(
-				highlighting.WithFormatOptions(chromahtml.WithClasses(true), chromahtml.WithPreWrapper(codePre{})),
-			),
+			highlighting{},
 		),
 		goldmark.WithParserOptions(parser.WithAutoHeadingID()),
 		// Raw HTML in a note passes through, as in Obsidian: the output is

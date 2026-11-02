@@ -8,10 +8,13 @@ import (
 // stmtCache keeps the statements of the index's writes prepared, one per
 // text, on each connection that runs them. An Upsert runs some thirty, and
 // SQLite parsing each again at every run was close to a third of a write's
-// CPU (IMP-185). Only texts from a bounded set come here: the constants of
-// the writes and of link resolution, and the few shapes built from them
-// (inboundQuery for a number of keys, syncAuthorFields for a path or all),
-// never the text of a user's query, which would grow it without end.
+// CPU (IMP-185); a search's own reads, the vocabulary and the structure of
+// its candidates, a tenth of a search. Only texts from a bounded set come
+// here: the constants of the writes, of link resolution and of those reads
+// (the snippets of a search's long hits among them), and the few shapes
+// built from them (inboundQuery for a number of keys, syncAuthorFields for a
+// path or all, a search's pool for a number of projects in or out), never
+// the text of a user's query, which would grow it without end.
 type stmtCache struct {
 	db *sql.DB
 	mu sync.Mutex
@@ -88,4 +91,12 @@ func (p prepDB) QueryRow(query string, args ...any) *sql.Row {
 		return p.c.db.QueryRow(query, args...)
 	}
 	return s.QueryRow(args...)
+}
+
+func (p prepDB) Query(query string, args ...any) (*sql.Rows, error) {
+	s, err := p.c.get(query)
+	if err != nil {
+		return nil, err
+	}
+	return s.Query(args...)
 }

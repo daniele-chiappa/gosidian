@@ -11,7 +11,7 @@ vi.mock('plancia', async (orig) => ({
   useWindowsStore: () => ({ reset: vi.fn() }),
 }))
 
-import { CUT_STORAGE_PREFIX, resetSessionState } from '@/composables/useSessionReset'
+import { CUT_STORAGE_PREFIX, DRAFT_STORAGE_PREFIX, resetSessionState } from '@/composables/useSessionReset'
 
 const keys = () => Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)!)
 
@@ -32,6 +32,18 @@ describe('resetSessionState (BUG-116)', () => {
     expect(keys().filter((k) => k.startsWith(CUT_STORAGE_PREFIX))).toEqual([])
     expect(localStorage.getItem('gosidian.editorMode')).toBe('split')
     expect(localStorage.getItem('gosidian.lastUser')).toBe('bob')
+  })
+
+  // The drafts kept in the browser hold the notes' text (BUG-142).
+  it('drops the drafts of every account', () => {
+    localStorage.setItem(`${DRAFT_STORAGE_PREFIX}u1.p/a.md`, '{"text":"mine","etag":"e","at":1}')
+    localStorage.setItem(`${DRAFT_STORAGE_PREFIX}u2.q/b.md`, '{}')
+    localStorage.setItem('gosidian.editorMode', 'split')
+
+    resetSessionState()
+
+    expect(keys().filter((k) => k.startsWith(DRAFT_STORAGE_PREFIX))).toEqual([])
+    expect(localStorage.getItem('gosidian.editorMode')).toBe('split')
   })
 
   it('does not throw when the storage refuses', () => {

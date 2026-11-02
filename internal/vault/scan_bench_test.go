@@ -1,11 +1,15 @@
 package vault
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gosidian/gosidian/internal/index"
 )
@@ -56,6 +60,63 @@ func BenchmarkScanIntoWarm(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+}
+
+// BenchmarkSearch runs the queries of level B (bench/queries.jsonl) on the
+// index of GOSIDIAN_BENCH_VAULT, one sub-benchmark each, asking for the
+// eleven hits memory_search asks for ten: the search on a large vault,
+// query by query, without the MCP around it.
+func BenchmarkSearch(b *testing.B) {
+	root := os.Getenv("GOSIDIAN_BENCH_VAULT")
+	if root == "" {
+		b.Skip("GOSIDIAN_BENCH_VAULT is not set")
+	}
+	idx, err := index.Open(filepath.Join(b.TempDir(), "index.db"))
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer idx.Close()
+	if err := New(root).ScanInto(idx); err != nil {
+		b.Fatal(err)
+	}
+	f, err := os.Open("../../bench/queries.jsonl")
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer f.Close()
+	var queries []string
+	for sc := bufio.NewScanner(f); sc.Scan(); {
+		var q struct{ ID, Query string }
+		if err := json.Unmarshal(sc.Bytes(), &q); err != nil {
+			b.Fatal(err)
+		}
+		queries = append(queries, q.Query)
+		b.Run(q.ID, func(b *testing.B) {
+			for n := 0; n < b.N; n++ {
+				if _, err := idx.SearchWith(q.Query, index.SearchOptions{Limit: 11}); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+	// All of them in turn, as level B sends them: no query finds what the
+	// one before left warm. An op is a round of all the queries; p50 and
+	// p95 are of the single searches.
+	b.Run("mixed", func(b *testing.B) {
+		var took []time.Duration
+		for n := 0; n < b.N; n++ {
+			for _, q := range queries {
+				t0 := time.Now()
+				if _, err := idx.SearchWith(q, index.SearchOptions{Limit: 11}); err != nil {
+					b.Fatal(err)
+				}
+				took = append(took, time.Since(t0))
+			}
+		}
+		slices.Sort(took)
+		b.ReportMetric(float64(took[len(took)/2].Microseconds())/1000, "p50-ms")
+		b.ReportMetric(float64(took[(len(took)*95+99)/100-1].Microseconds())/1000, "p95-ms")
+	})
 }
 
 // syntheticVault writes notes across a few projects, each linking to

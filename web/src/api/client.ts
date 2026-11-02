@@ -5,7 +5,9 @@
  *     request, so handlers don't repeat the header dance.
  *  2. Centralise 401 handling: clear the auth store and route the
  *     user back to /login with a `next=` query so the SPA can
- *     resume after re-auth.
+ *     resume after re-auth. A session that ended is marked in the
+ *     store for the login page, after the editors kept their drafts
+ *     (BUG-142).
  *  3. Surface 412 ("etag mismatch") as a typed event the editor
  *     conflict dialog listens for. Other 4xx/5xx pass through as
  *     promise rejections — call sites decide whether to toast,
@@ -61,6 +63,17 @@ export function onApiEvent(
   return () => eventBus.removeEventListener(name, wrapped)
 }
 
+/** Subscribe to the end of the session, told before the auth store is
+ *  cleared: the account is still known (BUG-142). */
+export function onSessionExpired(handler: () => void): () => void {
+  eventBus.addEventListener('session.expired', handler)
+  return () => eventBus.removeEventListener('session.expired', handler)
+}
+
+// The login page is on its way: the other requests that fail with the same
+// session do not send the browser there again.
+let toLogin = false
+
 client.interceptors.response.use(
   (res) => res,
   async (err: AxiosError<{ error?: { code?: string; details?: Record<string, unknown> } }>) => {
@@ -71,16 +84,26 @@ client.interceptors.response.use(
 
     if (status === 401) {
       const auth = useAuthStore()
-      auth.clear()
+      // A session that ended, not a request that never had one: the editors
+      // keep their drafts while they still know the account.
+      if (auth.token) {
+        eventBus.dispatchEvent(new Event('session.expired'))
+        auth.endSession()
+      } else auth.clear()
       // Several requests fail together when a session ends: the first one
       // sends the browser to the login page, and the others must not wrap
       // that page's own address in a new next=, which lost the deep link
       // after the sign-in (S6-11).
-      if (window.location.pathname !== '/login') {
-        const next = encodeURIComponent(window.location.pathname + window.location.search)
-        // Lazy router import to avoid the auth/api/router cycle.
-        const { router } = await import('@/router')
-        await router.push(`/login?next=${next}`)
+      if (window.location.pathname !== '/login' && !toLogin) {
+        toLogin = true
+        try {
+          const next = encodeURIComponent(window.location.pathname + window.location.search)
+          // Lazy router import to avoid the auth/api/router cycle.
+          const { router } = await import('@/router')
+          await router.push(`/login?next=${next}`)
+        } finally {
+          toLogin = false
+        }
       }
       return Promise.reject(err)
     }

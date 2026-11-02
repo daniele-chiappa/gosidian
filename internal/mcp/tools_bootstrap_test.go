@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/gosidian/gosidian/internal/diagram"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/initprompt"
 	"github.com/gosidian/gosidian/internal/lint"
@@ -121,8 +123,8 @@ func TestMCP_Bootstrap_HappyPath(t *testing.T) {
 		t.Errorf("missing should be empty (hot.md + README.md seeded), got %v", p.Missing)
 	}
 
-	if p.DirectivesVersion != initprompt.DirectivesVersion {
-		t.Errorf("directives_version = %d, want %d", p.DirectivesVersion, initprompt.DirectivesVersion)
+	if want := initprompt.DirectivesID(initprompt.Features{}, false); p.DirectivesVersion != want {
+		t.Errorf("directives_version = %d, want %d", p.DirectivesVersion, want)
 	}
 	if p.StubVersion != initprompt.StubVersion {
 		t.Errorf("stub_version = %d, want %d", p.StubVersion, initprompt.StubVersion)
@@ -155,6 +157,35 @@ func TestMCP_Bootstrap_HappyPath(t *testing.T) {
 	}
 	if !strings.Contains(p.Capabilities.Attachments.UploadEndpointHint, "/upload") {
 		t.Error("attachments.upload_endpoint_hint should mention /upload")
+	}
+}
+
+// The capabilities' hints say each way to move bytes in few words: every
+// session reads them (M1.3, 1,337 bytes before).
+func TestBuildCapabilities_HintsKeepTheirFactsBriefly(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	c := s.buildCapabilities(false)
+	a := c.Attachments.(bootstrapAttachCapability)
+	hints := []struct {
+		name, text string
+		facts      []string
+	}{
+		{"upload", a.UploadEndpointHint, []string{"memory_ingest", "extension", "bridge_filename", "source_path", "url", `transfer:"http"`, "multipart", "'file'", "bearer", "/upload", "/sse", "context"}},
+		{"download", a.DownloadEndpointHint, []string{"full bytes", "/download?path=", "/sse", "read scope", ".md/.html", "re-ingest", "ETag", "if_match", `transfer:"http"`, "single-use", "no header", "served at /vault-files/"}},
+		{"append", a.AppendEndpointHint, []string{"no MCP session", "hook", "/append?path=", "write scope", "If-Match header", "memory_append", "locks", "limits", "audit", "events", "missing note is created"}},
+		{"twin", c.Diagrams.Twin, []string{"```mermaid", diagram.TwinMark, "web editor", "not the twin"}},
+	}
+	total := 0
+	for _, h := range hints {
+		total += len(h.text)
+		for _, f := range h.facts {
+			if !strings.Contains(h.text, f) {
+				t.Errorf("%s hint lost %q: %s", h.name, f, h.text)
+			}
+		}
+	}
+	if total > 1200 {
+		t.Errorf("the hints are %d bytes, want at most 1200", total)
 	}
 }
 
@@ -352,6 +383,86 @@ func TestMCP_Bootstrap_MaintenanceDigest(t *testing.T) {
 	m = boot()
 	if m.BrokenLinks != 0 {
 		t.Errorf("same-note links inflated broken_links: %+v", m)
+	}
+}
+
+// The directives speak of what the instance and the project have on: the
+// note formats, the IN folder, the tag vocabulary (M1.3).
+func TestMCP_Bootstrap_DirectivesSayWhatIsOn(t *testing.T) {
+	f := newINUploadFixture(t)
+	directives := func(t *testing.T, project string) string {
+		t.Helper()
+		res, err := f.s.handleBootstrap(f.ctx(), call(map[string]any{"project": project}))
+		if err != nil || res.IsError {
+			t.Fatalf("bootstrap %s: %v %s", project, err, resultText(t, res))
+		}
+		var p struct {
+			Block string `json:"directives_block"`
+		}
+		if err := json.Unmarshal([]byte(resultText(t, res)), &p); err != nil {
+			t.Fatal(err)
+		}
+		return p.Block
+	}
+	parts := map[string]string{"html": "**Note `.html`**", "media": "**Media notes**", "table": "**Table notes**", "in": "memory_in_upload", "vocabulary": "max 64 voci"}
+	says := func(t *testing.T, block string, want ...string) {
+		t.Helper()
+		for name, phrase := range parts {
+			if strings.Contains(block, phrase) != slices.Contains(want, name) {
+				t.Errorf("the part on %s said = %v, want %v", name, !slices.Contains(want, name), slices.Contains(want, name))
+			}
+		}
+	}
+
+	says(t, directives(t, "q"))
+	says(t, directives(t, "p"), "in")
+
+	f.s.vault.SetHTMLNotes(true)
+	f.s.vault.SetTableNotes(true)
+	if err := f.s.projects.Set("q", projects.Flags{UseTagVocabulary: true}); err != nil {
+		t.Fatal(err)
+	}
+	says(t, directives(t, "q"), "html", "table", "vocabulary")
+}
+
+// directives_version names the block as served: handed back, it spares the
+// block only where the same block would come, not on a project with other
+// features or after a feature was turned on (M1.3).
+func TestMCP_Bootstrap_ABlockOfAnotherVariantComesAgain(t *testing.T) {
+	f := newINUploadFixture(t)
+	bootstrap := func(t *testing.T, project string, known int) (int, bool) {
+		t.Helper()
+		args := map[string]any{"project": project}
+		if known != 0 {
+			args["known_directives_version"] = known
+		}
+		res, err := f.s.handleBootstrap(f.ctx(), call(args))
+		if err != nil || res.IsError {
+			t.Fatalf("bootstrap %s: %v %s", project, err, resultText(t, res))
+		}
+		var p struct {
+			Version int    `json:"directives_version"`
+			Block   string `json:"directives_block"`
+		}
+		if err := json.Unmarshal([]byte(resultText(t, res)), &p); err != nil {
+			t.Fatal(err)
+		}
+		return p.Version, p.Block != ""
+	}
+
+	q, _ := bootstrap(t, "q", 0)
+	if q/100 != initprompt.DirectivesVersion {
+		t.Fatalf("directives_version %d is not of version %d", q, initprompt.DirectivesVersion)
+	}
+	if _, sent := bootstrap(t, "q", q); sent {
+		t.Error("the same block was sent again")
+	}
+	if p, sent := bootstrap(t, "p", q); !sent || p == q {
+		t.Errorf("project p (IN folder on) with q's %d: version %d, block sent = %v", q, p, sent)
+	}
+	f.s.vault.SetHTMLNotes(true)
+	if now, sent := bootstrap(t, "q", q); !sent || now == q {
+		t.Errorf("q after html notes went on, with %d: version %d, block sent = %v", q, now, sent)
 	}
 }
 

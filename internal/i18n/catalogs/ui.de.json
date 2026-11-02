@@ -122,7 +122,9 @@
     "action_focus_label": "Fokus-Modus umschalten",
     "action_focus_desc": "Obere + Seitenleiste ausblenden",
     "action_new_note_label": "Neue Notiz",
-    "action_new_note_desc": "Leere Notiz erstellen"
+    "action_new_note_desc": "Leere Notiz erstellen",
+    "search_text": "„{query}“ im Text suchen",
+    "title": "Zu einer Notiz, einem Projekt oder einem Tag"
   },
   "layout": {
     "sidebar_resize_label": "Ziehen zum Skalieren, Doppelklick zum Zurücksetzen",
@@ -343,6 +345,8 @@
     "suggestions": "Notizen",
     "no_value": "Ohne Wert",
     "column_empty": "Keine Notizen",
+    "closed": "Geschlossen",
+    "wip_over": "{column}: über dem Limit von {wip}.",
     "move_to": "{title} verschieben nach…",
     "new_row": "Neue Zeile",
     "new_row_in": "Neue Zeile in {column}",

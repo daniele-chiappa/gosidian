@@ -8,13 +8,14 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useEventListener } from '@vueuse/core'
 import { CircleAlert, CircleCheck, Upload } from 'lucide-vue-next'
-import { useWindowsStore } from 'plancia'
+import { useOpenFocused } from '@/composables/useOpenFocused'
 import { planciaKey } from '@/composables/planciaKey'
 import { useUploadsStore } from '@/stores/uploads'
 
 const { t } = useI18n()
 const uploads = useUploadsStore()
-const windows = useWindowsStore()
+// A gesture's open puts the focus on the window's title (IMP-217, F-03).
+const openWindow = useOpenFocused()
 
 const percent = computed(() => {
   const { done, total } = uploads.progress
@@ -34,7 +35,7 @@ useEventListener(window, 'beforeunload', (e: BeforeUnloadEvent) => {
 })
 
 function open() {
-  windows.open({ type: 'uploads', key: planciaKey('uploads'), title: t('uploads.window_title') })
+  openWindow({ type: 'uploads', key: planciaKey('uploads'), title: t('uploads.window_title') })
 }
 </script>
 

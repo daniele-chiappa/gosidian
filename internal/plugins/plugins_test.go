@@ -815,7 +815,9 @@ func agentPlugin(t *testing.T, tokens *fakeRunTokens) *httptest.Server {
 	s.AddTool(mcp.NewTool(ManifestTool), func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		b, _ := json.Marshal(map[string]any{
 			"name": "coder", "version": "1.0", "gosidian": 1,
-			"nodes":       []any{map[string]any{"name": "run", "tool": "run", "contract": ContractAgentRun, "mcp": true}},
+			"nodes": []any{map[string]any{"name": "run", "tool": "run", "contract": ContractAgentRun, "mcp": true,
+				"input_schema": map[string]any{"type": "object", "properties": map[string]any{"prompt": map[string]any{"type": "string"},
+					"repo": map[string]any{"type": "object", "properties": map[string]any{"resume": map[string]any{"type": "boolean"}}}}}}},
 			"permissions": map[string]any{"files": false, "network": []string{"gosidian"}, "mcp": []string{"read"}},
 		})
 		return mcp.NewToolResultText(string(b)), nil
@@ -848,6 +850,13 @@ func TestNode_MCPToken(t *testing.T) {
 	st, _ := reg.State("coder")
 	if _, err := reg.Accept(ctx, "coder", st.SHA, "test"); err != nil {
 		t.Fatal(err)
+	}
+	// The settings of the accepted manifest, for a caller that passes a
+	// newer one only to a plugin that takes it.
+	typ, _ := reg.Type("coder.run")
+	takes := typ.(interface{ Takes(path ...string) bool }).Takes
+	if !takes("repo", "resume") || !takes("prompt") || takes("repo", "from") || takes("access") {
+		t.Errorf("takes: repo.resume %v, prompt %v, repo.from %v, access %v", takes("repo", "resume"), takes("prompt"), takes("repo", "from"), takes("access"))
 	}
 	e, host := newEngine(t, reg)
 	host.mu.Lock()

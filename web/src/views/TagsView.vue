@@ -80,7 +80,13 @@ watch(selectedTag, (t) => {
   <div class="flex flex-wrap gap-8 p-6">
     <aside class="w-56 shrink-0">
       <!-- The window's title bar shows the name: the heading is for screen readers. -->
-      <h1 class="sr-only">{{ t('tags.title') }}</h1>
+      <h1
+        class="sr-only"
+        tabindex="-1"
+        data-window-heading
+      >
+        {{ t('tags.title') }}
+      </h1>
       <p v-if="loading" class="text-text-muted text-sm">{{ t('common.loading') }}</p>
       <div v-else-if="error" class="space-y-2">
         <ErrorMessage :text="error" class="text-sm" />

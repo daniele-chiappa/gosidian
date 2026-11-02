@@ -1,6 +1,7 @@
 package index
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -18,6 +19,54 @@ func TestStemmer_PorterStems(t *testing.T) {
 		if got[k] != want[k] {
 			t.Errorf("stem(%q) = %q, want %q", words[k], got[k], want[k])
 		}
+	}
+}
+
+// The stemmer keeps nothing between calls: the second call's stems are its
+// own words', whatever the first one held, and a word repeated, accented or
+// alone stems as it does in a list.
+func TestStemmer_CallsDoNotMix(t *testing.T) {
+	s, err := newStemmer()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.close()
+	if got := s.stems([]string{"deployments", "retries", "relational"}); strings.Join(got, ",") != "deploy,retri,relat" {
+		t.Fatalf("first call = %q", got)
+	}
+	for _, c := range []struct {
+		words []string
+		want  string
+	}{
+		{[]string{"caresses", "caresses", "Résumés"}, "caress,caress,resum"},
+		{[]string{"tested"}, "test"},
+		{nil, ""},
+		{[]string{"a b", ""}, ","},
+	} {
+		if got := s.stems(c.words); strings.Join(got, ",") != c.want {
+			t.Errorf("stems(%q) = %q, want %s", c.words, got, c.want)
+		}
+	}
+	if got := s.stem("streams"); got != "stream" {
+		t.Errorf("stem(streams) = %q", got)
+	}
+	// Remembered or not, the same stems: the words of the first call again,
+	// mixed with new ones, and past the cap, which forgets them all.
+	if got := s.stems([]string{"retries", "testing", "deployments", "BUG-017"}); strings.Join(got, ",") != "retri,test,deploy," {
+		t.Errorf("remembered and new = %q", got)
+	}
+	many := make([]string, maxKnownStems+10)
+	for k := range many {
+		many[k] = fmt.Sprintf("tested%d", k)
+	}
+	if got := s.stems(many); got[0] != "tested0" || got[len(got)-1] != many[len(many)-1] {
+		t.Errorf("past the cap: %q … %q", got[0], got[len(got)-1])
+	}
+	if len(s.known) > maxKnownStems+10 {
+		t.Errorf("the stemmer remembers %d stems", len(s.known))
+	}
+	if got := s.stems([]string{"deployments", "tested"}); strings.Join(got, ",") != "deploy,test" {
+		t.Errorf("after the cap = %q", got)
 	}
 }
 

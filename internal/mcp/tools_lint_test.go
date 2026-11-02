@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gosidian/gosidian/internal/lint"
 	"github.com/gosidian/gosidian/internal/projects"
 )
 
@@ -146,5 +147,66 @@ func TestMCP_Lint_ProjectTagVocabulary(t *testing.T) {
 	}
 	if n := countTagIssues(t); n != 0 {
 		t.Fatalf("flag on: expected 0 tag issues, got %d", n)
+	}
+}
+
+// toolDescriptions returns, from tools/list, a tool's description and its
+// parameters' descriptions by name.
+func toolDescriptions(t *testing.T, s *Server, name string) (string, map[string]string) {
+	t.Helper()
+	var resp struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				Description string `json:"description"`
+				InputSchema struct {
+					Properties map[string]struct {
+						Description string `json:"description"`
+					} `json:"properties"`
+				} `json:"inputSchema"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(rpcMessage(t, s, context.Background(), "tools/list", `{}`)), &resp); err != nil {
+		t.Fatal(err)
+	}
+	for _, tl := range resp.Result.Tools {
+		if tl.Name == name {
+			params := map[string]string{}
+			for p, v := range tl.InputSchema.Properties {
+				params[p] = v.Description
+			}
+			return tl.Description, params
+		}
+	}
+	t.Fatalf("%s is not in tools/list", name)
+	return "", nil
+}
+
+// memory_lint names every rule it runs by default, with what it checks, so
+// an agent can pick them: the list follows the linter's (M1.3).
+func TestLintTool_NamesEveryDefaultRule(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	desc, params := toolDescriptions(t, s, "memory_lint")
+	for _, rule := range lint.DefaultRules() {
+		if !strings.Contains(desc, rule) {
+			t.Errorf("the description does not name %s", rule)
+		}
+	}
+	if !strings.Contains(params["rules"], "unlinked-mentions") {
+		t.Errorf("the rules parameter does not name the opt-in rule: %s", params["rules"])
+	}
+}
+
+// memory_ingest says what a file becomes where its format is off, as the
+// server does: an attachment for a .csv or an image, a refusal for a .html
+// (M1.3).
+func TestIngestTool_SaysWhatAFormatOffDoes(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	desc, _ := toolDescriptions(t, s, "memory_ingest")
+	for _, want := range []string{"where those formats are on, else a plain attachment", ".html too where html notes are on (else refused)", "(.html only where html notes are on, else left out)"} {
+		if !strings.Contains(desc, want) {
+			t.Errorf("the description lacks %q", want)
+		}
 	}
 }

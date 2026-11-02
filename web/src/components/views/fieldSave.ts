@@ -7,7 +7,7 @@ type T = (key: string, values?: Record<string, unknown>) => string
 
 /** How a save ended: saved, or why not, with the field's current value on a conflict. */
 export type SaveResult =
-  | { ok: true }
+  | { ok: true; warning?: string }
   | { ok: false; message: string; conflict: boolean; current?: string | string[] }
 
 /**
@@ -29,6 +29,25 @@ export async function saveField(
   try {
     await patchFrontmatter(path, body)
     return { ok: true }
+  } catch (e) {
+    return failure(e, col, t)
+  }
+}
+
+/**
+ * saveBody sends a PATCH body as it is, for the move of a board's card to
+ * a place in a column (IMP-216); `col` names the field a refusal is about.
+ * A column the card took past its limit comes back as the warning.
+ */
+export async function saveBody(
+  path: string,
+  col: ViewColumn,
+  body: PatchFrontmatterBody,
+  t: T,
+): Promise<SaveResult> {
+  try {
+    const note = await patchFrontmatter(path, body)
+    return { ok: true, warning: note?.warning }
   } catch (e) {
     return failure(e, col, t)
   }

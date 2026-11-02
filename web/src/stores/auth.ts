@@ -28,6 +28,17 @@ interface AuthState {
   token: string
   expiresAt: string
   hardExpiry: string
+  /** When expiresAt arrived, in ms on this browser's clock: the start of the
+   *  window useSessionRenewal halves (BUG-143). 0 when unknown. */
+  renewedAt: number
+  /** The longest this session lasts (hard_expiry less the time of the
+   *  login), in ms: how long a draft kept in the browser lives (BUG-142).
+   *  0 when unknown. */
+  maxSessionMs: number
+  /** Set when a request found the session over (the API client's 401), until
+   *  the next login: the login page says so (BUG-142). Not in the address,
+   *  which the workspace rewrites; persisted, so a reload keeps it. */
+  sessionEnded: boolean
   user: User | null
   /** Set when login reports the effective policy mandates TOTP but no secret
    *  is enrolled yet — the AppShell forces the enrolment interstitial. */
@@ -90,6 +101,9 @@ export const useAuthStore = defineStore('auth', {
     token: '',
     expiresAt: '',
     hardExpiry: '',
+    renewedAt: 0,
+    maxSessionMs: 0,
+    sessionEnded: false,
     user: null,
     enrollmentRequired: false,
     passwordChangeRequired: false,
@@ -116,6 +130,9 @@ export const useAuthStore = defineStore('auth', {
       this.token = data.token
       this.expiresAt = data.expires_at
       this.hardExpiry = data.hard_expiry
+      this.renewedAt = Date.now()
+      this.maxSessionMs = Math.max(0, Date.parse(data.hard_expiry) - this.renewedAt) || 0
+      this.sessionEnded = false
       this.user = data.user
       this.enrollmentRequired = Boolean(data.totp_enrollment_required)
       this.passwordChangeRequired = Boolean(data.password_change_required)
@@ -164,6 +181,7 @@ export const useAuthStore = defineStore('auth', {
       const data = await postJson<RefreshResponse>('/refresh', {}, this.token)
       this.expiresAt = data.expires_at
       this.hardExpiry = data.hard_expiry
+      this.renewedAt = Date.now()
     },
 
     async logout() {
@@ -176,10 +194,19 @@ export const useAuthStore = defineStore('auth', {
       this.clear()
     },
 
+    /** A request found the session over: clears it, and the login page
+     *  says so. clear() leaves the mark, for the other requests it refused. */
+    endSession() {
+      this.clear()
+      this.sessionEnded = true
+    },
+
     clear() {
       this.token = ''
       this.expiresAt = ''
       this.hardExpiry = ''
+      this.renewedAt = 0
+      this.maxSessionMs = 0
       this.user = null
       this.enrollmentRequired = false
       this.passwordChangeRequired = false
@@ -195,6 +222,8 @@ export const useAuthStore = defineStore('auth', {
       this.token = ''
       this.expiresAt = ''
       this.hardExpiry = ''
+      this.renewedAt = 0
+      this.maxSessionMs = 0
       this.user = { id: 'anonymous', username: 'guest', role: 'guest' }
       this.enrollmentRequired = false
       this.passwordChangeRequired = false
@@ -210,6 +239,9 @@ export const useAuthStore = defineStore('auth', {
       'token',
       'expiresAt',
       'hardExpiry',
+      'renewedAt',
+      'maxSessionMs',
+      'sessionEnded',
       'user',
       'enrollmentRequired',
       'passwordChangeRequired',

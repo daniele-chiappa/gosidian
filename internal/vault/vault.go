@@ -9,9 +9,11 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gosidian/gosidian/internal/index"
@@ -574,6 +576,10 @@ func (v *Vault) ScanInto(idx *index.Index) error {
 	return err
 }
 
+// scanBatch is how many notes the scan reads at a time, and the most it
+// writes in one transaction (index.UpsertMany).
+var scanBatch = 256
+
 // Scan brings the index in line with the vault: it upserts every note whose
 // content differs from what was indexed (index.ContentHash; a note the index
 // asks to redo has no hash), drops the indexed notes no longer on disk
@@ -582,6 +588,11 @@ func (v *Vault) ScanInto(idx *index.Index) error {
 // even when nothing changed, so a change to link resolution alone reaches
 // the stored links at the next start. First it removes what saves cut short
 // left behind.
+//
+// The notes go scanBatch at a time: while a batch is written, in one
+// transaction, the next one is read and extracted on every core
+// (readBatch). The writes keep the order of the paths, so the rows are the
+// ones upserting the notes one by one leaves.
 func (v *Vault) Scan(idx *index.Index) (ScanStats, error) {
 	var st ScanStats
 	v.removeStaleWrites()
@@ -593,26 +604,52 @@ func (v *Vault) Scan(idx *index.Index) (ScanStats, error) {
 	if err != nil {
 		return st, fmt.Errorf("read index stamps: %w", err)
 	}
-	onDisk := make(map[string]bool, len(paths))
+	// A first start, a migration or a new ContentVersion re-index most of
+	// the vault (no stamp, or one without a hash): the full-text index then
+	// merges once, at the end, rather than at every batch. Every scan sets
+	// the mode, so one that a crash cut short does not leave it on.
+	redo := 0
 	for _, p := range paths {
-		n, err := loadNote(v.Root, p)
-		if err != nil {
-			return st, fmt.Errorf("load %s: %w", p, err)
+		if stamps[p].Hash == "" {
+			redo++
 		}
-		onDisk[n.Path] = true
-		doc := toIndexNote(n)
-		if old, ok := stamps[n.Path]; ok && old.Holds(doc) {
-			if old.ModTime != doc.ModTime || old.Size != doc.Size {
-				if err := idx.Touch(doc.Path, doc.ModTime, doc.Size); err != nil {
-					return st, fmt.Errorf("index %s: %w", p, err)
+	}
+	bulk := redo*2 > len(paths)
+	if err := idx.BulkLoad(bulk); err != nil {
+		return st, fmt.Errorf("index merging: %w", err)
+	}
+	if bulk {
+		defer idx.BulkLoad(false)
+	}
+	onDisk := make(map[string]bool, len(paths))
+	next := v.readBatch(paths[:min(scanBatch, len(paths))], stamps)
+	for from := 0; from < len(paths); from += scanBatch {
+		batch := <-next
+		if to := from + scanBatch; to < len(paths) {
+			next = v.readBatch(paths[to:min(to+scanBatch, len(paths))], stamps)
+		}
+		var changed []index.Extracted
+		for _, s := range batch {
+			if s.err != nil {
+				return st, s.err
+			}
+			onDisk[s.doc.Path] = true
+			if !s.held {
+				changed = append(changed, s.note)
+				continue
+			}
+			if old := stamps[s.doc.Path]; old.ModTime != s.doc.ModTime || old.Size != s.doc.Size {
+				if err := idx.Touch(s.doc.Path, s.doc.ModTime, s.doc.Size); err != nil {
+					return st, fmt.Errorf("index %s: %w", s.doc.Path, err)
 				}
 			}
-			continue
 		}
-		if err := idx.UpsertUnresolved(doc); err != nil {
-			return st, fmt.Errorf("index %s: %w", p, err)
+		if len(changed) > 0 {
+			if err := idx.UpsertMany(changed); err != nil {
+				return st, fmt.Errorf("index %w", err)
+			}
+			st.Reindexed += len(changed)
 		}
-		st.Reindexed++
 	}
 	st.Notes = len(onDisk)
 	for p := range stamps {
@@ -627,7 +664,60 @@ func (v *Vault) Scan(idx *index.Index) (ScanStats, error) {
 	if err := idx.ResolveAll(); err != nil {
 		return st, fmt.Errorf("resolve links: %w", err)
 	}
+	// A scan that rewrote most of the index, a first start or a new
+	// ContentVersion, leaves its full-text part in pieces: merged once here,
+	// before the first search. A restart that re-indexed a few notes does
+	// not pay for merging all of them.
+	if st.Reindexed*2 > st.Notes {
+		if err := idx.Compact(); err != nil {
+			return st, fmt.Errorf("compact the index: %w", err)
+		}
+	}
 	return st, nil
+}
+
+// scanned is a note of the scan as readBatch hands it to the writer.
+type scanned struct {
+	doc  index.NoteDoc
+	held bool            // the index holds this content: at most a Touch
+	note index.Extracted // what to upsert, when not held
+	err  error
+}
+
+// readBatch reads the notes at paths on every core and delivers them in
+// their order. A note whose content the index holds (stamps) is only read;
+// the others are extracted for the upsert too.
+func (v *Vault) readBatch(paths []string, stamps map[string]index.Stamp) <-chan []scanned {
+	out := make(chan []scanned, 1)
+	go func() {
+		batch := make([]scanned, len(paths))
+		var next atomic.Int64
+		var wg sync.WaitGroup
+		for range min(runtime.GOMAXPROCS(0), len(paths)) {
+			wg.Go(func() {
+				for k := next.Add(1) - 1; k < int64(len(paths)); k = next.Add(1) - 1 {
+					batch[k] = v.readNote(paths[k], stamps)
+				}
+			})
+		}
+		wg.Wait()
+		out <- batch
+	}()
+	return out
+}
+
+func (v *Vault) readNote(p string, stamps map[string]index.Stamp) scanned {
+	n, err := loadNote(v.Root, p)
+	if err != nil {
+		return scanned{err: fmt.Errorf("load %s: %w", p, err)}
+	}
+	s := scanned{doc: toIndexNote(n)}
+	if old, ok := stamps[s.doc.Path]; ok && old.Holds(s.doc) {
+		s.held = true
+		return s
+	}
+	s.note = index.Extract(s.doc)
+	return s
 }
 
 // Project describes a top-level directory inside the vault. Projects are

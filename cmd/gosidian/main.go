@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -246,6 +247,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("open spa token store: %v", err)
 	}
+	spaTokenStore.SetTTL(cfg.Webauth.SessionTTL, cfg.Webauth.SessionMaxTTL)
 	spaTokenStore.StartCleanup(1 * time.Hour)
 	defer spaTokenStore.Close()
 
@@ -491,6 +493,10 @@ func main() {
 	metrics.NotesGauge.Set(float64(scan.Notes))
 	log.Printf("scan complete in %s: %d notes, %d re-indexed, %d dropped",
 		time.Since(scanStart).Round(time.Millisecond), scan.Notes, scan.Reindexed, scan.Dropped)
+	// What the scan read and parsed, on every core, is garbage now: back to
+	// the system at once, where the scavenger would take minutes. On 5,087
+	// notes it kept 1.5-5.6 MiB of a server at rest of about 21.
+	debug.FreeOSMemory()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -780,6 +786,7 @@ func main() {
 	if err := apiv1.SetTrustedProxies(cfg.Webauth.TrustedProxies); err != nil {
 		log.Fatalf("webauth.trusted_proxies: %v", err)
 	}
+	apiv1.SetLoginLimits(cfg.Webauth.LoginWindow, cfg.Webauth.LoginMaxFailures)
 	if len(cfg.Webauth.TrustedProxies) > 0 {
 		log.Printf("webauth: trusting X-Forwarded-For from %s", strings.Join(cfg.Webauth.TrustedProxies, ", "))
 	}
@@ -810,6 +817,7 @@ func main() {
 		IN:         inFolders,
 		Marks:      marksStore,
 		Chat:       mcpServer.Chat(), // nil when [pipelines] is off: /chat answers 404
+		Cards:      mcpServer,        // a person's move of a board's card, by the board's rules (IMP-216)
 	})
 	srv.MountAPIv1(apiRouter)
 	srv.SetVaultFileAuthorizer(apiRouter.VaultFileAuthorizer()) // ADR-022: attachments share the API auth

@@ -155,7 +155,7 @@ func TestFindBlocksAndExpand(t *testing.T) {
 	if len(blocks) != 2 || blocks[0].Spec != "from: p/x\n" || blocks[1].Spec != "from: p/y\n" {
 		t.Fatalf("blocks = %+v (the one inside ````markdown is a sample, not a block)", blocks)
 	}
-	render := func(spec string) string { return "RESULT(" + strings.TrimSpace(spec) + ")\n" }
+	render := func(spec string, _ bool) string { return "RESULT(" + strings.TrimSpace(spec) + ")\n" }
 
 	agent, hash := Expand([]byte(body), true, render)
 	if !strings.Contains(string(agent), "```view\nfrom: p/x\n```\n"+resultOpen+"\n\nRESULT(from: p/x)\n\n"+resultClose) || hash == "" {

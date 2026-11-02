@@ -5,7 +5,7 @@ import enUI from '@catalogs/ui.en.json'
 
 const route = { query: {} as Record<string, string> }
 const router = { push: vi.fn(), replace: vi.fn() }
-const auth = { user: { id: 'bob' } as { id: string } | null, login: vi.fn() }
+const auth = { user: { id: 'bob' } as { id: string } | null, login: vi.fn(), sessionEnded: false }
 let same = true
 
 vi.mock('vue-router', () => ({ useRoute: () => route, useRouter: () => router }))
@@ -64,6 +64,30 @@ describe('LoginView next= (BUG-116, S6-5)', () => {
     same = true
     await signIn(mountView())
     expect(router.push).toHaveBeenCalledWith('/?w=note%3AAlice%2Fsecret.md&f=note%3AAlice%2Fsecret.md')
+  })
+})
+
+describe('LoginView after a session that ended (BUG-142)', () => {
+  beforeEach(() => vi.clearAllMocks())
+  const expiredNotice = (w: ReturnType<typeof mountView>) =>
+    w.findAll('[role=status]').find((el) => el.text().includes('Your session has expired'))
+
+  it('says so, and that the unsaved changes are still in this browser', async () => {
+    route.query = { next: '/' }
+    auth.sessionEnded = true
+    const w = mountView()
+    await flushPromises()
+    expect(expiredNotice(w)?.text()).toBe(
+      'Your session has expired: sign in again. Unsaved changes stay in this browser.',
+    )
+  })
+
+  it('says nothing of it on a plain sign-in', async () => {
+    route.query = { next: '/' }
+    auth.sessionEnded = false
+    const w = mountView()
+    await flushPromises()
+    expect(expiredNotice(w)).toBeUndefined()
   })
 })
 
@@ -137,5 +161,45 @@ describe('LoginView two-factor field', () => {
     const w = mountView()
     await flushPromises()
     expect(w.find("input[autocomplete='one-time-code']").exists()).toBe(false)
+  })
+})
+
+describe('LoginView page title (IMP-217, F-07)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    document.title = ''
+  })
+
+  it('says sign in, or sign up for an invite until the account is made', async () => {
+    route.query = {}
+    mountView().unmount()
+    expect(document.title).toBe('Sign in · gosidian')
+
+    route.query = { invite: 'inv_abc' }
+    vi.mocked(signup).mockResolvedValue(undefined)
+    const w = mountView()
+    expect(document.title).toBe('Sign up · gosidian')
+    await w.find("input[autocomplete='username']").setValue('carol')
+    await w.find('[data-signup-password]').setValue('carol-password-1')
+    await w.find('[data-signup-confirm]').setValue('carol-password-1')
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    expect(document.title).toBe('Sign in · gosidian')
+  })
+})
+
+describe('LoginView landmarks (IMP-217, F-35)', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('keeps the page in a main, to sign in and to sign up', () => {
+    const queries: Record<string, string>[] = [{}, { invite: 'inv_abc' }]
+    for (const query of queries) {
+      route.query = query
+      const w = mountView()
+      expect(w.element.tagName).toBe('MAIN')
+      expect(w.find('main h1').exists()).toBe(true)
+      expect(w.find('main form').exists()).toBe(true)
+      w.unmount()
+    }
   })
 })

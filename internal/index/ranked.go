@@ -1,6 +1,8 @@
 package index
 
 import (
+	"database/sql"
+	"encoding/json"
 	"fmt"
 	"math"
 	"sort"
@@ -36,25 +38,52 @@ const (
 	recencyBoost   = 0.1
 	recencyHorizon = 180
 
-	// Candidates fetched per query before the structural reorder.
+	// Candidates fetched per query before the structural reorder: three
+	// times the hits, at least minPool. The structure is no tie-break: on a
+	// vault of 29,000 notes a title match and the backlinks of a hub lift
+	// notes from past the 50th place in bm25 into the first hits. At 33
+	// a search of memory_search's eleven hits lost 38 of the 836 hits a
+	// pool of 50 found there, some of them first; level B's vaults never
+	// showed it. A deeper pool finds more still: the hits depend on the
+	// pool (IMP-215), and 50 is where it was.
 	minPool = 50
 	maxPool = 500
+	// minFusedDepth is how deep each phrasing of a search with variants
+	// ranks, at least: the fusion scores a note by its rank in every list,
+	// so their depth changes the fused order, and it stays as it was.
+	minFusedDepth = 50
 
 	// snippetTokens is the length of the search snippet. 24 tokens usually
 	// hold a whole sentence around the match; at 12 agents answered from a
 	// fragment that stopped halfway through the fact (benchmark, IMP-096).
-	snippetTokens = "24"
+	snippetTokens = 24
 
 	// MaxVariants caps SearchOptions.Variants.
 	MaxVariants = 8
-	// rrfK is the usual Reciprocal Rank Fusion constant: 1/(k+rank).
-	rrfK = 60.0
+	// rrfK is the Reciprocal Rank Fusion constant: 1/(k+rank). At the usual
+	// 60 the fusion was flat, the first place worth 1/61 and the tenth 1/70,
+	// so a note in the tails of two lists outranked the first of one: on the
+	// lab's 1,257 questions of IMP-215 a search with variants put the
+	// expected note first less often than its query alone (R@1 0.356
+	// against 0.398). At 5, 0.403, with MRR +0.045 and level R as it was.
+	rrfK = 5.0
 
 	pinnedFactor   = 1.2
 	archivedFactor = 0.7
 )
 
-var bm25Expr = fmt.Sprintf("bm25(notes_fts, %.1f, %.1f, %.1f)", weightTitle, weightMeta, weightBody)
+// longNote is the size, in bytes, from which a candidate's snippet waits
+// until the candidate is a hit; tests lower it. FTS5 cuts a snippet from the
+// whole body, about 10 ms a megabyte, and on a vault of long documents the
+// snippets of candidates the search then left out were most of its time. A
+// snippet that waits costs the match one more run, which a shorter note
+// would not repay.
+var longNote int64 = 8 << 10
+
+var (
+	bm25Expr    = fmt.Sprintf("bm25(notes_fts, %.1f, %.1f, %.1f)", weightTitle, weightMeta, weightBody)
+	snippetExpr = fmt.Sprintf(`snippet(notes_fts, 2, '<mark>', '</mark>', '…', %d)`, snippetTokens)
+)
 
 // now is the clock for the recency factor; tests pin it.
 var now = time.Now
@@ -78,7 +107,10 @@ type SearchOptions struct {
 }
 
 // SearchWith runs a scoped, ranked FTS search: the query and each variant
-// are sanitized as in Search, ranked independently, then fused.
+// are sanitized as in Search, ranked independently, then fused. When the
+// notes with every word are fewer than the limit, partial hits follow them
+// (partial.go): a query's own, or with variants those of every phrasing,
+// fused.
 func (i *Index) SearchWith(q string, opts SearchOptions) ([]SearchHit, error) {
 	limit := opts.Limit
 	if limit <= 0 {
@@ -98,20 +130,63 @@ func (i *Index) SearchWith(q string, opts SearchOptions) ([]SearchHit, error) {
 		return nil, nil
 	}
 	if len(queries) == 1 {
-		return i.rankedSearch(queries[0], opts, limit)
+		parts := i.queryParts(queries[0])
+		hits, err := i.rankedMatch(joinParts(parts, " AND "), queries[0], opts, limit, longNote)
+		if err != nil {
+			return nil, err
+		}
+		if len(hits) < limit {
+			if hits, err = i.withPartial(queries[0], parts, opts, limit, hits); err != nil {
+				return nil, err
+			}
+		}
+		return i.withSnippets(hits)
 	}
 	// Each phrasing ranks a full candidate pool, not just limit hits, so the
 	// fusion can see a note that several phrasings place below the top.
-	depth := poolSize(limit)
-	lists := make([][]SearchHit, 0, len(queries))
+	depth := min(max(limit*3, minFusedDepth), maxPool)
+	lists := make([][]rankedHit, 0, len(queries))
+	parts := make([][]queryPart, 0, len(queries))
 	for _, query := range queries {
-		hits, err := i.rankedSearch(query, opts, depth)
+		ps := i.queryParts(query)
+		hits, err := i.rankedMatch(joinParts(ps, " AND "), query, opts, depth, longNote)
 		if err != nil {
 			return nil, err
 		}
 		lists = append(lists, hits)
+		parts = append(parts, ps)
 	}
-	return fuse(queries, lists, limit), nil
+	hits := fuse(queries, lists, limit)
+	if len(hits) < limit {
+		// Short of the limit, the fusion holds every full hit of every
+		// phrasing: the partial ones of each, fused, follow.
+		s := i.partialSearch(opts)
+		partial := make([][]rankedHit, len(queries))
+		for k, query := range queries {
+			var err error
+			if partial[k], err = s.hits(query, parts[k], limit, lists[k]); err != nil {
+				return nil, err
+			}
+		}
+		seen := make(map[string]bool, len(hits))
+		for _, h := range hits {
+			seen[h.Path] = true
+		}
+		var extra []rankedHit
+		for _, h := range fuse(queries, partial, limit) {
+			if len(hits)+len(extra) == limit {
+				break
+			}
+			if !seen[h.Path] {
+				extra = append(extra, h)
+			}
+		}
+		if err := s.label(extra); err != nil {
+			return nil, err
+		}
+		hits = append(hits, scoreAfter(hits, extra)...)
+	}
+	return i.withSnippets(hits)
 }
 
 // distinctQueries returns q followed by the variants, trimmed, without empty
@@ -135,42 +210,65 @@ func distinctQueries(q string, variants []string) []string {
 }
 
 type candidate struct {
-	hit        SearchHit
-	id         int64
+	hit        rankedHit
 	mtime      int64
 	importance int
 	score      float64 // text relevance, then × structural factors; unrounded
 }
 
-// rankedSearch returns up to limit hits for one query, best first.
-func (i *Index) rankedSearch(q string, opts SearchOptions, limit int) ([]SearchHit, error) {
-	match := i.matchExpr(q)
+// rankedHit is a hit as one query ranks it, with what its snippet needs
+// when it waits (longNote): the note's id, that query's MATCH expression,
+// and for a huge note (hugeNote) the query itself. score is the unrounded
+// relevance its Score is relative to.
+type rankedHit struct {
+	SearchHit
+	id    int64
+	size  int64
+	score float64
+	match string // set while the snippet waits
+	query string
+}
+
+// rankedMatch returns up to limit hits of the query q, best first: the notes
+// match finds. The snippets of the notes from snippetFrom bytes up are left
+// to withSnippets.
+func (i *Index) rankedMatch(match, q string, opts SearchOptions, limit int, snippetFrom int64) ([]rankedHit, error) {
 	if match == "" {
 		return nil, nil
 	}
 	scope, args := scopeClause(opts.Projects, opts.Exclude)
 	pool := poolSize(limit)
-	rows, err := i.db.Query(`
-        SELECT n.id, n.path, n.title, n.mtime, n.importance, `+bm25Expr+`,
-               snippet(notes_fts, 2, '<mark>', '</mark>', '…', `+snippetTokens+`)
+	// Prepared once per scope shape: the text changes only with the number
+	// of projects in or out, never with the query.
+	rows, err := prepDB{i.stmts}.Query(`
+        SELECT n.id, n.path, n.title, n.mtime, n.importance, n.size, `+bm25Expr+`,
+               CASE WHEN n.size < ? THEN `+snippetExpr+` END
         FROM notes_fts
         JOIN notes n ON n.id = notes_fts.rowid
         WHERE notes_fts MATCH ?`+scope+`
         ORDER BY `+bm25Expr+`
         LIMIT ?
-    `, append(append([]any{match}, args...), pool)...)
+    `, append(append([]any{snippetFrom, match}, args...), pool)...)
 	if err != nil {
 		return nil, err
 	}
 	var cands []*candidate
+	// Scanned into once per search: declared in the loop, each row's would
+	// escape to the heap.
+	var bm25 float64
+	var snippet sql.NullString
 	for rows.Next() {
 		c := &candidate{}
-		var bm25 float64
-		if err := rows.Scan(&c.id, &c.hit.Path, &c.hit.Title, &c.mtime, &c.importance, &bm25, &c.hit.Snippet); err != nil {
+		if err := rows.Scan(&c.hit.id, &c.hit.Path, &c.hit.Title, &c.mtime, &c.importance, &c.hit.size, &bm25, &snippet); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		c.score = -bm25 // bm25() is negative, lower = better
+		if snippet.Valid {
+			c.hit.Snippet = snippet.String
+		} else {
+			c.hit.match, c.hit.query = match, q
+		}
 		cands = append(cands, c)
 	}
 	rows.Close()
@@ -190,13 +288,85 @@ func (i *Index) rankedSearch(q string, opts SearchOptions, limit int) ([]SearchH
 	})
 	// Sized by the candidates, which the SQL pool bounds, not by limit:
 	// CodeQL does not see the cap SearchWith puts on limit (IMP-114).
-	out := make([]SearchHit, 0, len(cands))
+	out := make([]rankedHit, 0, len(cands))
 	for _, c := range cands {
 		if len(out) == limit {
 			break
 		}
 		c.hit.Score = relativeScore(c.score, cands[0].score)
+		c.hit.score = c.score
 		out = append(out, c.hit)
+	}
+	return out, nil
+}
+
+// withSnippets cuts the snippets that waited, with one statement for the
+// hits of each query, and returns the hits. The statement runs the query's
+// match again over the hits' rows only: the unary + keeps SQLite from
+// handing the list to FTS5, which would run the whole match once per row.
+// A huge note's snippet is cut from its body here (cutSnippet).
+func (i *Index) withSnippets(hits []rankedHit) ([]SearchHit, error) {
+	type key struct {
+		match string
+		id    int64
+	}
+	snippets := map[key]string{}
+	var matches []string
+	ids := map[string][]int64{}
+	terms := map[string][]snippetTerm{}
+	db := prepDB{i.stmts}
+	for _, h := range hits {
+		if h.match == "" {
+			continue
+		}
+		if h.size >= hugeNote {
+			if terms[h.query] == nil {
+				terms[h.query] = i.snippetTerms(h.query)
+			}
+			var body string
+			if err := db.QueryRow(`SELECT body FROM notes_fts WHERE rowid = ?`, h.id).Scan(&body); err != nil {
+				return nil, err
+			}
+			snippets[key{h.match, h.id}] = cutSnippet(body, terms[h.query])
+			continue
+		}
+		if ids[h.match] == nil {
+			matches = append(matches, h.match)
+		}
+		ids[h.match] = append(ids[h.match], h.id)
+	}
+	for _, match := range matches {
+		list, err := json.Marshal(ids[match])
+		if err != nil {
+			return nil, err
+		}
+		rows, err := db.Query(`
+        SELECT rowid, `+snippetExpr+`
+        FROM notes_fts
+        WHERE notes_fts MATCH ? AND +rowid IN (SELECT value FROM json_each(?))`, match, string(list))
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var id int64
+			var snippet string
+			if err := rows.Scan(&id, &snippet); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			snippets[key{match, id}] = snippet
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+	}
+	out := make([]SearchHit, len(hits))
+	for k, h := range hits {
+		if h.match != "" {
+			h.Snippet = snippets[key{h.match, h.id}]
+		}
+		out[k] = h.SearchHit
 	}
 	return out, nil
 }
@@ -260,11 +430,11 @@ func (i *Index) applyStructure(cands []*candidate, q string) error {
 			score *= f
 			why = append(why, fmt.Sprintf("updated %dd ago ×%.2f", int(days), f))
 		}
-		if tags[c.id]["pinned"] {
+		if tags[c.hit.id]["pinned"] {
 			score *= pinnedFactor
 			why = append(why, fmt.Sprintf("pinned ×%.2f", pinnedFactor))
 		}
-		if tags[c.id]["status:archived"] {
+		if tags[c.hit.id]["status:archived"] {
 			score *= archivedFactor
 			why = append(why, fmt.Sprintf("archived ×%.2f", archivedFactor))
 		}
@@ -276,18 +446,30 @@ func (i *Index) applyStructure(cands []*candidate, q string) error {
 
 // structureOf loads, for the candidate set, the inbound-link counts (distinct
 // source notes, self-links excluded) and the pinned / status:archived tags.
+//
+// The candidates go as JSON lists, so that the two statements have one text
+// whatever their number, prepared once (stmts.go).
 func (i *Index) structureOf(cands []*candidate) (map[string]int, map[int64]map[string]bool, error) {
-	paths := make([]any, len(cands))
-	ids := make([]any, len(cands))
+	paths := make([]string, len(cands))
+	ids := make([]int64, len(cands))
 	for k, c := range cands {
-		paths[k], ids[k] = c.hit.Path, c.id
+		paths[k], ids[k] = c.hit.Path, c.hit.id
 	}
+	pathList, err := json.Marshal(paths)
+	if err != nil {
+		return nil, nil, err
+	}
+	idList, err := json.Marshal(ids)
+	if err != nil {
+		return nil, nil, err
+	}
+	db := prepDB{i.stmts}
 	backlinks := map[string]int{}
-	rows, err := i.db.Query(`
+	rows, err := db.Query(`
         SELECT l.target_path, COUNT(DISTINCT l.src_id)
         FROM links l JOIN notes s ON s.id = l.src_id
-        WHERE l.target_path IN (`+placeholders(len(paths))+`) AND s.path <> l.target_path
-        GROUP BY l.target_path`, paths...)
+        WHERE l.target_path IN (SELECT value FROM json_each(?)) AND s.path <> l.target_path
+        GROUP BY l.target_path`, string(pathList))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -305,9 +487,9 @@ func (i *Index) structureOf(cands []*candidate) (map[string]int, map[int64]map[s
 		return nil, nil, err
 	}
 	tags := map[int64]map[string]bool{}
-	rows, err = i.db.Query(`
+	rows, err = db.Query(`
         SELECT note_id, tag FROM tags
-        WHERE note_id IN (`+placeholders(len(ids))+`) AND tag IN ('pinned', 'status:archived')`, ids...)
+        WHERE note_id IN (SELECT value FROM json_each(?)) AND tag IN ('pinned', 'status:archived')`, string(idList))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -330,9 +512,9 @@ func (i *Index) structureOf(cands []*candidate) (map[string]int, map[int64]map[s
 // is the sum of 1/(rrfK+rank) over the lists that contain it, so notes found
 // by several phrasings rise. The first list's hit (snippet, Why) is kept and
 // Why gains the phrasings that matched.
-func fuse(queries []string, lists [][]SearchHit, limit int) []SearchHit {
+func fuse(queries []string, lists [][]rankedHit, limit int) []rankedHit {
 	type fused struct {
-		hit     SearchHit
+		hit     rankedHit
 		score   float64
 		matched []string
 	}
@@ -358,13 +540,14 @@ func fuse(queries []string, lists [][]SearchHit, limit int) []SearchHit {
 	})
 	// order unions up to nine lists of maxPool each; no response holds more
 	// than maxPool hits.
-	out := make([]SearchHit, 0, min(len(order), maxPool))
+	out := make([]rankedHit, 0, min(len(order), maxPool))
 	for _, f := range order {
 		if len(out) == limit {
 			break
 		}
 		h := f.hit
 		h.Score = relativeScore(f.score, order[0].score)
+		h.score = f.score
 		h.Why = append(append([]string(nil), h.Why...), "matched: "+strings.Join(f.matched, " | "))
 		out = append(out, h)
 	}

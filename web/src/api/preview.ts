@@ -47,7 +47,16 @@ export interface ViewData {
   defaults?: Record<string, import('./notes').FieldValue>
   /** Whether the reader may add rows to the database. */
   creatable?: boolean
+  /** The columns of a ```board block, with their states and limits (IMP-216). */
+  lanes?: ViewLane[]
   error?: string
+}
+
+/** A column of a board's block: its cards are in status; wip is its limit. */
+export interface ViewLane {
+  name: string
+  status: string
+  wip?: number
 }
 
 export interface PreviewResponse {

@@ -178,6 +178,11 @@ describe('PipelineWindow (IMP-169, F4)', () => {
     await usePipelineCatalog().reload()
   })
 
+  it('names itself in its heading (IMP-217, F-03)', async () => {
+    const { w } = await mountWindow()
+    expect(w.find('h1[data-window-heading]').text()).toBe(`Pipeline · ${PATH.split('/').pop()!.replace(/\.md$/, '')}`)
+  })
+
   it('edits the note’s pipeline block and saves it in place, with the etag', async () => {
     const { w } = await mountWindow()
     expect(w.find('.stand-in').element.textContent).toBe(BLOCK)

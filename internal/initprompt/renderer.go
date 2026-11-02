@@ -145,24 +145,112 @@ func Render(project string, profile Profile, mode Mode, hints Hints, projectExis
 	}, nil
 }
 
+// Features are what the instance and the project have on. The directives
+// speak of a note format, the IN folder or the tag vocabulary only where it
+// is on: every session reads them (M1.3).
+type Features struct {
+	HTMLNotes, MediaNotes, TableNotes bool
+	IN                                bool // the project's IN folder (use_in)
+	TagVocabulary                     bool // the project's tag vocabulary (use_tag_vocabulary)
+}
+
+// on reports whether the feature a template part names is on, and whether
+// the name is one.
+func (f Features) on(name string) (on, known bool) {
+	switch name {
+	case "html_notes":
+		return f.HTMLNotes, true
+	case "media_notes":
+		return f.MediaNotes, true
+	case "table_notes":
+		return f.TableNotes, true
+	case "in":
+		return f.IN, true
+	case "tag_vocabulary":
+		return f.TagVocabulary, true
+	}
+	return false, false
+}
+
+// DirectivesID is the directives_version the bootstrap gives for the block
+// rendered with f, the read block when read: 100 times DirectivesVersion,
+// plus a bit for each feature on and one for the read block. An agent hands
+// it back as known_directives_version, so a block it holds from a project
+// with other features, or from before a feature was turned on, is sent
+// again (M1.3). Projects alike share the number while the block names its
+// project: the directives ask to hand it back on the same project only.
+func DirectivesID(f Features, read bool) int {
+	id := 0
+	for i, on := range []bool{f.HTMLNotes, f.MediaNotes, f.TableNotes, f.IN, f.TagVocabulary, read} {
+		if on {
+			id |= 1 << i
+		}
+	}
+	return DirectivesVersion*100 + id
+}
+
+// partRE is a line of the directives template that opens a part said only
+// when a feature is on ("<!-- if html_notes -->") or off ("<!-- if !in -->"),
+// or that closes it ("<!-- end -->").
+var partRE = regexp.MustCompile(`^<!-- (?:if (!?)([a-z_]+)|(end)) -->$`)
+
+// applyFeatures keeps the parts of the template whose feature agrees with f
+// and drops the lines that mark them. Parts do not nest.
+func applyFeatures(body string, f Features) (string, error) {
+	var out []string
+	keep, open := true, false
+	for i, line := range strings.Split(body, "\n") {
+		m := partRE.FindStringSubmatch(line)
+		switch {
+		case m == nil:
+			if keep {
+				out = append(out, line)
+			}
+		case m[3] == "end":
+			if !open {
+				return "", fmt.Errorf("line %d: an end without its if", i+1)
+			}
+			keep, open = true, false
+		case open:
+			return "", fmt.Errorf("line %d: an if inside an if", i+1)
+		default:
+			on, known := f.on(m[2])
+			if !known {
+				return "", fmt.Errorf("line %d: no feature %q", i+1, m[2])
+			}
+			keep, open = on == (m[1] == ""), true
+		}
+	}
+	if open {
+		return "", errors.New("an if without its end")
+	}
+	return strings.Join(out, "\n"), nil
+}
+
 // RenderDirectives renders the generic operational directives block for a
-// project, parameterised only by {{PROJECT}} and {{DIRECTIVES_VERSION}}. It is
-// served by memory_bootstrap (directives_block) so each project reads the rules
-// fresh every session instead of embedding them in its instruction file.
-// Returns the rendered markdown and the current DirectivesVersion.
-func RenderDirectives(project string) (string, int, error) {
+// project, parameterised by {{PROJECT}} and {{DIRECTIVES_VERSION}} and by what
+// it has on. It is served by memory_bootstrap (directives_block) so each
+// project reads the rules fresh every session instead of embedding them in
+// its instruction file. Returns the rendered markdown and the current
+// DirectivesVersion, the one of its marker whatever is on: DirectivesID
+// names the variant.
+func RenderDirectives(project string, f Features) (string, int, error) {
 	if strings.TrimSpace(project) == "" {
 		return "", 0, errors.New("project is required")
 	}
-	body, err := assetsFS.ReadFile(sharedDirectivesTemplate)
+	raw, err := assetsFS.ReadFile(sharedDirectivesTemplate)
 	if err != nil {
 		return "", 0, fmt.Errorf("read directives template: %w", err)
+	}
+	body, err := applyFeatures(string(raw), f)
+	if err != nil {
+		return "", 0, fmt.Errorf("directives template: %w", err)
 	}
 	vars := map[string]string{
 		"PROJECT":            project,
 		"DIRECTIVES_VERSION": strconv.Itoa(DirectivesVersion),
 	}
-	return applyVars(string(body), vars), DirectivesVersion, nil
+	return applyVars(body, vars), DirectivesVersion, nil
 }
 
 // readDirectiveSections are the directive sections a token that cannot
@@ -182,8 +270,8 @@ const readDirectivesNote = "_Token di sola lettura: qui sotto solo le regole per
 // write to the project: the preamble plus readDirectiveSections, in template
 // order, with the same version as the full block. It saves about two thirds
 // of the block on sessions that could never apply the rest.
-func RenderReadDirectives(project string) (string, int, error) {
-	full, version, err := RenderDirectives(project)
+func RenderReadDirectives(project string, f Features) (string, int, error) {
+	full, version, err := RenderDirectives(project, f)
 	if err != nil {
 		return "", 0, err
 	}

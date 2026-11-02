@@ -51,7 +51,13 @@ async function exportZip() {
 <template>
   <div class="p-6 max-w-6xl mx-auto">
     <!-- The window's title bar shows the name: the heading is for screen readers. -->
-    <h1 class="sr-only">{{ t('admin.title') }}</h1>
+    <h1
+      class="sr-only"
+      tabindex="-1"
+      data-window-heading
+    >
+      {{ t('admin.title') }}
+    </h1>
     <ErrorMessage v-if="exportError" :text="exportError" class="text-sm mb-3" />
     <p v-if="!auth.isOwner" class="text-danger text-sm mb-6">
       {{ t('admin.owner_only') }}
@@ -76,6 +82,10 @@ async function exportZip() {
         >{{ exporting ? t('projects.exporting') : t('admin.export') }}</button>
       </nav>
 
+      <!-- The tab's name, shown on its button: the tabs' headings are h3. -->
+      <h2 class="sr-only">
+        {{ t(`admin.tab.${active}`) }}
+      </h2>
       <component :is="current()" />
     </template>
   </div>

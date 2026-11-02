@@ -26,10 +26,25 @@ The preview uses the same goldmark pipeline as the MCP rendering path.
 Wiki-links `[[target]]` are resolved and linked; unresolved targets are
 rendered with a `broken` style so authors notice typos immediately.
 
+## Wikilink suggestions
+
+Typing `[[` and a few letters suggests the notes whose **title or file
+name** contains them, ignoring case: `[[nota-b` finds *Nota beta*
+(`nota-beta.md`), and so does `[[nota b`. What a note says in its text
+does not count. A title that starts with the letters comes first, then a
+file name that does, then the others. Each suggestion shows the title
+with the path beside it, and picking one writes the path:
+`[[agile-lab/notes/nota-beta]]`. `Ctrl+Space` right after `[[` lists the
+notes edited last. A `relation` field of the properties suggests notes
+the same way.
+
 ## Save / history
 
 - **Save** writes the note atomically (temp file + rename) and updates
-  the SQLite index synchronously.
+  the SQLite index synchronously. The toolbar then says *saved at* and
+  the time, and a screen reader hears it, at each save; in a narrow
+  window the toolbar keeps the time with a check, the whole in its
+  tooltip.
 - **History** (`/notes/<path>/history`) lists previous states captured
   by git sync when enabled — with a one-click `restore` action.
 
@@ -76,12 +91,24 @@ affordances (maximize, minimize, close, drag, resize).
 
 ## Command palette
 
-`Cmd+K` / `Ctrl+K` opens a fuzzy finder across notes, projects, tags,
-and built-in actions (go to graph, create note, …). Keyboard-first:
-arrow keys to select, `Enter` to run, `Esc` to close. Recent
-selections are remembered for quick re-access. The list it shows comes
-from the server at each opening; the one it has shows while the new one
-arrives.
+`Cmd+K` / `Ctrl+K` opens a finder for a note, a project or a tag by its
+name: a note by its title or its path. Keyboard-first: arrow keys to
+select, `Enter` to open, `Esc` to close. With the field empty, the notes
+viewed recently come first. The list it shows comes from the server at
+each opening; the one it has shows while the new one arrives.
+
+The palette matches names, not what the notes say. Once there is a
+text, its last entry, **Search the text for "…"**, looks for it in the
+notes' text: it opens Search with the text, or hands it to the Search
+already open. The **Search** button in the top bar opens Search, and
+shows no shortcut: `Ctrl+K` opens the palette.
+
+To a screen reader the palette is a dialog named *Jump to a note, a
+project or a tag*, and its field a combobox: it keeps the focus, `Tab`
+included, and says which entry the arrows are on, with its kind when the
+list mixes kinds. `Home` and `End` go to the first and the last entry
+once the arrows are in the list, and move the caret in the text before;
+the entry chosen stays in view as the list scrolls.
 
 ## Not supported in-editor
 

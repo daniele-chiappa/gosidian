@@ -224,6 +224,10 @@ type WebauthConfig struct {
 	SessionTTL       time.Duration `toml:"session_ttl"`        // default 24h
 	LoginWindow      time.Duration `toml:"login_window"`       // default 15m
 	LoginMaxFailures int           `toml:"login_max_failures"` // default 5
+	// SessionMaxTTL caps a web session's whole life, however often it is
+	// renewed by session_ttl at a time (BUG-143): then the user signs in
+	// again. Default 168h, never under session_ttl.
+	SessionMaxTTL time.Duration `toml:"session_max_ttl"`
 	// TrustedProxies lists the reverse proxies (IPs or CIDRs) whose
 	// X-Forwarded-For header the login rate limiter may believe. Empty
 	// (default) means the header is ignored and the peer address is used:
@@ -948,6 +952,13 @@ func (c *Config) ApplyEnv() error {
 		}
 		c.Webauth.SessionTTL = d
 	}
+	if v := os.Getenv("GOSIDIAN_LOGIN_SESSION_MAX_TTL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("GOSIDIAN_LOGIN_SESSION_MAX_TTL: %w", err)
+		}
+		c.Webauth.SessionMaxTTL = d
+	}
 	if v := os.Getenv("GOSIDIAN_LOGIN_WINDOW"); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil {
@@ -961,6 +972,9 @@ func (c *Config) ApplyEnv() error {
 			return fmt.Errorf("GOSIDIAN_LOGIN_MAX_FAILURES: %w", err)
 		}
 		c.Webauth.LoginMaxFailures = n
+	}
+	if err := checkWebauth(c.Webauth); err != nil {
+		return err
 	}
 	if v := os.Getenv("GOSIDIAN_TOTP_MODE"); v != "" {
 		c.Webauth.TOTPMode, c.totpWarning = TOTPModeOf(v)
@@ -1234,6 +1248,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Webauth.SessionTTL == 0 {
 		c.Webauth.SessionTTL = 24 * time.Hour
+	}
+	if c.Webauth.SessionMaxTTL == 0 {
+		c.Webauth.SessionMaxTTL = 7 * 24 * time.Hour
 	}
 	if c.Webauth.LoginWindow == 0 {
 		c.Webauth.LoginWindow = 15 * time.Minute
@@ -1685,6 +1702,25 @@ func (c *Config) applyAgentsEnv() error {
 		c.Agents.Lease = d
 	}
 	return checkAgents(c.Agents)
+}
+
+// checkWebauth checks the lengths of a web session (BUG-143) and the
+// limits of the failed logins (BUG-145), from the file too. Under 2m the
+// web UI, which renews a session at most once a minute when less than
+// half of it is left, could not keep one alive; no failure allowed would
+// refuse every login.
+func checkWebauth(w WebauthConfig) error {
+	switch {
+	case w.SessionTTL < 2*time.Minute:
+		return fmt.Errorf("[webauth] session_ttl (GOSIDIAN_LOGIN_SESSION_TTL): %s is under 2m", w.SessionTTL)
+	case w.SessionMaxTTL < w.SessionTTL:
+		return fmt.Errorf("[webauth] session_max_ttl (GOSIDIAN_LOGIN_SESSION_MAX_TTL): %s is shorter than session_ttl (GOSIDIAN_LOGIN_SESSION_TTL), %s", w.SessionMaxTTL, w.SessionTTL)
+	case w.LoginWindow <= 0:
+		return fmt.Errorf("[webauth] login_window (GOSIDIAN_LOGIN_WINDOW): %s is no time, 15m", w.LoginWindow)
+	case w.LoginMaxFailures < 1:
+		return fmt.Errorf("[webauth] login_max_failures (GOSIDIAN_LOGIN_MAX_FAILURES): %d is under 1", w.LoginMaxFailures)
+	}
+	return nil
 }
 
 // checkAgents checks the settings of [agents] (IMP-195).

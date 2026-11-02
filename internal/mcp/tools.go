@@ -119,13 +119,13 @@ func writeRateLimited(w http.ResponseWriter, status int, msg string, wait time.D
 
 func (s *Server) registerTools() {
 	s.impl.AddTool(mcp.NewTool("memory_search",
-		mcp.WithDescription("Search notes in the vault using full-text search. Hits are ranked by text match (title weighs most, then frontmatter such as tags and description, then body) with small boosts for backlinks, importance, recent edits and the pinned tag; each hit carries `score` (relative to the best hit of this response, 1 = best) and `why` (the signals behind it). A link is searchable by the words it shows (its alias, or the linked note's name and heading), not by its folder path: to find the notes that link a page use memory_backlinks. Snippets are short excerpts around the match: before reporting a detail (a number, a date, a list), read the note with memory_get or memory_get_section. The search is lexical, not semantic (each word also matches its English inflections, so \"retry\" finds \"retries\"): when hits are few or missing, call again with `any_of` listing synonyms, translations (Italian/English) or other forms of the query — the lists are fused and `why` shows which phrasing matched. Pass include_outline=true or include_frontmatter=true to enrich each hit with the note's heading outline or parsed frontmatter in the same call — avoids N extra memory_get_outline/memory_get_frontmatter round-trips when exploring many results. Pass `projects` (array of top-level folder names) to restrict results to a specific set; empty = vault-wide (subject to the caller's token scope). `project` is shorthand for a single name; given together with `projects`, the two are merged (the result notes it)."),
-		mcp.WithString("query", mcp.Required(), mcp.Description("Free-text query. Multiple words are ANDed; prefix search is automatic.")),
-		mcp.WithArray("any_of", mcp.Description("Optional alternative phrasings searched alongside `query` (max 8), e.g. [\"credenziali\", \"secrets\"] for query \"segreti\". A note matching any of them is returned; notes matched by several phrasings rank higher.")),
+		mcp.WithDescription("Full-text search of the vault's notes. Hits are ranked by text match (title weighs most, then frontmatter such as tags and description, then body), with small boosts for backlinks, importance, recent edits and the pinned tag; each hit carries `score` (relative to this response's best hit, 1 = best) and `why` (the signals behind it). A link is searchable by the words it shows (its alias, or the linked note's name and heading), not by its folder path: to find the notes that link a page use memory_backlinks. Snippets are short excerpts around the match: before reporting a detail (a number, a date, a list), read the note with memory_get or memory_get_section. The search is lexical, not semantic (each word also matches its English inflections: \"retry\" finds \"retries\"): when hits are few, partial or missing, call again with `any_of` listing synonyms, translations (Italian/English) or other forms of the query; the lists are fused and `why` shows which phrasing matched. include_outline=true or include_frontmatter=true add each hit's heading outline or parsed frontmatter in the same call, instead of N memory_get_outline/memory_get_frontmatter round-trips over many results. `projects` (top-level folder names) restricts the results to that set; empty = vault-wide (within the token's scope). `project` is shorthand for one name; given with `projects`, the two are merged (the result notes it)."),
+		mcp.WithString("query", mcp.Required(), mcp.Description("Free-text query; prefix search is automatic. Notes with every word come first; if fewer than limit, notes with one of its less common words follow, marked partial in `why`.")),
+		mcp.WithArray("any_of", mcp.Description("Alternative phrasings searched with `query` (max 8), e.g. [\"credenziali\", \"secrets\"] for query \"segreti\": a note matching any of them is returned, one matched by several ranks higher.")),
 		mcp.WithNumber("limit", mcp.Description("Maximum number of hits (default 20, max 200). When more notes match, the result carries `truncated: true`.")),
-		mcp.WithBoolean("include_outline", mcp.Description("When true, each hit also carries an `outline` array (heading level/text/id). Default false.")),
-		mcp.WithBoolean("include_frontmatter", mcp.Description("When true, each hit also carries a `frontmatter` map with the parsed YAML fields. Default false.")),
-		mcp.WithArray("projects", mcp.Description("Optional list of top-level folder names (e.g. [\"gosidian\",\"dockers\"]) to restrict results to. Empty = vault-wide. Scoped tokens silently intersect this list with their project scope (never expand it).")),
+		mcp.WithBoolean("include_outline", mcp.Description("Each hit also carries an `outline` array (heading level/text/id). Default false.")),
+		mcp.WithBoolean("include_frontmatter", mcp.Description("Each hit also carries a `frontmatter` map of the parsed YAML fields. Default false.")),
+		mcp.WithArray("projects", mcp.Description("Top-level folder names (e.g. [\"gosidian\",\"dockers\"]) to restrict the results to; empty = vault-wide. A scoped token silently intersects the list with its project scope (never expands it).")),
 		mcp.WithString("project", mcp.Description("A single top-level folder name: shorthand for projects: [project], merged with projects when both are given.")),
 	), s.handleSearch)
 
@@ -150,27 +150,27 @@ func (s *Server) registerTools() {
 	), s.handleNotesByTag)
 
 	s.impl.AddTool(mcp.NewTool("memory_get",
-		mcp.WithDescription("Read a note by its vault-relative path (e.g. 'project/note.md'). Oversize guard: when the body exceeds 24 KiB (and raw is not set) the response is truncated — frontmatter + heading outline + the first chunk, with truncated:true, the full size, and the note's real etag (if_match still works). Fetch just the section you need via memory_get_section, or pass raw:true only when you really need the whole body. To get a large note onto your own disk without spending context tokens, GET the HTTP /download endpoint instead (your MCP base URL plus /download?path=<path>, bearer token), or pass transfer:\"http\" for a single-use URL that needs no bearer — see bootstrap capabilities. An Obsidian base ('project/books.base') reads as a note too, read-only: kind \"base\", its views translated into ```view blocks (render_views computes them), what has no equivalent in a warning, and its YAML in source. A note with ```diagram blocks (YAML, kind flow, tree, mindmap, fishbone, venn, matrix or gantt; bootstrap capabilities.diagrams) also returns diagrams: each one said in words, with its problems."),
+		mcp.WithDescription("Read a note by its vault-relative path (e.g. 'project/note.md'). Oversize guard: when the body exceeds 24 KiB (raw not set) the response is truncated: frontmatter, heading outline and the first chunk, with truncated:true, the full size and the note's real etag (if_match still works). Fetch just the section you need via memory_get_section, or pass raw:true only when you really need the whole body. To get a large note onto your own disk without spending context tokens, GET the HTTP /download endpoint instead (your MCP base URL plus /download?path=<path>, bearer token), or pass transfer:\"http\" for a single-use URL that needs no bearer (see bootstrap capabilities). An Obsidian base ('project/books.base') reads as a note too, read-only: kind \"base\", its views translated into ```view blocks (render_views computes them), what has no equivalent in a warning, and its YAML in source. A note with ```diagram blocks (YAML, kind flow, tree, mindmap, fishbone, venn, matrix or gantt; bootstrap capabilities.diagrams) also returns diagrams, each said in words, with its problems."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative path to the .md file; an Obsidian .base or .canvas reads too, read-only, with kind base or canvas.")),
-		mcp.WithBoolean("raw", mcp.Description("Bypass the oversize guard and return the full body regardless of size; for a .canvas, also its JSON in source.")),
-		mcp.WithNumber("max_bytes", mcp.Description("Explicit body cap in bytes — truncates even below the default threshold. Ignored when raw:true.")),
-		mcp.WithBoolean("render_views", mcp.Description("Also compute the note's ```view blocks: each block stays and its result follows it between gosidian:view-result markers. Off by default, so a note read to be edited comes back as it is on disk (the response's hint then says how many blocks were left uncomputed); never write the computed result back.")),
-		mcp.WithString("transfer", mcp.Description("\"http\": instead of the body, a single-use URL (5 min) to GET the note's raw bytes with no Authorization header, plus its etag and size. For a body you want on your own disk without spending context tokens when you cannot read your bearer for /download (a cautious client blocks reading it from its config).")),
-		mcp.WithString("media", mcp.Description("\"inline\": the note's images as text, from their image notes (in <note>_img/, described by a pipeline): [icon: label] inside a sentence, [image: label] description on a line of their own; media_inline counts them. For reading a document whole, as a model would; never write it back.")),
+		mcp.WithBoolean("raw", mcp.Description("Bypass the oversize guard: the full body whatever its size; for a .canvas, also its JSON in source.")),
+		mcp.WithNumber("max_bytes", mcp.Description("Body cap in bytes, which truncates even below the default threshold. Ignored with raw:true.")),
+		mcp.WithBoolean("render_views", mcp.Description("Also compute the note's ```view blocks: each block stays, its result after it between gosidian:view-result markers. Off by default, so a note read to be edited comes back as it is on disk (the hint then says how many blocks were left uncomputed); never write the computed result back.")),
+		mcp.WithString("transfer", mcp.Description("\"http\": instead of the body, a single-use URL (5 min) to GET the note's raw bytes with no Authorization header, plus its etag and size: a body on your own disk without context tokens when you cannot read your bearer for /download (a cautious client blocks reading it from its config).")),
+		mcp.WithString("media", mcp.Description("\"inline\": the note's images as text, from their image notes (in <note>_img/, described by a pipeline): [icon: label] inside a sentence, [image: label] description on a line of their own; media_inline counts them. To read a document whole, as a model would; never write it back.")),
 	), s.handleGet)
 
 	s.impl.AddTool(mcp.NewTool("memory_get_section",
 		mcp.WithDescription("Read a single section of a note (heading + content up to the next heading of equal or higher level). Use when a note is long and you only need one section — much cheaper than memory_get on large files."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative path to the .md file.")),
 		mcp.WithString("heading", mcp.Required(), mcp.Description("The heading text to retrieve, without the leading '#'s. Match is case-insensitive. Its start is enough when it names one heading, such as an ID: \"BUG-014\" finds \"BUG-014 — …\"; the response's heading is the full one.")),
-		mcp.WithBoolean("render_views", mcp.Description("Also compute the note's ```view blocks: each block stays and its result follows it between gosidian:view-result markers. Off by default, so a note read to be edited comes back as it is on disk (the response's hint then says how many blocks were left uncomputed); never write the computed result back.")),
+		mcp.WithBoolean("render_views", mcp.Description("Also compute the note's ```view blocks: each block stays, its result after it between gosidian:view-result markers. Off by default, so a note read to be edited comes back as it is on disk (the hint then says how many blocks were left uncomputed); never write the computed result back.")),
 	), s.handleGetSection)
 
 	s.impl.AddTool(mcp.NewTool("memory_batch_get",
-		mcp.WithDescription("Read multiple notes in a single call. Use this instead of N sequential memory_get calls when reconstructing context at session start. Each entry in the result has either content (success) or error (path not found / outside scope). The call itself does not fail because one path is missing. Result size is controllable: mode=outline|frontmatter skips bodies entirely, max_bytes_per_note truncates long bodies (entry gets truncated:true) — use them to keep bulk reads inside your context budget and fetch the few notes you actually need in full afterwards."),
+		mcp.WithDescription("Read multiple notes in a single call. Use this instead of N sequential memory_get calls when rebuilding context at session start. Each result entry has either content (success) or error (path not found / outside scope): one missing path does not fail the call. Result size is controllable: mode=outline|frontmatter skips bodies entirely, max_bytes_per_note truncates long bodies (entry truncated:true); keep bulk reads inside your context budget and fetch the few notes you actually need in full afterwards."),
 		mcp.WithArray("paths", mcp.Required(), mcp.Description("Array of vault-relative paths to read (max 50).")),
 		mcp.WithString("mode", mcp.Description("What to return per note: content (default, full body), outline (headings only; views:N marks a section holding ```view blocks), frontmatter (raw frontmatter block only). Content comes as stored: a note with views says so in hint. outline/frontmatter cost a fraction of the tokens.")),
-		mcp.WithNumber("max_bytes_per_note", mcp.Description("Optional cap on the returned content bytes per note (content mode only). Longer bodies are cut at the cap and flagged truncated:true; the etag still stamps the full note.")),
+		mcp.WithNumber("max_bytes_per_note", mcp.Description("Cap on each note's returned content bytes (content mode only): longer bodies are cut at the cap and flagged truncated:true; the etag still stamps the full note.")),
 	), s.handleBatchGet)
 
 	s.impl.AddTool(mcp.NewTool("memory_recent",
@@ -369,7 +369,7 @@ func (s *Server) handleSearch(ctx context.Context, req mcp.CallToolRequest) (*mc
 	}
 	// The checks below repeat the query's filter as defence in depth.
 	out := make([]searchHit, 0, len(hits))
-	truncated := false
+	truncated, partial := false, 0
 	for _, h := range hits {
 		if !tok.AllowsPath(h.Path) {
 			continue
@@ -413,8 +413,11 @@ func (s *Server) handleSearch(ctx context.Context, req mcp.CallToolRequest) (*mc
 			}
 		}
 		out = append(out, hit)
+		if len(h.Missing) > 0 {
+			partial++
+		}
 	}
-	metrics.CountSearch("mcp", len(out))
+	metrics.CountSearch("mcp", len(out), partial)
 	body := map[string]any{"hits": out}
 	if truncated {
 		body["truncated"] = true
@@ -887,7 +890,7 @@ func (s *Server) handleCreate(ctx context.Context, req mcp.CallToolRequest) (*mc
 		return mcp.NewToolResultErrorFromErr("invalid path", err), nil
 	}
 	if strings.HasSuffix(strings.ToLower(rel), ".html") && !s.vault.HTMLNotesEnabled() {
-		return mcp.NewToolResultError("html notes are disabled on this instance — a per-project flag an admin can flip live from the web UI project toggles (or [vault] html_notes / GOSIDIAN_VAULT_HTML_NOTES)"), nil
+		return mcp.NewToolResultError("html notes are disabled on this instance: " + formatTurnOn("html_notes")), nil
 	}
 	tok, errRes := s.authorizeWrite(ctx, rel)
 	if errRes != nil {

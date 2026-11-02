@@ -13,6 +13,7 @@ import (
 
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/dbschema"
+	"github.com/gosidian/gosidian/internal/fleet"
 	"github.com/gosidian/gosidian/internal/frontmatter"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/parser"
@@ -34,6 +35,10 @@ type patchFrontmatterRequest struct {
 	Expect map[string]any `json:"expect"`
 	// IfMatch is the etag of the whole note, as the If-Match header.
 	IfMatch string `json:"if_match"`
+	// At is the place of a board's card in its column, 0 the top
+	// (IMP-216): with set column, where it enters; alone, where it goes
+	// in its own.
+	At *int `json:"at"`
 }
 
 // patchFrontmatter writes and removes frontmatter keys of the markdown note
@@ -70,13 +75,20 @@ func (r *Router) patchFrontmatter(w http.ResponseWriter, req *http.Request, rel 
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
 		return
 	}
-	if len(body.Set) == 0 && len(body.Unset) == 0 {
-		WriteError(w, http.StatusBadRequest, CodeValidationRequired, "nothing to change: give set or unset")
-		return
-	}
 	ifMatch := strings.TrimSpace(req.Header.Get("If-Match"))
 	if ifMatch == "" {
 		ifMatch = strings.TrimSpace(body.IfMatch)
+	}
+	if r.patchCard(w, req, user, rel, body, ifMatch) {
+		return
+	}
+	switch {
+	case body.At != nil:
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "at is the place of a board's card, and this note is none")
+		return
+	case len(body.Set) == 0 && len(body.Unset) == 0:
+		WriteError(w, http.StatusBadRequest, CodeValidationRequired, "nothing to change: give set or unset")
+		return
 	}
 
 	unlock := r.deps.Vault.LockPath(rel)
@@ -403,4 +415,94 @@ func (r *Router) readRowViews(w http.ResponseWriter, req *http.Request, rel stri
 		resp.Views = append(resp.Views, item)
 	}
 	WriteJSON(w, http.StatusOK, resp)
+}
+
+// patchCard moves a board's card when the edit touches its place, its
+// status, column or at (IMP-216): through deps.Cards, under the board's
+// rules and lock, as an agent's move. It reports whether it answered: a
+// note that is no card, or an edit of its other fields, goes on as any
+// note's.
+func (r *Router) patchCard(w http.ResponseWriter, req *http.Request, user *RequestUser, rel string, body patchFrontmatterRequest, ifMatch string) bool {
+	if r.deps.Cards == nil {
+		return false
+	}
+	note, err := r.deps.Vault.Load(rel)
+	if err != nil || !fleet.IsTask(parser.FrontmatterRawForPath(rel, note.Content)) || fleet.ReadTask(rel, note.Content).Board == "" {
+		return false
+	}
+	place := body.At != nil
+	for _, k := range []string{fleet.KeyStatus, fleet.KeyColumn, fleet.KeyRank} {
+		_, set := body.Set[k]
+		place = place || set || slices.Contains(body.Unset, k)
+	}
+	if !place {
+		return false
+	}
+	bad := func(msg string) bool {
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat, msg)
+		return true
+	}
+	var m fleet.CardMove
+	for k, v := range body.Set {
+		s, ok := v.(string)
+		switch {
+		case k == fleet.KeyRank:
+			return bad("rank: the server keeps it; give at, the card's place in its column (0 the top)")
+		case k != fleet.KeyStatus && k != fleet.KeyColumn:
+			return bad("a card's place changes alone: status, column and at, without " + k)
+		case !ok || strings.TrimSpace(s) == "":
+			return bad(k + ": a column or a state of the card's board")
+		case k == fleet.KeyStatus:
+			m.Status = strings.TrimSpace(s)
+		default:
+			m.Column = strings.TrimSpace(s)
+		}
+	}
+	if len(body.Unset) > 0 {
+		return bad("a card keeps its status and column: move it to another column")
+	}
+	if body.At != nil && *body.At < 0 {
+		return bad("at: the card's place in its column, from 0, the top")
+	}
+	m.At, m.IfMatch = body.At, ifMatch
+	var conflict map[string]any
+	m.Check = func(content []byte) error {
+		if changed := changedFields(parser.ExtractFrontmatterRaw(content), body.Expect); len(changed) > 0 {
+			conflict = changed
+			return errors.New("a field was modified since the last read")
+		}
+		return nil
+	}
+	warning, err := r.deps.Cards.MoveCard(req.Context(), user.Username, rel, m)
+	var me *fleet.MoveError
+	switch {
+	case conflict != nil:
+		cur, _ := r.deps.Vault.Load(rel)
+		details := map[string]any{"fields": conflict}
+		if cur != nil {
+			details["current_etag"] = quoteETag(cur.ETag())
+		}
+		WriteErrorWithDetails(w, http.StatusConflict, CodeConflict, "a field was modified since the last read", details)
+		return true
+	case errors.As(err, &me) && me.Stale:
+		WriteError(w, http.StatusPreconditionFailed, CodeConcurrencyEtag, "note was modified since the last read")
+		return true
+	case errors.As(err, &me):
+		WriteError(w, http.StatusUnprocessableEntity, CodeValidationFormat, me.Msg)
+		return true
+	case err != nil:
+		WriteError(w, http.StatusInternalServerError, CodeServerInternal, "move: "+err.Error())
+		return true
+	}
+	fresh, err := r.deps.Vault.Load(rel)
+	if err != nil {
+		writeLoadError(w, err)
+		return true
+	}
+	w.Header().Set("ETag", quoteETag(fresh.ETag()))
+	WriteJSON(w, http.StatusOK, struct {
+		noteResponse
+		Warning string `json:"warning,omitempty"`
+	}{r.toNoteResponse(fresh), warning})
+	return true
 }

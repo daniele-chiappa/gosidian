@@ -3,8 +3,8 @@
  * browser tab: the tree, the effective-access map, the uploads into IN on
  * their way, the recently-viewed notes,
  * the persisted window layout and the cut view's rules (which name projects
- * and collections) all belong to whoever was signed in, and
- * showing them — even for the few hundred milliseconds it takes the new
+ * and collections) and the drafts kept in the browser (BUG-142) all belong
+ * to whoever was signed in, and showing them — even for the few hundred milliseconds it takes the new
  * account's requests to land — leaks project and note names across accounts.
  *
  * resetSessionState() drops all of it; call it on sign-out. noteSignedIn()
@@ -24,6 +24,8 @@ const LAST_USER_KEY = 'gosidian.lastUser'
 const PLANCIA_STORAGE_KEY = 'gosidian.plancia'
 /** The cut view's rules, one key per project (NoteView). */
 export const CUT_STORAGE_PREFIX = 'gosidian.cut.'
+/** The drafts kept in the browser, one key per account and note (noteDraft). */
+export const DRAFT_STORAGE_PREFIX = 'gosidian.draft.'
 
 export function resetSessionState(): void {
   useTreeStore().invalidateAll()
@@ -35,12 +37,12 @@ export function resetSessionState(): void {
   try {
     localStorage.removeItem(PLANCIA_STORAGE_KEY)
     // Collected first: removing a key while walking them shifts the indexes.
-    const cut: string[] = []
+    const gone: string[] = []
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i)
-      if (k?.startsWith(CUT_STORAGE_PREFIX)) cut.push(k)
+      if (k?.startsWith(CUT_STORAGE_PREFIX) || k?.startsWith(DRAFT_STORAGE_PREFIX)) gone.push(k)
     }
-    for (const k of cut) localStorage.removeItem(k)
+    for (const k of gone) localStorage.removeItem(k)
   } catch {
     /* storage disabled: nothing persisted to drop */
   }

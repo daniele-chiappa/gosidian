@@ -17,7 +17,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronRight, Dot, Plus, Lock, Globe, Inbox } from 'lucide-vue-next'
 import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
-import { useWindowsStore } from 'plancia'
+import { useOpenFocused } from '@/composables/useOpenFocused'
 import { useAccessStore } from '@/stores/access'
 import { visibilityHelp } from '@/api/access'
 import { planciaKey } from '@/composables/planciaKey'
@@ -27,7 +27,8 @@ import { formatSize } from '@/api/format'
 const props = defineProps<{ node: TN }>()
 const { t } = useI18n()
 const recents = useRecentlyViewed()
-const windows = useWindowsStore()
+// A gesture's open puts the focus on the window's title (IMP-217, F-03).
+const openWindow = useOpenFocused()
 const access = useAccessStore()
 const menu = useTreeMenu()
 
@@ -63,7 +64,7 @@ function openNote() {
   if (props.node.is_dir) return
   const title = props.node.name.replace(/\.md$/, '')
   recents.record(props.node.path, title)
-  windows.open({
+  openWindow({
     type: 'note',
     key: planciaKey('note', props.node.path),
     title,
@@ -73,7 +74,7 @@ function openNote() {
 
 function openIN() {
   const project = props.node.path.split('/')[0]
-  windows.open({
+  openWindow({
     type: 'in',
     key: planciaKey('in', project),
     title: t('in.window_title', { name: project }),
@@ -104,7 +105,7 @@ function onRowKeydown(e: KeyboardEvent) {
 
 // Open the creation window pre-targeted to this folder (the + on a folder row).
 function createHere() {
-  windows.open({
+  openWindow({
     type: 'create',
     key: planciaKey('create', props.node.path),
     title: t('note_create.window_title', { name: props.node.name }),

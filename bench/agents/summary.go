@@ -64,7 +64,9 @@ func printSummary(resultsPath, questionsPath string) error {
 			continue
 		}
 		if q, ok := byQ[s.ID]; ok {
-			s.Correct, _ = score(q, s.Answer)
+			var missing []string
+			s.Correct, missing = score(q, s.Answer)
+			s.Review = q.Review || toCheck(missing)
 		}
 		single = append(single, s)
 	}
@@ -167,6 +169,31 @@ func printSummary(resultsPath, questionsPath string) error {
 		}
 		sort.Strings(miss)
 		fmt.Printf("- %s: %s\n", c, strings.Join(miss, ", "))
+	}
+	// The negatives, and the answers that name a near miss of a list,
+	// counted correct by the patterns: read them before trusting the table.
+	checks := map[string]map[string]int{}
+	for _, s := range sessions {
+		if s.Error == "" && s.Correct && s.Review {
+			if checks[s.Config] == nil {
+				checks[s.Config] = map[string]int{}
+			}
+			checks[s.Config][s.ID]++
+		}
+	}
+	if len(checks) > 0 {
+		fmt.Println("\nCorrect by the patterns, to check by hand (sessions):")
+		fmt.Println()
+		for _, c := range order {
+			var ids []string
+			for id, n := range checks[c] {
+				ids = append(ids, fmt.Sprintf("%s ×%d", id, n))
+			}
+			sort.Strings(ids)
+			if len(ids) > 0 {
+				fmt.Printf("- %s: %s\n", c, strings.Join(ids, ", "))
+			}
+		}
 	}
 	printToolUse(sessions, order)
 

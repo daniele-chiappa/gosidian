@@ -7,7 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gosidian/gosidian/internal/metrics"
 	mcplib "github.com/mark3labs/mcp-go/mcp"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 func TestLimitArg(t *testing.T) {
@@ -74,5 +76,33 @@ func TestSearch_LimitAboveMaximum(t *testing.T) {
 	}
 	if hits, _, cut := search(25); hits != 25 || cut {
 		t.Errorf("limit 25 of 25: %d hits, truncated %v", hits, cut)
+	}
+}
+
+// memory_search counts a search whose hits are all partial apart (ADR-007).
+func TestSearch_CountsPartialApart(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	ctx := context.Background()
+	for i := range 30 {
+		_, _ = s.handleCreate(ctx, call(map[string]any{"path": fmt.Sprintf("n%02d.md", i), "content": "weather report"}))
+	}
+	_, _ = s.handleCreate(ctx, call(map[string]any{"path": "gopher.md", "content": "gopher burrow"}))
+	count := func(result string) float64 {
+		return testutil.ToFloat64(metrics.SearchQueries.WithLabelValues("mcp", result))
+	}
+	for _, c := range []struct{ query, result string }{
+		{"gopher burrow", "hits"},
+		{"gopher tunnel", "partial"},
+		{"nothing here", "zero"},
+	} {
+		before := count(c.result)
+		req := call(map[string]any{"query": c.query})
+		req.Params.Name = "memory_search"
+		if res, err := callNotesMiddleware(s.handleSearch)(ctx, req); err != nil || res == nil || res.IsError {
+			t.Fatalf("%q: %v %+v", c.query, err, res)
+		}
+		if got := count(c.result) - before; got != 1 {
+			t.Errorf("%q: result %q counted %v times", c.query, c.result, got)
+		}
 	}
 }

@@ -65,15 +65,15 @@ waiting, printing first what each reads and calls.
 Then read what the plugin asks for, and accept it:
 
 ```bash
-docker exec gosidian gosidian plugin show docling
+docker exec gosidian /gosidian plugin show docling
 # Plugin:      docling 0.1.0
 # SHA:         3f9c2a71d0e4…
 # Reads files: yes, the files a pipeline hands it
 # Calls:       none (declared: the plugin's container enforces it)
 # Nodes:
 #   docling.convert (tool convert), files in file
-docker exec gosidian gosidian plugin accept docling 3f9c2a71d0e4
-docker exec gosidian gosidian plugin list
+docker exec gosidian /gosidian plugin accept docling 3f9c2a71d0e4
+docker exec gosidian /gosidian plugin list
 ```
 
 `accept` takes the first characters of the sha `show` printed, so you
@@ -424,9 +424,9 @@ The owner accepts the tools with the manifest, then **exposes** the plugin
 in the projects whose agents may use them:
 
 ```bash
-docker exec gosidian gosidian plugin expose vec-pg rag-prove
-docker exec gosidian gosidian plugin list        # … Exposed plugins: PLUGIN PROJECT
-docker exec gosidian gosidian plugin unexpose vec-pg rag-prove
+docker exec gosidian /gosidian plugin expose vec-pg rag-prove
+docker exec gosidian /gosidian plugin list        # … Exposed plugins: PLUGIN PROJECT
+docker exec gosidian /gosidian plugin unexpose vec-pg rag-prove
 ```
 
 A token sees a plugin's tool only when the plugin is exposed in a project

@@ -431,7 +431,13 @@ onMounted(() => {
     @dragleave="onDragLeave"
     @drop="onDrop"
   >
-    <h1 class="sr-only">{{ t('in.window_title', { name: project }) }}</h1>
+    <h1
+      class="sr-only"
+      tabindex="-1"
+      data-window-heading
+    >
+      {{ t('in.window_title', { name: project }) }}
+    </h1>
     <div
       v-if="dragging"
       class="pointer-events-none absolute inset-2 z-20 flex items-center justify-center rounded-lg border-2 border-dashed border-accent bg-accent/10 text-accent font-medium"

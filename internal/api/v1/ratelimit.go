@@ -14,13 +14,24 @@ import (
 // Login rate-limit defaults. Mirror the v1.x web flow knobs so the
 // SPA login surface fails the same way the HTML form does. Tests
 // override LoginWindow / LoginMaxFailures via the package-level
-// vars; in production, cmd/gosidian.main wires them from
-// cfg.Webauth.LoginWindow / cfg.Webauth.LoginMaxFailures so a single
-// tunable controls both audiences.
+// vars; in production, cmd/gosidian.main sets them with SetLoginLimits
+// from cfg.Webauth.LoginWindow / cfg.Webauth.LoginMaxFailures.
 var (
 	LoginWindow      = 15 * time.Minute
 	LoginMaxFailures = 5
 )
+
+// SetLoginLimits sets the window and the failures in it after which a
+// login is refused, once at startup (BUG-145: until then the configured
+// ones never arrived). A value at 0 or below leaves its limit as it is.
+func SetLoginLimits(window time.Duration, maxFailures int) {
+	if window > 0 {
+		LoginWindow = window
+	}
+	if maxFailures > 0 {
+		LoginMaxFailures = maxFailures
+	}
+}
 
 // loginCleanupEvery determines how often (in failed attempts) the
 // limiter sweeps stale entries. Cheap, no goroutine — happens

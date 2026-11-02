@@ -312,7 +312,13 @@ onMounted(() => {
 <template>
   <div class="p-8 max-w-5xl mx-auto">
     <!-- The window's title bar names the view, the heading is for screen readers. -->
-    <h1 class="sr-only">{{ t('runs.title') }}</h1>
+    <h1
+      class="sr-only"
+      tabindex="-1"
+      data-window-heading
+    >
+      {{ t('runs.title') }}
+    </h1>
     <p class="text-sm text-text-muted mb-6">{{ t('runs.intro') }}</p>
 
     <div class="flex items-center gap-2 mb-4 flex-wrap">

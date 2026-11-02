@@ -2,9 +2,10 @@
  * Confirmations, questions and error notices in gosidian's own dialog
  * (ConfirmHost, mounted once in AppShell), where the web UI used the
  * browser's confirm(), prompt() and alert(): those followed neither the
- * theme nor the language of the buttons. The dialog keeps the focus inside,
- * Esc cancels, and Enter confirms, from the confirm button (or the text
- * field) that has the focus when it opens.
+ * theme nor the language of the buttons. The dialog keeps the focus inside
+ * and Esc cancels. It opens on the text field of a prompt, where Enter
+ * confirms, on Cancel for what deletes or revokes, and on the confirm
+ * button otherwise.
  */
 import { shallowReactive } from 'vue'
 

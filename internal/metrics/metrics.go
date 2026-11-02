@@ -88,23 +88,29 @@ var (
 		},
 	)
 	// SearchQueries counts full-text searches by surface (mcp = memory_search,
-	// web = the SPA search) and whether they returned anything. Counts only,
-	// never the query text: the zero-hit rate is the evidence ADR-007 asks
+	// web = the SPA search) and what they returned: notes with every word
+	// (hits), only notes without one of them (partial), nothing (zero).
+	// Counts only, never the query text: the rate of searches that found no
+	// note with every word, zero and partial, is the evidence ADR-007 asks
 	// for before any semantic search (IMP-095).
 	SearchQueries = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "gosidian_search_queries_total",
-			Help: "Full-text searches by surface (mcp/web) and result (hits/zero).",
+			Help: "Full-text searches by surface (mcp/web) and result (hits/partial/zero).",
 		},
 		[]string{"surface", "result"},
 	)
 )
 
-// CountSearch records one search on surface that returned hits results.
-func CountSearch(surface string, hits int) {
+// CountSearch records one search on surface that returned hits results, of
+// which partial lack a word of the query.
+func CountSearch(surface string, hits, partial int) {
 	result := "hits"
-	if hits == 0 {
+	switch {
+	case hits == 0:
 		result = "zero"
+	case partial == hits:
+		result = "partial"
 	}
 	SearchQueries.WithLabelValues(surface, result).Inc()
 }

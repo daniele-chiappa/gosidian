@@ -67,6 +67,7 @@ A role:
 | `agent` | its agent note: the note's body, below its title, is the agent's system prompt |
 | `run` | the node that runs it: a plugin's `<name>.run` of the [agent-run contract](plugins.md#agent-nodes-agent-run1) (`claude.run`, `pi.run`) |
 | `model`, `effort`, `max_turns`, `max_seconds`, `max_tokens` | for the executor, within its preset (`max_tokens` counts the cache reads too: a role that reads and writes much, as an app's, may need more than the preset's default) |
+| `access` | its agent's level of the agent-run contract: `read`, `edit` (also writes files) or `exec` (also runs commands, in its executor's sandbox: its checks too, before the pipeline runs them again); default the executor's, `edit` with a `repo`. `exec` needs a preset that allows it (Bash for `claude`), and the commands reach what the executor's container reaches: give it on purpose. The commit takes every file the agent leaves that the repository does not ignore: the agent is told to delete what its checks built, and a `.gitignore` with the build's folder (`dist/`) spares it |
 | `repo` or `host` | the repository its executor works on, or the host its commands run on |
 | `paths`, `forbid` | the paths of the repository it may and may not change (a folder ends with `/`) |
 | `checks` | the script that tests its work, in the repository's folder (`npm test && npm run build`) |
@@ -101,10 +102,11 @@ tags: [fitness, type:task]
 What to do, and how it is accepted.
 ```
 
-The states are A2A's, and `review`:
+The states are A2A's, with `review` and `backlog`:
 
 | `status` | |
 |---|---|
+| `backlog` | not ready yet: nothing takes it until a person moves it to `submitted` (a [board](board.md)'s first columns) |
 | `submitted` | waiting to start |
 | `working` | at work, or an objective waiting for its sub-tasks |
 | `input-required` | waits for a person's answer |
@@ -180,21 +182,23 @@ person set back by hand gets a new run, not its old one.
 | Node | `with` | Output |
 |---|---|---|
 | `task.context` | `task` (default `{{ trigger.task }}`), `prompt` (text added at the end) | `task`, `body`, `team`, `role`, `system` (the agent note's body), `prompt` (the task for its agent: the role, the task, its paths, the reports of the tasks it depends on; for a coordinator, the roles it gives tasks to, with the repository or host each sees, or the vault only, and its sub-tasks' reports), `max_cost` (the task's budget, or the team's `task_usd`), `paths`, `forbid`, `depends_on`, `children` |
-| `task.update` | `task`, `status` (`working`, `input-required`, `review`, `submitted`), `message` (a dated section of the task) | `task` |
+| `task.update` | `task`, `status` (`working`, `input-required`, `review`, `submitted`), `message` (a dated section of the task), `branch` (the branch the next attempt continues, `{{ verdict.branch }}`; empty for none) | `task` |
 | `task.complete` | `task`, `status` (`completed`, the default, `failed`, `canceled`), `report` | `task` |
-| `task.run` | `task`, `prompt` (added at the end), `plan` (for a coordinator: ask for a plan); any other setting goes to the executor and wins | the executor's output: it runs the role's `run` node with the prompt of `task.context`, the agent note as `system`, the role's model, effort and limits, the task's budget as `max_cost`, the role's `repo` (with `access: edit` and a pull request titled as the task) and `mcp: write` when the role `writes`, `read` otherwise; and `next`: `checks` and `preview`, true when the role has them and the agent pushed a branch, for the `when` of the nodes that run them |
-| `task.gate` | `agent` (`{{ agent }}`), `checks` (`{{ checks }}`, exec.run's output), `preview` (`{{ look }}`, preview.check's), `choices` (the labels of `approve`, `redo`, `discard`) | `ok`, and what follows: `close` (no approval needed), `ask` (a person approves), `redo` (another attempt is left), `fail`; `files`, `outside`, `forbidden` (the files the agent changed against the role's and task's paths and forbid), `notes` (the notes the run wrote in the role's `writes`), `pr_url`, `branch`, `image` (the preview's screenshot), `link`, `title`, `text` (for the person and the report), `feedback` (for another attempt), `choices` |
-| `task.verdict` | `gate`, `answer` (wait.call's: `choice`, `by`, `comment`) | `close` with `status`, `merge`, `close_pr`, `redo`, `report`, `feedback` |
-| `task.pr` | `url`, `action` (`merge`, `close`) | the output of the executor plugin's `pr` node, which merges or closes with its preset's credentials |
+| `task.run` | `task`, `prompt` (added at the end), `plan` (for a coordinator: ask for a plan); any other setting goes to the executor and wins | the executor's output: it runs the role's `run` node with the prompt of `task.context`, the agent note as `system`, the role's model, effort and limits, the task's budget as `max_cost`, the role's `access`, the role's `repo` (with `access: edit` unless the role says another, a pull request titled as the task, and the task's `branch` with `resume` when an attempt sent back left one and the executor's plugin takes it) and `mcp: write` when the role `writes`, `read` otherwise; and `next`: `checks` and `preview`, true when the role has them and the agent pushed a branch, for the `when` of the nodes that run them |
+| `task.gate` | `agent` (`{{ agent }}`), `checks` (`{{ checks }}`, exec.run's output), `preview` (`{{ look }}`, preview.check's), `choices` (the labels of `approve`, `redo`, `discard`) | `ok`, and what follows: `close` (no approval needed), `ask` (a person approves), `redo` (another attempt is left), `fail`; `files`, `outside`, `forbidden` (the files the agent changed against the role's and task's paths and forbid), `notes` (the notes the run wrote in the role's `writes`), `pr_url`, `branch`, `resume` (another attempt may continue the branch: the agent pushed it, within its paths), `image` (the preview's screenshot), `link`, `title`, `text` (for the person and the report), `feedback` (for another attempt), `choices` |
+| `task.verdict` | `gate`, `answer` (wait.call's: `choice`, `by`, `comment`) | `close` with `status`, `merge`, `close_pr`, `redo`, `report`, `feedback`; `branch` (the branch the next attempt continues, for `task.update`; empty when it starts from the base) and `delete_branch` (for `task.pr`: closing the pull request deletes its branch) |
+| `task.pr` | `url`, `action` (`merge`, `close`), `delete_branch` (default true) | the output of the executor plugin's `pr` node, which merges or closes with its preset's credentials |
 | `task.plan` | `plan` (`{{ plan.json }}`) | `action`, `close`, `ask`, `wait`, `summary`, `question`, `created` (`key`, `path`, `assignee`, `title`) |
 
 **The report.** What the gate says, and the task's `## Report` after it,
 starts with what the pipeline found after the agent (the files, the notes
 written, the checks it ran and how they ended, the preview), then the
 agent's own words; an approval adds the person's answer and the merge or
-close of the pull request. The agents run no checks themselves: the
-coordinator and the tasks that depend on one read the pipeline's part as
-facts, and their prompt says so.
+close of the pull request. An agent runs checks only with `access: exec`,
+and then the pipeline runs them again: the coordinator and the tasks that
+depend on one read the pipeline's part as facts, and their prompt says
+so. The agent of a role with `checks` is told the command, and whether it
+may run it.
 
 Only the run that holds a task moves or closes it, with these nodes: the
 agent of the run moves no task with the MCP tools, its own neither, so it
@@ -241,6 +245,16 @@ the coordinator (`coordinator: false`):
    next attempt reads; **discard** closes the pull request and cancels
    the task. Without an attempt left, redo is not offered and a gate that
    fails fails the task.
+
+**Another attempt continues the branch.** When the gate or a person sends
+a task back, and the agent pushed its branch within the role's paths, the
+pull request is closed and its branch kept (`delete_branch: false`); the
+task keeps it in `branch`, and the next attempt continues it (`resume`):
+its agent finds the files as the attempt before left them, and reads in
+the task what went wrong. A branch with a file the role must not change,
+or outside its paths, goes with its pull request, and the next attempt
+starts from the base. A plugin too old for `resume` (claude and pi before
+0.4.0) starts each attempt from the base, as before.
 
 `task.pr` calls the `pr` node of the executor's plugin (`claude.pr`,
 `pi.pr`): the plugin merges and closes with the credentials of its
@@ -313,7 +327,9 @@ tasks over MCP with its token:
 - `memory_task_update`, `memory_task_complete`: as the nodes;
 - `memory_task_create`: gives a task to a role.
 
-The task tools are in the `core` profile of the tokens.
+The task tools are in the `core` profile of the tokens. They also work
+on the cards of a [board](board.md), which have no team: there an agent
+takes the board's next card instead of a role's task.
 
 ## The board
 
@@ -322,3 +338,9 @@ task its sub-tasks and the tasks that wait for it. The note
 `<team>-tasks.md` that `memory_create_team` writes groups a team's tasks:
 what waits for a person (`input-required`, `review`), what is at work, the
 board, what is done.
+
+A note `type: board` is another way to work on a project's tasks
+([boards](board.md)): its columns, each a state with a limit of cards at
+work, and the order of the cards in each. Its cards are tasks without a
+team, which an agent in a session takes one after the other and a person
+drags in the web UI. A team takes no card yet: its tasks stay its own.

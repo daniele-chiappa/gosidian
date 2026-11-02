@@ -33,6 +33,7 @@
     "empty": "No windows open.",
     "minimizedHint": "{n} minimized in the footer ↓",
     "openFromSidebar": "Open a note from the sidebar.",
+    "skipToWindow": "Skip to the active window",
     "minimizedLabel": "Minimized:",
     "restore": "Restore",
     "viewStrip": "Strip",
@@ -138,7 +139,11 @@
     "html_frame": "HTML note",
     "too_large": "This note is larger than 1 MiB, more than the web UI can save: it opens read-only. Edit it with an editor or through git.",
     "too_large_to_save": "The text is larger than 1 MiB, which the web UI cannot save. Shorten it, or split it into several notes.",
-    "preview_failed": "The preview could not be made"
+    "preview_failed": "The preview could not be made",
+    "draft_kept_at": "Unsaved changes from {time}.",
+    "draft_kept_on": "Unsaved changes from {date}.",
+    "draft_restore": "Restore",
+    "draft_discard": "Discard"
   },
   "note_create": {
     "title": "New note",
@@ -232,7 +237,9 @@
     "action_focus_desc": "Hide topbar + sidebar",
     "action_new_note_label": "New note",
     "action_new_note_desc": "Create an empty note",
-    "no_matches": "No matches. Press {key} to close."
+    "no_matches": "No matches. Press {key} to close.",
+    "search_text": "Search the text for “{query}”",
+    "title": "Jump to a note, a project or a tag"
   },
   "layout": {
     "sidebar_resize_label": "Drag to resize, double-click to reset",
@@ -248,7 +255,8 @@
     "totp_placeholder": "123 456 or xxxxx-xxxxx",
     "submitting": "Signing in…",
     "bad_credentials": "Wrong username, password or code.",
-    "failed": "Sign-in failed"
+    "failed": "Sign-in failed",
+    "session_expired": "Your session has expired: sign in again. Unsaved changes stay in this browser."
   },
   "note_edit": {
     "mode_editor": "Editor",
@@ -820,6 +828,8 @@
     "suggestions": "Notes",
     "no_value": "No value",
     "column_empty": "No notes",
+    "closed": "Closed",
+    "wip_over": "{column}: past its limit of {wip}.",
     "move_to": "Move {title} to…",
     "new_row": "New row",
     "new_row_in": "New row in {column}",
@@ -835,7 +845,8 @@
     "row_views": "Row views",
     "count_notes": "note | notes",
     "created_by": "Created by {who}",
-    "modified_by": "Modified by {who}"
+    "modified_by": "Modified by {who}",
+    "moved_to": "Moved to {column}, place {place}"
   },
   "request_error": {
     "network": "The server does not answer: check the connection.",
@@ -871,7 +882,12 @@
     "project_placeholder": "project (optional)",
     "searching": "Searching…",
     "no_matches": "No matches for {query}.",
-    "failed": "Search failed"
+    "failed": "Search failed",
+    "missing": "Without: {words}",
+    "count": "{n} result | {n} results",
+    "tip_spelling": "Check how the words are spelled.",
+    "clear_project": "Remove the project filter",
+    "in_titles": "Search the titles"
   },
   "query": {
     "title": "Query",
@@ -1180,7 +1196,8 @@
       "when": "When",
       "size": "Size",
       "load_failed": "The audit could not be read",
-      "actor_column": "Actor"
+      "actor_column": "Actor",
+      "count": "{n} entry | {n} entries"
     },
     "users": {
       "new": "New user",

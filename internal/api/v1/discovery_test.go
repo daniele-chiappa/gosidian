@@ -1,6 +1,8 @@
 package v1
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -299,5 +301,35 @@ func TestSearch_StripsMarkTags(t *testing.T) {
 	}
 	if strings.Contains(w.body, "<mark>") || strings.Contains(w.body, "</mark>") {
 		t.Errorf("snippet not stripped: %s", w.body)
+	}
+}
+
+// A partial hit says which words of the query its note lacks; a full one
+// carries no missing at all.
+func TestSearch_MissingWordsOfPartialHits(t *testing.T) {
+	f := newNotesFixture(t)
+	for i := range 30 {
+		f.seedNote(t, fmt.Sprintf("w%02d.md", i), "weather report")
+	}
+	f.seedNote(t, "full.md", "gopher burrow")
+	f.seedNote(t, "half.md", "gopher tunnel")
+	w := f.doAuthRecorder(http.MethodGet, "/api/v1/search?q=gopher+burrow", "", nil)
+	if w.code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.code, w.body)
+	}
+	var out struct {
+		Hits []map[string]any `json:"hits"`
+	}
+	if err := json.Unmarshal([]byte(w.body), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Hits) != 2 || out.Hits[0]["path"] != "full.md" || out.Hits[1]["path"] != "half.md" {
+		t.Fatalf("hits = %s, want full.md then half.md", w.body)
+	}
+	if _, ok := out.Hits[0]["missing"]; ok {
+		t.Errorf("the full hit carries missing: %s", w.body)
+	}
+	if m, _ := out.Hits[1]["missing"].([]any); len(m) != 1 || m[0] != "burrow" {
+		t.Errorf("half.md missing = %v, want [burrow]", out.Hits[1]["missing"])
 	}
 }

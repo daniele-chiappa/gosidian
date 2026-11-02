@@ -92,15 +92,21 @@ func (s *Server) fleetRead(rel string) (fleet.Task, []byte, error) {
 	return fleet.ReadTask(rel, note.Content), note.Content, nil
 }
 
-// taskWrite is how a task is written: by a token (the limiter counts it)
-// or by the server for a run (actor).
+// taskWrite is how a task is written: by a token (the limiter counts it),
+// by the server for a run (actor), or for a person of the web UI (actor,
+// person) who saw the note at ifMatch.
 type taskWrite struct {
-	tok   *auth.Token
-	actor string
+	tok     *auth.Token
+	actor   string
+	person  bool
+	ifMatch string
 }
 
 func (w taskWrite) noteWrite(nw noteWrite) noteWrite {
-	if w.tok == nil {
+	switch {
+	case w.person:
+		nw.automation, nw.source, nw.actor, nw.ifMatch = true, audit.SourceHTTP, w.actor, w.ifMatch
+	case w.tok == nil:
 		nw.automation, nw.source, nw.actor, nw.batched = true, audit.SourcePipeline, w.actor, true
 	}
 	return nw
@@ -173,6 +179,17 @@ func (s *Server) taskLease() time.Duration {
 		}
 	}
 	return 15 * time.Minute
+}
+
+// taskMaxAttempts is the attempts of a task before an ended lease fails
+// it, [agents] max_attempts.
+func (s *Server) taskMaxAttempts() int {
+	if s.pipelines != nil {
+		if n := s.pipelines.Config().Tasks.MaxAttempts; n > 0 {
+			return n
+		}
+	}
+	return 3
 }
 
 // The fleet of the pipelines' host (pipeline.Fleet).

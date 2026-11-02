@@ -3,8 +3,6 @@ package v1
 import (
 	"net/http"
 	"strings"
-
-	"github.com/gosidian/gosidian/internal/index"
 )
 
 // noteTitleHit is the wire shape consumed by the CodeMirror wikilink
@@ -27,11 +25,12 @@ const (
 )
 
 // handleNoteTitles powers wikilink autocomplete. The SPA fires this
-// endpoint as the user types `[[<prefix>` in the editor, debounced at
-// 200ms. We use the existing FTS Search index — title-only matches
-// would require a dedicated index, which is overkill for the current
-// vault sizes. Limit defaults to 10 (just enough for the dropdown)
-// and is capped at 50.
+// endpoint as the user types `[[<prefix>` in the editor, and for the
+// suggestions of a relation field. A query matches the title or the file
+// name, as a wikilink names a note (IMP-218, F-27): the full-text search
+// it used offered notes that only mentioned the word, and missed
+// nota-beta.md for `[[nota-b` once the editor filtered on the title.
+// Limit defaults to 10 (just enough for the dropdown) and is capped at 50.
 func (r *Router) handleNoteTitles(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
 		WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
@@ -75,17 +74,17 @@ func (r *Router) handleNoteTitles(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	rows, err := r.deps.Index.SearchWith(q, index.SearchOptions{Limit: limit, Projects: scope})
+	rows, err := r.deps.Index.NotesByName(q, scope, limit)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
 		return
 	}
 	out := make([]noteTitleHit, 0, noteTitlesMaxLimit)
-	for _, h := range rows {
-		if !r.canSee(p, h.Path) { // defence in depth: the scope already filtered
+	for _, n := range rows {
+		if !r.canSee(p, n.Path) { // defence in depth: the scope already filtered
 			continue
 		}
-		out = append(out, noteTitleHit{Title: h.Title, Path: h.Path})
+		out = append(out, noteTitleHit{Title: n.Title, Path: n.Path})
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"items": out})
 }

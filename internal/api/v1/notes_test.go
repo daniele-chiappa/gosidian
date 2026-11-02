@@ -420,6 +420,32 @@ func TestNoteTitles_FetchesByQuery(t *testing.T) {
 	}
 }
 
+// A query names a note by its title or its file name, as a wikilink does,
+// and the body does not count (IMP-218, F-27): `[[nota-b` suggested
+// nothing for nota-beta.md, titled "Nota beta", and the full-text search
+// behind it offered notes that only mentioned the word.
+func TestNoteTitles_MatchesTitleAndFileNameNotBody(t *testing.T) {
+	f := newNotesFixture(t)
+	for _, d := range []index.NoteDoc{
+		{Path: "nota-beta.md", Title: "Nota beta", Body: "Unrelated.", ModTime: 1},
+		{Path: "other.md", Title: "Other", Body: "This mentions nota-b in the body.", ModTime: 1},
+	} {
+		if err := f.idx.Upsert(d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w := f.doAuthRecorder(http.MethodGet, "/api/v1/note-titles?q=nota-b", "", nil)
+	if w.code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.code, w.body)
+	}
+	if !strings.Contains(w.body, `"path":"nota-beta.md"`) || !strings.Contains(w.body, `"title":"Nota beta"`) {
+		t.Errorf("nota-b misses nota-beta.md: %s", w.body)
+	}
+	if strings.Contains(w.body, "other.md") {
+		t.Errorf("nota-b offers a note that has it only in the body: %s", w.body)
+	}
+}
+
 // With no query, an account that sees a few projects gets their latest
 // notes, even when the vault's latest edits are all elsewhere (IMP-160,
 // S2-13: the overfetch filtered after the LIMIT came back empty).

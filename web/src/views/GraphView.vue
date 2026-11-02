@@ -50,6 +50,12 @@ const props = defineProps<{
 const store = useWindowsStore()
 const openWindow = inject<(spec: OpenSpec) => string>('openWindow', (s) => store.open(s))
 
+// The window's name, as its title bar has it (IMP-217, F-03).
+const heading = computed(() => {
+  if (props.focus && !props.global) return t('graph.links_title', { name: base(props.focus) })
+  return props.project ? `${t('nav.graph')} · ${props.project}` : t('nav.graph')
+})
+
 // Renderer toggle: each window starts from the persisted global
 // default and switching updates it (2D stays the default on fresh
 // profiles; three.js loads only on the first switch to 3D).
@@ -331,6 +337,13 @@ onMounted(async () => {
 
 <template>
   <div class="flex h-full">
+    <h1
+      class="sr-only"
+      tabindex="-1"
+      data-window-heading
+    >
+      {{ heading }}
+    </h1>
     <aside
       v-if="!compact"
       class="w-72 shrink-0 border-r border-border bg-bg-elevated p-4 space-y-4 overflow-auto"

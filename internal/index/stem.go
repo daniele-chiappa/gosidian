@@ -2,6 +2,7 @@ package index
 
 import (
 	"database/sql"
+	"encoding/json"
 	"strings"
 	"sync"
 	"unicode"
@@ -17,6 +18,8 @@ const (
 	minPrefixLen = 3
 	// maxCandidates caps the vocabulary scanned for one search word.
 	maxCandidates = 200
+	// maxKnownStems caps the stems the stemmer remembers: a few hundred KB.
+	maxKnownStems = 4096
 )
 
 // stemmer derives English Porter stems with SQLite's own FTS5 porter
@@ -24,9 +27,22 @@ const (
 // FTS5 itself would produce, with no stemming code or dependency of our own.
 // The index keeps its plain tokens; stems only add the inflections of a
 // search word to the query (see matchExpr).
+//
+// A call runs in one transaction it rolls back, with statements prepared
+// once: the words in with one insert, their tokens read, nothing written.
+// Committing and deleting the words, each statement prepared again, made
+// most of the inflections' cost, which were 30% of a search on the
+// benchmark's large vault: a search stems each word twice.
+//
+// A word's stem never changes, and the words a search stems come back:
+// the vocabulary under a prefix is the same from one search to the next.
+// The stemmer remembers the stems it found, up to maxKnownStems words, and
+// forgets them all when it has that many.
 type stemmer struct {
-	mu sync.Mutex
-	db *sql.DB
+	mu                 sync.Mutex
+	db                 *sql.DB
+	insert, tokensRead *sql.Stmt
+	known              map[string]string
 }
 
 func newStemmer() (*stemmer, error) {
@@ -45,7 +61,16 @@ func newStemmer() (*stemmer, error) {
 			return nil, err
 		}
 	}
-	return &stemmer{db: db}, nil
+	s := &stemmer{db: db, known: map[string]string{}}
+	// The k-th word of the JSON list is document k+1.
+	if s.insert, err = db.Prepare(`INSERT INTO w(rowid, t) SELECT key + 1, value FROM json_each(?)`); err == nil {
+		s.tokensRead, err = db.Prepare(`SELECT doc, term FROM v`)
+	}
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	return s, nil
 }
 
 // stems returns the Porter stem of each word, or "" for a word that is not
@@ -58,23 +83,51 @@ func (s *stemmer) stems(words []string) []string {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	defer s.db.Exec(`DELETE FROM w`)
-	tx, err := s.db.Begin()
-	if err != nil {
-		return out
-	}
+	var unknown []string
+	var at []int
 	for k, w := range words {
-		if _, err := tx.Exec(`INSERT INTO w(rowid, t) VALUES(?, ?)`, k+1, w); err != nil {
-			tx.Rollback()
-			return out
+		if st, ok := s.known[w]; ok {
+			out[k] = st
+		} else {
+			unknown, at = append(unknown, w), append(at, k)
 		}
 	}
-	if err := tx.Commit(); err != nil {
+	if len(unknown) == 0 {
 		return out
 	}
-	rows, err := s.db.Query(`SELECT doc, term FROM v`)
+	found, ok := s.lookup(unknown)
+	if !ok {
+		return make([]string, len(words))
+	}
+	if len(s.known)+len(unknown) > maxKnownStems {
+		clear(s.known)
+	}
+	for j, k := range at {
+		out[k] = found[j]
+		s.known[unknown[j]] = found[j]
+	}
+	return out
+}
+
+// lookup stems words with the porter tokenizer (under s.mu); ok is false
+// when anything failed.
+func (s *stemmer) lookup(words []string) (out []string, ok bool) {
+	out = make([]string, len(words))
+	list, err := json.Marshal(words)
 	if err != nil {
-		return out
+		return out, false
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return out, false
+	}
+	defer tx.Rollback()
+	if _, err := tx.Stmt(s.insert).Exec(string(list)); err != nil {
+		return out, false
+	}
+	rows, err := tx.Stmt(s.tokensRead).Query()
+	if err != nil {
+		return out, false
 	}
 	defer rows.Close()
 	tokens := make([]int, len(words))
@@ -92,7 +145,7 @@ func (s *stemmer) stems(words []string) []string {
 			out[k] = ""
 		}
 	}
-	return out
+	return out, rows.Err() == nil
 }
 
 func (s *stemmer) stem(word string) string { return s.stems([]string{word})[0] }
@@ -108,7 +161,20 @@ func (s *stemmer) close() {
 // indexed inflections outside its own prefix also matches them exactly:
 // "retry" → ("retry"* OR "retries" OR "retried").
 func (i *Index) matchExpr(q string) string {
-	var parts []string
+	return joinParts(i.queryParts(q), " AND ")
+}
+
+// queryPart is one word of a query: the word as typed, and its FTS5
+// expression.
+type queryPart struct {
+	word string
+	expr string
+}
+
+// queryParts returns the words of q that are terms to the tokenizer, each
+// with its expression.
+func (i *Index) queryParts(q string) []queryPart {
+	var parts []queryPart
 	for _, t := range strings.Fields(q) {
 		t = strings.ReplaceAll(t, `"`, ``)
 		// A word of punctuation alone (the " — " of most titles, "&", "-")
@@ -121,10 +187,19 @@ func (i *Index) matchExpr(q string) string {
 		if forms := i.inflections(t); len(forms) > 0 {
 			part = `(` + part + ` OR "` + strings.Join(forms, `" OR "`) + `")`
 		}
-		parts = append(parts, part)
+		parts = append(parts, queryPart{word: t, expr: part})
 	}
-	// Explicit AND: FTS5 rejects an implicit one after a parenthesized group.
-	return strings.Join(parts, " AND ")
+	return parts
+}
+
+// joinParts joins the parts' expressions with op. Explicit AND: FTS5 rejects
+// an implicit one after a parenthesized group.
+func joinParts(parts []queryPart, op string) string {
+	exprs := make([]string, len(parts))
+	for k, p := range parts {
+		exprs[k] = p.expr
+	}
+	return strings.Join(exprs, op)
 }
 
 // inflections lists the indexed words that share word's Porter stem but are
@@ -142,7 +217,7 @@ func (i *Index) inflections(word string) []string {
 	if len(prefix) < minPrefixLen {
 		return nil
 	}
-	rows, err := i.db.Query(`SELECT term FROM notes_vocab WHERE term >= ? AND term < ? LIMIT ?`,
+	rows, err := prepDB{i.stmts}.Query(`SELECT term FROM notes_vocab WHERE term >= ? AND term < ? LIMIT ?`,
 		prefix, prefix+"￿", maxCandidates)
 	if err != nil {
 		return nil

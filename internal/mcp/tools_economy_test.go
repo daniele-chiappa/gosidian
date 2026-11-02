@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-
-	"github.com/gosidian/gosidian/internal/initprompt"
 )
 
 const economyHot = `---
@@ -71,13 +69,13 @@ func TestMCP_BootstrapKnownVersionAndEtags(t *testing.T) {
 	// (etag not supplied) still full.
 	slim := bootstrapView(t, s, map[string]any{
 		"project":                  "p",
-		"known_directives_version": initprompt.DirectivesVersion,
+		"known_directives_version": full.DirectivesVersion,
 		"known_etags":              map[string]any{"p/hot.md": full.HotMD.ETag},
 	})
 	if slim.DirectivesBlock != "" {
 		t.Fatal("directives_block must be omitted when known version matches")
 	}
-	if slim.DirectivesVersion != initprompt.DirectivesVersion {
+	if slim.DirectivesVersion != full.DirectivesVersion {
 		t.Fatal("directives_version must always be present")
 	}
 	if !slim.HotMD.Unchanged || slim.HotMD.Content != "" || slim.HotMD.ETag != full.HotMD.ETag {
@@ -90,7 +88,7 @@ func TestMCP_BootstrapKnownVersionAndEtags(t *testing.T) {
 	// Stale version/etag: everything comes back full.
 	stale := bootstrapView(t, s, map[string]any{
 		"project":                  "p",
-		"known_directives_version": initprompt.DirectivesVersion - 1,
+		"known_directives_version": full.DirectivesVersion - 1,
 		"known_etags":              map[string]any{"p/hot.md": "stale-etag"},
 	})
 	if stale.DirectivesBlock == "" || stale.HotMD.Content == "" || stale.HotMD.Unchanged {

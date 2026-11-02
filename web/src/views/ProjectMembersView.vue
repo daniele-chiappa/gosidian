@@ -131,7 +131,13 @@ onMounted(load)
 <template>
   <div class="p-6 max-w-xl mx-auto">
     <!-- The window's title bar names it: the heading is for screen readers. -->
-    <h1 class="sr-only">{{ t('members.title', { project: props.project }) }}</h1>
+    <h1
+      class="sr-only"
+      tabindex="-1"
+      data-window-heading
+    >
+      {{ t('members.title', { project: props.project }) }}
+    </h1>
     <p class="text-sm text-text-muted mb-1">
       {{ t('members.intro') }}
     </p>
@@ -150,7 +156,7 @@ onMounted(load)
 
     <template v-if="view">
       <!-- Accounts -->
-      <h3 class="text-sm font-semibold mb-2">{{ t('members.accounts', { n: view.users.length }) }}</h3>
+      <h2 class="text-sm font-semibold mb-2">{{ t('members.accounts', { n: view.users.length }) }}</h2>
       <ul class="space-y-2 mb-3">
         <li
           v-for="m in view.users"
@@ -199,7 +205,7 @@ onMounted(load)
       </form>
 
       <!-- Teams -->
-      <h3 class="text-sm font-semibold mb-2">{{ t('members.teams', { n: view.teams.length }) }}</h3>
+      <h2 class="text-sm font-semibold mb-2">{{ t('members.teams', { n: view.teams.length }) }}</h2>
       <ul class="space-y-2 mb-3">
         <li
           v-for="g in view.teams"

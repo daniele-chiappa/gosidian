@@ -56,7 +56,10 @@ const sharedStubTemplate = "assets/_common/stub.tmpl.md"
 
 // sharedDirectivesTemplate is the generic operational directives block served
 // by memory_bootstrap (directives_block field), parameterised only by
-// {{PROJECT}} and {{DIRECTIVES_VERSION}}.
+// {{PROJECT}} and {{DIRECTIVES_VERSION}}. It is never written to disk: the
+// agent reads it fresh at every bootstrap, and what is particular to a project
+// (stack, hot files, language) lives in its stub. Every byte of the template
+// reaches every session, so it carries no comment for its maintainers.
 const sharedDirectivesTemplate = "assets/_common/directives.tmpl.md"
 
 // sharedPlacementText is where the augment prompts tell the agent to put the
@@ -225,7 +228,11 @@ const StubVersion = 3
 // v27 (2026-10-22, IMP-172 phase 5b): files for the project's pipelines go
 // into its IN folder with memory_in_upload (open, the pieces with curl and
 // the ticket, complete), not into notes with memory_ingest.
-const DirectivesVersion = 27
+//
+// v28 (2026-10-31, M1.3): the directives speak of the .html, media and table
+// notes, the IN folder and the tag vocabulary only where they are on; the
+// bootstrap's directives_version names the variant served (DirectivesID).
+const DirectivesVersion = 28
 
 // AnchorVersion is the version of the agent-anchor template/format. It is
 // substituted into the `<!-- gosidian:anchor v=N ... -->` marker so the

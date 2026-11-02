@@ -240,10 +240,10 @@ func (r *Router) handleMe(w http.ResponseWriter, req *http.Request) {
 }
 
 // handleRefresh extends the sliding TTL of the current token without
-// rotating its plaintext value. The SPA fires this from a timer ~60s
-// before `expires_at`; the response carries the same token string so
-// clients that miss the call until expiry can still recover by
-// re-issuing the login request.
+// rotating its plaintext value. The SPA calls it while it is used, once
+// less than half of the window is left (useSessionRenewal); the response
+// carries the same token string. A session that expired needs a new
+// login.
 func (r *Router) handleRefresh(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
 		WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")

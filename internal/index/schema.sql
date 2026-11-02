@@ -10,6 +10,9 @@ CREATE TABLE IF NOT EXISTS notes (
 );
 -- Link resolution matches a target to a title case-insensitively.
 CREATE INDEX IF NOT EXISTS notes_title_lower ON notes(lower(title));
+-- A path LIKE ignores case, so only an index in NOCASE order serves it: a
+-- project or a folder (path LIKE 'p/%') reads its own notes, not all of them.
+CREATE INDEX IF NOT EXISTS notes_path_nocase ON notes(path COLLATE NOCASE);
 
 -- Index-wide settings (v3): content_version is the ContentVersion the rows
 -- were extracted with.
@@ -39,11 +42,17 @@ CREATE INDEX IF NOT EXISTS tags_note ON tags(note_id);
 
 -- Columns are weighted by search.go (bm25): title, meta = the raw
 -- frontmatter (tags, description, aliases…), body = the text without it.
+-- Every search word is a prefix query, and a short one (di, con, a) is the
+-- prefix of thousands of indexed words, whose lists FTS5 merges at each
+-- search unless the prefix is indexed too: prefix='1 2 3' keeps those of one
+-- to three characters. The full-text lists take about two and a half times
+-- the space; on a vault of 30,000 notes the index file grows by a quarter.
 CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
     title,
     meta,
     body,
-    tokenize='unicode61 remove_diacritics 2'
+    tokenize='unicode61 remove_diacritics 2',
+    prefix='1 2 3'
 );
 
 -- The indexed words, one row per distinct term: query-side stemming picks

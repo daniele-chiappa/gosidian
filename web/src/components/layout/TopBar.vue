@@ -4,11 +4,10 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useAccessStore } from '@/stores/access'
 import { useUIStore } from '@/stores/ui'
-import { useWindowsStore } from 'plancia'
+import { useOpenFocused } from '@/composables/useOpenFocused'
 import { planciaKey } from '@/composables/planciaKey'
 import { roleLabel } from '@/api/access'
 import { resetSessionState } from '@/composables/useSessionReset'
-import { shortcutLabel } from '@/composables/platform'
 import { Search, LogOut, LogIn, Columns2, SquareStack } from 'lucide-vue-next'
 import InsightsBadge from '@/components/layout/InsightsBadge.vue'
 import UploadsBadge from '@/components/layout/UploadsBadge.vue'
@@ -19,11 +18,11 @@ const router = useRouter()
 const auth = useAuthStore()
 const access = useAccessStore()
 const ui = useUIStore()
-const windows = useWindowsStore()
-const paletteKeys = shortcutLabel('K')
+// A gesture's open puts the focus on the window's title (IMP-217, F-03).
+const openWindow = useOpenFocused()
 
 function openSearch() {
-  windows.open({ type: 'search', key: planciaKey('search'), title: t('nav.search') })
+  openWindow({ type: 'search', key: planciaKey('search'), title: t('nav.search') })
 }
 
 async function handleLogout() {
@@ -49,7 +48,6 @@ async function handleLogout() {
       >
         <Search class="w-3 h-3" />
         <span>{{ t('nav.search') }}</span>
-        <kbd class="opacity-60">{{ paletteKeys }}</kbd>
       </button>
 
       <!-- plancia layout toggle: niri strip ↔ tabs (persisted in the UI store) -->

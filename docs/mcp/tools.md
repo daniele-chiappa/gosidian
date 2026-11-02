@@ -3,6 +3,16 @@
 **71 tools** cover the full retrieval → write → workflow →
 orchestration → self-check cycle for agent memory.
 
+Four belong to branches that are off by default, and `tools/list` shows
+them only while their branch is on, so a branch off costs an agent no
+schema: `memory_pipelines`, `memory_pipeline_run` and `memory_create_team`
+with the pipelines on (`[pipelines] enabled`), `memory_in_upload` to a
+token that may write in a project with an IN folder (`use_in`). In the
+same way `memory_create_table_note` and `memory_create_media_note` are
+listed only while `table_notes` and `media_notes` are on: off, they could
+only refuse, and `memory_ingest` stores a `.csv` or an image as an
+attachment. Hidden, these tools are also unknown to `tools/call`.
+
 Consult each tool's `description` via your client's `tools/list` call
 for precise schemas; the groupings below are the conceptual map.
 
@@ -35,7 +45,16 @@ a note naming it (and the likely intended argument, e.g. `Project` →
   A project with the `lean_read_bootstrap` flag gives tokens that cannot
   write to it only the reading sections of the directives
   (`directives_scope: "read"`) — fewer tokens, less context; off by
-  default.
+  default. The directives speak of the `.html`, media and table notes,
+  the IN folder and the tag vocabulary only where the server or the
+  project has them on. `directives_version` names the block as served:
+  100 times the version of the directives (the `v=` of its marker), plus
+  one for `.html` notes, 2 for media notes, 4 for table notes, 8 for the
+  IN folder, 16 for the tag vocabulary and 32 for the reading sections
+  only. Handed back as `known_directives_version` on the same project,
+  as the directives ask, it spares the block where the same one would
+  come: a feature turned on, or the token's access changed, sends it
+  again.
   The payload also carries a `maintenance` digest (hot.md size/age, its
   size with the views computed when it has some (`hot_computed_size`,
   `hot_computed_oversize` past 12 KiB, `hot_views_cut`),
@@ -80,7 +99,13 @@ a note naming it (and the likely intended argument, e.g. `Project` →
   translations) that are searched alongside `query` and fused by
   reciprocal rank — the agent supplies the vocabulary, the server stays
   deterministic. Each word also matches its English inflections ("retry"
-  finds "retries"). Project and access filters apply before the limit
+  finds "retries"). When the notes with every word are fewer than the
+  limit, the notes with one of the query's less common words (in at most
+  10% of the notes) follow them, marked `partial: without "…"` in `why`
+  and scored never above the last full hit; with `any_of`, the partial
+  hits of each phrasing follow a fusion that falls short. The web UI's
+  search and the `[[` suggestions do the same. Project and access filters
+  apply before the limit
 - `memory_get(path, raw?, max_bytes?)`, `memory_get_section(path, heading)`,
   `memory_get_frontmatter(path)`, `memory_get_outline(path)` — full
   body vs cheap triage variants. `memory_get` has an **oversize
@@ -269,7 +294,8 @@ a note naming it (and the likely intended argument, e.g. `Project` →
   bearer; `complete` (or `POST <endpoint>/complete`) places them as one
   batch, a zip with `unzip` unpacked; `status` follows it, `cancel` drops
   it, `list` gives the account's uploads. The same files opened again are
-  the same upload, with a new ticket. See [upload](upload.md#files-for-the-pipelines-memory_in_upload).
+  the same upload, with a new ticket. Listed only to a token that may
+  write in a project with `use_in`. See [upload](upload.md#files-for-the-pipelines-memory_in_upload).
 - `memory_upload_attachment(project, data|source_path, filename)` —
   single-step upload returning a ready-to-splice markdown embed
 - `memory_upload_resource(project, data|source_path, filename, kind?)` —
@@ -287,13 +313,13 @@ a note naming it (and the likely intended argument, e.g. `Project` →
 - `memory_attachment_info(path)`
 - `memory_create_media_note(project, data|source_path, filename, caption?, title?, path?)` —
   image media note (ADR-013): uploads the image **and** creates the `.md`
-  with `type: image` + `media:` + the caption, atomically. Requires
-  `media_notes` enabled; images only
+  with `type: image` + `media:` + the caption, atomically. Listed only
+  with `media_notes` on; images only
 - `memory_create_table_note(project, attachment|data|source_path|bridge_filename, caption?, title?, path?)` —
   CSV table note (ADR-016): uploads (or references) the CSV **and** creates
   the `.md` with `type: table` + `media:` + the caption, atomically; column
-  headers + row count are inlined into the body for search. Requires
-  `table_notes` enabled; `.csv` only
+  headers + row count are inlined into the body for search. Listed only
+  with `table_notes` on; `.csv` only
 
 The single-step / pre-uploader split, the equivalent REST endpoint
 `POST /api/upload`, and the full error catalogue live in
@@ -335,35 +361,43 @@ from the caller's token identity and cannot be forged, while
 
 ## Teams of agents (tasks)
 
-The tasks of a project's [teams of agents](../agents.md) (IMP-195): notes
-in `<project>/tasks/`, rows of the database `tasks.md`, with the states
-`submitted`, `working`, `input-required`, `review`, `completed`,
-`failed`, `canceled`. A pipeline's run moves and closes its task with the
-task nodes; the agent of a run (a run token) reads the tasks and creates
-sub-tasks, but moves none. An outside agent moves and closes the tasks it
-claimed.
+The tasks of a project's [teams of agents](../agents.md) (IMP-195) and
+the cards of its [boards](../board.md) (IMP-216): notes in
+`<project>/tasks/`, rows of the database `tasks.md`, with the states
+`backlog`, `submitted`, `working`, `input-required`, `review`,
+`completed`, `failed`, `canceled`. A pipeline's run moves and closes its
+task with the task nodes; the agent of a run (a run token) reads the tasks
+and creates sub-tasks, but moves none and takes no card. An outside agent
+moves and closes the tasks and cards it claimed; a card goes to the
+columns of its board, within their limits.
 All but `memory_create_team` are in the `core` profile.
 
-- `memory_tasks(project, team?, status?, role?)` — the tasks (`open` by
-  default, `all`, or one status), each submitted one with why it does not
-  start yet, and each team with its spend of the day against its budget
+- `memory_tasks(project, team?, board?, status?, role?)` — the tasks
+  (`open` by default, `all`, or one status), each submitted one with why
+  it does not start yet, and each team with its spend of the day against
+  its budget; with `board`, its cards and its columns with their counts
 - `memory_task_create(project, team, assignee, title, body?, parent?,
   depends_on?, paths?, forbid?, budget_usd?, hold?)` — a task for a role.
   A run token creates tasks only for the roles its own role delegates
   to, under its own task; one level of sub-tasks, `[agents] max_tasks`
-  per objective
-- `memory_task_claim(path)` — an outside agent takes a ready task, with
-  a lease of `[agents] lease`
+  per objective. With `board` instead of `team` and `assignee`, a card
+  (`column?`, `for?`, `done_by?`), at the bottom of a column of
+  `backlog` or `submitted`
+- `memory_task_claim(path | board)` — an outside agent takes a ready
+  task, or the board's next card, with a lease of `[agents] lease`
 - `memory_task_heartbeat(path)` — renews the lease
-- `memory_task_update(path, status, message?)` — `working`,
-  `input-required`, `review`, or `submitted` to give it back
+- `memory_task_update(path, status | column, message?)` — `working`,
+  `input-required`, `review`, or `submitted` to give it back; a card, to a
+  column of those
 - `memory_task_complete(path, report, status?)` — closes it with the
-  `## Report` section the tasks after it read
+  `## Report` section the tasks after it read; a card a person closes
+  goes to review instead
 - `memory_create_team(project, name?, roles?, run?, coordinator?)` —
   writes a team's note, an agent note per role, the pipelines that give
   its tasks to their agents and, with a coordinator, its objectives to
   it, the database `tasks.md` when there is none, and a note that shows
-  the team's tasks
+  the team's tasks. Listed only while the server runs pipelines, which run
+  the team
 
 ## Workflow
 
@@ -392,8 +426,8 @@ All but `memory_create_team` are in the `core` profile.
   with their status and the node types they add (`<plugin>.<node>`,
   [plugins](../plugins.md)), and the project's `queue`: its steps queued
   by plugin, model and shared resource, with the places taken and the
-  limits ([calls at once](../pipelines.md#calls-at-once)). Read-only. Off unless the
-  server runs pipelines and the project has `use_pipelines`
+  limits ([calls at once](../pipelines.md#calls-at-once)). Read-only. Listed only while
+  the server runs pipelines, and off for a project without `use_pipelines`
   ([pipelines](../pipelines.md)).
 - `memory_pipeline_run(action?, path?, input?, idempotency_key?,
   callback_url?, wait?, run?, step?, data?)` — `start` (default) runs a
@@ -403,6 +437,7 @@ All but `memory_create_team` are in the `core` profile.
   a `wait.call`. A category with its most runs not ended refuses the
   start, and says so. `resume` hands `data` to the waiting step of
   `run`, `cancel` stops it. Write access to the pipeline's project.
+  Listed only while the server runs pipelines.
 - `memory_self_stats()` — token identity (including the multi-project
   scope list), `access` (every project the token reaches with its live
   level, `read` or `write`: a write-scoped token can still be read-only
@@ -459,8 +494,13 @@ All but `memory_create_team` are in the `core` profile.
   [graphs](../vault/graphs.md)), `team-invalid` (a ```` ```team ```` block
   that does not read as a team of agents, on the line of the problem, a
   `type: team` note without exactly one block, or a role whose agent is
-  no note of the vault; [agents](../agents.md)). Zero `severity:error` on
-  a coherent vault.
+  no note of the vault; [agents](../agents.md)), `board-invalid` (a
+  ```` ```board ```` block that does not read as a board, on the line of
+  the problem, a `type: board` note without exactly one block, a card
+  whose board is no board of the project or whose column is not its
+  state's, as a note edited by hand leaves it, or, in a project with
+  cards, a database of the tasks that lost the fields the cards need;
+  [boards](../board.md)). Zero `severity:error` on a coherent vault.
 - `memory_self_improve(category, title, friction, confidence, …)` —
   *experimental, opt-in, off by default*: record a structured insight
   about gosidian's own ergonomics (see

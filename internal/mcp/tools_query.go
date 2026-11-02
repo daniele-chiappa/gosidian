@@ -21,18 +21,18 @@ func (s *Server) registerQueryTool() {
 		mcp.WithDescription("Find notes by their frontmatter, like a Dataview filter: every condition in `where` must hold. "+
 			"A field is a frontmatter key (a list matches element by element); a namespaced tag counts as a field when the note has no field of that name "+
 			"(tag status:done → status = done), and `tags` is the tag list. "+
-			"created_by and modified_by are who created and last modified the note through gosidian (audit log), usable as fields; over the rows of a database (from its source) its rollup fields are computed when fields or sort names them. "+
+			"created_by and modified_by, who created and last modified the note through gosidian (audit log), are fields too; over a database's rows (from its source) its rollup fields are computed when fields or sort names them. "+
 			"Operators: eq, ne, in, exists, lt, lte, gt, gte, contains. ISO dates and numbers compare as such (a datetime by its instant, whatever its offset; a date YYYY-MM-DD by the day a value writes), text ignores case; "+
 			"ne and exists:false also match notes without the field. "+
 			"A value written as a [[wikilink]] matches by link, however the note writes it: related contains [[p/x]] finds the notes whose related field links to p/x, "+
 			"and the pseudo-field links covers every link, body and frontmatter alike (links contains [[p/x]]: what links to p/x). "+
-			"Returns path, title, modification time and the fields listed in `fields` (default: those used in where and sort), "+
+			"Returns path, title, modification time and the `fields` (default: those used in where and sort), "+
 			"newest modification first unless `sort` names a field or path, title, modified. "+
-			"Use it for any question about status, type, dates, importance or other frontmatter instead of memory_notes_by_tag + memory_batch_get. "+
-			"Example — draft plans with importance ≥ 3 updated since September: where "+
+			"Use it for any question on status, type, dates, importance or other frontmatter instead of memory_notes_by_tag + memory_batch_get. "+
+			"Example, draft plans with importance ≥ 3 updated since September: where "+
 			`[{"field":"type","op":"eq","value":"plan"},{"field":"status","op":"eq","value":"draft"},{"field":"importance","op":"gte","value":3},{"field":"updated","op":"gte","value":"2026-09-01"}].`),
 		mcp.WithString("project", mcp.Description("Project (top-level folder) to query; empty = every project the token can read. A project outside the token's scope matches nothing.")),
-		mcp.WithArray("from", mcp.Description("Folders whose notes directly inside are queried, like the from of a view: the rows of a database note (its source folder). Optional; with from, where may be empty."), mcp.WithStringItems()),
+		mcp.WithArray("from", mcp.Description("Folders whose notes directly inside are queried, like a view's from: the rows of a database note (its source folder). Optional; with from, where may be empty."), mcp.WithStringItems()),
 		mcp.WithArray("where", mcp.Description(fmt.Sprintf("Conditions, all required (max %d); required unless from is given. Each: {field, op (default eq), value} — value is a string or number, a list for in, true/false for exists.", index.MaxQueryConds)),
 			mcp.Items(map[string]any{
 				"type": "object",

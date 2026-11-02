@@ -11,7 +11,7 @@
  * meanwhile is not overwritten. The panel loads again when the note
  * changes (etag).
  */
-import { computed, inject, ref, watch } from 'vue'
+import { computed, inject, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWindowsStore, type OpenSpec } from 'plancia'
 import { getRowFields, type FieldValue, type RowFields } from '@/api/notes'
@@ -109,6 +109,25 @@ function setValue(name: string, v: string | string[] | undefined) {
   else data.value.values[name] = v
 }
 
+// The field changed keeps the focus (IMP-217, F-04): its editor goes, and
+// the field is disabled while its value is saved, so the focus fell to the
+// page. It comes back only from there: a Tab that moved on keeps its place.
+const rootEl = ref<HTMLElement | null>(null)
+async function refocus(name: string) {
+  await nextTick()
+  const at = document.activeElement
+  if (at && at !== document.body) return
+  const field = [...(rootEl.value?.querySelectorAll<HTMLElement>('dd[data-field]') ?? [])].find(
+    (dd) => dd.dataset.field === name,
+  )
+  field?.querySelector<HTMLElement>('button, input')?.focus()
+}
+
+function cancelEdit(col: ViewColumn) {
+  editing.value = null
+  void refocus(col.name)
+}
+
 async function commit(col: ViewColumn, input: string | boolean | string[]) {
   let seen = seenOf(col)
   if (col.type !== 'checkbox') {
@@ -125,12 +144,14 @@ async function commit(col: ViewColumn, input: string | boolean | string[]) {
   }
   const msg = await commitField(target, seen, input, t)
   if (msg !== null) message.value = msg
+  void refocus(col.name)
 }
 </script>
 
 <template>
   <section
     v-if="data?.database"
+    ref="rootEl"
     class="mb-6 rounded border border-border p-3 text-sm"
     :aria-label="t('views.properties')"
     data-properties
@@ -170,7 +191,7 @@ async function commit(col: ViewColumn, input: string | boolean | string[]) {
             :value="valueOf(c)"
             :label="t('views.edit', { field: fieldLabel(c.name) })"
             @commit="commit(c, $event)"
-            @cancel="editing = null"
+            @cancel="cancelEdit(c)"
           />
           <span
             v-else-if="editable(c) && row.links?.[c.name]?.length"

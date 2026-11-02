@@ -44,6 +44,10 @@ meanwhile. A view of a database also offers a new row (under a
 table, in each column of a board) to a reader who may write it: see
 [new rows](databases.md#editing-rows-in-the-web-ui).
 
+The board of a note `type: board` is its ```` ```board ```` block, not a
+view: its columns are the board's, in its order, with their limits, and
+its cards keep the order the board gives them ([boards](../board.md)).
+
 ```view
 from: myproject/docs/improvements
 where:

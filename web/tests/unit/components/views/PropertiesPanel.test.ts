@@ -29,12 +29,13 @@ function fields(over: Partial<RowFields> = {}): RowFields {
   }
 }
 
-async function mountPanel(f: RowFields) {
+async function mountPanel(f: RowFields, attachTo?: HTMLElement) {
   get.mockResolvedValue(f)
   const i18n = createI18n({ legacy: false, locale: 'en', messages: { en: enUI } })
   const w = mount(PropertiesPanel, {
     props: { path: 'p/docs/tasks/T-1.md', etag: 'e1' },
     global: { plugins: [i18n], provide: { openWindow: vi.fn() } },
+    attachTo,
   })
   await flushPromises()
   return w
@@ -132,5 +133,59 @@ describe('PropertiesPanel replies', () => {
     await flushPromises()
     expect(w.text()).toContain('T-2')
     expect(w.text()).not.toContain('T-1')
+  })
+})
+
+describe('PropertiesPanel, the focus on the field changed (IMP-217, F-04)', () => {
+  beforeEach(() => {
+    get.mockReset()
+    patch.mockReset().mockResolvedValue({} as never)
+  })
+
+  const statusButton = (w: Awaited<ReturnType<typeof mountPanel>>) =>
+    w.find('dd[data-field="status"] button').element as HTMLButtonElement
+
+  it('keeps it on the field once the value is saved', async () => {
+    const w = await mountPanel(fields(), document.body)
+    statusButton(w).focus()
+    await w.find('dd[data-field="status"] button').trigger('click')
+    await w.find('dd[data-field="status"] select').setValue('done')
+    await flushPromises()
+    expect(patch).toHaveBeenCalled()
+    expect(document.activeElement).toBe(statusButton(w))
+    w.unmount()
+  })
+
+  it('gives it back to the field on Esc', async () => {
+    const w = await mountPanel(fields(), document.body)
+    await w.find('dd[data-field="status"] button').trigger('click')
+    await w.find('dd[data-field="status"] select').trigger('keydown', { key: 'Escape' })
+    await flushPromises()
+    expect(document.activeElement).toBe(statusButton(w))
+    w.unmount()
+  })
+
+  it('leaves it where Tab took it', async () => {
+    const w = await mountPanel(fields(), document.body)
+    await w.find('dd[data-field="status"] button').trigger('click')
+    const next = w.find('dd[data-field="see"] button').element as HTMLButtonElement
+    next.focus()
+    await flushPromises()
+    expect(document.activeElement).toBe(next)
+    w.unmount()
+  })
+
+  it('keeps it on a checkbox, disabled while it saves', async () => {
+    const f = fields()
+    f.columns!.push({ name: 'urgent', type: 'checkbox' })
+    f.values.urgent = 'false'
+    const w = await mountPanel(f, document.body)
+    const box = w.find('dd[data-field="urgent"] input')
+    ;(box.element as HTMLInputElement).focus()
+    await box.setValue(true)
+    await flushPromises()
+    expect(patch).toHaveBeenCalled()
+    expect(document.activeElement).toBe(w.find('dd[data-field="urgent"] input').element)
+    w.unmount()
   })
 })

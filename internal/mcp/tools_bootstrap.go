@@ -28,13 +28,13 @@ import (
 // registerTools() alongside the other v1.2 tools.
 func (s *Server) registerBootstrapTool() {
 	s.impl.AddTool(mcp.NewTool("memory_bootstrap",
-		mcp.WithDescription("Aggregate session-start payload for a project: hot.md + README + instruction file (when present), active plans, skills (a skill with reference notes carries bundle {notes, bytes, oversize}, see memory_skills), agents, 5 recent notes, stats. Call this FIRST each session instead of separate gets. `directives_block` carries the full operational directives rendered for this project (only their reading sections, with directives_scope \"read\", when the project's lean_read_bootstrap flag is on and the token cannot write) — read and FOLLOW it (served fresh every session; regenerate your stub via memory_init_agent only when stub_version is ahead of your stub marker). `capabilities` reports the enabled content formats (html/media/table notes) plus attachment limits/extensions and the HTTP /upload and /download endpoint hints. `maintenance` carries cheap grooming signals (hot.md size/age, broken wikilinks, stale-note count): when its `attention` flag is true, propose the relevant grooming at end of task. `tag_vocabulary` (only on projects with the use_tag_vocabulary flag) reports the extra lint tag vocabulary declared in memory/conventions.md frontmatter. `access` says whether this token may write in the project (read | write). `missing` lists absent vault scaffold; `agent_md.expected_external` means the instruction file lives in the agent's working dir, not the vault. Repeat calls: pass known_directives_version + known_etags (+ known_anchor_metas on anchor-enabled projects) and use mode lite — see the parameter docs."),
+		mcp.WithDescription("Aggregate session-start payload for a project, in one call: hot.md, README and instruction file (when present), active plans, skills (one with reference notes carries bundle {notes, bytes, oversize}, see memory_skills), agents, 5 recent notes, stats. Call this FIRST each session instead of separate gets. `directives_block` is the full operational directives rendered for this project (only their reading sections, with directives_scope \"read\", when the project's lean_read_bootstrap flag is on and the token cannot write): read and FOLLOW it. It is served fresh every session; regenerate your stub via memory_init_agent only when stub_version is ahead of your stub marker. `capabilities`: the content formats on (html/media/table notes), attachment limits and extensions, the HTTP /upload and /download endpoint hints. `maintenance`: cheap grooming signals (hot.md size/age, broken wikilinks, stale-note count); when its `attention` flag is true, propose the relevant grooming at end of task. `tag_vocabulary` (only on projects with the use_tag_vocabulary flag): the extra lint tag vocabulary declared in memory/conventions.md frontmatter. `access`: whether this token may write in the project (read | write). `missing`: absent vault scaffold; `agent_md.expected_external`: the instruction file lives in the agent's working dir, not the vault. Repeat calls: pass known_directives_version and known_etags (+ known_anchor_metas on anchor-enabled projects) and use mode lite, see the parameters."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder) to bootstrap. "+scopedProjectNote)),
-		mcp.WithString("profile", mcp.Description("CLI/agent profile for agent-anchor materialisation (default \"claude\"). When the master switch + the project's use_anchors flag are on and the profile supports native subagents, the response carries an `anchors` block: thin agent-anchor files to reconcile in the agent's cwd.")),
-		mcp.WithNumber("known_directives_version", mcp.Description("The directives_version you already hold from a previous bootstrap: on match, directives_block is omitted (directives_version is always present to detect it).")),
-		mcp.WithObject("known_etags", mcp.Description("Map of vault-relative path → etag from a previous bootstrap: files whose etag still matches come back unchanged:true with no body (hot_md, readme, agent_md). For a file with ```view blocks pass its views_etag: its views are computed at every bootstrap and its plain etag no longer proves it unchanged.")),
-		mcp.WithObject("known_anchor_metas", mcp.Description("Map of canonical vault path → meta_version from a previous bootstrap's anchors.items: anchors whose meta still matches come back as {path, canonical, meta_version, unchanged:true} with no content. If an unchanged anchor file is missing from disk, re-bootstrap without this param to get the content back.")),
-		mcp.WithString("mode", mcp.Description("auto (default) | full | lite. lite serves hot.md as frontmatter + heading outline (fetch sections via memory_get_section; a heading with views:N holds ```view blocks, so fetch it with render_views:true); auto switches to lite only when hot.md crosses the oversize threshold (flagged auto_lite:true).")),
+		mcp.WithString("profile", mcp.Description("CLI/agent profile for agent-anchor materialisation (default \"claude\"). With the master switch and the project's use_anchors flag on, and a profile with native subagents, the response carries an `anchors` block: thin agent-anchor files to reconcile in the agent's cwd.")),
+		mcp.WithNumber("known_directives_version", mcp.Description("The directives_version of a previous bootstrap of this project: on match, directives_block is omitted (directives_version is always present to detect it).")),
+		mcp.WithObject("known_etags", mcp.Description("Map of vault-relative path → etag from a previous bootstrap: a file whose etag still matches comes back unchanged:true with no body (hot_md, readme, agent_md). For a file with ```view blocks pass its views_etag: its views are computed at every bootstrap, so its plain etag no longer proves it unchanged.")),
+		mcp.WithObject("known_anchor_metas", mcp.Description("Map of canonical vault path → meta_version from a previous bootstrap's anchors.items: an anchor whose meta still matches comes back as {path, canonical, meta_version, unchanged:true} with no content. If an unchanged anchor file is missing from disk, bootstrap again without this parameter to get the content back.")),
+		mcp.WithString("mode", mcp.Description("auto (default) | full | lite. lite serves hot.md as frontmatter + heading outline (fetch sections via memory_get_section; a heading with views:N holds ```view blocks: fetch it with render_views:true); auto goes lite only when hot.md crosses the oversize threshold (flagged auto_lite:true).")),
 	), s.handleBootstrap)
 }
 
@@ -182,7 +182,7 @@ func diagramCapability() bootstrapDiagrams {
 	return bootstrapDiagrams{
 		Format: diagram.Version, Block: "```" + diagram.Lang, NoteType: diagram.NoteType, Kinds: kinds,
 		Example: "kind: flow\nnodes: [{id: a, label: Start, link: \"[[project/note]]\"}, {id: b, label: Done}]\nedges: [\"a -> b: label\"]",
-		Twin:    "a ```mermaid block right after a diagram, first line " + diagram.TwinMark + " <hash>, is its twin for Obsidian, written by the web editor: change the diagram, not the twin",
+		Twin:    "a ```mermaid block right after a diagram, first line " + diagram.TwinMark + " <hash>, is its Obsidian twin, written by the web editor: edit the diagram, not the twin",
 	}
 }
 
@@ -248,9 +248,9 @@ func (s *Server) buildCapabilities(readOnly bool) bootstrapCapabilities {
 		Attachments: bootstrapAttachCapability{
 			MaxMiB:               attach.MaxBytes >> 20,
 			Extensions:           exts,
-			UploadEndpointHint:   "to save a file use memory_ingest (routes by extension; sources: bridge_filename, source_path, url, or transfer:\"http\" for a single-use upload ticket). Raw bytes can also be POSTed multipart (field 'file', bearer token) to your MCP base URL plus /upload (the URL you configured, minus any trailing /sse) — bytes travel over HTTP, not the model context",
+			UploadEndpointHint:   "save a file with memory_ingest (routed by extension; sources: bridge_filename, source_path, url, or transfer:\"http\" for a single-use upload ticket), or POST it multipart (field 'file', bearer) to your MCP URL + /upload (drop a trailing /sse): the bytes skip the context",
 			DownloadEndpointHint: downloadEndpointHint,
-			AppendEndpointHint:   "to append to a note from a script that has a bearer but no MCP session (e.g. a Claude Code hook), POST the markdown body to your MCP base URL plus /append?path=<vault path> (bearer token, write scope; optional If-Match header with the ETag from /download): same locks, limits, audit and events as memory_append; a missing note is created",
+			AppendEndpointHint:   "a script with a bearer but no MCP session (e.g. a Claude Code hook) appends to a note by POSTing the markdown to your MCP URL + /append?path=<vault path> (bearer, write scope; optional If-Match header with the ETag from /download), as memory_append: same locks, limits, audit, events; a missing note is created",
 			Tools:                []string{"memory_ingest", "memory_upload_attachment", "memory_upload_resource"},
 			BridgeDir:            s.bridgeDir,
 			AllowedUploadRoots:   s.allowedUploadRoots,
@@ -269,6 +269,19 @@ func (s *Server) projectCapabilities(project string, readOnly bool) bootstrapCap
 	return c
 }
 
+// directiveFeatures is what the directives of the project speak of: the
+// note formats of the instance, the IN folder and the tag vocabulary of the
+// project, where they are on.
+func (s *Server) directiveFeatures(project string) initprompt.Features {
+	return initprompt.Features{
+		HTMLNotes:     s.vault.HTMLNotesEnabled(),
+		MediaNotes:    s.vault.MediaNotesEnabled(),
+		TableNotes:    s.vault.TableNotesEnabled(),
+		IN:            s.in != nil && s.projects != nil && s.projects.UsesIN(project),
+		TagVocabulary: s.projects != nil && s.projects.UsesTagVocabulary(project),
+	}
+}
+
 // quotaWindow is the quota's window for the capabilities, "" without one.
 func quotaWindow(q *uploadquota.Quota) string {
 	if !q.Enabled() {
@@ -279,7 +292,7 @@ func quotaWindow(q *uploadquota.Quota) string {
 
 // downloadEndpointHint is the read-side byte path (IMP-081), shared by the
 // full and the read-only capabilities block.
-const downloadEndpointHint = "to get a note's full bytes on your disk without context tokens (edit a large .html report locally, then re-ingest it), GET your MCP base URL plus /download?path=<vault path> (the URL you configured, minus any trailing /sse; bearer token, read scope): raw .md/.html body, ETag reusable as if_match on the next write. Without the bearer at hand, memory_get with transfer:\"http\" gives a single-use URL to GET with no header. Attachments are served at /vault-files/<path> with the same bearer"
+const downloadEndpointHint = "a note's full bytes on your disk, no context tokens (to edit a big .html report locally and re-ingest it): GET your MCP URL + /download?path=<vault path> (drop a trailing /sse; bearer, read scope), the raw .md/.html body with an ETag good as if_match on the next write. No bearer at hand: memory_get with transfer:\"http\" gives a single-use URL to GET with no header. Attachments are served at /vault-files/<path> with the same bearer"
 
 // conventionFiles maps the relative-to-project filename to the key we expose
 // in the JSON payload. Order matters: the `missing` list is emitted in this
@@ -338,6 +351,8 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 	// organized. Write tokens always get the full payload.
 	readOnly := tok != nil && !tok.AllowsWrite(project) &&
 		s.projects != nil && s.projects.UsesLeanReadBootstrap(project)
+	features := s.directiveFeatures(project)
+	directivesID := initprompt.DirectivesID(features, readOnly)
 
 	payload := map[string]any{
 		"project": project,
@@ -350,7 +365,7 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 		// projects never embed — and never drift from — the directives.
 		// stub_version lets an agent know when its (rarely changing) stub
 		// must be regenerated via memory_init_agent.
-		"directives_version": initprompt.DirectivesVersion,
+		"directives_version": directivesID,
 		"stub_version":       initprompt.StubVersion,
 		// capabilities: per-instance content-format discovery (plan
 		// 20260706-capability-discovery-bootstrap). Always present — an agent
@@ -364,14 +379,15 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 	if readOnly {
 		payload["directives_scope"] = "read"
 	}
-	// Version negotiation: a caller that already holds the current directives
-	// skips the whole block — directives_version above is the match signal.
-	if req.GetInt("known_directives_version", 0) != initprompt.DirectivesVersion {
+	// Version negotiation: a caller that already holds this variant of the
+	// directives skips the whole block — directives_version above is the
+	// match signal, one per variant.
+	if req.GetInt("known_directives_version", 0) != directivesID {
 		render := initprompt.RenderDirectives
 		if readOnly {
 			render = initprompt.RenderReadDirectives
 		}
-		if block, _, derr := render(project); derr == nil {
+		if block, _, derr := render(project, features); derr == nil {
 			payload["directives_block"] = block
 		}
 	}

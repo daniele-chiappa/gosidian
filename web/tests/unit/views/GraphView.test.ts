@@ -97,3 +97,15 @@ describe('GraphView (BUG-116, S6-10)', () => {
     expect(vi.mocked(fetchGraph).mock.calls.at(-1)![0]?.limit).toBeUndefined()
   })
 })
+
+describe('GraphView, its heading (IMP-217, F-03)', () => {
+  it('names itself in its heading: the links of a note, or the graph of a project (IMP-217, F-03)', async () => {
+    vi.mocked(fetchGraph).mockResolvedValue(graph(1))
+    const stubs = { GraphCanvas: true, Graph3DCanvas: true, SearchSelect: true }
+    const ego = mount(GraphView, { props: { focus: 'p/x.md', depth: 1 }, global: { plugins: [i18n()], stubs } })
+    expect(ego.find('h1[data-window-heading]').text()).toBe('Links · x')
+    const project = mount(GraphView, { props: { project: 'A', global: true }, global: { plugins: [i18n()], stubs } })
+    expect(project.find('h1[data-window-heading]').text()).toBe('Graph · A')
+    await flushPromises()
+  })
+})

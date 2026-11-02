@@ -128,8 +128,11 @@ If you build your own MCP client:
 
 ## Verification
 
-Once connected, every client should see 71 tools in `tools/list`. A
-good smoke sequence for your first call:
+Once connected, a client with a full-profile token should see 71 tools
+in `tools/list` on a server that runs pipelines, and four fewer while they
+are off and no project it writes in has an IN folder: the branches' tools
+appear with their branch ([catalogue](tools.md)). A good smoke sequence
+for your first call:
 
 ```
 memory_bootstrap(project="<name-of-a-project>")

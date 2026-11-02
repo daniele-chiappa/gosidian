@@ -354,6 +354,20 @@ func TestTaskTrigger_Lease(t *testing.T) {
 	}
 }
 
+// A card of a board held past its lease is its board's to give back, to
+// the column of its state (IMP-216): the engine leaves it.
+func TestTaskTrigger_ACardsLeaseIsItsBoards(t *testing.T) {
+	e, host := taskEngine(t)
+	past := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
+	host.notes["p/pipelines/regista.md"] = pipelineNote("trigger: {on: task}\nnodes:\n  - id: w\n    use: wait.call\n")
+	host.notes["p/tasks/c.md"] = "---\ntitle: c\ntype: task\nstatus: working\nboard: \"[[p/board]]\"\ncolumn: Analisi\n" +
+		"claimed_by: agent@x\nlease_until: " + past + "\nattempts: 1\ntags: [p, type:task]\n---\n\n# c\n"
+	e.TickTasks()
+	if c := host.task(t, "p/tasks/c.md"); c.Status != fleet.Working || c.ClaimedBy != "agent@x" || c.Column != "Analisi" {
+		t.Fatalf("c: %+v\n%s", c, host.note(c.Path))
+	}
+}
+
 func TestParse_TaskTrigger(t *testing.T) {
 	s, err := Parse("trigger: {on: task, team: \"[[p/squadra]]\", roles: [dev, test]}\nnodes: [{id: a, use: note.read}]", testTypes)
 	if err != nil {

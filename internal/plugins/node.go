@@ -194,6 +194,28 @@ func (n node) Run(ctx context.Context, env *pipeline.Env, with map[string]any) (
 	return m, nil
 }
 
+// Takes says whether the node's settings, as its accepted manifest's
+// input schema says them, have the setting at path (repo, resume): a
+// caller passes a setting of a newer version only to a plugin that takes
+// it. A node not accepted, or without a schema, takes nothing.
+func (n node) Takes(path ...string) bool {
+	_, _, spec, ok := n.r.accepted(n.use)
+	if !ok || len(spec.Input) == 0 {
+		return false
+	}
+	var schema map[string]any
+	if json.Unmarshal(spec.Input, &schema) != nil {
+		return false
+	}
+	for _, k := range path {
+		props, _ := schema["properties"].(map[string]any)
+		if schema, _ = props[k].(map[string]any); schema == nil {
+			return false
+		}
+	}
+	return true
+}
+
 // runToken mints the MCP token of a call whose setting mcp asks for
 // gosidian's MCP: read or write, within what the accepted manifest grants,
 // for the run's project, lasting the call; revoke drops it. No setting, or

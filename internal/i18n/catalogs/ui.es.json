@@ -122,7 +122,9 @@
     "action_focus_label": "Modo concentración",
     "action_focus_desc": "Ocultar barra superior y lateral",
     "action_new_note_label": "Nueva nota",
-    "action_new_note_desc": "Crear una nota vacía"
+    "action_new_note_desc": "Crear una nota vacía",
+    "search_text": "Buscar «{query}» en el texto",
+    "title": "Ir a una nota, un proyecto o una etiqueta"
   },
   "layout": {
     "sidebar_resize_label": "Arrastra para redimensionar, doble clic para restablecer",
@@ -343,6 +345,8 @@
     "suggestions": "Notas",
     "no_value": "Sin valor",
     "column_empty": "Sin notas",
+    "closed": "Cerradas",
+    "wip_over": "{column}: por encima del límite de {wip}.",
     "move_to": "Mover {title} a…",
     "new_row": "Nueva fila",
     "new_row_in": "Nueva fila en {column}",

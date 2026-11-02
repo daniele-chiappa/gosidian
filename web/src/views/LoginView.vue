@@ -4,13 +4,16 @@
  * (`/login?invite=<token>`, minted in Admin → Invites): the invitee picks
  * a username and a password, the account is created as a member, and the
  * sign-in form comes back with the username filled in (BUG-099). An invite
- * expired or used says so, and asks for a new link.
+ * expired or used says so, and asks for a new link. After a session that
+ * ended (the store's sessionEnded, from the API client) it says the unsaved
+ * changes are still in this browser (BUG-142).
  */
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { noteSignedIn, withoutWorkspace } from '@/composables/useSessionReset'
+import { usePageTitle } from '@/composables/usePageTitle'
 import { getAuthConfig } from '@/api/totp'
 import { errorText } from '@/api/errors'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
@@ -35,6 +38,7 @@ const signupPassword = ref('')
 const signupConfirm = ref('')
 const inviteInvalid = ref(false)
 const notice = ref<string | null>(null)
+usePageTitle(() => [invite.value ? t('signup.title') : t('login.submit')])
 
 function backToLogin() {
   invite.value = ''
@@ -84,6 +88,8 @@ onMounted(async () => {
   }
 })
 
+const expired = computed(() => auth.sessionEnded)
+
 const nextTarget = computed(() => {
   const raw = route.query.next
   if (typeof raw === 'string' && raw.startsWith('/')) return raw
@@ -111,7 +117,7 @@ async function handleSubmit() {
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-bg text-text px-4">
+  <main class="min-h-screen flex items-center justify-center bg-bg text-text px-4">
     <div v-if="invite" class="w-full max-w-sm" data-signup>
       <div class="mb-6 text-center">
         <h1 class="text-2xl font-semibold">gosidian</h1>
@@ -241,6 +247,9 @@ async function handleSubmit() {
           />
         </label>
 
+        <p v-if="expired && !notice && !error" class="text-sm text-text-muted" role="status" data-session-expired>
+          {{ t('login.session_expired') }}
+        </p>
         <p v-if="notice && !error" class="text-sm text-success" role="status" data-signup-done>{{ notice }}</p>
         <ErrorMessage v-if="error" :text="error" class="text-sm" />
 
@@ -253,5 +262,5 @@ async function handleSubmit() {
         </button>
       </form>
     </div>
-  </div>
+  </main>
 </template>

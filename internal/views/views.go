@@ -34,6 +34,7 @@ import (
 
 	"github.com/gosidian/gosidian/internal/clock"
 	"github.com/gosidian/gosidian/internal/dbschema"
+	"github.com/gosidian/gosidian/internal/fleet"
 	"github.com/gosidian/gosidian/internal/index"
 )
 
@@ -58,6 +59,10 @@ type Spec struct {
 	// Read lists fields the query reads without showing them: the fields of
 	// the row its rollups use (this.<field>); compute sets it.
 	Read []string
+	// Lanes are the columns of a ```board block (IMP-216), in its order: a
+	// board of cards groups by them, whatever the type of GroupBy, and
+	// orders each by rank. A spec never says them.
+	Lanes []fleet.Column
 }
 
 // Context resolves the relative values a spec may use: this, the note
@@ -420,6 +425,20 @@ func compute(spec string, c Context, q QueryFunc) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	return computeSpec(s, c, q)
+}
+
+// computeBlock computes a block a read computes: a ```view, or a ```board
+// (computeBoard).
+func computeBlock(spec string, board bool, c Context, q QueryFunc) (*Result, error) {
+	if board {
+		return computeBoard(spec, c, q)
+	}
+	return compute(spec, c, q)
+}
+
+// computeSpec computes a parsed view in context c.
+func computeSpec(s *Spec, c Context, q QueryFunc) (*Result, error) {
 	var schema *dbschema.Schema
 	if c.Schema != nil && len(s.From) == 1 {
 		schema = c.Schema(schemaFolder(s.From[0]))
@@ -461,6 +480,9 @@ type Group struct {
 // checkbox), then any other value found, alphabetically; the column of the
 // notes without a value comes last, and only when it holds some.
 func (r *Result) Groups() ([]Group, error) {
+	if len(r.Spec.Lanes) > 0 {
+		return r.lanes(), nil
+	}
 	field := r.Spec.GroupBy
 	var order []string
 	if r.Schema != nil {
@@ -620,7 +642,16 @@ func (r *Result) Markdown() string {
 			if name == "" {
 				name = "(no value)"
 			}
-			fmt.Fprintf(&b, "**%s: %s** (%d)\n\n", r.Spec.GroupBy, tableSafe(name), len(g.Hits))
+			switch lane := slices.IndexFunc(r.Spec.Lanes, func(l fleet.Column) bool { return l.Name == g.Value }); {
+			case len(r.Spec.Lanes) == 0:
+				fmt.Fprintf(&b, "**%s: %s** (%d)\n\n", r.Spec.GroupBy, tableSafe(name), len(g.Hits))
+			case g.Value == "":
+				fmt.Fprintf(&b, "**(closed)** (%d)\n\n", len(g.Hits))
+			case lane >= 0 && r.Spec.Lanes[lane].WIP > 0:
+				fmt.Fprintf(&b, "**%s** (%d, wip %d)\n\n", tableSafe(name), len(g.Hits), r.Spec.Lanes[lane].WIP)
+			default:
+				fmt.Fprintf(&b, "**%s** (%d)\n\n", tableSafe(name), len(g.Hits))
+			}
 			for _, h := range g.Hits {
 				listItem(h)
 			}

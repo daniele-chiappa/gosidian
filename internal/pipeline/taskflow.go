@@ -38,7 +38,9 @@ const planInstructions = `Answer with JSON, as the schema says:
   your own, its "assignee" (one of the roles you give tasks to), a "title",
   a "body" (what to do and how it is accepted, with what it needs to know),
   and "depends_on": the keys of tasks of this answer, or the paths of tasks
-  there are, that must be completed first;
+  there are, that must be completed first. A task that checks the work of
+  others (a review) depends on every task whose work it checks: it then
+  sees their result, not what was there before them;
 - "action": "wait", when the sub-tasks at work are enough and there is
   nothing to give yet (one failed, and the others will do its part): the
   objective waits for them;
@@ -101,10 +103,17 @@ func taskRun(ctx context.Context, env *Env, with map[string]any) (any, error) {
 		args["mcp"] = "write"
 	}
 	if c.role.Repo != "" {
-		args["access"] = "edit"
-		args["repo"] = map[string]any{"name": c.role.Repo, "pr": map[string]any{"title": c.task.Title,
+		args["access"] = fleet.AccessEdit
+		repo := map[string]any{"name": c.role.Repo, "pr": map[string]any{"title": c.task.Title,
 			"body": fmt.Sprintf("Task %s of the team %s, run %s of %s.", c.task.Path, strings.TrimSuffix(c.team.Path, ".md"), env.Run.ID, env.Run.Ref)}}
+		// An attempt the gate or a person sent back left its work on a
+		// branch: this one continues it, with an executor that can.
+		if c.task.Branch != "" && takes(t, "repo", "resume") {
+			repo["branch"], repo["resume"] = c.task.Branch, true
+		}
+		args["repo"] = repo
 	}
+	set("access", c.role.Access, c.role.Access != "")
 	if plan {
 		var schema map[string]any
 		if err := json.Unmarshal([]byte(planSchema), &schema); err != nil {
@@ -128,6 +137,16 @@ func taskRun(ctx context.Context, env *Env, with map[string]any) (any, error) {
 		m["next"] = map[string]any{"checks": c.role.Checks != "" && pushed, "preview": c.role.Preview != "" && pushed}
 	}
 	return out, err
+}
+
+// takes says whether a node type has the setting at path, for a type
+// that says (a plugin's, from its accepted manifest); another takes what
+// it takes.
+func takes(t Type, path ...string) bool {
+	if s, ok := t.(interface{ Takes(path ...string) bool }); ok {
+		return s.Takes(path...)
+	}
+	return true
 }
 
 // matchPath says whether a file of the repository is under a path of a
@@ -176,6 +195,8 @@ func taskGate(_ context.Context, env *Env, with map[string]any) (any, error) {
 	ok := true
 	prURL, _ := repo["pr_url"].(string)
 	branch, _ := repo["branch"].(string)
+	pushed, _ := repo["pushed"].(bool)
+	resumed, _ := repo["resumed"].(bool)
 	if c.role.Repo != "" {
 		switch {
 		case repo == nil:
@@ -274,10 +295,15 @@ func taskGate(_ context.Context, env *Env, with map[string]any) (any, error) {
 			}
 		}
 	}
-	// What the pipeline found comes first, as its own: the agents run no
-	// checks themselves, and a coordinator or a reviewer that reads only an
-	// agent's words takes «I ran nothing» for checks never run.
-	facts := "What the pipeline found, after the agent (it runs the checks itself; the agent does not):\n\n" + strings.Join(lines, "\n\n")
+	// What the pipeline found comes first, as its own: an agent may run no
+	// checks (a coordinator or a reviewer that reads only its words takes
+	// «I ran nothing» for checks never run), or run them on its side; the
+	// pipeline's run is the one that counts.
+	who := "it runs the checks itself; the agent does not"
+	if c.role.Access == fleet.AccessExec {
+		who = "it runs the checks itself, whatever the agent ran"
+	}
+	facts := "What the pipeline found, after the agent (" + who + "):\n\n" + strings.Join(lines, "\n\n")
 	if len(lines) == 0 {
 		facts = "What the pipeline found, after the agent: nothing to check for this role."
 	}
@@ -315,8 +341,12 @@ func taskGate(_ context.Context, env *Env, with map[string]any) (any, error) {
 	if image != "" {
 		img = image
 	}
+	// Another attempt continues the branch, which holds this one's work,
+	// when its files were within the paths: one with a file it must not
+	// change starts again from base, which the agent cannot restore.
+	resume := c.role.Repo != "" && branch != "" && (pushed || resumed) && len(forbidden) == 0 && len(outside) == 0
 	return map[string]any{"ok": ok, "checks_ok": checksOK, "files": nonNil(files), "outside": nonNil(outside), "forbidden": nonNil(forbidden),
-		"notes": nonNil(notes), "pr_url": prURL, "branch": branch, "image": img, "link": link, "text": text, "feedback": report,
+		"notes": nonNil(notes), "pr_url": prURL, "branch": branch, "resume": resume, "image": img, "link": link, "text": text, "feedback": report,
 		"title": fmt.Sprintf("%s: %s (attempt %d)", c.role.Name, c.task.Title, c.task.Attempts),
 		"ask":   ok && needs, "close": ok && !needs, "redo": !ok && again, "fail": !ok && !again,
 		"approve": c.role.Approve, "choices": choices, "labels": labels}, nil
@@ -398,8 +428,15 @@ func taskVerdict(_ context.Context, env *Env, with map[string]any) (any, error) 
 		return nil, errors.New("the gate says neither close, redo, fail nor ask")
 	}
 	// A pull request that is not merged is closed: another attempt opens
-	// its own.
+	// its own, on the same branch when the gate says it may continue it
+	// (branch, which task.update keeps on the task); otherwise the branch
+	// goes with the pull request.
 	out["close_pr"] = prURL != "" && !out["merge"].(bool) && (out["redo"].(bool) || out["status"] != fleet.Completed)
+	out["branch"] = ""
+	if resume, _ := gate["resume"].(bool); resume && out["redo"].(bool) {
+		out["branch"], _ = gate["branch"].(string)
+	}
+	out["delete_branch"] = out["branch"] == ""
 	return out, nil
 }
 

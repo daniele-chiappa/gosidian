@@ -10,6 +10,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
+import { usePageTitle } from '@/composables/usePageTitle'
 import {
   getOAuthRequest,
   approveOAuthRequest,
@@ -27,6 +28,7 @@ const loading = ref(true)
 const error = ref<string | null>(null)
 const busy = ref(false)
 const redirecting = ref(false)
+usePageTitle(() => [consent.value ? t('oauth.title', { client: consent.value.client_name }) : null])
 
 /** Project names the user keeps ticked; starts with everything visible. */
 const selected = ref<Set<string>>(new Set())
@@ -124,7 +126,7 @@ async function deny() {
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-bg text-text px-4 py-8">
+  <main class="min-h-screen flex items-center justify-center bg-bg text-text px-4 py-8">
     <div class="w-full max-w-lg">
       <div class="mb-6 text-center">
         <h1 class="text-2xl font-semibold">gosidian</h1>
@@ -257,5 +259,5 @@ async function deny() {
         </p>
       </div>
     </div>
-  </div>
+  </main>
 </template>

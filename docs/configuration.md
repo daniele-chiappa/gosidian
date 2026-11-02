@@ -109,9 +109,10 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_SECRETS_KEY` | — | empty (32 bytes in base64, `openssl rand -base64 32`: the key of `<state-dir>/secrets.json`, the secrets the pipelines use; without it `gosidian secret` refuses and the nodes that need a secret fail) |
 | `GOSIDIAN_TRASH_ENABLED` | `trash.enabled` | `false` |
 | `GOSIDIAN_TRASH_RETENTION` | `trash.retention` | `720h`; `0` keeps entries until purged |
-| `GOSIDIAN_LOGIN_SESSION_TTL` | `webauth.session_ttl` | `24h` |
-| `GOSIDIAN_LOGIN_WINDOW` | `webauth.login_window` | `15m` |
-| `GOSIDIAN_LOGIN_MAX_FAILURES` | `webauth.login_max_failures` | `5` |
+| `GOSIDIAN_LOGIN_SESSION_TTL` | `webauth.session_ttl` | `24h` (how long a web session lasts since it was last renewed; at least `2m`) |
+| `GOSIDIAN_LOGIN_SESSION_MAX_TTL` | `webauth.session_max_ttl` | `168h` (the longest a web session lasts, however often it is renewed: then its user signs in again; not under `session_ttl`) |
+| `GOSIDIAN_LOGIN_WINDOW` | `webauth.login_window` | `15m` (how long a failed login counts against its address, and a wrong second factor against its account) |
+| `GOSIDIAN_LOGIN_MAX_FAILURES` | `webauth.login_max_failures` | `5` (the failures in that window after which a login is refused; at least 1) |
 | `GOSIDIAN_TRUSTED_PROXIES` | `webauth.trusted_proxies` | empty (comma-separated IPs/CIDRs of the reverse proxies whose `X-Forwarded-For` the login rate limiter may trust; empty = the header is ignored and the peer address is used) |
 | `GOSIDIAN_TOTP_MODE` | `webauth.totp_mode` | `off` (`optional`, `required`; any case, `require` too; another value reads `required`, with a line in the log) |
 | `GOSIDIAN_AUTO_OWNER` | `webauth.auto_owner` | `true` (at the first start, with no account at all, create the owner `admin` with a random password, shown once in the log and kept in `<state-dir>/initial-admin-password` until the owner chooses its own at the first sign-in; `false` leaves the owner to `gosidian user setup`) |

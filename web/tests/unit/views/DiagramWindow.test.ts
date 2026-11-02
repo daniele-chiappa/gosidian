@@ -99,6 +99,11 @@ describe('DiagramWindow (IMP-169, F2)', () => {
     refuse = false
   })
 
+  it('names itself in its heading (IMP-217, F-03)', async () => {
+    const w = await mountAt(0)
+    expect(w.find('h1[data-window-heading]').text()).toBe('Diagram · n')
+  })
+
   it('edits the index-th block and saves it in place, with the etag', async () => {
     const w = await mountAt(1)
     expect(w.find('.stand-in').text()).toContain('root: Second')

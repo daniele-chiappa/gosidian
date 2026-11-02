@@ -66,6 +66,30 @@ func TestSetTrustedProxies_RejectsGarbage(t *testing.T) {
 	}
 }
 
+// The limits the configuration passes (BUG-145): with two, the second
+// failure closes the address; a limit at 0 leaves its own as it is.
+func TestSetLoginLimits(t *testing.T) {
+	prevWin, prevMax := LoginWindow, LoginMaxFailures
+	t.Cleanup(func() { LoginWindow, LoginMaxFailures = prevWin, prevMax })
+	SetLoginLimits(time.Minute, 2)
+	if LoginWindow != time.Minute || LoginMaxFailures != 2 {
+		t.Fatalf("limits %s %d", LoginWindow, LoginMaxFailures)
+	}
+	l := newLoginLimiter()
+	l.registerFail("10.0.0.1")
+	if !l.allowed("10.0.0.1") {
+		t.Fatal("one failure of two closed the address")
+	}
+	l.registerFail("10.0.0.1")
+	if l.allowed("10.0.0.1") {
+		t.Fatal("the second failure left the address open")
+	}
+	SetLoginLimits(0, 0)
+	if LoginWindow != time.Minute || LoginMaxFailures != 2 {
+		t.Errorf("0 changed the limits: %s %d", LoginWindow, LoginMaxFailures)
+	}
+}
+
 // allowed() is consulted before the body is even decoded, so a stream of
 // malformed login POSTs must not leave one map entry per source address.
 func TestLoginLimiter_AllowedDoesNotCreateEntries(t *testing.T) {

@@ -280,7 +280,9 @@ func (e *Engine) tickProject(fl Fleet, project string, pipes []Pipeline, teams m
 			}
 			continue
 		}
-		if !t.LeaseUntil.IsZero() && now.After(t.LeaseUntil) {
+		// A card's lease its board ends, as it moves the card to its column
+		// (mcp endLeases).
+		if t.Board == "" && !t.LeaseUntil.IsZero() && now.After(t.LeaseUntil) {
 			e.leaseEnded(fl, t)
 			released = true
 		}
@@ -652,16 +654,7 @@ func (e *Engine) leaseEnded(fl Fleet, t fleet.Task) {
 		if cur.ClaimedBy != t.ClaimedBy || cur.LeaseUntil.IsZero() || now.Before(cur.LeaseUntil) || fleet.Ended(cur.Status) {
 			return nil, ErrTaskSkip
 		}
-		status := fleet.Submitted
-		if cur.Attempts >= max {
-			status = fleet.Failed
-		}
-		out, err := fleet.Set(content, map[string]any{fleet.KeyStatus: status, fleet.KeyUpdated: clock.NoteTime(now)}, fleet.KeyClaimedBy, fleet.KeyLeaseUntil)
-		if err != nil {
-			return nil, err
-		}
-		return fleet.AppendSection(out, now.In(clock.Location()).Format("2006-01-02 15:04")+" — lease ended",
-			fmt.Sprintf("%s held the task until %s without a heartbeat (attempt %d of %d).", cur.ClaimedBy, clock.NoteTime(cur.LeaseUntil), cur.Attempts, max)), nil
+		return fleet.GiveBack(cur, content, max, now.In(clock.Location()))
 	}, "task")
 	if err != nil && !errors.Is(err, ErrTaskSkip) {
 		e.log.Warn("pipeline: a task's lease", "task", t.Path, "err", err)

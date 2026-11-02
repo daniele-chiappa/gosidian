@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import type { InternalAxiosRequestConfig } from 'axios'
-import client, { isConcurrencyConflict, onApiEvent } from '@/api/client'
+import client, { isConcurrencyConflict, onApiEvent, onSessionExpired } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 
 // The 401 handler imports the router lazily; a stub records where it goes.
@@ -123,6 +123,33 @@ describe('api/client interceptors', () => {
     window.history.replaceState({}, '', `/login?next=${encodeURIComponent('/notes/p/x?w=1')}`)
     await client.get('/auth-config').catch(() => undefined)
     expect(routerPush).not.toHaveBeenCalled()
+    window.history.replaceState({}, '', '/')
+  })
+
+  // BUG-142: a session that ended says so on the login page, and the editors
+  // keep their drafts in the browser while they still know the account.
+  it('marks a session that ended, once, after the editors kept their drafts', async () => {
+    const auth = useAuthStore()
+    auth.token = 'gsp_test'
+    auth.user = { id: 'u1', username: 'owner', role: 'owner' }
+    setAdapter((config) =>
+      Promise.reject({
+        config,
+        response: { status: 401, statusText: 'Unauthorized', headers: {}, config, data: {} },
+        isAxiosError: true,
+      }),
+    )
+    routerPush.mockClear()
+    const seen: (string | undefined)[] = []
+    const off = onSessionExpired(() => seen.push(auth.user?.id))
+    window.history.replaceState({}, '', '/notes/p/x')
+    await Promise.all([client.get('/a').catch(() => undefined), client.get('/b').catch(() => undefined)])
+    expect(seen).toEqual(['u1'])
+    expect(auth.token).toBe('')
+    expect(routerPush).toHaveBeenCalledTimes(1)
+    expect(routerPush).toHaveBeenCalledWith(`/login?next=${encodeURIComponent('/notes/p/x')}`)
+    expect(auth.sessionEnded).toBe(true)
+    off()
     window.history.replaceState({}, '', '/')
   })
 })

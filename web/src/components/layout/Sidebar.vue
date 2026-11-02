@@ -4,7 +4,8 @@ import { useI18n } from 'vue-i18n'
 import { useTreeStore } from '@/stores/tree'
 import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
 import { useSSE } from '@/composables/useSSE'
-import { useWindowsStore, type OpenSpec } from 'plancia'
+import type { OpenSpec } from 'plancia'
+import { useOpenFocused } from '@/composables/useOpenFocused'
 import { useAuthStore } from '@/stores/auth'
 import { useAccessStore } from '@/stores/access'
 import { useUIStore } from '@/stores/ui'
@@ -29,7 +30,8 @@ const { t } = useI18n()
 
 const treeStore = useTreeStore()
 const recents = useRecentlyViewed()
-const windows = useWindowsStore()
+// A gesture's open puts the focus on the window's title (IMP-217, F-03).
+const openWindow = useOpenFocused()
 const auth = useAuthStore()
 const access = useAccessStore()
 const ui = useUIStore()
@@ -89,11 +91,11 @@ const menuItems = computed<MenuItem[]>(() => {
   return items
 })
 function openMenu(spec: OpenSpec) {
-  windows.open(spec)
+  openWindow(spec)
 }
 
 function openRecent(path: string, title: string) {
-  windows.open({ type: 'note', key: planciaKey('note', path), title, props: { path } })
+  openWindow({ type: 'note', key: planciaKey('note', path), title, props: { path } })
 }
 
 onMounted(() => {

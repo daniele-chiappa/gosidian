@@ -69,6 +69,7 @@ type question struct {
 	Question string   `json:"question"`
 	Answer   string   `json:"answer"`
 	Accept   []string `json:"accept"`
+	Reject   []string `json:"reject"` // the near misses of a list: an answer that names one is checked by hand
 	Review   bool     `json:"review"`
 }
 
@@ -394,6 +395,7 @@ func runSession(qs []question, group int, config string, run int, model, vaultDi
 	}
 	if len(qs) == 1 {
 		s.Correct, s.Missing = score(q, res.Result)
+		s.Review = s.Review || toCheck(s.Missing)
 		return s
 	}
 	s.Parts = splitAnswers(res.Result, s.Batch)
@@ -402,6 +404,7 @@ func runSession(qs []question, group int, config string, run int, model, vaultDi
 		if ok {
 			s.CorrectN++
 		}
+		s.Review = s.Review || toCheck(missing)
 		for _, m := range missing {
 			s.Missing = append(s.Missing, q.ID+": "+m)
 		}
@@ -531,16 +534,35 @@ func prepareMirror(config string, projects []string, bin, hook, mcpURL, token st
 }
 
 // score checks the answer against every accept pattern (case-insensitive
-// regular expressions, all required) and returns the ones that failed.
+// regular expressions, all required) and returns the ones that failed. A
+// reject pattern that matches is returned as "check: <p>" without failing
+// the answer: a correct answer often names the near misses to say why it
+// left them out, so such an answer is checked by hand.
 func score(q question, answer string) (bool, []string) {
 	var missing []string
+	ok := answer != ""
 	for _, p := range q.Accept {
 		re, err := regexp.Compile("(?i)" + p)
 		if err != nil || !re.MatchString(answer) {
-			missing = append(missing, p)
+			missing, ok = append(missing, p), false
 		}
 	}
-	return len(missing) == 0 && answer != "", missing
+	for _, p := range q.Reject {
+		if re, err := regexp.Compile("(?i)" + p); err == nil && re.MatchString(answer) {
+			missing = append(missing, "check: "+p)
+		}
+	}
+	return ok, missing
+}
+
+// toCheck reports whether score flagged the answer for a manual check.
+func toCheck(missing []string) bool {
+	for _, m := range missing {
+		if strings.HasPrefix(m, "check: ") {
+			return true
+		}
+	}
+	return false
 }
 
 func readQuestions(path, ids string) ([]question, error) {

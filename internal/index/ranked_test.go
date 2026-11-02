@@ -87,6 +87,52 @@ func TestSearchWith_FieldWeights(t *testing.T) {
 	}
 }
 
+// The structure is no tie-break: a note that bm25 places past the 33rd,
+// with the backlinks of a hub, importance 5 and the pinned tag, is the
+// best hit. The pool must reach it, as it reaches past the first places
+// of a vault of 29,000 notes, where a pool of 33 lost some first hits
+// (IMP-215).
+func TestSearchWith_PoolReachesWhatTheStructureLifts(t *testing.T) {
+	idx := openTest(t)
+	filler := func(n int) string { return strings.Repeat(" wren", n) }
+	// Forty notes bm25 ranks first, the hub after them, twenty below.
+	for k := 0; k < 40; k++ {
+		upsert(t, idx, fmt.Sprintf("p/strong%02d.md", k), "", "cache"+filler(10))
+	}
+	upsert(t, idx, "p/hub.md", "", "---\nimportance: 5\ntags: [pinned]\n---\n\ncache"+filler(12))
+	for k := 0; k < 20; k++ {
+		upsert(t, idx, fmt.Sprintf("p/weak%02d.md", k), "", "cache"+filler(40))
+	}
+	for k := 0; k < 300; k++ {
+		upsert(t, idx, fmt.Sprintf("q/ref%03d.md", k), "", "see [[p/hub]]")
+	}
+	rows, err := idx.db.Query(`SELECT n.path FROM notes_fts JOIN notes n ON n.id = notes_fts.rowid WHERE notes_fts MATCH '"cache"*' ORDER BY ` + bm25Expr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	place := 0
+	for k := 1; rows.Next(); k++ {
+		var p string
+		rows.Scan(&p)
+		if p == "p/hub.md" {
+			place = k
+		}
+	}
+	rows.Close()
+	if place <= 33 {
+		t.Fatalf("the hub is %d in bm25: the test needs it past the 33rd", place)
+	}
+	for _, limit := range []int{3, 11} {
+		hits, err := idx.SearchWith("cache", SearchOptions{Limit: limit})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(hits) == 0 || hits[0].Path != "p/hub.md" {
+			t.Errorf("limit %d: the hub, %d in bm25, is not the first hit: %v", limit, place, paths(hits))
+		}
+	}
+}
+
 func TestSearchWith_StructuralFactors(t *testing.T) {
 	idx := openTest(t)
 	body := "zebra quartz lantern"
@@ -188,6 +234,51 @@ func TestSearchWith_VariantsFusedByRank(t *testing.T) {
 	if got := distinctQueries("a", []string{"b", "c", "d", "e", "f", "g", "h", "i", "j"}); len(got) != 1+MaxVariants {
 		t.Errorf("variants not capped: %v", got)
 	}
+}
+
+// The fusion counts a list's first places more than its tail: the first
+// note of one list outranks a note that two lists place tenth. The
+// phrasings weigh the same: two first places tie, the path decides.
+func TestFuse_FirstPlacesCountMore(t *testing.T) {
+	list := func(paths ...string) []rankedHit {
+		out := make([]rankedHit, len(paths))
+		for k, p := range paths {
+			out[k] = rankedHit{SearchHit: SearchHit{Path: p}}
+		}
+		return out
+	}
+	fill := func(prefix string) []string {
+		var out []string
+		for k := 0; k < 9; k++ {
+			out = append(out, fmt.Sprintf("%s%d.md", prefix, k))
+		}
+		return out
+	}
+	queries := []string{"main", "variant"}
+	hits := fuse(queries, [][]rankedHit{
+		list(append([]string{"top.md"}, append(fill("a"), "both.md")...)...),
+		list(append(fill("b"), "both.md")...),
+	}, 30)
+	at := map[string]int{}
+	for k, h := range hits {
+		at[h.Path] = k
+	}
+	if at["top.md"] > at["both.md"] {
+		t.Errorf("fused = %v, want top.md (first of one list) above both.md (tenth of two)", paths(withoutSnippets(hits)))
+	}
+
+	hits = fuse(queries, [][]rankedHit{list("z.md"), list("a.md")}, 2)
+	if hits[0].Path != "a.md" || hits[0].Score != hits[1].Score {
+		t.Errorf("fused = %v, scores %v and %v, want a tie broken by path", paths(withoutSnippets(hits)), hits[0].Score, hits[1].Score)
+	}
+}
+
+func withoutSnippets(hits []rankedHit) []SearchHit {
+	out := make([]SearchHit, len(hits))
+	for k, h := range hits {
+		out[k] = h.SearchHit
+	}
+	return out
 }
 
 // A pre-v1 index file (two-column FTS, no importance) is upgraded in place

@@ -42,13 +42,12 @@
  * A pipeline note's ```pipeline block is drawn (IMP-169, F4), with «Edit»
  * opening the pipeline window.
  */
-import { computed, ref } from 'vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
 import { isAxiosError } from 'axios'
 import { sanitizePreviewHtml } from './sanitizePreview'
 import { planciaKey, base } from '@/composables/planciaKey'
 import type { ViewData } from '@/api/preview'
 import ViewTable from '@/components/views/ViewTable.vue'
-import ViewBoard from '@/components/views/ViewBoard.vue'
 import ViewCount from '@/components/views/ViewCount.vue'
 import {
   hasDiagrams,
@@ -70,6 +69,9 @@ import PipelineBlock from './PipelineBlock.vue'
 import GraphBlock from './GraphBlock.vue'
 import ChatBlock from './ChatBlock.vue'
 import { usePreviewLinks } from './usePreviewLinks'
+
+// A board is in few notes: its code loads with the first one (IMP-216).
+const ViewBoard = defineAsyncComponent(() => import('@/components/views/ViewBoard.vue'))
 
 // notePath: the note the HTML belongs to, which relative links start from.
 // compact: a pane beside or under the editor, set in the smaller type scale

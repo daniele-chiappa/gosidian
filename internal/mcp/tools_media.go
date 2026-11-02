@@ -31,7 +31,7 @@ func (s *Server) registerMediaTools() {
 
 func (s *Server) handleCreateMediaNote(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if !s.vault.MediaNotesEnabled() {
-		return mcp.NewToolResultError("media notes are disabled on this instance — a per-project flag an admin can flip live from the web UI project toggles (or [vault] media_notes / GOSIDIAN_VAULT_MEDIA_NOTES). Meanwhile the image can still be stored as a plain attachment (memory_ingest or memory_upload_attachment)"), nil
+		return mcp.NewToolResultError("media notes are disabled on this instance: " + formatTurnOn("media_notes") + ". Meanwhile the image can still be stored as a plain attachment (memory_ingest or memory_upload_attachment)"), nil
 	}
 	project, err := req.RequireString("project")
 	if err != nil {

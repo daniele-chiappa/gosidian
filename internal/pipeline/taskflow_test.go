@@ -25,6 +25,8 @@ type crew struct {
 	answers []map[string]any // x.run's answers, in turn
 	asked   []map[string]any // what x.run was asked
 	prs     []string         // "merge <url>", "close <url>"
+	deletes []any            // x.pr's delete_branch, call by call
+	old     bool             // x.run is of a plugin too old to resume a branch
 	checks  float64          // exec.run's exit code
 	execs   int              // exec.run's calls
 	looks   int              // preview.publish's calls
@@ -50,7 +52,20 @@ func (c *crew) Contract(use string) string {
 	return ""
 }
 
+// picky is an executor of a plugin too old for a setting.
+type picky struct{ Type }
+
+func (picky) Takes(...string) bool { return false }
+
 func (c *crew) Type(use string) (Type, bool) {
+	if use == "x.run" && c.old {
+		t, _ := c.typ(use)
+		return picky{t}, true
+	}
+	return c.typ(use)
+}
+
+func (c *crew) typ(use string) (Type, bool) {
 	return TypeFunc(func(_ context.Context, env *Env, with map[string]any) (any, error) {
 		c.mu.Lock()
 		defer c.mu.Unlock()
@@ -72,6 +87,7 @@ func (c *crew) Type(use string) (Type, bool) {
 			return maps.Clone(out), nil
 		case "x.pr":
 			c.prs = append(c.prs, with["action"].(string)+" "+with["url"].(string))
+			c.deletes = append(c.deletes, with["delete_branch"])
 			return map[string]any{"merged": with["action"] == "merge"}, nil
 		case "exec.run":
 			c.execs++
@@ -103,7 +119,8 @@ const flowTeam = "---\ntitle: squadra\ntype: team\n---\n\n```team\ncoordinator: 
 	"  capo:\n    run: x.run\n    delegates_to: [dev, doc]\n" +
 	"  dev:\n    run: x.run\n    repo: sandbox\n    paths: [web/]\n    forbid: [web/plan.js]\n    checks: npm test\n" +
 	"  doc:\n    run: x.run\n    max_tokens: 4000000\n    writes: [p/kb]\n" +
-	"  web:\n    run: x.run\n    repo: sandbox\n    checks: npm run build\n    preview: dist\n    approve: none\n```\n"
+	"  web:\n    run: x.run\n    repo: sandbox\n    checks: npm run build\n    preview: dist\n    approve: none\n" +
+	"  tester:\n    run: x.run\n    repo: sandbox\n    access: exec\n    checks: npm test\n    approve: none\n```\n"
 
 func flowEngine(t *testing.T) (*Engine, *fakeHost, *crew) {
 	e, host := newEngine(t, Config{Tasks: TaskConfig{MaxAttempts: 2}})
@@ -152,7 +169,8 @@ func TestTaskFlow_APersonApprovesAndThePullRequestIsMerged(t *testing.T) {
 		!strings.Contains(q["text"].(string), "The checks (`npm test`) passed on the agent's branch.") || q["image"] != nil {
 		t.Fatalf("question %v", q)
 	}
-	if asked := c.asked[0]; asked["access"] != "edit" || asked["mcp"] != "read" || asked["repo"].(map[string]any)["name"] != "sandbox" {
+	if asked := c.asked[0]; asked["access"] != "edit" || asked["mcp"] != "read" || asked["repo"].(map[string]any)["name"] != "sandbox" ||
+		!strings.Contains(asked["prompt"].(string), "The pipeline runs the role's checks on your branch after you: `npm test`. You cannot run them.") {
 		t.Fatalf("asked %v", asked)
 	}
 	waitStatus(t, e, run, jobs.Waiting)
@@ -184,6 +202,11 @@ func TestTaskFlow_AForbiddenFileSendsTheTaskBack(t *testing.T) {
 	if !strings.Contains(c.asked[1]["prompt"].(string), "Files it must not change: web/plan.js.") {
 		t.Fatalf("the second attempt was not told what to fix: %s", c.asked[1]["prompt"])
 	}
+	// A file it must not change is on the branch: the second attempt starts
+	// again from base, and the branch goes with its pull request.
+	if repo := c.asked[1]["repo"].(map[string]any); repo["branch"] != nil || repo["resume"] != nil || c.deletes[0] != true || a.Branch != "" {
+		t.Fatalf("second attempt's repo %v, deletes %v, branch %q", repo, c.deletes, a.Branch)
+	}
 }
 
 func TestTaskFlow_ThePersonAsksForAnotherAttempt(t *testing.T) {
@@ -201,6 +224,11 @@ func TestTaskFlow_ThePersonAsksForAnotherAttempt(t *testing.T) {
 		c.prs[0] != "close https://git/o/sandbox/pulls/9" {
 		t.Fatalf("prompt %s prs %v", c.asked[1]["prompt"], c.prs)
 	}
+	// The second attempt continues the first one's branch, which closing
+	// its pull request kept.
+	if repo := c.asked[1]["repo"].(map[string]any); repo["branch"] != "agent/x" || repo["resume"] != true || c.deletes[0] != false || a.Branch != "agent/x" {
+		t.Fatalf("second attempt's repo %v, deletes %v, branch %q", repo, c.deletes, a.Branch)
+	}
 	// The second time only approve and discard: no attempt is left.
 	eventually(t, func() bool { c.mu.Lock(); defer c.mu.Unlock(); return len(c.notify) == 2 }, "the second question")
 	if got := strings.Join(toStrings(c.notify[1]["choices"]), ","); got != "approve,discard" {
@@ -211,8 +239,34 @@ func TestTaskFlow_ThePersonAsksForAnotherAttempt(t *testing.T) {
 		t.Fatal(err)
 	}
 	a = waitTask(t, e, host, "p/tasks/a.md", func(x fleet.Task) bool { return x.Status == fleet.Canceled }, "a discarded")
-	if len(c.prs) != 2 || c.prs[1] != "close https://git/o/sandbox/pulls/9" {
-		t.Fatalf("prs %v", c.prs)
+	if len(c.prs) != 2 || c.prs[1] != "close https://git/o/sandbox/pulls/9" || c.deletes[1] != true || a.Branch != "" {
+		t.Fatalf("prs %v deletes %v branch %q", c.prs, c.deletes, a.Branch)
+	}
+}
+
+func TestTaskFlow_ARoleThatRunsCommandsRunsItsChecksToo(t *testing.T) {
+	e, host, c := flowEngine(t)
+	c.answers = []map[string]any{{"text": "Ran npm test: green.", "repo": map[string]any{"files": []any{"test/a.test.js"}, "branch": "agent/old", "pushed": true, "resumed": true}}}
+	host.notes["p/tasks/a.md"] = taskNote("prove", "tester", "submitted", "branch: agent/old\n")
+	a := waitTask(t, e, host, "p/tasks/a.md", func(x fleet.Task) bool { return x.Status == fleet.Completed }, "a completed")
+	asked := c.asked[0]
+	if repo := asked["repo"].(map[string]any); asked["access"] != "exec" || repo["branch"] != "agent/old" || repo["resume"] != true ||
+		!strings.Contains(asked["prompt"].(string), "Run the role's checks in repo/ before you finish: `npm test`. Then delete the files they made that `git status` lists as untracked") {
+		t.Fatalf("asked %v", asked)
+	}
+	if note := host.note(a.Path); !strings.Contains(note, "it runs the checks itself, whatever the agent ran") || a.Branch != "" {
+		t.Fatalf("a %+v:\n%s", a, note)
+	}
+}
+
+func TestTaskFlow_AnExecutorTooOldStartsAgainFromBase(t *testing.T) {
+	e, host, c := flowEngine(t)
+	c.old = true
+	c.answers = []map[string]any{{"text": "Done.", "repo": map[string]any{"files": []any{"test/a.test.js"}, "branch": "agent/r-s", "pushed": true}}}
+	host.notes["p/tasks/a.md"] = taskNote("prove", "tester", "submitted", "branch: agent/old\n")
+	waitTask(t, e, host, "p/tasks/a.md", func(x fleet.Task) bool { return x.Status == fleet.Completed }, "a completed")
+	if repo := c.asked[0]["repo"].(map[string]any); repo["branch"] != nil || repo["resume"] != nil {
+		t.Fatalf("repo %v", repo)
 	}
 }
 
@@ -346,7 +400,8 @@ func TestTaskFlow_TheCoordinatorPlansAndCloses(t *testing.T) {
 		t.Fatalf("the coordinator was not asked for a plan: %v", c.asked[0])
 	}
 	// It knows what the pipeline runs, and reads the reports as facts and words.
-	if p := c.asked[0]["prompt"].(string); !strings.Contains(p, "checks `npm test` run by the pipeline") || !strings.Contains(p, "Ask an agent for neither.") {
+	if p := c.asked[0]["prompt"].(string); !strings.Contains(p, "checks `npm test` run by the pipeline") || !strings.Contains(p, "ask an agent for neither.") ||
+		!strings.Contains(p, "A task that checks the work of\n  others (a review) depends on every task whose work it checks") {
 		t.Fatalf("first prompt: %s", p)
 	}
 	if p := c.asked[3]["prompt"].(string); !strings.Contains(p, reportsNote) || !strings.Contains(p, "Notes written (1): p/kb/nota.md.") {

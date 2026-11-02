@@ -1,6 +1,7 @@
 package index
 
 import (
+	"database/sql"
 	"fmt"
 	"sort"
 	"strings"
@@ -300,28 +301,30 @@ func (i *Index) GraphData(project string, includeCross bool) ([]GraphNode, []Gra
 }
 
 // Projects returns the sorted list of distinct top-level folders containing notes.
+// It walks the path index a project at a time: one lookup finds the first
+// note of a project and the next starts past its last, so a vault of many
+// notes costs as many lookups as it has projects, not a read of every note.
 func (i *Index) Projects() ([]string, error) {
-	rows, err := i.db.Query(`
-        SELECT DISTINCT substr(path, 1, instr(path, '/') - 1) AS project
-        FROM notes
-        WHERE instr(path, '/') > 0
-        ORDER BY project
-    `)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
 	var out []string
-	for rows.Next() {
-		var p string
-		if err := rows.Scan(&p); err != nil {
+	from := ""
+	for {
+		var path string
+		err := i.db.QueryRow(`SELECT path FROM notes WHERE path >= ? AND instr(path, '/') > 0 ORDER BY path LIMIT 1`, from).Scan(&path)
+		if err == sql.ErrNoRows {
+			break
+		}
+		if err != nil {
 			return nil, err
 		}
-		if p != "" {
-			out = append(out, p)
+		project, _, _ := strings.Cut(path, "/")
+		if project != "" {
+			out = append(out, project)
 		}
+		// '0' comes right after '/': every path under project sorts below this.
+		from = project + "0"
 	}
-	return out, rows.Err()
+	sort.Strings(out)
+	return out, nil
 }
 
 // Hub is a most-connected note in the wikilink graph, ranked by undirected

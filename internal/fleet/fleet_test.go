@@ -25,6 +25,7 @@ roles:
     agent: "[[fitness/agents/sviluppo]]"
     run: claude.run
     repo: agents-fitness
+    access: exec
     paths: [web/, src/]
     forbid: [package.json]
     checks: npm test
@@ -46,11 +47,11 @@ func TestParseTeam(t *testing.T) {
 		t.Fatalf("roles out of order: %v", got)
 	}
 	dev, _ := team.Role("sviluppo")
-	if dev.Approve != ApproveMerge || dev.Agent != "fitness/agents/sviluppo.md" || len(dev.Paths) != 2 {
+	if dev.Approve != ApproveMerge || dev.Agent != "fitness/agents/sviluppo.md" || len(dev.Paths) != 2 || dev.Access != AccessExec {
 		t.Fatalf("sviluppo: %+v", dev)
 	}
 	know, _ := team.Role("conoscenza")
-	if know.Approve != ApproveNone || len(know.Writes) != 1 || know.Writes[0] != "fitness/conoscenza/" || know.MaxTokens != 5_000_000 {
+	if know.Approve != ApproveNone || len(know.Writes) != 1 || know.Writes[0] != "fitness/conoscenza/" || know.MaxTokens != 5_000_000 || know.Access != "" {
 		t.Fatalf("conoscenza: %+v", know)
 	}
 	if team.Name() != "fitness/squadra" || team.Project() != "fitness" {
@@ -79,6 +80,8 @@ func TestParseTeamProblems(t *testing.T) {
 		"rounds out of range":  "max_rounds: 99\nroles:\n  a: {run: claude.run}\n",
 		"delegates to itself":  "roles:\n  a: {run: claude.run, delegates_to: [a]}\n",
 		"negative max_tokens":  "roles:\n  a: {run: claude.run, max_tokens: -1}\n",
+		"bad access":           "roles:\n  a: {run: claude.run, access: root}\n",
+		"repo read only":       "roles:\n  a: {run: claude.run, repo: r, access: read}\n",
 	}
 	for name, src := range cases {
 		if _, problems := Parse(src, "fitness/squadra.md"); len(problems) == 0 {
@@ -144,6 +147,20 @@ func TestTaskRenderAndRead(t *testing.T) {
 	content = AppendSection(content, "Report", "Fatto.")
 	if !strings.HasSuffix(string(content), "## Report\n\nFatto.\n") {
 		t.Fatalf("section:\n%s", content)
+	}
+	// The branch an attempt sent back left, until the task closes.
+	content, err = Set(content, map[string]any{KeyStatus: Working, KeyClaimedBy: "run-2", KeyBranch: "agent/r1-s2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task = ReadTask(p, content); task.Branch != "agent/r1-s2" {
+		t.Fatalf("branch: %+v\n%s", task, content)
+	}
+	if content, err = Complete(task, content, "run-2", Completed, "Fatto.", at); err != nil {
+		t.Fatal(err)
+	}
+	if task = ReadTask(p, content); task.Branch != "" || task.Status != Completed {
+		t.Fatalf("after Complete: %+v\n%s", task, content)
 	}
 }
 

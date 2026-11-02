@@ -59,7 +59,13 @@ onMounted(load)
 <template>
   <div class="p-8 max-w-4xl mx-auto">
     <!-- The window's title bar shows the name: the heading is for screen readers. -->
-    <h1 class="sr-only">{{ t('trash.title') }}</h1>
+    <h1
+      class="sr-only"
+      tabindex="-1"
+      data-window-heading
+    >
+      {{ t('trash.title') }}
+    </h1>
     <p class="text-sm text-text-muted mb-6">
       {{ t('trash.intro') }}
     </p>

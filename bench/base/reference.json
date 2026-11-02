@@ -1,0 +1,430 @@
+{
+  "schema": 1,
+  "set": "2026-10-29",
+  "why": "The medians of twelve single runs of 2026-10-28, six of v2.120.0 and six of a reader's scope, which level B found the same, at a load of 1.3-2.1; the rooms and objectives the roadmap's M1.2 decided on 2026-10-29. Five runs of main at 1a23ee5 (v2.120.2) on 2026-10-29 pass it",
+  "from": [
+    "base-2026-10-28-v2120-a.json",
+    "base-2026-10-28-v2120-b.json",
+    "base-2026-10-28-v2120-c.json",
+    "base-2026-10-28-v2120-d.json",
+    "base-2026-10-28-v2120-e.json",
+    "base-2026-10-28-v2120-f.json",
+    "base-2026-10-28-viewscope-a.json",
+    "base-2026-10-28-viewscope-b.json",
+    "base-2026-10-28-viewscope-c.json",
+    "base-2026-10-28-viewscope-d.json",
+    "base-2026-10-28-viewscope-e.json",
+    "base-2026-10-28-viewscope-f.json"
+  ],
+  "max_load": 4,
+  "checks": [
+    {
+      "name": "Search, one query: R@1",
+      "metric": "retrieval.query.r_at_1",
+      "ref": 0.511,
+      "higher_better": true
+    },
+    {
+      "name": "Search, one query: R@5",
+      "metric": "retrieval.query.r_at_5",
+      "ref": 0.8,
+      "higher_better": true,
+      "target": 0.76
+    },
+    {
+      "name": "Search, one query: MRR",
+      "metric": "retrieval.query.mrr",
+      "ref": 0.628,
+      "higher_better": true
+    },
+    {
+      "name": "Search, one query: misses",
+      "metric": "retrieval.query.miss",
+      "ref": 8
+    },
+    {
+      "name": "Search with any_of: R@1",
+      "metric": "retrieval.any_of.r_at_1",
+      "ref": 0.733,
+      "higher_better": true,
+      "target": 0.8
+    },
+    {
+      "name": "Search with any_of: R@5",
+      "metric": "retrieval.any_of.r_at_5",
+      "ref": 0.956,
+      "higher_better": true
+    },
+    {
+      "name": "Search with any_of: MRR",
+      "metric": "retrieval.any_of.mrr",
+      "ref": 0.832,
+      "higher_better": true
+    },
+    {
+      "name": "Search with any_of: misses",
+      "metric": "retrieval.any_of.miss",
+      "ref": 1,
+      "target": 2
+    },
+    {
+      "name": "Tools, full",
+      "metric": "surface.tools_full",
+      "ref": 65
+    },
+    {
+      "name": "Tools, core",
+      "metric": "surface.tools_core",
+      "ref": 27
+    },
+    {
+      "name": "tools/list, full (bytes)",
+      "metric": "surface.tools_list_bytes_full",
+      "ref": 78944,
+      "target": 80000
+    },
+    {
+      "name": "tools/list, core (bytes)",
+      "metric": "surface.tools_list_bytes_core",
+      "ref": 37788
+    },
+    {
+      "name": "Bootstrap of the project (bytes)",
+      "metric": "surface.bootstrap_bytes",
+      "ref": 21604,
+      "target": 20000
+    },
+    {
+      "name": "Start, cold (ms)",
+      "metric": "start.cold_ms",
+      "ref": 456.4,
+      "pct": 15
+    },
+    {
+      "name": "Start, warm (ms)",
+      "metric": "start.warm_ms",
+      "ref": 205.9,
+      "pct": 15
+    },
+    {
+      "name": "bootstrap, p50 (ms)",
+      "metric": "latency.memory_bootstrap.p50_ms",
+      "ref": 2.926,
+      "pct": 25,
+      "min": 0.1
+    },
+    {
+      "name": "bootstrap, p95 (ms)",
+      "metric": "latency.memory_bootstrap.p95_ms",
+      "ref": 3.87,
+      "pct": 40,
+      "min": 0.3
+    },
+    {
+      "name": "search, p50 (ms)",
+      "metric": "latency.memory_search.p50_ms",
+      "ref": 1.035,
+      "pct": 25,
+      "min": 0.1
+    },
+    {
+      "name": "search, p95 (ms)",
+      "metric": "latency.memory_search.p95_ms",
+      "ref": 1.67,
+      "pct": 40,
+      "min": 0.3
+    },
+    {
+      "name": "get, p50 (ms)",
+      "metric": "latency.memory_get.p50_ms",
+      "ref": 0.432,
+      "pct": 25,
+      "min": 0.1
+    },
+    {
+      "name": "get, p95 (ms)",
+      "metric": "latency.memory_get.p95_ms",
+      "ref": 0.619,
+      "pct": 40,
+      "min": 0.3
+    },
+    {
+      "name": "list_notes, p50 (ms)",
+      "metric": "latency.memory_list_notes.p50_ms",
+      "ref": 0.67,
+      "pct": 25,
+      "min": 0.1
+    },
+    {
+      "name": "list_notes, p95 (ms)",
+      "metric": "latency.memory_list_notes.p95_ms",
+      "ref": 0.909,
+      "pct": 40,
+      "min": 0.3
+    },
+    {
+      "name": "query, p50 (ms)",
+      "metric": "latency.memory_query.p50_ms",
+      "ref": 1.27,
+      "pct": 25,
+      "min": 0.1
+    },
+    {
+      "name": "query, p95 (ms)",
+      "metric": "latency.memory_query.p95_ms",
+      "ref": 1.575,
+      "pct": 40,
+      "min": 0.3
+    },
+    {
+      "name": "create, p50 (ms)",
+      "metric": "latency.memory_create.p50_ms",
+      "ref": 4.007,
+      "pct": 25,
+      "min": 1
+    },
+    {
+      "name": "edit, p50 (ms)",
+      "metric": "latency.memory_edit.p50_ms",
+      "ref": 4.021,
+      "pct": 25,
+      "min": 1
+    },
+    {
+      "name": "append, p50 (ms)",
+      "metric": "latency.memory_append.p50_ms",
+      "ref": 3.995,
+      "pct": 25,
+      "min": 1
+    },
+    {
+      "name": "Large vault: start, cold (ms)",
+      "metric": "large.cold_ms",
+      "ref": 2604.5,
+      "pct": 20,
+      "target": 3500
+    },
+    {
+      "name": "Large vault: start, warm (ms)",
+      "metric": "large.warm_ms",
+      "ref": 294.7,
+      "pct": 15
+    },
+    {
+      "name": "Large vault: search, p50 (ms)",
+      "metric": "large.search.p50_ms",
+      "ref": 1.56,
+      "pct": 25,
+      "min": 0.1
+    },
+    {
+      "name": "Large vault: search, p95 (ms)",
+      "metric": "large.search.p95_ms",
+      "ref": 4.338,
+      "pct": 40,
+      "min": 0.3,
+      "target": 3
+    },
+    {
+      "name": "Web UI, first load (bytes sent)",
+      "metric": "spa.bytes",
+      "ref": 162786,
+      "target": 200000
+    },
+    {
+      "name": "Memory at rest, own (bytes)",
+      "metric": "resources.idle_anon",
+      "ref": 17911808,
+      "pct": 10
+    },
+    {
+      "name": "Memory, peak (bytes)",
+      "metric": "resources.peak",
+      "ref": 34537472,
+      "pct": 10
+    },
+    {
+      "name": "Large vault: memory at rest, own (bytes)",
+      "metric": "large.idle_anon",
+      "ref": 21776384,
+      "pct": 10
+    },
+    {
+      "name": "CPU per call (µs)",
+      "metric": "resources.cpu_per_call_us",
+      "ref": 1229.15,
+      "pct": 20
+    },
+    {
+      "name": "Image (bytes)",
+      "metric": "sizes.image",
+      "ref": 125770208.5,
+      "pct": 2
+    },
+    {
+      "name": "Binary (bytes)",
+      "metric": "sizes.binary",
+      "ref": 70510752,
+      "pct": 2
+    }
+  ],
+  "moves": [
+    {
+      "set": "2026-10-29",
+      "why": "The web UI's text assets go gzipped to a client that takes them: the first load from 590,103 bytes sent to 161,625 (roadmap M1.3; the objective is 200,000)",
+      "from": [
+        "base-2026-10-29-spa-gzip.json"
+      ],
+      "metrics": [
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-10-29",
+      "why": "The boot scan writes 256 notes to a transaction and reads and parses the next ones on every core while it writes: the cold start on the large vault from 5,746 ms to 2,036 (roadmap M1.3; the objective is 3,500)",
+      "from": [
+        "base-2026-10-29-boot-scan.json"
+      ],
+      "metrics": [
+        "large.cold_ms"
+      ]
+    },
+    {
+      "set": "2026-10-30",
+      "why": "A search no longer commits to the stemmer, prepares its reads once, remembers the stems it found, and finds the full-text index merged after a scan that rewrote it: the median search from 1.11 ms to 0.738 on the small vault and from 1.571 to 0.938 on the large one (roadmap M1.3)",
+      "from": [
+        "base-2026-10-30-search-a.json",
+        "base-2026-10-30-search-b.json",
+        "base-2026-10-30-search-c.json"
+      ],
+      "metrics": [
+        "latency.memory_search.p50_ms",
+        "large.search.p50_ms"
+      ]
+    },
+    {
+      "set": "2026-10-30",
+      "why": "The full-text index keeps the prefixes of one to three characters, so a search with a short word no longer merges the lists of thousands of words; writing them costs at a scan that loads the vault, partly won back by merging the index once at its end: the cold start on the large vault from 2,036 ms to 2,604 (roadmap M1.3; the objective is 3,500)",
+      "from": [
+        "base-2026-10-30-short-words.json"
+      ],
+      "metrics": [
+        "large.cold_ms"
+      ]
+    },
+    {
+      "set": "2026-10-31",
+      "why": "Boards of cards (IMP-216 phase 1): the board's two strings in the five languages of the first load, and the map of the chunks, take the first load from 161,625 bytes sent to 161,833, a cost the user accepted on 2026-10-31; the board's own code loads with the first note that has one. The task tools' shorter descriptions take tools/list from 85,793 bytes to 85,697 with the new arguments, its core from 38,274 to 38,259",
+      "from": [
+        "base-2026-10-31-board.json"
+      ],
+      "metrics": [
+        "surface.tools_list_bytes_full",
+        "surface.tools_list_bytes_core",
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-10-31",
+      "why": "The bootstrap under M1.3: the directives template's own comment no longer reaches a session, the directives and the capabilities' hints say the same rules in fewer words, and the directives speak of the .html, media and table notes, the IN folder and the tag vocabulary only where they are on, each variant with its own directives_version: the bootstrap of the benchmark project from 25,237 bytes to 21,604 (roadmap M1.3; the objective is 20,000, which only dropping rules would reach, and the user keeps every rule)",
+      "from": [
+        "base-2026-10-31-bootstrap.json"
+      ],
+      "metrics": [
+        "surface.bootstrap_bytes"
+      ]
+    },
+    {
+      "set": "2026-10-31",
+      "why": "The creators of table and media notes are listed only while their format is on, as the tools of a branch, and the heaviest tool descriptions say the same things in fewer words: tools/list from 85,697 bytes to 78,833 with the formats off, 67 tools to 65, its core from 38,259 to 37,677 (roadmap M1.3; the objective of 80,000 is reached)",
+      "from": [
+        "base-2026-10-31-tools-list.json"
+      ],
+      "metrics": [
+        "surface.tools_full",
+        "surface.tools_list_bytes_full",
+        "surface.tools_list_bytes_core"
+      ]
+    },
+    {
+      "set": "2026-10-31",
+      "why": "Partial hits (roadmap M1.3): when the notes with every word are fewer than the limit, the notes with one of the query's less common words follow them, marked partial in why; with any_of, after a fusion that falls short. Level R, one query: R@5 from 0.711 to 0.8 (the objective of 0.76 is reached), misses 12 to 8; with any_of, misses 3 to 1 (the objective of 2 is reached). The second full-text query takes the median search from 0.738 ms to 1.035 on the small vault and from 0.938 to 1.56 on the large one, and the description of query takes tools/list from 78,833 bytes to 78,944, its core from 37,677 to 37,788: costs the user accepted on 2026-10-31",
+      "from": [
+        "base-2026-10-31-search-fill.json"
+      ],
+      "metrics": [
+        "retrieval.query.r_at_1",
+        "retrieval.query.r_at_5",
+        "retrieval.query.mrr",
+        "retrieval.query.miss",
+        "retrieval.any_of.r_at_5",
+        "retrieval.any_of.mrr",
+        "retrieval.any_of.miss",
+        "surface.tools_list_bytes_full",
+        "surface.tools_list_bytes_core",
+        "latency.memory_search.p50_ms",
+        "large.search.p50_ms"
+      ]
+    },
+    {
+      "set": "2026-10-31",
+      "why": "The fusion of a search with variants counts each list's first places more, its constant from 60 to 5 (roadmap M1.3): level R with any_of MRR from 0.828 to 0.832, its R@1, R@5 and misses as they were",
+      "from": [
+        "base-2026-10-31-fusion.json"
+      ],
+      "metrics": [
+        "retrieval.any_of.mrr"
+      ]
+    },
+    {
+      "set": "2026-10-31",
+      "why": "The search window says the words a partial hit lacks (Without: …, Senza: …): the two strings in the English and Italian catalogues of the first load take it from 161,833 bytes sent to 161,856, a cost the user accepted on 2026-10-31",
+      "from": [
+        "base-2026-10-31-webui-partial.json"
+      ],
+      "metrics": [
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-01",
+      "why": "The web session (BUG-142, BUG-143): the auth store keeps when its expiry arrived, how long the session lasts at most and whether it ended, the API client tells the editors before it clears the account, and the English and Italian catalogues of the first load hold the five strings of the login page's notice and the kept draft's banner; they take it from 161,856 bytes sent to 162,192 (catalogues +162, auth store +107, client +74), a cost the user accepted on 2026-11-01",
+      "from": [
+        "base-2026-11-01-session-drafts.json"
+      ],
+      "metrics": [
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-01",
+      "why": "The focus, the announcements and the titles of the web UI (IMP-217): the English and Italian catalogues of the first load hold the four new strings (three announcements and the link that skips to the active window), the one stylesheet holds the classes of the new controls, and the list of the chunks the router's routes preload names two more (the page title's and the live region's); they take it from 162,192 bytes sent to 162,453 (catalogues +151, stylesheet +70, router +39), a cost the user accepted on 2026-11-01",
+      "from": [
+        "base-2026-11-01-focus-titles.json"
+      ],
+      "metrics": [
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-01",
+      "why": "plancia 0.4.0, the focus that follows the windows: the one stylesheet holds its new rules (the focus ring of a window, the 24 px close button of a tab, the sidebar's toggle), which take the first load from 162,453 bytes sent to 162,480 (stylesheet +27, the scripts the same but for the names of their chunks); gosidian has no rule of its own that they replace, a cost the user accepted on 2026-11-01",
+      "from": [
+        "base-2026-11-01-plancia-040.json"
+      ],
+      "metrics": [
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-02",
+      "why": "IMP-218, the palette and Search: five new strings in the English and Italian catalogues of the first load (the palette's name and its entry that searches the text, Search's three tips when it finds nothing) take it from 162,480 bytes sent to 162,786 (locales +285, the router +19 for the name of the chunk the palette and Search share, +2 from chunk names), a cost the user accepted on 2026-11-02",
+      "from": [
+        "base-2026-11-02-imp-218.json"
+      ],
+      "metrics": [
+        "spa.bytes"
+      ]
+    }
+  ]
+}

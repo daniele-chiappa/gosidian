@@ -239,7 +239,8 @@ working.
 
 With web login enabled, unauthenticated browser requests are
 redirected to `/login`. Failed attempts trigger a rate limiter
-(default 5 failures per 15 minutes, see [Configuration](../configuration.md)).
+(default 5 failures per 15 minutes, `GOSIDIAN_LOGIN_MAX_FAILURES` and
+`GOSIDIAN_LOGIN_WINDOW`, see [Configuration](../configuration.md)).
 
 Accounts from the console, with the server running or not (it re-reads
 the accounts on its next request):
@@ -268,7 +269,12 @@ An `owner` account can invite `member` accounts from `/admin/users`:
 - Invites are **single-use** and expire in **24 hours**.
 - Disabling a member revokes all their MCP tokens automatically
   (cascade on `OnUserDisabled`).
-- Sessions live 24 hours by default (`GOSIDIAN_LOGIN_SESSION_TTL`).
+- A web session lasts 24 hours since it was last renewed
+  (`GOSIDIAN_LOGIN_SESSION_TTL`), and 7 days at most however often it is
+  renewed (`GOSIDIAN_LOGIN_SESSION_MAX_TTL`): then its user signs in again.
+  The web UI renews it while it is used: a key, a click or the wheel
+  renews it once less than half of its `GOSIDIAN_LOGIN_SESSION_TTL` is
+  left. A tab left alone expires.
 
 ### When to skip web login
 

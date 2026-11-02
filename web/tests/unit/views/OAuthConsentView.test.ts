@@ -59,6 +59,18 @@ describe('OAuthConsentView (BUG-116, S6-4)', () => {
     expect(approveOAuthRequest).toHaveBeenCalledWith('r1', { projects: ['Alpha'], scopes: ['read'] })
   })
 
+  it('names the client it authorizes in the page title (IMP-217, F-07)', async () => {
+    document.title = ''
+    await mountWith(consent({}))
+    expect(document.title).toBe('Authorize Claude · gosidian')
+  })
+
+  it('keeps the page in a main (IMP-217, F-35)', async () => {
+    const w = await mountWith(consent({}))
+    expect(w.element.tagName).toBe('MAIN')
+    expect(w.find('main h1').exists()).toBe(true)
+  })
+
   it('gives the owner an unscoped grant only from the "all projects" line', async () => {
     const w = await mountWith(consent({}))
     await approveButton(w).trigger('click')

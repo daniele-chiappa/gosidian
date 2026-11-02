@@ -267,7 +267,8 @@ var baseSchemas = []NodeSchema{
 		Input: json.RawMessage(`{"type": "object", "required": ["status"], "properties": {
 	"task": {"type": "string", "format": "path", "description": "The task's note; default {{ trigger.task }}"},
 	"status": {"type": "string", "enum": ["working", "input-required", "review", "submitted"]},
-	"message": {"type": "string", "format": "multiline", "description": "A section added to the task: what a person is asked, or what the next attempt must fix"}}}`),
+	"message": {"type": "string", "format": "multiline", "description": "A section added to the task: what a person is asked, or what the next attempt must fix"},
+	"branch": {"type": "string", "description": "The branch the next attempt continues ({{ verdict.branch }}); empty for none"}}}`),
 		Output: json.RawMessage(`{"type": "object", "properties": {"task": ` + taskSchema + `}}`)},
 	{Type: "task.complete", Description: "Closes the task the run holds with its report (IMP-195)",
 		Input: json.RawMessage(`{"type": "object", "properties": {
@@ -298,6 +299,7 @@ var taskFlowSchemas = []NodeSchema{
 	"files": {"type": "array", "items": {"type": "string"}}, "outside": {"type": "array", "items": {"type": "string"}}, "forbidden": {"type": "array", "items": {"type": "string"}},
 	"notes": {"type": "array", "items": {"type": "string"}, "description": "The notes the run wrote in the role's folders (writes)"},
 	"pr_url": {"type": "string"}, "branch": {"type": "string"}, "image": {"type": "string"}, "link": {"type": "string"},
+	"resume": {"type": "boolean", "description": "Another attempt may continue the agent's branch: it pushed it, within its paths"},
 	"title": {"type": "string"}, "text": {"type": "string"}, "feedback": {"type": "string"}, "choices": {"type": "array", "items": {"type": "string"}}}}`)},
 	{Type: "task.verdict", Description: "Reads the gate and the person's answer into what follows: merge, close, redo, close the pull request (IMP-195)",
 		Input: json.RawMessage(`{"type": "object", "required": ["gate"], "properties": {
@@ -305,12 +307,15 @@ var taskFlowSchemas = []NodeSchema{
 	"answer": {"type": "object", "description": "The answer of wait.call (choice, by, comment), when the gate asked"}}}`),
 		Output: json.RawMessage(`{"type": "object", "properties": {
 	"merge": {"type": "boolean"}, "close": {"type": "boolean"}, "redo": {"type": "boolean"}, "close_pr": {"type": "boolean"},
+	"branch": {"type": "string", "description": "The branch the next attempt continues, for task.update; empty when it starts from base"},
+	"delete_branch": {"type": "boolean", "description": "Closing the pull request deletes its branch: no attempt continues it"},
 	"status": {"type": "string"}, "choice": {"type": "string"}, "by": {"type": "string"}, "report": {"type": "string"}, "feedback": {"type": "string"}}}`)},
 	{Type: "task.pr", Description: "Merges or closes the pull request of the task's agent, through the pr node of its executor's plugin, whose preset holds the credentials (IMP-195)",
 		Input: json.RawMessage(`{"type": "object", "required": ["url", "action"], "properties": {
 	"task": {"type": "string", "format": "path"},
 	"url": {"type": "string", "description": "The pull request ({{ gate.pr_url }})"},
-	"action": {"type": "string", "enum": ["merge", "close"]}}}`),
+	"action": {"type": "string", "enum": ["merge", "close"]},
+	"delete_branch": {"type": "boolean", "default": true, "description": "Then delete its branch; false keeps it for the next attempt ({{ verdict.delete_branch }})"}}}`),
 		Output: json.RawMessage(`{"type": "object", "description": "The plugin's pr output: merged, closed, sha, branch_deleted"}`)},
 	{Type: "task.plan", Description: "Writes the tasks a coordinator planned (task.run with plan: true), for the roles it gives tasks to, under its objective; or says done or ask (IMP-195)",
 		Input: json.RawMessage(`{"type": "object", "required": ["plan"], "properties": {
@@ -328,7 +333,8 @@ const taskSchema = `{"type": "object", "properties": {
 	"team": {"type": "string"}, "parent": {"type": "string"}, "depends_on": {"type": "array", "items": {"type": "string"}},
 	"paths": {"type": "array", "items": {"type": "string"}}, "forbid": {"type": "array", "items": {"type": "string"}},
 	"budget_usd": {"type": "number"}, "cost_usd": {"type": "number"}, "tokens": {"type": "integer"},
-	"attempts": {"type": "integer"}, "rounds": {"type": "integer"}}}`
+	"attempts": {"type": "integer"}, "rounds": {"type": "integer"},
+	"branch": {"type": "string", "description": "The branch the next attempt continues"}}}`
 
 // inFilesOutput is the files an in.list gives.
 const inFilesOutput = `"files": {"type": "array", "items": {"type": "object", "properties": {

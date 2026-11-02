@@ -17,17 +17,28 @@ const button = (text: string) =>
 describe('ConfirmHost', () => {
   afterEach(() => cancelAll())
 
-  it('asks in its own dialog, with the confirm button focused, and answers', async () => {
+  it('asks in its own dialog, from Cancel when it deletes, and answers', async () => {
     const w = mountHost()
     const answer = confirmAction('Delete p/a.md?', { confirmLabel: 'Delete' })
     await flushPromises()
     expect(dialog()?.textContent).toContain('Delete p/a.md?')
     expect(dialog()?.textContent).toContain('Are you sure?')
-    expect(document.activeElement).toBe(button('Delete'))
+    // An Enter pressed out of habit must not delete.
+    expect(document.activeElement).toBe(button('Cancel'))
     button('Delete')!.click()
     expect(await answer).toBe(true)
     await flushPromises()
     expect(dialog()).toBeNull()
+    w.unmount()
+  })
+
+  it('starts on the confirm button when nothing is lost', async () => {
+    const w = mountHost()
+    const answer = confirmAction('Run it?', { danger: false })
+    await flushPromises()
+    expect(document.activeElement).toBe(button('Confirm'))
+    button('Confirm')!.click()
+    expect(await answer).toBe(true)
     w.unmount()
   })
 

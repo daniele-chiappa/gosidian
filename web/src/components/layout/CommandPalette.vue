@@ -9,13 +9,25 @@
  * Waterman: at <2k vault entries the simple version is faster, has
  * predictable ranking, and survives long unicode strings without
  * extra dependencies.
+ *
+ * It matches names only. With a text, its last entry looks for it in the
+ * notes' text instead, in Search (IMP-218, F-06).
+ *
+ * To a screen reader it is a named dialog with an ARIA combobox, as
+ * SearchSelect (IMP-218, F-05): the field keeps the focus, Tab included,
+ * and says through aria-activedescendant which entry the arrows are on.
+ * Home and End go to the first and the last entry once the arrows are in
+ * the list, and move the caret in the text before.
  */
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { fetchCommandPalette, type CommandPaletteData } from '@/api/commandPalette'
 import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
 import { useWindowsStore, type OpenSpec } from 'plancia'
+import { Search } from 'lucide-vue-next'
+import { useOpenFocused } from '@/composables/useOpenFocused'
 import { planciaKey } from '@/composables/planciaKey'
+import { paletteRequest } from '@/composables/usePalette'
 
 interface PaletteItem {
   kind: 'note' | 'project' | 'tag' | 'action'
@@ -27,6 +39,8 @@ interface PaletteItem {
 }
 
 const { t } = useI18n()
+// A gesture's open puts the focus on the window's title (IMP-217, F-03).
+const openWindow = useOpenFocused()
 const windows = useWindowsStore()
 const recents = useRecentlyViewed()
 
@@ -34,7 +48,16 @@ const open = ref(false)
 const query = ref('')
 const dataset = ref<CommandPaletteData | null>(null)
 const selected = ref(0)
+// The arrows moved in the list since the text last changed.
+const browsing = ref(false)
 const inputEl = ref<HTMLInputElement | null>(null)
+const baseId = `cp-${useId()}`
+const titleId = `${baseId}-title`
+const listId = `${baseId}-list`
+const optionId = (i: number) => `${listId}-${i}`
+// Where the palette was opened from: closed without a choice, it gives the
+// focus back there (IMP-217, F-04); a choice opens a window, which takes it.
+let opener: HTMLElement | null = null
 
 const baseItems = computed<PaletteItem[]>(() => {
   const items: PaletteItem[] = []
@@ -98,6 +121,21 @@ const filtered = computed<PaletteItem[]>(() => {
     .map((x) => x.item)
 })
 
+// With a text, the last entry searches the notes' text for it: no name
+// may have it, and the Search button, which showed Ctrl+K, opened Search,
+// not this palette (IMP-218, F-06).
+const searchItem = computed<PaletteItem | null>(() => {
+  const q = query.value.trim()
+  if (!q) return null
+  return {
+    kind: 'action',
+    label: t('palette.search_text', { query: q }),
+    open: { type: 'search', key: planciaKey('search'), title: t('nav.search'), props: { q } },
+  }
+})
+// What the keyboard moves through and Enter picks.
+const entries = computed<PaletteItem[]>(() => (searchItem.value ? [...filtered.value, searchItem.value] : filtered.value))
+
 // The answer to the last opening wins; an older one is kept only while there
 // is no list at all, so a newer request that fails leaves something to show.
 let fetchSeq = 0
@@ -112,9 +150,9 @@ async function refreshDataset() {
     if (seq !== fetchSeq && dataset.value) return
     // The entry the keyboard is on stays selected, wherever the new list
     // puts it: Enter opened whatever came to sit at its old place.
-    const kept = filtered.value[selected.value]
+    const kept = entries.value[selected.value]
     dataset.value = d
-    const i = kept ? filtered.value.findIndex((x) => itemKey(x) === itemKey(kept)) : -1
+    const i = kept ? entries.value.findIndex((x) => itemKey(x) === itemKey(kept)) : -1
     selected.value = i >= 0 ? i : 0
   } catch {
     // Not fatal: the palette keeps the list it has, or none, and the next
@@ -122,10 +160,12 @@ async function refreshDataset() {
   }
 }
 
-async function show() {
+async function show(q = '') {
+  opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
   open.value = true
-  query.value = ''
+  query.value = q
   selected.value = 0
+  browsing.value = false
   // The list was read once a session: a note created later never showed
   // until a reload. The one it has shows at once, and the server's comes
   // in behind it.
@@ -134,14 +174,27 @@ async function show() {
   await nextTick()
   inputEl.value?.focus()
 }
-function hide() {
+function hide(giveBack = true) {
   open.value = false
+  if (giveBack && opener?.isConnected) opener.focus()
+  opener = null
 }
 
 function pick(item: PaletteItem | undefined) {
   if (!item) return
-  hide()
-  windows.open(item.open)
+  hide(false)
+  const id = openWindow(item.open)
+  // A Search already open only takes the focus: the text goes to it too,
+  // with when it was asked, so the same text asked again searches again.
+  if (item.open.type === 'search' && id) windows.identify(id, planciaKey('search'), { ...item.open.props, qAt: Date.now() })
+}
+
+// A move of the keyboard keeps the entry in view: a mouse is already on it.
+function moveTo(i: number) {
+  if (!entries.value.length) return
+  browsing.value = true
+  selected.value = Math.max(0, Math.min(i, entries.value.length - 1))
+  void nextTick(() => document.getElementById(optionId(selected.value))?.scrollIntoView?.({ block: 'nearest' }))
 }
 
 function onKey(e: KeyboardEvent) {
@@ -157,21 +210,35 @@ function onKey(e: KeyboardEvent) {
     hide()
   } else if (e.key === 'ArrowDown') {
     e.preventDefault()
-    selected.value = Math.min(selected.value + 1, filtered.value.length - 1)
+    moveTo(selected.value + 1)
   } else if (e.key === 'ArrowUp') {
     e.preventDefault()
-    selected.value = Math.max(selected.value - 1, 0)
+    moveTo(selected.value - 1)
+  } else if ((e.key === 'Home' || e.key === 'End') && browsing.value) {
+    e.preventDefault()
+    moveTo(e.key === 'Home' ? 0 : entries.value.length - 1)
+  } else if (e.key === 'Tab') {
+    // The field is the dialog's one control: Tab left it for the page
+    // under the dialog.
+    e.preventDefault()
+    inputEl.value?.focus()
   } else if (e.key === 'Enter') {
     e.preventDefault()
-    pick(filtered.value[selected.value])
+    pick(entries.value[selected.value])
   }
 }
 
+// Another view opens it with a text (IMP-218, F-26).
+watch(paletteRequest, (r) => {
+  if (r) void show(r.q)
+})
+
 watch(query, () => {
   selected.value = 0
+  browsing.value = false
 })
 // A list read again while the palette is open can be shorter.
-watch(filtered, (items) => {
+watch(entries, (items) => {
   if (selected.value >= items.length) selected.value = Math.max(items.length - 1, 0)
 })
 
@@ -190,22 +257,53 @@ onUnmounted(() => {
       class="fixed inset-0 z-40 flex items-start justify-center pt-24 bg-overlay/60"
       role="dialog"
       aria-modal="true"
-      @click.self="hide"
+      :aria-labelledby="titleId"
+      @click.self="hide()"
     >
       <div
         class="w-[min(640px,90vw)] rounded-lg bg-surface ring-1 ring-border shadow-lg overflow-hidden"
       >
+        <h2
+          :id="titleId"
+          class="sr-only"
+        >
+          {{ t('palette.title') }}
+        </h2>
         <input
           ref="inputEl"
           v-model="query"
           type="text"
+          autocomplete="off"
+          role="combobox"
+          aria-autocomplete="list"
+          :aria-labelledby="titleId"
+          :aria-expanded="entries.length > 0"
+          :aria-controls="listId"
+          :aria-activedescendant="entries.length ? optionId(selected) : undefined"
           :placeholder="t('palette.placeholder')"
           class="w-full px-4 py-3 bg-bg-elevated border-b border-border focus:outline-none"
         />
-        <ul class="max-h-[50vh] overflow-auto">
+        <p
+          v-if="!filtered.length"
+          class="px-4 py-3 text-sm text-text-muted"
+        >
+          <i18n-t keypath="palette.no_matches" scope="global">
+            <template #key><kbd>Esc</kbd></template>
+          </i18n-t>
+        </p>
+        <ul
+          v-if="entries.length"
+          :id="listId"
+          role="listbox"
+          :aria-labelledby="titleId"
+          class="max-h-[50vh] overflow-auto"
+        >
           <li
             v-for="(item, idx) in filtered"
+            :id="optionId(idx)"
             :key="itemKey(item)"
+            role="option"
+            :aria-selected="idx === selected"
             :class="[
               'flex items-center gap-3 px-4 py-2 cursor-pointer',
               idx === selected ? 'bg-surface-hover' : 'hover:bg-surface-hover',
@@ -224,12 +322,22 @@ onUnmounted(() => {
             >{{ item.detail }}</span>
           </li>
           <li
-            v-if="!filtered.length"
-            class="px-4 py-3 text-sm text-text-muted"
+            v-if="searchItem"
+            :id="optionId(filtered.length)"
+            role="option"
+            :aria-selected="selected === filtered.length"
+            :class="[
+              'flex items-center gap-3 px-4 py-2 cursor-pointer border-t border-border',
+              selected === filtered.length ? 'bg-surface-hover' : 'hover:bg-surface-hover',
+            ]"
+            @click="pick(searchItem)"
+            @mouseenter="selected = filtered.length"
           >
-            <i18n-t keypath="palette.no_matches" scope="global">
-              <template #key><kbd>Esc</kbd></template>
-            </i18n-t>
+            <Search
+              class="w-4 h-4 shrink-0 text-text-muted"
+              aria-hidden="true"
+            />
+            <span class="flex-1 truncate">{{ searchItem.label }}</span>
           </li>
         </ul>
       </div>

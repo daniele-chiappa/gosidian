@@ -239,7 +239,13 @@ onMounted(load)
 <template>
   <div class="p-8 max-w-3xl mx-auto">
     <!-- The window's title bar shows the name: the heading is for screen readers. -->
-    <h1 class="sr-only">{{ t('settings_view.title') }}</h1>
+    <h1
+      class="sr-only"
+      tabindex="-1"
+      data-window-heading
+    >
+      {{ t('settings_view.title') }}
+    </h1>
     <p
       v-if="!auth.isOwner"
       class="text-sm text-text-muted mb-6"

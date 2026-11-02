@@ -11,6 +11,8 @@ package mcp
 import (
 	"context"
 
+	"github.com/gosidian/gosidian/internal/auth"
+	"github.com/gosidian/gosidian/internal/vault"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -76,6 +78,9 @@ func (s *Server) filterToolsByProfile(ctx context.Context, tools []mcp.Tool) []m
 			}
 			continue
 		}
+		if s.branchToolOff(tok, t.Name) {
+			continue
+		}
 		if !core {
 			out = append(out, t)
 			continue
@@ -89,4 +94,41 @@ func (s *Server) filterToolsByProfile(ctx context.Context, tools []mcp.Tool) []m
 		}
 	}
 	return out
+}
+
+// branchToolOff reports whether name is the tool of a branch that is off
+// for tok (ADR-035, roadmap M2.2): a branch off costs no schema. The
+// pipelines' tools and memory_create_team, whose teams run as pipelines,
+// need [pipelines] on; memory_in_upload needs a project with use_in that
+// tok may write in. The creators of table and media notes need their
+// format on (roadmap M1.3): off, they could only refuse, and memory_ingest
+// stores those files as attachments. Hidden, a tool is also "not found" on
+// tools/call.
+func (s *Server) branchToolOff(tok *auth.Token, name string) bool {
+	switch name {
+	case "memory_pipelines", "memory_pipeline_run", "memory_create_team":
+		return !s.pipelinesOn
+	case "memory_in_upload":
+		return !s.inWritable(tok)
+	case "memory_create_table_note":
+		return !s.vault.TableNotesEnabled()
+	case "memory_create_media_note":
+		return !s.vault.MediaNotesEnabled()
+	}
+	return false
+}
+
+// inWritable reports whether tok may upload into some project's IN folder,
+// with the checks of authorizeWrite.
+func (s *Server) inWritable(tok *auth.Token) bool {
+	if s.in == nil || s.projects == nil || tok == nil || !tok.HasScope(auth.ScopeWrite) {
+		return false
+	}
+	for _, p := range s.projects.INNames() {
+		root := vault.INRoot(p)
+		if !s.projectHidden(p) && tok.AllowsPath(root) && tok.InWritePaths(root) && tok.AllowsWrite(root) {
+			return true
+		}
+	}
+	return false
 }

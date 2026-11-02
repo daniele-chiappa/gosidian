@@ -2,9 +2,10 @@
 /**
  * The dialog of confirmAction(), askText() and showNotice()
  * (composables/useConfirm), one request at a time. PlanciaModal keeps the
- * focus inside, closes on Esc and gives the focus back where it was; the
- * confirm button (a prompt's text field) takes it first, so Enter confirms
- * as it did in the browser's dialog.
+ * focus inside, closes on Esc and gives the focus back where it was. A
+ * prompt's text field takes it first, so Enter confirms; a destructive
+ * confirmation starts on Cancel, so that an Enter pressed out of habit does
+ * not delete, and any other on its confirm button.
  */
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -15,6 +16,12 @@ const { t } = useI18n()
 const current = computed(() => confirmQueue[0])
 const draft = ref('')
 watch(current, (c) => (draft.value = c?.value ?? ''), { immediate: true })
+
+const initialFocus = computed(() => {
+  const c = current.value
+  if (c?.kind === 'prompt') return '[data-dialog-input]'
+  return c?.kind === 'confirm' && c.danger ? '[data-dialog-cancel]' : '[data-dialog-confirm]'
+})
 
 const confirmText = computed(() => {
   const c = current.value
@@ -50,7 +57,7 @@ function onEnter(e: KeyboardEvent) {
     :open="true"
     :title="title"
     :labels="{ close: t('plancia.close') }"
-    :initial-focus="current.kind === 'prompt' ? '[data-dialog-input]' : '[data-dialog-confirm]'"
+    :initial-focus="initialFocus"
     @close="answer(current.id, false)"
   >
     <p class="whitespace-pre-line text-sm" data-dialog-message>{{ current.message }}</p>
@@ -67,6 +74,7 @@ function onEnter(e: KeyboardEvent) {
       <button
         v-if="current.kind !== 'notice'"
         type="button"
+        data-dialog-cancel
         class="h-control rounded border border-border px-3 text-sm hover:bg-surface-hover"
         @click="answer(current.id, false)"
       >

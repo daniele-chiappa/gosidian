@@ -1,9 +1,14 @@
 package fleet
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"path"
+	"slices"
 	"strings"
+
+	"go.yaml.in/yaml/v3"
 )
 
 // The notes a new team starts with (memory_create_team): the team, the
@@ -65,6 +70,135 @@ group_by: status
 columns: [title, assignee, cost_usd]
 `+"```"+`
 `, src, strings.Join(States, ", "), project))
+}
+
+// boardFields are the fields a board's cards add to the database of the
+// tasks, in the order BoardSchema writes them.
+var boardFields = []struct{ name, def string }{
+	{"board", "{type: relation}"},
+	{KeyColumn, "{type: text}"},
+	{KeyRank, "{type: number}"},
+	{KeyColumnSince, "{type: date}"},
+	{"done_by", "{type: select, options: [" + DoneAgent + ", " + DonePerson + "]}"},
+	{"for", "{type: relation}"},
+}
+
+// CardFields are the fields a board's cards add to the database of the
+// tasks.
+func CardFields() []string {
+	out := make([]string, len(boardFields))
+	for i, f := range boardFields {
+		out[i] = f.name
+	}
+	return out
+}
+
+// BoardSchema makes the database note of a project's tasks (content) hold
+// a board's cards (IMP-216): backlog first among the options of status,
+// team and assignee no longer required, and the fields of a card. Only the
+// lines of fields change; changed is false when it held them already.
+func BoardSchema(content []byte) (out []byte, changed bool, err error) {
+	lines := strings.SplitAfter(string(content), "\n")
+	if len(lines) == 0 || strings.TrimRight(lines[0], "\r\n") != "---" {
+		return nil, false, errors.New("the database of the tasks has no frontmatter")
+	}
+	end := slices.IndexFunc(lines[1:], func(l string) bool { return strings.TrimRight(l, "\r\n") == "---" })
+	if end < 0 {
+		return nil, false, errors.New("the frontmatter of the database of the tasks is not closed")
+	}
+	fm := lines[1 : end+1]
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(strings.Join(fm, "")), &doc); err != nil || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return nil, false, errors.New("the frontmatter of the database of the tasks does not read as YAML")
+	}
+	m := doc.Content[0]
+	at := -1
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == "fields" {
+			at = i
+		}
+	}
+	if at < 0 || m.Content[at+1].Kind != yaml.MappingNode {
+		return nil, false, errors.New("the database of the tasks has no fields")
+	}
+	fields := m.Content[at+1]
+	field := func(name string) *yaml.Node {
+		for i := 0; i+1 < len(fields.Content); i += 2 {
+			if fields.Content[i].Value == name && fields.Content[i+1].Kind == yaml.MappingNode {
+				return fields.Content[i+1]
+			}
+		}
+		return nil
+	}
+	status := field(KeyStatus)
+	var options *yaml.Node
+	if status != nil {
+		for i := 0; i+1 < len(status.Content); i += 2 {
+			if status.Content[i].Value == "options" {
+				options = status.Content[i+1]
+			}
+		}
+	}
+	if options == nil || options.Kind != yaml.SequenceNode {
+		return nil, false, errors.New("the database of the tasks has no options for status")
+	}
+	if !slices.ContainsFunc(options.Content, func(n *yaml.Node) bool { return n.Value == Backlog }) {
+		options.Content = slices.Insert(options.Content, 0, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: Backlog})
+		changed = true
+	}
+	for _, name := range []string{"team", "assignee"} {
+		if f := field(name); f != nil {
+			for i := 0; i+1 < len(f.Content); i += 2 {
+				if f.Content[i].Value == "required" {
+					f.Content = slices.Delete(f.Content, i, i+2)
+					changed = true
+					break
+				}
+			}
+		}
+	}
+	for _, bf := range boardFields {
+		if field(bf.name) != nil {
+			continue
+		}
+		var def yaml.Node
+		if err := yaml.Unmarshal([]byte(bf.def), &def); err != nil {
+			return nil, false, err
+		}
+		fields.Content = append(fields.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: bf.name}, def.Content[0])
+		changed = true
+	}
+	if !changed {
+		return content, false, nil
+	}
+	key := *m.Content[at]
+	key.HeadComment = "" // it stays on its own lines, above the ones written again
+	var b bytes.Buffer
+	enc := yaml.NewEncoder(&b)
+	enc.SetIndent(2)
+	if err := enc.Encode(&yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{&key, fields}}); err != nil {
+		return nil, false, err
+	}
+	// The lines of fields: from its key to the next key's, but the blank
+	// lines and comments just above that one.
+	from, to := key.Line-1, len(fm)
+	if at+2 < len(m.Content) {
+		to = m.Content[at+2].Line - 1
+		for to > from+1 && (strings.TrimSpace(fm[to-1]) == "" || strings.HasPrefix(fm[to-1], "#")) {
+			to--
+		}
+	}
+	written := b.String()
+	if strings.Contains(lines[0], "\r") {
+		written = strings.ReplaceAll(written, "\n", "\r\n")
+	}
+	var o strings.Builder
+	o.WriteString(lines[0])
+	o.WriteString(strings.Join(fm[:from], ""))
+	o.WriteString(written)
+	o.WriteString(strings.Join(fm[to:], ""))
+	o.WriteString(strings.Join(lines[end+1:], ""))
+	return []byte(o.String()), true, nil
 }
 
 // TeamNote is the note of a new team named name, with a role per entry
@@ -214,7 +348,7 @@ nodes:
     use: task.pr
     after: [verdict]
     when: "{{ verdict.close_pr }}"
-    with: {url: "{{ gate.pr_url }}", action: close}
+    with: {url: "{{ gate.pr_url }}", action: close, delete_branch: "{{ verdict.delete_branch }}"}
   - id: close
     use: task.complete
     after: [verdict, merge, drop]
@@ -224,7 +358,7 @@ nodes:
     use: task.update
     after: [verdict, drop]
     when: "{{ verdict.redo }}"
-    with: {status: submitted, message: "{{ verdict.feedback }}"}
+    with: {status: submitted, message: "{{ verdict.feedback }}", branch: "{{ verdict.branch }}"}
 `+"```"+`
 `, Link(team), strings.TrimSuffix(path.Base(team), ".md")+"-work"))
 }

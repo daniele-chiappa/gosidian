@@ -23,6 +23,13 @@ var schemaSQL string
 const (
 	maxOpenConns = 16
 	maxIdleConns = 4
+	// mmapSize is how much of the index file each connection reads through a
+	// memory map instead of read calls into its own page cache: a page it
+	// has not read yet costs no system call and no copy. Writes still go
+	// through write calls, so the mapped pages stay clean and the kernel
+	// can drop them. On the large vault of level B a search took 4% less,
+	// and its first run after a start 10% less.
+	mmapSize = 256 << 20
 )
 
 type Index struct {
@@ -48,7 +55,8 @@ func Open(path string) (*Index, error) {
 	// commits heal at the next start. Under the default FULL every commit
 	// fsynced, which made the boot scan (thousands of small commits) take
 	// minutes on slow disks.
-	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(ON)")
+	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=foreign_keys(ON)"+
+		"&_pragma=mmap_size("+strconv.Itoa(mmapSize)+")")
 	if err != nil {
 		return nil, err
 	}
@@ -84,8 +92,9 @@ func Open(path string) (*Index, error) {
 // (IMP-127 iteration 2) adds links.field, the frontmatter key of a link; v5
 // (IMP-127 iteration 3) adds the authors table; v6 (BUG-121) adds notes.name
 // and links.target_key, the keys link resolution looks notes and unresolved
-// links up by (see noteKeys).
-const schemaVersion = 6
+// links up by (see noteKeys); v7 indexes the prefixes of one to three
+// characters in notes_fts (schema.sql).
+const schemaVersion = 7
 
 // ContentVersion identifies what an upsert extracts from a note: links,
 // tags, title, importance, note_fields and the FTS columns. Bump it whenever
@@ -106,7 +115,9 @@ func migrate(db *sql.DB) (bool, error) {
 	if err := db.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
 		return false, err
 	}
-	if v < 1 {
+	// The FTS table takes its columns (v1) and its prefix index (v7) only
+	// when created; the hashes a migration clears fill it again.
+	if v < 7 {
 		if _, err := db.Exec(`DROP TABLE IF EXISTS notes_fts`); err != nil {
 			return false, err
 		}
@@ -303,7 +314,7 @@ func stripNoteExt(p string) string {
 // extractForPath dispatches link/tag/title/fts-body extraction by note kind.
 // HTML notes use parser.ExtractHTML and index its plain-text projection (not the
 // raw markup) for FTS; markdown notes index the body after the frontmatter,
-// which goes to its own FTS column (see upsertLocked).
+// which goes to its own FTS column (see Extract).
 func extractForPath(path, body string) (links []parser.WikiLinkRef, tags []string, title, ftsBody string) {
 	if strings.HasSuffix(strings.ToLower(path), ".html") {
 		links, tags, title, ftsBody = parser.ExtractHTML([]byte(body))
@@ -324,7 +335,7 @@ func extractForPath(path, body string) (links []parser.WikiLinkRef, tags []strin
 // links unresolved, which lint reported as broken right after a write
 // (BUG-079).
 func (i *Index) Upsert(n NoteDoc) error {
-	_, err := i.upsertLocked(n, true)
+	_, err := i.upsertLocked(Extract(n), true)
 	return err
 }
 
@@ -333,8 +344,31 @@ func (i *Index) Upsert(n NoteDoc) error {
 // at the end reaches the same result as resolving note by note, the links of
 // each note and then the links elsewhere it answers, with fewer queries.
 func (i *Index) UpsertUnresolved(n NoteDoc) error {
-	_, err := i.upsertLocked(n, false)
+	_, err := i.upsertLocked(Extract(n), false)
 	return err
+}
+
+// UpsertMany stores the extracted notes like UpsertUnresolved, in order, in
+// one transaction. For bulk loads: the boot scan of 5,087 notes spent close
+// to half its time committing them one at a time, each commit writing its
+// pages to the WAL and flushing an FTS segment that later merges undid. A
+// failed note rolls back the whole batch, and the error names it.
+func (i *Index) UpsertMany(notes []Extracted) error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	sqlTx, err := i.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer sqlTx.Rollback()
+	tx := prepTx{sqlTx, i.stmts}
+	for _, e := range notes {
+		if _, err := upsertTx(tx, e, false); err != nil {
+			return fmt.Errorf("%s: %w", e.Path, err)
+		}
+	}
+	return sqlTx.Commit()
 }
 
 // Stamp is what the boot scan compares to decide whether a note needs
@@ -523,10 +557,41 @@ func reresolveLinks(tx prepTx, query string, args ...any) error {
 	return nil
 }
 
-// upsertLocked writes the note in one transaction. With resolve, its links
-// are stored with their target_path and the inbound links are resolved
-// before the commit; without, the links stay unresolved for a ResolveAll.
-func (i *Index) upsertLocked(n NoteDoc, resolve bool) (int64, error) {
+// Compact merges the full-text index into one segment (FTS5 'optimize').
+// A bulk load leaves it in many, and a search looks each of its terms up
+// in every one: on the benchmark's large vault, after the boot scan, the
+// median search took 42% less and the p95 17% less once merged, for 49 ms
+// of merging. The rows, and so the hits, stay the same.
+func (i *Index) Compact() error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	_, err := i.db.Exec(`INSERT INTO notes_fts(notes_fts) VALUES('optimize')`)
+	return err
+}
+
+// BulkLoad switches how FTS5 merges the segments of the full-text index:
+// on, for a scan that writes most of the vault, it merges none of them as
+// the batches go in, and a level only when it holds 64; off, its defaults,
+// a little at every write and a level at 16. Merging as it went, a bulk
+// load merged the same rows again and again: on a vault of 30,000 notes,
+// in native SQLite, a fifth to nearly half of the load. Compact, at the end,
+// merges them once.
+func (i *Index) BulkLoad(on bool) error {
+	automerge, crisismerge := 4, 16
+	if on {
+		automerge, crisismerge = 0, 64
+	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if _, err := i.db.Exec(`INSERT INTO notes_fts(notes_fts, rank) VALUES('automerge', ?)`, automerge); err != nil {
+		return err
+	}
+	_, err := i.db.Exec(`INSERT INTO notes_fts(notes_fts, rank) VALUES('crisismerge', ?)`, crisismerge)
+	return err
+}
+
+// upsertLocked writes the note in one transaction (upsertTx).
+func (i *Index) upsertLocked(e Extracted, resolve bool) (int64, error) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 
@@ -535,18 +600,57 @@ func (i *Index) upsertLocked(n NoteDoc, resolve bool) (int64, error) {
 		return 0, err
 	}
 	defer sqlTx.Rollback()
-	tx := prepTx{sqlTx, i.stmts}
+	id, err := upsertTx(prepTx{sqlTx, i.stmts}, e, resolve)
+	if err != nil {
+		return 0, err
+	}
+	if err := sqlTx.Commit(); err != nil {
+		return 0, err
+	}
+	return id, nil
+}
 
-	title := n.Title
-	links, tags, frontTitle, ftsBody := extractForPath(n.Path, n.Body)
+// Extracted is what an upsert stores of a note that its text alone decides:
+// the title, links, tags, fields, importance, hash and FTS columns. Taking
+// it needs no database and no lock, so a bulk load extracts notes on every
+// core while one goroutine writes them (Vault.Scan).
+type Extracted struct {
+	NoteDoc
+	title      string
+	links      []parser.WikiLinkRef
+	tags       []string
+	fields     []fieldRow
+	importance int
+	hash       string
+	ftsMeta    string
+	ftsBody    string
+}
+
+// Extract reads from the note's text what an upsert of it stores.
+func Extract(n NoteDoc) Extracted {
+	e := Extracted{NoteDoc: n, title: n.Title, hash: ContentHash(n)}
+	var frontTitle string
+	e.links, e.tags, frontTitle, e.ftsBody = extractForPath(n.Path, n.Body)
 	if frontTitle != "" {
-		title = frontTitle
+		e.title = frontTitle
 	}
 	meta := parser.FrontmatterRawForPath(n.Path, []byte(n.Body))
 	// The links of the frontmatter's values count as links too, each with
 	// its field (IMP-127 iteration 2): backlinks, graph and views see them.
-	links = append(links, parser.FrontmatterLinks(meta)...)
+	e.links = append(e.links, parser.FrontmatterLinks(meta)...)
+	e.fields = extractFields(meta, e.tags)
+	e.importance = parser.Importance(meta)
+	// meta's links as their words too (IMP-120); the fields and the
+	// frontmatter links above read the text as written.
+	e.ftsMeta = parser.SearchText(meta)
+	return e
+}
 
+// upsertTx writes the note's rows in tx, replacing those of the same path.
+// With resolve, its links are stored with their target_path and the inbound
+// links are resolved; without, the links stay unresolved for a ResolveAll.
+func upsertTx(tx prepTx, e Extracted, resolve bool) (int64, error) {
+	n, title := e.NoteDoc, e.title
 	var oldID sql.NullInt64
 	_ = tx.QueryRow(`SELECT id FROM notes WHERE path = ?`, n.Path).Scan(&oldID)
 	if oldID.Valid {
@@ -559,7 +663,7 @@ func (i *Index) upsertLocked(n NoteDoc, resolve bool) (int64, error) {
         INSERT INTO notes(path, name, title, mtime, size, importance, hash) VALUES(?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(path) DO UPDATE SET name=excluded.name, title=excluded.title, mtime=excluded.mtime,
             size=excluded.size, importance=excluded.importance, hash=excluded.hash
-    `, n.Path, noteName(n.Path), title, n.ModTime, n.Size, parser.Importance(meta), ContentHash(n)); err != nil {
+    `, n.Path, noteName(n.Path), title, n.ModTime, n.Size, e.importance, e.hash); err != nil {
 		return 0, err
 	}
 
@@ -578,7 +682,7 @@ func (i *Index) upsertLocked(n NoteDoc, resolve bool) (int64, error) {
 		return 0, err
 	}
 
-	for _, l := range links {
+	for _, l := range e.links {
 		var targetPath any
 		if resolve {
 			// Read through tx: it sees this note's new row, so a link to
@@ -590,13 +694,13 @@ func (i *Index) upsertLocked(n NoteDoc, resolve bool) (int64, error) {
 			return 0, err
 		}
 	}
-	for _, t := range tags {
+	for _, t := range e.tags {
 		if _, err := tx.Exec(`INSERT INTO tags(note_id, tag) VALUES(?,?)`, id, t); err != nil {
 			return 0, err
 		}
 	}
 
-	for _, f := range extractFields(meta, tags) {
+	for _, f := range e.fields {
 		if _, err := tx.Exec(`INSERT INTO note_fields(note_id, key, value, num, date, source) VALUES(?,?,?,?,?,?)`,
 			id, f.key, f.value, f.num, f.date, f.source); err != nil {
 			return 0, err
@@ -607,12 +711,8 @@ func (i *Index) upsertLocked(n NoteDoc, resolve bool) (int64, error) {
 		return 0, err
 	}
 
-	if _, err := tx.Exec(
-		`INSERT INTO notes_fts(rowid, title, meta, body) VALUES(?,?,?,?)`,
-		// meta's links as their words too (IMP-120); the fields and the
-		// frontmatter links above read the text as written.
-		id, title, parser.SearchText(meta), ftsBody,
-	); err != nil {
+	if _, err := tx.Exec(`INSERT INTO notes_fts(rowid, title, meta, body) VALUES(?,?,?,?)`,
+		id, title, e.ftsMeta, e.ftsBody); err != nil {
 		return 0, err
 	}
 
@@ -620,10 +720,6 @@ func (i *Index) upsertLocked(n NoteDoc, resolve bool) (int64, error) {
 		if err := resolveInbound(tx, n.Path, n.Title, title); err != nil {
 			return 0, err
 		}
-	}
-
-	if err := sqlTx.Commit(); err != nil {
-		return 0, err
 	}
 	return id, nil
 }

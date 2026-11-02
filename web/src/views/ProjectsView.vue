@@ -218,7 +218,13 @@ onMounted(() => {
     <!-- The window's title bar names the view, the heading is for screen
          readers; the flags' meaning is in the legend and in each chip's
          tooltip. -->
-    <h1 class="sr-only">{{ t('projects.title') }}</h1>
+    <h1
+      class="sr-only"
+      tabindex="-1"
+      data-window-heading
+    >
+      {{ t('projects.title') }}
+    </h1>
     <div class="mb-6 space-y-2">
       <p class="text-sm text-text-muted">
         {{ t('projects.intro') }}

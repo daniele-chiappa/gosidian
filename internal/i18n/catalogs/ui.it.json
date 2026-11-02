@@ -33,6 +33,7 @@
     "empty": "Nessuna finestra aperta.",
     "minimizedHint": "{n} ridotte nel footer ↓",
     "openFromSidebar": "Apri una nota dalla sidebar.",
+    "skipToWindow": "Vai alla finestra attiva",
     "minimizedLabel": "Ridotte:",
     "restore": "Ripristina",
     "viewStrip": "Striscia",
@@ -138,7 +139,11 @@
     "html_frame": "Nota HTML",
     "too_large": "Questa nota supera 1 MiB, più di quanto la web UI può salvare: si apre in sola lettura. Modificala con un editor o tramite git.",
     "too_large_to_save": "Il testo supera 1 MiB e la web UI non può salvarlo. Accorcialo o dividilo in più note.",
-    "preview_failed": "Non è stato possibile creare l'anteprima"
+    "preview_failed": "Non è stato possibile creare l'anteprima",
+    "draft_kept_at": "Modifiche non salvate delle {time}.",
+    "draft_kept_on": "Modifiche non salvate del {date}.",
+    "draft_restore": "Ripristina",
+    "draft_discard": "Scarta"
   },
   "note_create": {
     "title": "Nuova nota",
@@ -232,7 +237,9 @@
     "action_focus_desc": "Nasconde topbar e sidebar",
     "action_new_note_label": "Nuova nota",
     "action_new_note_desc": "Crea una nota vuota",
-    "no_matches": "Nessun risultato. Premi {key} per chiudere."
+    "no_matches": "Nessun risultato. Premi {key} per chiudere.",
+    "search_text": "Cerca «{query}» nel testo",
+    "title": "Vai a una nota, un progetto o un tag"
   },
   "layout": {
     "sidebar_resize_label": "Trascina per ridimensionare, double-click per reset",
@@ -248,7 +255,8 @@
     "totp_placeholder": "123 456 o xxxxx-xxxxx",
     "submitting": "Accesso…",
     "bad_credentials": "Nome utente, password o codice errati.",
-    "failed": "Accesso non riuscito"
+    "failed": "Accesso non riuscito",
+    "session_expired": "La sessione è scaduta: accedi di nuovo. Le modifiche non salvate restano in questo browser."
   },
   "note_edit": {
     "mode_editor": "Editor",
@@ -820,6 +828,8 @@
     "suggestions": "Note",
     "no_value": "Senza valore",
     "column_empty": "Nessuna nota",
+    "closed": "Chiuse",
+    "wip_over": "{column}: oltre il limite di {wip}.",
     "move_to": "Sposta {title} in…",
     "new_row": "Nuova riga",
     "new_row_in": "Nuova riga in {column}",
@@ -835,7 +845,8 @@
     "row_views": "Viste della riga",
     "count_notes": "nota | note",
     "created_by": "Creata da {who}",
-    "modified_by": "Modificata da {who}"
+    "modified_by": "Modificata da {who}",
+    "moved_to": "Spostata in {column}, al posto {place}"
   },
   "request_error": {
     "network": "Il server non risponde: controlla la connessione.",
@@ -871,7 +882,12 @@
     "project_placeholder": "progetto (facoltativo)",
     "searching": "Ricerca in corso…",
     "no_matches": "Nessun risultato per {query}.",
-    "failed": "Ricerca non riuscita"
+    "failed": "Ricerca non riuscita",
+    "missing": "Senza: {words}",
+    "count": "{n} risultato | {n} risultati",
+    "tip_spelling": "Controlla come sono scritte le parole.",
+    "clear_project": "Togli il filtro del progetto",
+    "in_titles": "Cerca nei titoli"
   },
   "query": {
     "title": "Query",
@@ -1180,7 +1196,8 @@
       "when": "Quando",
       "size": "Dimensione",
       "load_failed": "Impossibile leggere l'audit",
-      "actor_column": "Chi"
+      "actor_column": "Chi",
+      "count": "{n} riga | {n} righe"
     },
     "users": {
       "new": "Nuovo utente",

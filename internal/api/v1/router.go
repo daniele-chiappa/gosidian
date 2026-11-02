@@ -1,11 +1,13 @@
 package v1
 
 import (
+	"context"
 	"net/http"
 	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/chatbot"
+	"github.com/gosidian/gosidian/internal/fleet"
 	"github.com/gosidian/gosidian/internal/gitsync"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/infolder"
@@ -60,6 +62,16 @@ type Deps struct {
 	// Chat is the bots' service (IMP-191), nil while the pipelines are
 	// off: /chat answers 404.
 	Chat *chatbot.Service
+	// Cards moves the cards of boards (IMP-216): the MCP server, so that a
+	// person's move goes through the rules and the lock of an agent's. Nil
+	// edits a card's fields as any note's.
+	Cards Cards
+}
+
+// Cards moves a board's card for the person actor (mcp.Server.MoveCard):
+// the warning of a column past its limit, or a *fleet.MoveError.
+type Cards interface {
+	MoveCard(ctx context.Context, actor, rel string, m fleet.CardMove) (warning string, err error)
 }
 
 // Router owns the http.Handler tree under /api/v1/*. A separate type

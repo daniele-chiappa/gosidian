@@ -39,11 +39,11 @@ func (s *Server) bridgeHint(dataB64 string) string {
 // Called from registerTools().
 func (s *Server) registerAttachmentTools() {
 	s.impl.AddTool(mcp.NewTool("memory_upload_attachment",
-		mcp.WithDescription("Upload a file attachment to the vault and get a ready-to-splice markdown embed. CHEAPEST for large files: POST multipart (field 'file', bearer token) to the /upload endpoint — your MCP base URL plus /upload (drop a trailing /sse from the URL you configured); bytes travel over HTTP, not the model context. This tool takes ONE source: base64 `data`, server-side `source_path`, or `bridge_filename` (staged in the bridge dir). Size cap and allowed extensions are in bootstrap `capabilities`."),
-		mcp.WithString("bridge_filename", mcp.Description("PREFERRED for images/binaries: the basename of a file you staged in the server's bridge dir (GOSIDIAN_MCP_BRIDGE_DIR). The server reads it from there and consumes it — near-zero token cost (no base64 through the context).")),
-		mcp.WithString("data", mcp.Description("Base64-encoded file content. Costly for large files (~1 token/char) — prefer bridge_filename/source_path. Required only when neither of those is used.")),
-		mcp.WithString("source_path", mcp.Description("Absolute filesystem path to the file — RESOLVED ON THE SERVER, not the client. Use this when gosidian and the agent share a filesystem (local install, Docker volume mount, co-located deploy). For remote setups use 'data' or bridge_filename. Must be inside the vault, the bridge dir, or an allowed upload root (GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS).")),
-		mcp.WithString("filename", mcp.Description("Original filename for extension validation and link text. Required with data, optional with source_path/bridge_filename (defaults to basename).")),
+		mcp.WithDescription("Upload a file attachment to the vault and get a ready-to-splice markdown embed. CHEAPEST for large files: POST multipart (field 'file', bearer token) to the /upload endpoint, your MCP base URL plus /upload (drop a trailing /sse from the URL you configured): the bytes travel over HTTP, not the model context. This tool takes ONE source: base64 `data`, server-side `source_path`, or `bridge_filename` (staged in the bridge dir). Size cap and allowed extensions in bootstrap `capabilities`."),
+		mcp.WithString("bridge_filename", mcp.Description("PREFERRED for images/binaries: the basename of a file you staged in the server's bridge dir (GOSIDIAN_MCP_BRIDGE_DIR), which the server reads and consumes: near-zero tokens (no base64 through the context).")),
+		mcp.WithString("data", mcp.Description("Base64 file content, ~1 token/char: for large files prefer bridge_filename/source_path. Required only when neither of those is used.")),
+		mcp.WithString("source_path", mcp.Description("Absolute filesystem path to the file, RESOLVED ON THE SERVER, not the client. Use this when gosidian and the agent share a filesystem (local install, Docker volume mount, co-located deploy); for remote setups use 'data' or bridge_filename. Must be inside the vault, the bridge dir or an allowed upload root (GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS).")),
+		mcp.WithString("filename", mcp.Description("Original filename, for extension validation and link text. Required with data, optional with source_path/bridge_filename (defaults to basename).")),
 		mcp.WithString("project", mcp.Description("Optional project to store the attachment in. Empty stores at vault root.")),
 	), s.handleUploadAttachment)
 
@@ -70,13 +70,13 @@ func (s *Server) registerAttachmentTools() {
 	), s.handleAttachmentInfo)
 
 	s.impl.AddTool(mcp.NewTool("memory_upload_resource",
-		mcp.WithDescription("Upload a file resource decoupled from any note (returns the handle path/url/hash/mime/kind/size, no embed markdown) — the pre-uploader for the stage-then-attach pattern. CHEAPEST for large files: POST multipart (field 'file', bearer token) to the /upload endpoint (your MCP base URL plus /upload; drop a trailing /sse). ONE source: base64 `data`, `source_path`, or `bridge_filename`. Storage is <project>/attachments/<hash>.<ext>, magic-bytes verified; caps/extensions in bootstrap `capabilities`."),
+		mcp.WithDescription("Upload a file resource decoupled from any note (returns the handle path/url/hash/mime/kind/size, no embed markdown): the pre-uploader of the stage-then-attach pattern. CHEAPEST for large files: POST multipart (field 'file', bearer token) to the /upload endpoint (your MCP base URL plus /upload; drop a trailing /sse). ONE source: base64 `data`, `source_path`, or `bridge_filename`. Storage is <project>/attachments/<hash>.<ext>, magic-bytes verified; caps and extensions in bootstrap `capabilities`."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Vault project to store the resource in. Required (resources without a project context are rare and intentionally not auto-routed).")),
-		mcp.WithString("bridge_filename", mcp.Description("PREFERRED for images/binaries: the basename of a file you staged in the server's bridge dir (GOSIDIAN_MCP_BRIDGE_DIR). Read and consumed server-side — near-zero token cost.")),
-		mcp.WithString("data", mcp.Description("Base64-encoded file content. Costly for large files (~1 token/char) — prefer bridge_filename/source_path. Required only when neither of those is used.")),
-		mcp.WithString("source_path", mcp.Description("Absolute filesystem path to the file — RESOLVED ON THE SERVER, not the client. Use when gosidian and the agent share a filesystem. For remote setups use 'data' or bridge_filename. Must be inside the vault, the bridge dir, or an allowed upload root (GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS).")),
-		mcp.WithString("filename", mcp.Description("Original filename for extension validation. Required with data, optional with source_path/bridge_filename (defaults to basename).")),
-		mcp.WithString("kind", mcp.Description("Hint for caller branching: image | document | auto (default). Echoed back in the response — server resolves auto from the validated MIME family.")),
+		mcp.WithString("bridge_filename", mcp.Description("PREFERRED for images/binaries: the basename of a file you staged in the server's bridge dir (GOSIDIAN_MCP_BRIDGE_DIR), read and consumed server-side: near-zero tokens.")),
+		mcp.WithString("data", mcp.Description("Base64 file content, ~1 token/char: for large files prefer bridge_filename/source_path. Required only when neither of those is used.")),
+		mcp.WithString("source_path", mcp.Description("Absolute filesystem path to the file, RESOLVED ON THE SERVER, not the client. Use it when gosidian and the agent share a filesystem; for remote setups use 'data' or bridge_filename. Must be inside the vault, the bridge dir or an allowed upload root (GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS).")),
+		mcp.WithString("filename", mcp.Description("Original filename, for extension validation. Required with data, optional with source_path/bridge_filename (defaults to basename).")),
+		mcp.WithString("kind", mcp.Description("Hint for the caller's branching: image | document | auto (default), echoed back; the server resolves auto from the validated MIME family.")),
 	), s.handleUploadResource)
 }
 

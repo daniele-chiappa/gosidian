@@ -14,7 +14,9 @@ scrollable strip.
 
 - **Open** a note from the sidebar tree, a wikilink, search, or the
   command palette (`⌘K` / `Ctrl-K`); each opens to the right of the
-  focused window.
+  focused window, and the focus goes to the window's title, which a
+  screen reader says: `Tab` goes on to its first control. The windows a
+  reload brings back leave the focus where it is.
 - **Resize** in discrete steps (small → medium → full) with the window's
   resize button.
 - **Minimize** a window to a horizontally-scrollable footer; click to
@@ -24,11 +26,56 @@ scrollable strip.
 - **Edit in place**: a note window has a View/Edit toggle; the editor
   mounts lazily in the same window. Where nothing can be edited (a
   read-only account, a base, a canvas) there is no toggle.
+- **Drafts**: while you edit, the unsaved text is also kept in this
+  browser, per account and note, so a session that ends, a reload, a
+  crash or a window closed with unsaved changes does not lose it. When
+  the note opens again it offers *Restore* or *Discard*; a restored draft
+  saves on the version it was written on, so a note changed meanwhile
+  asks before it is overwritten. A draft goes when the note is saved,
+  with *Load the saved version*, when the note is deleted, at sign-out,
+  when another account signs in here, and after the longest session
+  (`GOSIDIAN_LOGIN_SESSION_MAX_TTL`).
 - **Navigate** focus between windows with `Alt-←` / `Alt-→`.
+- **Close or minimize**: the focus goes back where the window was opened
+  from, if that is still on the page, or else to the title of the window
+  that takes over, and to the main once no window is left; a window
+  restored from the footer takes it on its title, and so does the window
+  `Alt-←` / `Alt-→` move to.
+- **Tabs**: the bar's *Tabs* button shows one window at a time, each
+  with its tab. The tabs are one `Tab` stop, which a screen reader hears
+  as tabs: the arrows go from one to the next, `Home` and `End` to the
+  first and the last, `Delete` closes the tab's window. *Strip* goes
+  back to the windows side by side.
+- **Skip to the active window**: the first `Tab` from the top of the
+  page shows this link, which takes the focus past the bar and the
+  sidebar to the title of the focused window. A screen reader also jumps
+  by landmark (the bar, the vault sidebar, the main with the windows) and
+  by heading: each window opens on its title and goes down one level at a
+  time, and a desk with no windows says so in its heading.
+- **The focus stays where you work**: a note just made opens with the
+  focus in its editor; a creation the server refuses puts it on the name,
+  with the reason; a field of the properties, once saved, and a card
+  moved on a board, in its new column, keep it; the palette closed with
+  `Esc` gives it back where it was opened. *Save* stays in the `Tab`
+  order with nothing to save, and does nothing then. A note that reloads
+  itself, as when a field is saved, stays on screen until its new version
+  is there.
+- **Screen readers** hear what changes under the keyboard, from one live
+  region of the shell: a save, a card moved on a board, how many notes a
+  search found (or that none did), how many entries an audit filter
+  keeps, a change made elsewhere to the note being edited. The command
+  palette says which entry the arrows are on
+  ([editor → command palette](editor.md#command-palette)).
+- **Tab title**: the browser's tab says the focused window and its
+  project, `nota-alfa · agile-lab · gosidian`, so two tabs of gosidian
+  are told apart; the login page says `Sign in · gosidian` (`Sign up`
+  for an invite), the consent page the client it authorizes.
 - **Confirm**: a delete, a revoke or a rename asks in gosidian's own
-  dialog, in the language of the UI: `Enter` confirms, `Esc` cancels.
-  Closing a window with unsaved changes still asks with the browser's
-  dialog.
+  dialog, in the language of the UI, and `Esc` cancels. A delete or a
+  revoke opens on *Cancel*, so an `Enter` pressed out of habit loses
+  nothing: `Tab` reaches the red button. A rename opens on its field,
+  where `Enter` confirms. Closing a window with unsaved changes still
+  asks with the browser's dialog.
 
 The open windows + focus are encoded in the URL (`?w=…&f=…`), so a
 workspace is shareable and survives reload; when the URL is empty the
@@ -52,6 +99,19 @@ working):
 | `/settings` | theme preset, language, git sync |
 | `/admin/*` | users, tokens, invites, audit (owner only) |
 | `/trash` | soft-deleted notes, folders and projects (if enabled); a note or a folder comes back to its project, for who can write there; a project comes back with the access it had: who could read it sees it, who administered it (or the owner) restores or purges it |
+
+## Search window
+
+**Search** (the top bar's button, or **Menu → Search**) looks for words
+in the notes' text, in every project the account reads or in the one
+named in its second field. Above the hits it says how many it found.
+Each hit shows its title with its project beside, so two notes titled
+alike are told apart, then its path and a few lines of its text; a hit
+that lacks some words of the query says which. When nothing is found,
+it suggests checking the spelling, has a button that removes the project
+filter when there is one, and one that looks for the text in the names,
+in the command palette (`Ctrl+K`, see
+[editor → command palette](editor.md#command-palette)).
 
 ## Query window
 

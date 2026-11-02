@@ -5,7 +5,7 @@
 
 services:
   gosidian:
-    image: ${SMOKE_GOSIDIAN_IMAGE:-ghcr.io/daniele-chiappa/gosidian:v2.118.2}
+    image: ${SMOKE_GOSIDIAN_IMAGE:-ghcr.io/daniele-chiappa/gosidian:v2.130.0}
     depends_on:
       fake:
         condition: service_started

@@ -28,7 +28,13 @@ onMounted(() => emit('title', t('uploads.window_title')))
 <template>
   <div class="p-6 max-w-4xl mx-auto text-sm space-y-3" data-uploads-window>
     <div class="flex items-center gap-3">
-      <h1 class="text-base font-semibold">{{ t('uploads.window_title') }}</h1>
+      <h1
+        class="text-base font-semibold"
+        tabindex="-1"
+        data-window-heading
+      >
+        {{ t('uploads.window_title') }}
+      </h1>
       <span class="flex-1" />
       <button
         v-if="uploads.jobs.some((j) => j.state === 'done')"

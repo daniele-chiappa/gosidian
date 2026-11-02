@@ -184,7 +184,13 @@ onMounted(async () => {
 <template>
   <div class="p-6 max-w-5xl mx-auto">
     <!-- The window's title bar shows the name: the heading is for screen readers. -->
-    <h1 class="sr-only">{{ t('query.title') }}</h1>
+    <h1
+      class="sr-only"
+      tabindex="-1"
+      data-window-heading
+    >
+      {{ t('query.title') }}
+    </h1>
     <p class="text-sm text-text-muted mb-4">
       {{ t('query.intro') }}
     </p>

@@ -13,7 +13,7 @@
  * Restores manual note creation, which the v2.0 HTMX→Vue migration never
  * ported (IMP-058); the backend (POST /notes, POST /attach) was already there.
  */
-import { ref, computed, inject } from 'vue'
+import { ref, computed, inject, nextTick, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { createNote } from '@/api/notes'
 import { attachFile } from '@/api/attach'
@@ -50,6 +50,17 @@ const caption = ref('')
 const file = ref<File | null>(null)
 const creating = ref(false)
 const error = ref<string | null>(null)
+// The field to fix takes the focus, with the reason tied to it (IMP-217,
+// F-04): the image not chosen, or the name the server refused.
+const errorAt = ref<'name' | 'image' | null>(null)
+const errorId = `create-error-${useId()}`
+const nameEl = ref<HTMLInputElement | null>(null)
+const fileEl = ref<HTMLInputElement | null>(null)
+function fail(text: string, at: 'name' | 'image') {
+  error.value = text
+  errorAt.value = at
+  void nextTick(() => (at === 'image' ? fileEl : nameEl).value?.focus())
+}
 
 const slug = computed(() =>
   name.value
@@ -71,11 +82,12 @@ function frontmatter(extra: [string, string | string[]][] = []): string {
 async function submit() {
   if (!slug.value || creating.value) return
   if (kind.value === 'image' && !file.value) {
-    error.value = t('note_create.err_choose_image')
+    fail(t('note_create.err_choose_image'), 'image')
     return
   }
   creating.value = true
   error.value = null
+  errorAt.value = null
   try {
     let content: string
     let mode: 'edit' | undefined
@@ -119,10 +131,11 @@ async function submit() {
       type: 'note',
       key: planciaKey('note', created.path),
       title: created.title || created.path,
-      props: { path: created.path, ...(mode ? { mode } : {}) },
+      // A note to write goes on in its editor, with the focus there (IMP-217, F-04).
+      props: { path: created.path, ...(mode ? { mode, editorFocus: true } : {}) },
     })
   } catch (e) {
-    error.value = errorText(e, t, t('note_create.err_failed'))
+    fail(errorText(e, t, t('note_create.err_failed')), 'name')
   } finally {
     creating.value = false
   }
@@ -132,7 +145,13 @@ async function submit() {
 <template>
   <div class="p-6 max-w-xl mx-auto">
     <!-- The window's title bar names it: the heading is for screen readers. -->
-    <h1 class="sr-only">{{ t('note_create.title') }}</h1>
+    <h1
+      class="sr-only"
+      tabindex="-1"
+      data-window-heading
+    >
+      {{ t('note_create.title') }}
+    </h1>
     <p class="text-sm text-text-muted mb-5">
       {{ t('note_create.location_prefix') }} <span class="font-mono">{{ folder || t('note_create.root') }}/</span>
     </p>
@@ -167,8 +186,11 @@ async function submit() {
       <label class="block">
         <span class="text-sm text-text-muted">{{ t('note_create.name_label') }}</span>
         <input
+          ref="nameEl"
           v-model="name"
           type="text"
+          :aria-invalid="errorAt === 'name' || undefined"
+          :aria-describedby="errorAt === 'name' ? errorId : undefined"
           :placeholder="t('note_create.name_placeholder')"
           class="mt-1 h-control py-0 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
         >
@@ -210,8 +232,11 @@ async function submit() {
         <label class="block">
           <span class="text-sm text-text-muted">{{ t('note_create.image_label') }}</span>
           <input
+            ref="fileEl"
             type="file"
             accept="image/*"
+            :aria-invalid="errorAt === 'image' || undefined"
+            :aria-describedby="errorAt === 'image' ? errorId : undefined"
             class="mt-1 w-full text-sm file:mr-3 file:rounded file:border-0 file:bg-accent file:text-accent-fg file:px-3 file:py-1.5 file:cursor-pointer"
             @change="onFile"
           >
@@ -227,7 +252,12 @@ async function submit() {
         </label>
       </template>
 
-      <ErrorMessage v-if="error" :text="error" class="text-sm" />
+      <ErrorMessage
+        v-if="error"
+        :id="errorId"
+        :text="error"
+        class="text-sm"
+      />
 
       <div class="flex gap-2 pt-1">
         <button

@@ -27,25 +27,25 @@ import (
 // Called from registerTools().
 func (s *Server) registerIngestTool() {
 	s.impl.AddTool(mcp.NewTool("memory_ingest",
-		mcp.WithDescription("Save a file into the vault with automatic routing — the ONE tool for \"store this file/report\". Provide the file ONE way, cheapest first: `bridge_filename` (staged in the server's bridge dir), `source_path` (server-side path inside an allowed upload root), `url` (the server fetches it — allowlisted prefixes only), `attachment` (vault path of a file already uploaded), or base64 `data` (small files only). Remote agents with a shell: pass `transfer:\"http\"` instead of a source to mint a single-use upload URL, then POST the bytes there (no bearer needed). Routing by extension: .csv → table note, image → media note, .md/.html → the note itself (body read server-side, no tokens through the context), anything else → plain attachment. Force a kind with `as`. "+
-			"`as: \"package\"` imports a whole folder or .zip in one call (a folder or .zip staged in the bridge dir, a server folder or .zip in source_path, base64 zip data, or transfer:\"http\" for a .zip) under `dest`: .md/.html become notes keeping their paths inside the package, other accepted files attachments; relative links between files of the package become wikilinks, a note without frontmatter gets a title and the project's tag. All or nothing: a note already there stops it unless overwrite:true; dry_run:true shows the plan without writing. One write of the rate limit."),
+		mcp.WithDescription("Save a file into the vault with automatic routing: the ONE tool for \"store this file/report\". Give the file ONE way, cheapest first: `bridge_filename` (staged in the server's bridge dir), `source_path` (a server-side path inside an allowed upload root), `url` (the server fetches it, allowlisted prefixes only), `attachment` (vault path of a file already uploaded), or base64 `data` (small files only). A remote agent with a shell: pass `transfer:\"http\"` instead of a source to mint a single-use upload URL, then POST the bytes there (no bearer needed). Routing by extension: .csv → table note and image → media note where those formats are on, else a plain attachment; .md → the note itself (body read server-side, no tokens through the context), and .html too where html notes are on (else refused); anything else → plain attachment. `as` forces a kind. "+
+			"`as: \"package\"` imports a whole folder or .zip in one call (staged in the bridge dir, a server folder or .zip in source_path, base64 zip data, or transfer:\"http\" for a .zip) under `dest`: .md/.html become notes keeping their paths inside the package (.html only where html notes are on, else left out), other accepted files attachments; relative links between its files become wikilinks, a note without frontmatter gets a title and the project's tag. All or nothing: a note already there stops it unless overwrite:true; dry_run:true shows the plan without writing. One write of the rate limit."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Vault project to store into.")),
-		mcp.WithString("bridge_filename", mcp.Description("Basename of a file you staged in the server's bridge dir (GOSIDIAN_MCP_BRIDGE_DIR). Read and consumed server-side — near-zero token cost (co-located deploys).")),
-		mcp.WithString("source_path", mcp.Description("Absolute server-side filesystem path. Must be inside the vault, the bridge dir, or an allowed upload root (GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS).")),
-		mcp.WithString("url", mcp.Description("http(s) URL the SERVER fetches the file from (CI artifacts, internal screenshot services). Gated by the GOSIDIAN_INGEST_URL_ALLOWLIST prefix allowlist; disabled when unset.")),
-		mcp.WithString("attachment", mcp.Description("Vault-relative path of an already-uploaded attachment to promote into a table/media note without re-uploading.")),
-		mcp.WithString("data", mcp.Description("Base64-encoded content. Costly for large files (~1 token/char) — prefer bridge_filename/source_path. Requires filename.")),
-		mcp.WithString("transfer", mcp.Description("Pass \"http\" (with NO source) to mint a single-use upload ticket: the response carries the endpoint to POST the file to (multipart, field 'file', no Authorization header — the ticket is the credential, TTL ~5 min). On receipt the server executes this call's intent (as/note_path/title/caption/overwrite).")),
-		mcp.WithString("filename", mcp.Description("Original filename for extension detection/validation. Required with data, optional otherwise (defaults to the source basename or the uploaded file's name).")),
-		mcp.WithString("as", mcp.Description("Force the result kind instead of routing by extension: auto (default) | table | media | note | attachment | package (a folder or .zip imported whole under dest).")),
-		mcp.WithString("dest", mcp.Description("as: package only — the vault folder the package goes into, inside project (e.g. 'proj/docs/guide').")),
-		mcp.WithBoolean("dry_run", mcp.Description("as: package only — return the plan (notes, attachments, files left out, notes that would need overwrite, unresolved links) without writing.")),
-		mcp.WithString("note_path", mcp.Description("Explicit vault-relative note path for the table/media/note result (e.g. 'proj/report-2026-07.md'). Derived from the filename/title when omitted.")),
-		mcp.WithString("title", mcp.Description("Table/media notes: note title. Defaults to the filename stem.")),
-		mcp.WithString("caption", mcp.Description("Table/media notes: markdown body describing the content — the searchable text. Strongly recommended.")),
-		mcp.WithBoolean("overwrite", mcp.Description("Note kind and package: replace the notes that already exist. Default false (fail on existing).")),
-		mcp.WithString("if_match", mcp.Description("Note kind only, with overwrite: etag from a previous memory_get — the replace fails if the note changed since you read it.")),
-		mcp.WithBoolean("allow_shrink", mcp.Description("With overwrite, for a note or the notes of a package: confirm a content much shorter than the note it replaces. Default false: as for memory_update, the shrink guard refuses a content that would empty the note (a package is then not imported at all).")),
+		mcp.WithString("bridge_filename", mcp.Description("Basename of a file you staged in the server's bridge dir (GOSIDIAN_MCP_BRIDGE_DIR), read and consumed server-side: near-zero tokens (co-located deploys).")),
+		mcp.WithString("source_path", mcp.Description("Absolute server-side path. Must be inside the vault, the bridge dir or an allowed upload root (GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS).")),
+		mcp.WithString("url", mcp.Description("http(s) URL the SERVER fetches the file from (CI artifacts, internal screenshot services), within the GOSIDIAN_INGEST_URL_ALLOWLIST prefixes; off when that is unset.")),
+		mcp.WithString("attachment", mcp.Description("Vault path of an attachment already uploaded, to promote into a table/media note without uploading it again.")),
+		mcp.WithString("data", mcp.Description("Base64 content, ~1 token/char: for large files prefer bridge_filename/source_path. Requires filename.")),
+		mcp.WithString("transfer", mcp.Description("\"http\" (with NO source) mints a single-use upload ticket: the response carries the endpoint to POST the file to (multipart, field 'file', no Authorization header: the ticket is the credential, TTL ~5 min). On receipt the server runs this call's intent (as/note_path/title/caption/overwrite).")),
+		mcp.WithString("filename", mcp.Description("Original filename, whose extension routes and validates the file. Required with data; otherwise defaults to the source basename or the uploaded file's name.")),
+		mcp.WithString("as", mcp.Description("Force the kind instead of routing by extension: auto (default) | table | media | note | attachment | package (a folder or .zip imported whole under dest).")),
+		mcp.WithString("dest", mcp.Description("as: package only: the vault folder it goes into, inside project (e.g. 'proj/docs/guide').")),
+		mcp.WithBoolean("dry_run", mcp.Description("as: package only: the plan (notes, attachments, files left out, notes that would need overwrite, unresolved links) without writing.")),
+		mcp.WithString("note_path", mcp.Description("Vault path of the table/media/note result (e.g. 'proj/report-2026-07.md'); derived from the filename/title when omitted.")),
+		mcp.WithString("title", mcp.Description("Table/media notes: the title, default the filename stem.")),
+		mcp.WithString("caption", mcp.Description("Table/media notes: markdown body describing the content, the searchable text. Strongly recommended.")),
+		mcp.WithBoolean("overwrite", mcp.Description("Note kind and package: replace notes that already exist. Default false (fail on existing).")),
+		mcp.WithString("if_match", mcp.Description("Note kind only, with overwrite: etag from a previous memory_get; the replace fails if the note changed since you read it.")),
+		mcp.WithBoolean("allow_shrink", mcp.Description("With overwrite, for a note or a package's notes: confirm a content much shorter than the note it replaces. Default false: as for memory_update, the shrink guard refuses a content that would empty the note (a package is then not imported at all).")),
 	), s.handleIngest)
 }
 
@@ -58,6 +58,13 @@ const (
 	ingestNote       ingestKind = "note"
 	ingestAttachment ingestKind = "attachment"
 )
+
+// formatTurnOn says how a note format off comes on: it is the instance's
+// configuration, read at start, not a switch of a project (BUG-141).
+func formatTurnOn(key string) string {
+	return "an admin turns them on in the instance's configuration, [vault] " + key +
+		" or GOSIDIAN_VAULT_" + strings.ToUpper(key) + ", and restarts it"
+}
 
 // resolveIngestKind maps (as, ext) to the ingestion kind. In auto mode a
 // table/media route whose vault flag is off degrades to a plain attachment
@@ -78,12 +85,12 @@ func (s *Server) resolveIngestKind(as, ext string) (ingestKind, string, *mcp.Cal
 			if s.vault.TableNotesEnabled() {
 				return ingestTable, "", nil
 			}
-			return ingestAttachment, "table_notes is disabled on this instance, so the CSV was stored as a plain attachment. An admin can enable [vault] table_notes (project toggle-UI or GOSIDIAN_VAULT_TABLE_NOTES) to get paginated table notes.", nil
+			return ingestAttachment, "table_notes is disabled on this instance, so the CSV was stored as a plain attachment. For paginated table notes, " + formatTurnOn("table_notes") + ".", nil
 		case isImage:
 			if s.vault.MediaNotesEnabled() {
 				return ingestMedia, "", nil
 			}
-			return ingestAttachment, "media_notes is disabled on this instance, so the image was stored as a plain attachment. An admin can enable [vault] media_notes (project toggle-UI or GOSIDIAN_VAULT_MEDIA_NOTES) to get first-class media notes.", nil
+			return ingestAttachment, "media_notes is disabled on this instance, so the image was stored as a plain attachment. For first-class media notes, " + formatTurnOn("media_notes") + ".", nil
 		case isNoteExt:
 			return ingestNote, "", nil
 		case ext == "":
@@ -325,7 +332,7 @@ func (s *Server) ingestNoteFromSource(ctx context.Context, project, ext, fnForEx
 // with CAS, synchronous index, audit and event publish.
 func (s *Server) writeIngestedNote(ctx context.Context, project, ext, fnForExt, notePath string, content []byte, overwrite, allowShrink bool, ifMatch, hint string) (*mcp.CallToolResult, error) {
 	if ext == ".html" && !s.vault.HTMLNotesEnabled() {
-		return mcp.NewToolResultError("html notes are disabled on this instance — a per-project flag an admin can flip live from the web UI project toggles (or [vault] html_notes / GOSIDIAN_VAULT_HTML_NOTES)"), nil
+		return mcp.NewToolResultError("html notes are disabled on this instance: " + formatTurnOn("html_notes")), nil
 	}
 	if notePath == "" {
 		notePath = project + "/" + filepath.Base(fnForExt)

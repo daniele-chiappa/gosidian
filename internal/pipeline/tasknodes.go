@@ -53,7 +53,7 @@ func taskPath(env *Env, with map[string]any) (string, error) {
 func taskOutput(t fleet.Task) map[string]any {
 	return map[string]any{"path": t.Path, "title": t.Title, "status": t.Status, "assignee": t.Assignee, "team": t.Team,
 		"parent": t.Parent, "depends_on": nonNil(t.DependsOn), "paths": nonNil(t.Paths), "forbid": nonNil(t.Forbid),
-		"budget_usd": t.BudgetUSD, "cost_usd": t.CostUSD, "tokens": t.Tokens, "attempts": t.Attempts, "rounds": t.Rounds}
+		"budget_usd": t.BudgetUSD, "cost_usd": t.CostUSD, "tokens": t.Tokens, "attempts": t.Attempts, "rounds": t.Rounds, "branch": t.Branch}
 }
 
 func nonNil(xs []string) []string {
@@ -65,7 +65,7 @@ func nonNil(xs []string) []string {
 
 func roleOutput(r fleet.Role) map[string]any {
 	return map[string]any{"name": r.Name, "agent": r.Agent, "run": r.Run, "model": r.Model, "effort": r.Effort,
-		"max_turns": r.MaxTurns, "max_seconds": r.MaxSeconds, "max_tokens": r.MaxTokens, "repo": r.Repo, "host": r.Host,
+		"max_turns": r.MaxTurns, "max_seconds": r.MaxSeconds, "max_tokens": r.MaxTokens, "access": r.Access, "repo": r.Repo, "host": r.Host,
 		"paths": nonNil(r.Paths), "forbid": nonNil(r.Forbid), "checks": r.Checks, "writes": nonNil(r.Writes),
 		"preview": r.Preview, "delegates_to": nonNil(r.DelegatesTo), "approve": r.Approve}
 }
@@ -195,7 +195,7 @@ func loadTaskCtx(env *Env, with map[string]any, extra string) (*taskCtx, error) 
 
 // reportsNote tells an agent how to read the reports of other tasks: the
 // pipeline's facts first, then the agent's own words (IMP-195, the pilot).
-const reportsNote = "Each report starts with what the pipeline itself found (the files, the notes written, the checks it ran, the preview, a person's answer, the merge): those are facts. The rest is the agent's own account; the agents run no checks themselves. A report's headings are two levels below the agent's (its # is ###): the task's note keeps them inside its section."
+const reportsNote = "Each report starts with what the pipeline itself found (the files, the notes written, the checks it ran, the preview, a person's answer, the merge): those are facts. The rest is the agent's own account: a check an agent says it ran is not the pipeline's. A report's headings are two levels below the agent's (its # is ###): the task's note keeps them inside its section."
 
 func (c *taskCtx) writePrompt(extra string) string {
 	t, team, role := c.task, c.team, c.role
@@ -209,6 +209,16 @@ func (c *taskCtx) writePrompt(extra string) string {
 	}
 	if len(c.forbid) > 0 {
 		b.WriteString("Never change: " + strings.Join(c.forbid, ", ") + ".\n")
+	}
+	if role.Checks != "" {
+		if role.Access == fleet.AccessExec {
+			// The commit takes every file left in the work tree that the
+			// repository does not ignore: a build of the checks (dist/)
+			// would come with it, outside the paths (the lab, 2026-10-27).
+			b.WriteString("Run the role's checks in repo/ before you finish: `" + role.Checks + "`. Then delete the files they made that `git status` lists as untracked: the commit takes every file you leave in repo/. The pipeline runs the checks again on your branch, and its run is the one that counts.\n")
+		} else {
+			b.WriteString("The pipeline runs the role's checks on your branch after you: `" + role.Checks + "`. You cannot run them.\n")
+		}
 	}
 	if len(role.Writes) > 0 {
 		b.WriteString("You may write notes of the vault only in: " + strings.Join(role.Writes, ", ") + ".\n")
@@ -238,6 +248,9 @@ func (c *taskCtx) writePrompt(extra string) string {
 			} else if r.Repo == "" && r.Host == "" {
 				b.WriteString(" and writes nothing")
 			}
+			if r.Access == fleet.AccessExec {
+				b.WriteString(", runs commands")
+			}
 			if r.Checks != "" {
 				fmt.Fprintf(&b, ", checks `%s` run by the pipeline", r.Checks)
 			}
@@ -246,7 +259,7 @@ func (c *taskCtx) writePrompt(extra string) string {
 			}
 			b.WriteString(")\n")
 		}
-		b.WriteString("An agent with a repository edits its files and runs nothing: the pipeline runs the role's checks on its branch and merges after the approval. Ask an agent for neither.\n")
+		b.WriteString("The pipeline runs a role's checks on the agent's branch and merges after the approval: ask an agent for neither. An agent with a repository edits its files; only one that runs commands can run anything itself.\n")
 		b.WriteString("Give the work on a repository only to a role that has it: a role without one cannot open its files, only the reports about them.\n")
 		if team.Split == fleet.SplitCraft {
 			b.WriteString("Split the work along a chain of crafts, each task passing its result to the next.\n")
@@ -331,9 +344,19 @@ func taskUpdate(_ context.Context, env *Env, with map[string]any) (any, error) {
 	}
 	status, _ := with["status"].(string)
 	message, _ := with["message"].(string)
+	// branch: the branch the next attempt continues ("" none), when the
+	// node says one.
+	branch, setBranch := with["branch"].(string)
 	at := env.Engine.now().In(clock.Location())
 	t, err := fl.UpdateTask(p, func(cur fleet.Task, content []byte) ([]byte, error) {
-		return fleet.Update(cur, content, "run-"+env.Run.ID, status, message, at)
+		out, err := fleet.Update(cur, content, "run-"+env.Run.ID, status, message, at)
+		if err != nil || !setBranch {
+			return out, err
+		}
+		if b := strings.TrimSpace(branch); b != "" {
+			return fleet.Set(out, map[string]any{fleet.KeyBranch: b})
+		}
+		return fleet.Set(out, nil, fleet.KeyBranch)
 	}, Actor(env.Run.Ref))
 	if err != nil {
 		return nil, err

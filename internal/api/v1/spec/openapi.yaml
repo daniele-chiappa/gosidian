@@ -63,10 +63,12 @@ components:
       scheme: bearer
       bearerFormat: gsp_<base64url>
       description: |
-        Bearer token issued by `POST /api/v1/login`. Sliding TTL 24h,
-        absolute hard expiry 7d. Refresh via `POST /api/v1/refresh`
-        before `expires_at`; full re-login required after the hard
-        expiry regardless of refresh activity.
+        Bearer token issued by `POST /api/v1/login`. Sliding TTL 24h
+        (`webauth.session_ttl`), absolute hard expiry 7d
+        (`webauth.session_max_ttl`) by default. Refresh via
+        `POST /api/v1/refresh` before `expires_at`, which is never past
+        `hard_expiry`; full re-login required after the hard expiry
+        regardless of refresh activity.
 
   schemas:
     ErrorResponse:
@@ -722,10 +724,44 @@ paths:
   /api/v1/note-titles:
     get:
       tags: [notes]
-      summary: Wikilink autocomplete source (Phase 4).
+      summary: Notes by name, for the wikilink suggestions of the editor and of a relation field.
+      description: >-
+        With q, the notes the account can read whose title or file name (the
+        last part of the path, without its extension) contains q, ignoring
+        case; the body does not count. A title that starts with q comes
+        first, then a file name that starts with it, then a title that
+        contains it, then a file name; within each, by title and path.
+        Without q, the notes edited last.
+      parameters:
+        - in: query
+          name: q
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
       responses:
-        "501":
-          $ref: "#/components/responses/NotImplemented"
+        "200":
+          description: The notes, best first.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [title, path]
+                      properties:
+                        title: {type: string}
+                        path: {type: string}
 
   /api/v1/tree:
     get:
@@ -818,9 +854,56 @@ paths:
   /api/v1/search:
     get:
       tags: [search]
+      summary: Full-text search of the notes the account can read (the SPA's search).
+      description: >-
+        Ranked as memory_search ranks them. The notes with every word of q
+        come first; when they are fewer than limit, the notes with one of
+        its less common words (in at most 10% of the notes) follow them,
+        each with the words it lacks in missing. Snippets are plain text.
+      parameters:
+        - in: query
+          name: q
+          required: true
+          schema:
+            type: string
+          description: Free-text query; each word is prefix-matched.
+        - in: query
+          name: project
+          required: false
+          schema:
+            type: string
+          description: Restrict the search to one top-level folder.
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 20
       responses:
-        "501":
-          $ref: "#/components/responses/NotImplemented"
+        "200":
+          description: The hits, best first.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hits:
+                    type: array
+                    items:
+                      type: object
+                      required: [path, title, snippet]
+                      properties:
+                        path: {type: string}
+                        title: {type: string}
+                        snippet: {type: string}
+                        missing:
+                          type: array
+                          items: {type: string}
+                          description: The words of q the note lacks; only on a partial hit.
+        "400":
+          description: No q.
 
   /api/v1/query:
     post:

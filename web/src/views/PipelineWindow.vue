@@ -319,6 +319,13 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="flex h-full flex-col gap-2 overflow-auto p-4" data-pipeline-window @keydown="onKey">
+    <h1
+      class="sr-only"
+      tabindex="-1"
+      data-window-heading
+    >
+      {{ t('pipeline_editor.window_title', { name: base(path) }) }}
+    </h1>
     <div class="flex flex-wrap items-center gap-2 text-sm">
       <span class="font-mono text-xs text-text-muted">{{ path }}</span>
       <span class="flex-1" />

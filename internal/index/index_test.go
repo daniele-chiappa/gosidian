@@ -1,6 +1,8 @@
 package index
 
 import (
+	"context"
+	"database/sql"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -311,5 +313,88 @@ func TestUpsert_EmptyName(t *testing.T) {
 	upsert(t, idx, "p/.md", "", "body")
 	if n, err := idx.Note("p/.md"); err != nil || n == nil {
 		t.Errorf("p/.md not indexed: %v", err)
+	}
+}
+
+// Every connection of the pool reads the index through a memory map, not
+// only the first one.
+func TestOpen_EveryConnectionMapsTheFile(t *testing.T) {
+	idx := openTest(t)
+	ctx := context.Background()
+	var conns []*sql.Conn
+	for range 3 {
+		c, err := idx.db.Conn(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		conns = append(conns, c)
+	}
+	for k, c := range conns {
+		var n int64
+		if err := c.QueryRowContext(ctx, `PRAGMA mmap_size`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != mmapSize {
+			t.Errorf("connection %d: mmap_size %d, want %d", k, n, mmapSize)
+		}
+		c.Close()
+	}
+}
+
+// An index from v6 has a full-text table without the prefix index, which
+// only a new table gets: the migration recreates it and clears every hash,
+// so the boot scan fills it again.
+func TestOpen_MigratesV6Index(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v6.db")
+	idx, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	upsert(t, idx, "p/a.md", "a", "di stampa")
+	if _, err := idx.db.Exec(`DROP TABLE notes_fts;
+		CREATE VIRTUAL TABLE notes_fts USING fts5(title, meta, body, tokenize='unicode61 remove_diacritics 2');
+		PRAGMA user_version = 6`); err != nil {
+		t.Fatal(err)
+	}
+
+	idx = reopen(t, idx, path)
+	var v int
+	if err := idx.db.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil || v != schemaVersion {
+		t.Fatalf("user_version = %d (%v), want %d", v, err, schemaVersion)
+	}
+	var ddl string
+	if err := idx.db.QueryRow(`SELECT sql FROM sqlite_master WHERE name = 'notes_fts'`).Scan(&ddl); err != nil || !strings.Contains(ddl, "prefix='1 2 3'") {
+		t.Fatalf("notes_fts after the migration: %q (%v)", ddl, err)
+	}
+	if s := stampOf(t, idx, "p/a.md"); s.Hash != "" {
+		t.Errorf("migrated note has a hash: %+v", s)
+	}
+	upsert(t, idx, "p/a.md", "a", "di stampa")
+	if hits, err := idx.SearchWith("d stam", SearchOptions{Limit: 5}); err != nil || len(hits) != 1 || hits[0].Path != "p/a.md" {
+		t.Errorf("search after the migration = %+v (%v)", hits, err)
+	}
+}
+
+// BulkLoad turns FTS5's merging off for a load and back to its defaults.
+func TestBulkLoad_SwitchesMerging(t *testing.T) {
+	idx := openTest(t)
+	merging := func() string {
+		t.Helper()
+		var a, c string
+		if err := idx.db.QueryRow(`SELECT (SELECT v FROM notes_fts_config WHERE k = 'automerge'), (SELECT v FROM notes_fts_config WHERE k = 'crisismerge')`).Scan(&a, &c); err != nil {
+			t.Fatal(err)
+		}
+		return a + " " + c
+	}
+	for _, c := range []struct {
+		on   bool
+		want string
+	}{{true, "0 64"}, {false, "4 16"}} {
+		if err := idx.BulkLoad(c.on); err != nil {
+			t.Fatal(err)
+		}
+		if got := merging(); got != c.want {
+			t.Errorf("BulkLoad(%v): automerge, crisismerge = %s, want %s", c.on, got, c.want)
+		}
 	}
 }

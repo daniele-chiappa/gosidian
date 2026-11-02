@@ -94,6 +94,47 @@ func TestSpaTokenStore_Refresh(t *testing.T) {
 	}
 }
 
+// The lengths the configuration passes (BUG-143): the sliding deadline,
+// and the maximum no deadline goes past, not even a refresh's.
+func TestSpaTokenStore_TTLAndMaximum(t *testing.T) {
+	s, err := OpenSpaTokens(filepath.Join(t.TempDir(), "spa.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.SetTTL(2*time.Hour, 5*time.Hour)
+	before := time.Now().UTC()
+	plain, tok, err := s.Create("user-1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := time.Now().UTC()
+	within := func(got time.Time, d time.Duration) bool {
+		return !got.Before(before.Add(d)) && !got.After(after.Add(d))
+	}
+	if !within(tok.ExpiresAt, 2*time.Hour) || !within(tok.HardExpiry, 5*time.Hour) {
+		t.Errorf("created %s, expires %s, hard %s", before, tok.ExpiresAt, tok.HardExpiry)
+	}
+
+	// A session 4h30 old: its refresh ends at the maximum, not 2h on.
+	s.mu.Lock()
+	s.tokens[0].HardExpiry = time.Now().UTC().Add(30 * time.Minute)
+	hard := s.tokens[0].HardExpiry
+	s.mu.Unlock()
+	got, err := s.Refresh(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.ExpiresAt.Equal(hard) {
+		t.Errorf("refreshed to %s, past the maximum %s", got.ExpiresAt, hard)
+	}
+
+	// A maximum shorter than the sliding window holds from the start.
+	s.SetTTL(2*time.Hour, 30*time.Minute)
+	if _, short, err := s.Create("user-2", ""); err != nil || !short.ExpiresAt.Equal(short.HardExpiry) {
+		t.Errorf("created %+v %v", short, err)
+	}
+}
+
 func TestSpaTokenStore_Revoke(t *testing.T) {
 	dir := t.TempDir()
 	s, _ := OpenSpaTokens(filepath.Join(dir, "spa.json"))

@@ -40,9 +40,10 @@ import {
 } from 'lucide-vue-next'
 import OverflowMenu, { type OverflowItem } from '@/components/primitives/OverflowMenu.vue'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
+import { announce } from '@/composables/useAnnounce'
 import { getNote, updateNote, deleteNote, createSnapshot, type Note } from '@/api/notes'
 import { downloadNote } from '@/api/noteDownload'
-import { draftAfterSave } from '@/views/noteDraft'
+import { draftAfterSave, dropDraft, keepDraft, keptDraft, type KeptDraft } from '@/views/noteDraft'
 import { tooLargeToSend } from '@/views/noteSize'
 import {
   renderPreviewData,
@@ -54,7 +55,7 @@ import {
   type CutRequest,
 } from '@/api/preview'
 import axios from 'axios'
-import { isConcurrencyConflict, onApiEvent, type ConcurrencyConflictDetail } from '@/api/client'
+import { isConcurrencyConflict, onApiEvent, onSessionExpired, type ConcurrencyConflictDetail } from '@/api/client'
 import { errorText } from '@/api/errors'
 import { formatSize } from '@/api/format'
 import { useSSE } from '@/composables/useSSE'
@@ -72,6 +73,7 @@ import { convertCanvas } from '@/components/domain/canvasConvert'
 import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
 import { planciaKey, base } from '@/composables/planciaKey'
 import { useAccessStore } from '@/stores/access'
+import { useAuthStore } from '@/stores/auth'
 import { useTreeStore } from '@/stores/tree'
 import { useUIStore } from '@/stores/ui'
 import { useWindowsStore, type OpenSpec } from 'plancia'
@@ -87,7 +89,8 @@ type EditorLayout = 'editor' | 'split' | 'stacked' | 'preview'
 
 // anchor is the heading a link pointed at (IMP-140), anchorAt when it was
 // clicked: the window scrolls to the heading, again on every new click.
-const props = defineProps<{ path: string; mode?: Mode; anchor?: string; anchorAt?: number }>()
+// editorFocus: a note just made, whose editor takes the focus (IMP-217, F-04).
+const props = defineProps<{ path: string; mode?: Mode; anchor?: string; anchorAt?: number; editorFocus?: boolean }>()
 const emit = defineEmits<{ title: [string]; dirty: [boolean]; close: [] }>()
 
 const { t } = useI18n()
@@ -135,6 +138,30 @@ const lastSavedAt = ref<string | null>(null)
 const conflict = ref<ConcurrencyConflictDetail | null>(null)
 // The note changed on the server while it had unsaved edits (IMP-127).
 const remoteChanged = ref(false)
+// Its banner comes with its text, which a screen reader does not read:
+// the shell's region says it (IMP-217, F-10).
+watch(
+  () => remoteChanged.value && !conflict.value,
+  (on) => {
+    if (on) announce(t('note.changed_elsewhere'))
+  },
+)
+// The etags of this note's events while a save is on its way (BUG-144):
+// the event of the save itself may come before its reply, so they wait
+// for the etag the reply brings.
+let heldEtags: string[] = []
+// The draft kept in this browser (BUG-142), so that a session that ends, a
+// reload or a crash does not take it: written a moment after an edit and
+// before each save, dropped once saved. A note that opens with one offers
+// it back (offeredDraft) until it is restored or discarded.
+const auth = useAuthStore()
+const offeredDraft = ref<KeptDraft | null>(null)
+// The etag a restored draft was written on: its save asks for that version,
+// so a note changed since answers with the conflict instead of losing the
+// other writer's change.
+let draftBase: string | null = null
+// For a session stored before its length was kept: the default maximum.
+const DRAFT_MAX_AGE = 168 * 3600_000
 const sse = useSSE(['note'])
 const copied = ref(false)
 let copiedTimer: ReturnType<typeof setTimeout> | null = null
@@ -462,7 +489,10 @@ watch(project, () => {
 
 async function load() {
   if (!path.value) return
-  loading.value = true
+  // A reload of the note shown (an event of its own, a field saved from its
+  // panel) keeps the window until the new version is there: blanked, it
+  // lost the focus and the place (IMP-217, F-04).
+  loading.value = note.value?.path !== path.value
   error.value = null
   notFound.value = false
   try {
@@ -470,6 +500,8 @@ async function load() {
     remoteChanged.value = false
     note.value = fetched
     draft.value = fetched.content
+    draftBase = null
+    offerDraft(fetched)
     recents.record(fetched.path, fetched.title || fetched.path)
     emit('title', fetched.title || fetched.path)
     // HTML notes bypass the markdown renderer; the iframe shows raw content,
@@ -511,6 +543,7 @@ const refreshPreview = useDebounceFn(async () => {
 watch(draft, () => {
   if (!note.value) return
   dirty.value = draft.value !== note.value.content
+  void persistDraftSoon()
   // HTMLPreview binds the draft directly (reactive); only markdown needs the
   // server round-trip to refresh the preview pane.
   if (!isHtml.value && mode.value === 'edit' && layout.value !== 'editor') void refreshPreview()
@@ -539,6 +572,10 @@ function onNoteEvent(p: { path?: string; etag?: string; action?: string }) {
   }
   if (p.path === path.value) {
     if (p.etag && bareEtag(p.etag) === bareEtag(note.value.etag)) return // our own save
+    if (saving.value) {
+      heldEtags.push(bareEtag(p.etag))
+      return
+    }
     if (dirty.value) {
       remoteChanged.value = true // keep the draft; the banner offers a reload
       return
@@ -569,6 +606,91 @@ async function checkRemote() {
   } catch {
     /* the next event, or a reload, tells */
   }
+}
+
+// The events held during a save, once it is over: an etag other than the
+// note's own now is another writer's (after ours: one before it makes the
+// save a 412).
+function releaseHeld() {
+  const others = note.value && heldEtags.some((e) => e !== bareEtag(note.value!.etag))
+  heldEtags = []
+  if (!others) return
+  if (dirty.value) remoteChanged.value = true
+  else void load()
+}
+
+/** Keeps the draft as it is now, or drops it once it is the saved text; an
+ *  offered draft stays until it is answered. */
+function persistDraft() {
+  const user = auth.user?.id
+  if (!user || !note.value || !canEdit.value) return
+  if (dirty.value)
+    keepDraft(user, note.value.path, { text: draft.value, etag: draftBase ?? note.value.etag, at: Date.now() })
+  else if (!offeredDraft.value) dropDraft(user, note.value.path)
+}
+const persistDraftSoon = useDebounceFn(persistDraft, 500)
+
+// A draft kept from before is offered, unless it is the saved text.
+function offerDraft(fetched: Note) {
+  offeredDraft.value = null
+  const user = auth.user?.id
+  if (!user || !canEdit.value) return
+  const kept = keptDraft(user, fetched.path, auth.maxSessionMs || DRAFT_MAX_AGE)
+  if (kept && kept.text === fetched.content) dropDraft(user, fetched.path)
+  else offeredDraft.value = kept
+}
+const draftOfferText = computed(() => {
+  if (!offeredDraft.value) return ''
+  const at = new Date(offeredDraft.value.at)
+  return at.toDateString() === new Date().toDateString()
+    ? t('note.draft_kept_at', { time: at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) })
+    : t('note.draft_kept_on', { date: at.toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) })
+})
+// The banner's buttons go with it: the focus moves on to the editor, or to
+// the toolbar, so that typing and Ctrl+S carry on in this window.
+const editorEl = ref<{ focus: () => void } | null>(null)
+let focusEditor = false
+watch(
+  editorEl,
+  (ed) => {
+    if (!ed || !focusEditor) return
+    focusEditor = false
+    ed.focus()
+  },
+  { flush: 'post' },
+)
+function keepFocus() {
+  if (mode.value !== 'edit' || layout.value === 'preview') {
+    headerEl.value?.querySelector<HTMLElement>('button:not([disabled])')?.focus()
+    return
+  }
+  // The editor loads at its first use: it takes the focus once it is there.
+  if (editorEl.value) editorEl.value.focus()
+  else focusEditor = true
+}
+function restoreDraft() {
+  const kept = offeredDraft.value
+  if (!kept || !note.value) return
+  offeredDraft.value = null
+  draftBase = kept.etag
+  enterEdit()
+  draft.value = kept.text
+  // Written on a version the note no longer is: the banner says so before
+  // the save does.
+  if (bareEtag(kept.etag) !== bareEtag(note.value.etag)) remoteChanged.value = true
+  void nextTick(keepFocus)
+}
+function discardDraft() {
+  offeredDraft.value = null
+  // What was typed since is the draft now; nothing typed, none.
+  persistDraft()
+  void nextTick(keepFocus)
+}
+function forgetDraft() {
+  offeredDraft.value = null
+  draftBase = null
+  const user = auth.user?.id
+  if (user && note.value) dropDraft(user, note.value.path)
 }
 
 /** Scrolls to the heading the window was opened at, once it is rendered. */
@@ -624,29 +746,41 @@ async function save() {
     return
   }
   saving.value = true
+  // Kept before the request: a session that ended answers 401, and the
+  // page goes to the login.
+  persistDraft()
   try {
     const sent = draft.value
     const updated = await updateNote(note.value.path, {
       content: sent,
-      ifMatch: note.value.etag,
+      ifMatch: draftBase ?? note.value.etag,
     })
     note.value = updated
+    draftBase = null
     const after = draftAfterSave(sent, draft.value, updated.content)
     draft.value = after.draft
     dirty.value = after.dirty
-    lastSavedAt.value = new Date().toLocaleTimeString()
-    remoteChanged.value = false
-    // Our own save's event may arrive before this reply: not a remote change.
+    persistDraft()
+    markSaved()
     remoteChanged.value = false
   } catch (e) {
     // The conflict banner owns a 412: an error pane would hide the draft.
     if (!isConcurrencyConflict(e)) error.value = errorText(e, t, t('note.save_failed'))
   } finally {
     saving.value = false
+    releaseHeld()
   }
 }
 
+// The toolbar shows the save, and the shell's region says it: in a narrow
+// window the toolbar has room for its time only (IMP-217, F-10).
+function markSaved() {
+  lastSavedAt.value = new Date().toLocaleTimeString()
+  announce(t('note.saved_at', { time: lastSavedAt.value }))
+}
+
 async function reloadRemote() {
+  forgetDraft()
   conflict.value = null
   await load()
 }
@@ -658,15 +792,20 @@ async function forceOverwrite() {
     const sent = draft.value
     const updated = await updateNote(note.value.path, { content: sent })
     note.value = updated
+    draftBase = null
     const after = draftAfterSave(sent, draft.value, updated.content)
     draft.value = after.draft
     dirty.value = after.dirty
-    lastSavedAt.value = new Date().toLocaleTimeString()
+    persistDraft()
+    markSaved()
     conflict.value = null
+    // The change the banner told of is under the draft now.
+    remoteChanged.value = false
   } catch (e) {
     error.value = errorText(e, t, t('note.overwrite_failed'))
   } finally {
     saving.value = false
+    releaseHeld()
   }
 }
 
@@ -677,6 +816,7 @@ async function destroy() {
   if (!(await confirmAction(t(access.deleteNoteKey, { path: note.value.path }), { confirmLabel: t('common.delete') }))) return
   try {
     await deleteNote(note.value.path)
+    forgetDraft()
     treeStore.refresh()
     emit('close')
   } catch (e) {
@@ -840,23 +980,37 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 let unsub: (() => void) | null = null
+let unsubSession: (() => void) | null = null
 onMounted(() => {
   void load()
+  if (props.editorFocus && mode.value === 'edit') keepFocus()
   window.addEventListener('keydown', onKeydown)
   unsub = onApiEvent('note.concurrency-conflict', (detail) => {
     if (detail.path === path.value) conflict.value = detail
   })
+  // The draft written a moment ago may not be kept yet.
+  unsubSession = onSessionExpired(persistDraft)
   sse.on('note', onNoteEvent)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
   unsub?.()
+  unsubSession?.()
   if (copiedTimer) clearTimeout(copiedTimer)
 })
 </script>
 
 <template>
   <div ref="rootEl" class="flex flex-col h-full">
+    <!-- The window's name, where an open puts the focus (IMP-217, F-03);
+         the title bar shows it. -->
+    <h1
+      class="sr-only"
+      tabindex="-1"
+      data-window-heading
+    >
+      {{ note?.title || base(path) }}
+    </h1>
     <header
       ref="headerEl"
       class="flex items-center gap-2 border-b border-border bg-bg-elevated px-4 py-2"
@@ -870,7 +1024,27 @@ onBeforeUnmount(() => {
         :title="t('note.unsaved')"
         :aria-label="t('note.unsaved')"
       />
-      <span v-else-if="lastSavedAt && !compact" class="shrink-0 text-xs text-success">
+      <span
+        v-else-if="lastSavedAt && compact"
+        class="inline-flex shrink-0 items-center gap-0.5 text-xs text-success"
+        :title="t('note.saved_at', { time: lastSavedAt })"
+        data-saved-at
+      >
+        <Check
+          class="h-3 w-3"
+          aria-hidden="true"
+        />
+        <span
+          aria-hidden="true"
+          data-saved-time
+        >{{ lastSavedAt }}</span>
+        <span class="sr-only">{{ t('note.saved_at', { time: lastSavedAt }) }}</span>
+      </span>
+      <span
+        v-else-if="lastSavedAt"
+        class="shrink-0 text-xs text-success"
+        data-saved-at
+      >
         {{ t('note.saved_at', { time: lastSavedAt }) }}
       </span>
       <span class="flex-1" />
@@ -951,10 +1125,12 @@ onBeforeUnmount(() => {
             <component :is="l.icon" class="h-3.5 w-3.5" />
           </button>
         </div>
+        <!-- aria-disabled, not disabled: with nothing to save it stays in the
+             Tab order, and save() does nothing (IMP-217, F-04). -->
         <button
           type="button"
-          class="h-control-sm shrink-0 rounded bg-accent px-2 text-xs text-accent-fg hover:bg-accent-hover disabled:opacity-50"
-          :disabled="!dirty || saving"
+          class="h-control-sm shrink-0 rounded bg-accent px-2 text-xs text-accent-fg hover:bg-accent-hover aria-disabled:opacity-50 aria-disabled:hover:bg-accent"
+          :aria-disabled="!dirty || saving ? 'true' : undefined"
           @click="save"
         >
           {{ saving ? t('note.saving') : t('common.save') }}
@@ -989,6 +1165,28 @@ onBeforeUnmount(() => {
       <OverflowMenu v-else-if="note" class="shrink-0" :items="actions" :label="t('note.more_actions')" />
     </header>
 
+    <!-- A draft kept in this browser from before (BUG-142): restored, it
+         saves on the version it was written on. -->
+    <div
+      v-if="offeredDraft && note"
+      class="flex flex-wrap items-center gap-2 border-b border-warning/40 bg-warning/10 px-4 py-2 text-xs"
+      role="alert"
+      data-draft-offer
+    >
+      <span class="text-warning">{{ draftOfferText }}</span>
+      <div class="flex-1" />
+      <button type="button" class="h-control-sm rounded px-2 hover:bg-surface-hover" @click="discardDraft">
+        {{ t('note.draft_discard') }}
+      </button>
+      <button
+        type="button"
+        class="h-control-sm rounded bg-accent px-2 text-accent-fg hover:bg-accent-hover"
+        @click="restoreDraft"
+      >
+        {{ t('note.draft_restore') }}
+      </button>
+    </div>
+
     <!-- Announced to screen readers (S6-14): the save was refused. -->
     <div
       v-if="conflict"
@@ -1012,7 +1210,7 @@ onBeforeUnmount(() => {
     <div
       v-if="remoteChanged && !conflict"
       class="flex flex-wrap items-center gap-2 border-b border-warning/40 bg-warning/10 px-4 py-2 text-xs"
-      role="status"
+      data-changed-elsewhere
     >
       <span class="text-warning">{{ t('note.changed_elsewhere') }}</span>
       <div class="flex-1" />
@@ -1271,7 +1469,7 @@ onBeforeUnmount(() => {
           'border-b border-border': layout === 'stacked',
         }"
       >
-        <CodeMirrorEditor v-model="draft" :project="project" placeholder="Markdown…" />
+        <CodeMirrorEditor ref="editorEl" v-model="draft" :project="project" placeholder="Markdown…" />
       </div>
       <div v-if="layout !== 'editor'" class="overflow-auto p-4 max-w-none">
         <HTMLPreview v-if="isHtml" :html="draft" :path="note.path" />

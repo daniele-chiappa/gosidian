@@ -58,7 +58,13 @@ watch(path, load)
         @click="openNote"
       >{{ t('history.note') }}</button>
       <!-- The window's title bar names it: the heading is for screen readers. -->
-      <h1 class="sr-only">{{ t('history.title') }}</h1>
+      <h1
+        class="sr-only"
+        tabindex="-1"
+        data-window-heading
+      >
+        {{ t('history.title') }}
+      </h1>
       <span class="font-mono text-sm text-text-muted truncate">{{ path }}</span>
     </header>
 

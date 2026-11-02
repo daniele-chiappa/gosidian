@@ -41,8 +41,8 @@ import (
 
 // SPA token defaults. Sliding TTL governs the time-since-last-use window
 // after which a token must be refreshed; hard TTL caps the absolute
-// lifetime regardless of activity. Both are configurable per-store via
-// SpaTokenStore.SetTTL for tests.
+// lifetime regardless of activity. main sets both from webauth.session_ttl
+// and session_max_ttl via SpaTokenStore.SetTTL (BUG-143).
 const (
 	defaultSpaSlidingTTL = 24 * time.Hour
 	defaultSpaHardTTL    = 7 * 24 * time.Hour
@@ -95,8 +95,8 @@ func OpenSpaTokens(path string) (*SpaTokenStore, error) {
 	return s, nil
 }
 
-// SetTTL overrides the sliding/hard TTL pair. Intended for tests; not
-// surfaced via env vars to keep the production surface minimal.
+// SetTTL overrides the sliding/hard TTL pair: the configured session
+// lengths at startup (BUG-143), shorter ones in tests.
 func (s *SpaTokenStore) SetTTL(sliding, hard time.Duration) {
 	s.mu.Lock()
 	s.slidingTTL = sliding
@@ -211,14 +211,15 @@ func (s *SpaTokenStore) Create(userID, userAgent string) (plaintext string, tok 
 	sum := sha256.Sum256([]byte(plaintext))
 	hash := hex.EncodeToString(sum[:])
 	now := time.Now().UTC()
+	hard := now.Add(s.hardTTL)
 	tok = SpaToken{
 		ID:         hash[:8],
 		Hash:       hash,
 		UserID:     userID,
 		UserAgent:  userAgent,
 		IssuedAt:   now,
-		ExpiresAt:  now.Add(s.slidingTTL),
-		HardExpiry: now.Add(s.hardTTL),
+		ExpiresAt:  s.slidingDeadline(now, hard),
+		HardExpiry: hard,
 		LastSeenAt: now,
 	}
 	s.mu.Lock()
@@ -301,7 +302,7 @@ func (s *SpaTokenStore) Refresh(plaintext string) (*SpaToken, error) {
 		if now.After(s.tokens[i].HardExpiry) {
 			return nil, errors.New("token hard-expired (login required)")
 		}
-		s.tokens[i].ExpiresAt = now.Add(s.slidingTTL)
+		s.tokens[i].ExpiresAt = s.slidingDeadline(now, s.tokens[i].HardExpiry)
 		s.tokens[i].LastSeenAt = now
 		if err := s.save(); err != nil {
 			return nil, err
@@ -310,6 +311,16 @@ func (s *SpaTokenStore) Refresh(plaintext string) (*SpaToken, error) {
 		return &t, nil
 	}
 	return nil, errors.New("token not found")
+}
+
+// slidingDeadline is now plus the sliding TTL, at most the hard expiry:
+// the deadline a client reads never promises more than the session has
+// left (BUG-143).
+func (s *SpaTokenStore) slidingDeadline(now, hard time.Time) time.Time {
+	if d := now.Add(s.slidingTTL); d.Before(hard) {
+		return d
+	}
+	return hard
 }
 
 // Revoke removes the token matching the plaintext. No-op if absent.

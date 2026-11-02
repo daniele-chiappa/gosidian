@@ -870,7 +870,7 @@ the drawing ([above](#editing-in-the-web-ui)).
 `external`, `chat` or `manual`, and does nothing else:
 
 ```bash
-docker exec gosidian gosidian pipeline token create \
+docker exec gosidian /gosidian pipeline token create \
   --pipeline team/pipelines/arrivals.md --name scanner
 curl -X POST https://vault.example.com/api/v1/pipelines/team/pipelines/arrivals.md/runs \
   -H "Authorization: Bearer gosidian_run_…" -H "Idempotency-Key: scan-0042" \

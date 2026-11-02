@@ -856,6 +856,129 @@ projects = ["rag"]
 	}
 }
 
+// The lengths of a web session (BUG-143): the defaults, the file, the
+// environment over it, and the lengths refused, from either.
+func TestWebauthSessionTTL(t *testing.T) {
+	if w := Default().Webauth; w.SessionTTL != 24*time.Hour || w.SessionMaxTTL != 7*24*time.Hour {
+		t.Fatalf("defaults %s %s", w.SessionTTL, w.SessionMaxTTL)
+	}
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[webauth]\nsession_ttl = \"8h\"\nsession_max_ttl = \"720h\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.ApplyEnv(); err != nil {
+		t.Fatal(err)
+	}
+	if c.Webauth.SessionTTL != 8*time.Hour || c.Webauth.SessionMaxTTL != 720*time.Hour {
+		t.Errorf("from the file: %s %s", c.Webauth.SessionTTL, c.Webauth.SessionMaxTTL)
+	}
+	if err := Save(path, c); err != nil {
+		t.Fatal(err)
+	}
+	if again, err := Load(path); err != nil || again.Webauth.SessionMaxTTL != 720*time.Hour {
+		t.Errorf("saved and loaded: %s %v", again.Webauth.SessionMaxTTL, err)
+	}
+
+	t.Setenv("GOSIDIAN_LOGIN_SESSION_TTL", "30m")
+	t.Setenv("GOSIDIAN_LOGIN_SESSION_MAX_TTL", "12h")
+	if err := c.ApplyEnv(); err != nil {
+		t.Fatal(err)
+	}
+	if c.Webauth.SessionTTL != 30*time.Minute || c.Webauth.SessionMaxTTL != 12*time.Hour {
+		t.Errorf("from the environment: %s %s", c.Webauth.SessionTTL, c.Webauth.SessionMaxTTL)
+	}
+
+	// The defaults are 24h and 168h: a maximum under 24h is shorter.
+	for k, bads := range map[string][]string{
+		"GOSIDIAN_LOGIN_SESSION_TTL":     {"0", "90s", "-1h", "soon", "200h"},
+		"GOSIDIAN_LOGIN_SESSION_MAX_TTL": {"0", "1h", "-5m", "soon"},
+	} {
+		for _, bad := range bads {
+			t.Run(k+"="+bad, func(t *testing.T) {
+				t.Setenv("GOSIDIAN_LOGIN_SESSION_TTL", "")
+				t.Setenv("GOSIDIAN_LOGIN_SESSION_MAX_TTL", "")
+				t.Setenv(k, bad)
+				if err := Default().ApplyEnv(); err == nil || !strings.Contains(err.Error(), k) {
+					t.Errorf("%s=%q: %v", k, bad, err)
+				}
+			})
+		}
+	}
+
+	for _, body := range []string{"session_ttl = \"30s\"", "session_max_ttl = \"1h\"", "session_ttl = \"8h\"\nsession_max_ttl = \"4h\""} {
+		t.Run(body, func(t *testing.T) {
+			t.Setenv("GOSIDIAN_LOGIN_SESSION_TTL", "")
+			t.Setenv("GOSIDIAN_LOGIN_SESSION_MAX_TTL", "")
+			p := filepath.Join(t.TempDir(), "config.toml")
+			if err := os.WriteFile(p, []byte("[webauth]\n"+body+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			c, err := Load(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := c.ApplyEnv(); err == nil || !strings.Contains(err.Error(), "[webauth]") {
+				t.Errorf("%s in the file: %v", body, err)
+			}
+		})
+	}
+}
+
+// The limits of the failed logins (BUG-145): the defaults, the
+// environment over them, and the limits refused, from either.
+func TestWebauthLoginLimits(t *testing.T) {
+	if w := Default().Webauth; w.LoginWindow != 15*time.Minute || w.LoginMaxFailures != 5 {
+		t.Fatalf("defaults %s %d", w.LoginWindow, w.LoginMaxFailures)
+	}
+	t.Setenv("GOSIDIAN_LOGIN_WINDOW", "1h")
+	t.Setenv("GOSIDIAN_LOGIN_MAX_FAILURES", "10")
+	c := Default()
+	if err := c.ApplyEnv(); err != nil {
+		t.Fatal(err)
+	}
+	if c.Webauth.LoginWindow != time.Hour || c.Webauth.LoginMaxFailures != 10 {
+		t.Errorf("from the environment: %s %d", c.Webauth.LoginWindow, c.Webauth.LoginMaxFailures)
+	}
+
+	for k, bads := range map[string][]string{
+		"GOSIDIAN_LOGIN_WINDOW":       {"0", "-1m", "soon"},
+		"GOSIDIAN_LOGIN_MAX_FAILURES": {"0", "-2", "x"},
+	} {
+		for _, bad := range bads {
+			t.Run(k+"="+bad, func(t *testing.T) {
+				t.Setenv("GOSIDIAN_LOGIN_WINDOW", "")
+				t.Setenv("GOSIDIAN_LOGIN_MAX_FAILURES", "")
+				t.Setenv(k, bad)
+				if err := Default().ApplyEnv(); err == nil || !strings.Contains(err.Error(), k) {
+					t.Errorf("%s=%q: %v", k, bad, err)
+				}
+			})
+		}
+	}
+
+	for _, body := range []string{"login_window = \"-5m\"", "login_max_failures = -1"} {
+		t.Run(body, func(t *testing.T) {
+			t.Setenv("GOSIDIAN_LOGIN_WINDOW", "")
+			t.Setenv("GOSIDIAN_LOGIN_MAX_FAILURES", "")
+			p := filepath.Join(t.TempDir(), "config.toml")
+			if err := os.WriteFile(p, []byte("[webauth]\n"+body+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			c, err := Load(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := c.ApplyEnv(); err == nil || !strings.Contains(err.Error(), "[webauth]") {
+				t.Errorf("%s in the file: %v", body, err)
+			}
+		})
+	}
+}
+
 // The settings of the agent teams (IMP-195): their defaults, the file, the
 // environment over it, and the values refused, from either.
 func TestAgents(t *testing.T) {

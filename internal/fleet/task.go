@@ -25,10 +25,16 @@ const (
 	Completed     = "completed"
 	Failed        = "failed"
 	Canceled      = "canceled"
+	// Backlog is a board's card not ready yet (IMP-216): no team's task
+	// is in it, and nothing takes it before it is submitted.
+	Backlog = "backlog"
 )
 
-// States are the states of a task, in the order a board shows them.
+// States are the states of a team's task, in the order a board shows them.
 var States = []string{Submitted, Working, InputRequired, Review, Completed, Failed, Canceled}
+
+// Known says whether s is a state of a task or of a card.
+func Known(s string) bool { return s == Backlog || slices.Contains(States, s) }
 
 // Ended says whether a task in state s is closed.
 func Ended(s string) bool { return s == Completed || s == Failed || s == Canceled }
@@ -54,6 +60,14 @@ const (
 	// the last of them saw.
 	KeyRounds        = "rounds"
 	KeyChildrenState = "children_state"
+	// KeyBranch is the branch of the repository an attempt sent back left
+	// its work on: the next attempt continues it.
+	KeyBranch = "branch"
+	// A card's (IMP-216): its column, its rank in it, and when it entered
+	// it.
+	KeyColumn      = "column"
+	KeyRank        = "rank"
+	KeyColumnSince = "column_since"
 )
 
 // Task is a task as its note's frontmatter says it.
@@ -61,8 +75,8 @@ type Task struct {
 	Path      string   `json:"path"`
 	Title     string   `json:"title"`
 	Status    string   `json:"status"`
-	Team      string   `json:"team"`
-	Assignee  string   `json:"assignee"`
+	Team      string   `json:"team,omitempty"`
+	Assignee  string   `json:"assignee,omitempty"`
 	Parent    string   `json:"parent,omitempty"`
 	DependsOn []string `json:"depends_on,omitempty"`
 	Paths     []string `json:"paths,omitempty"`
@@ -78,7 +92,18 @@ type Task struct {
 	// Rounds and ChildrenState are an objective's (KeyRounds).
 	Rounds        int    `json:"rounds,omitempty"`
 	ChildrenState string `json:"children_state,omitempty"`
-	Created       string `json:"created,omitempty"`
+	// Branch is the branch the next attempt continues (KeyBranch).
+	Branch string `json:"branch,omitempty"`
+	// A card's (IMP-216): its board's note, its column, its rank in it (0
+	// for none), when it entered it, who closes it (DoneAgent or
+	// DonePerson, "" for its board's default), and the notes it is for.
+	Board       string   `json:"board,omitempty"`
+	Column      string   `json:"column,omitempty"`
+	Rank        float64  `json:"rank,omitempty"`
+	ColumnSince string   `json:"column_since,omitempty"`
+	DoneBy      string   `json:"done_by,omitempty"`
+	For         []string `json:"for,omitempty"`
+	Created     string   `json:"created,omitempty"`
 }
 
 // IsTask says whether a note's raw frontmatter is a task's.
@@ -105,10 +130,15 @@ func ReadTask(p string, content []byte) Task {
 	}
 	t := Task{Path: p, Title: str("title"), Status: str(KeyStatus), Team: LinkPath(str("team"), project),
 		Assignee: str("assignee"), Parent: LinkPath(str("parent"), project), Paths: list("paths"), Forbid: list("forbid"),
-		ClaimedBy: str(KeyClaimedBy), ChildrenState: str(KeyChildrenState), Created: str("created")}
+		ClaimedBy: str(KeyClaimedBy), ChildrenState: str(KeyChildrenState), Branch: str(KeyBranch), Created: str("created"),
+		Board: LinkPath(str("board"), project), Column: str(KeyColumn), ColumnSince: str(KeyColumnSince), DoneBy: str("done_by")}
 	for _, d := range list("depends_on") {
 		t.DependsOn = append(t.DependsOn, LinkPath(d, project))
 	}
+	for _, f := range list("for") {
+		t.For = append(t.For, LinkPath(f, project))
+	}
+	t.Rank = number(str(KeyRank))
 	t.BudgetUSD = number(str("budget_usd"))
 	t.CostUSD = number(str(KeyCostUSD))
 	t.Tokens = int64(number(str(KeyTokens)))
@@ -138,7 +168,7 @@ func number(s string) float64 {
 type NewTask struct {
 	Title     string
 	Body      string
-	Team      string // the team's note
+	Team      string // the team's note; "" for a board's card
 	Assignee  string
 	Parent    string
 	DependsOn []string
@@ -146,8 +176,15 @@ type NewTask struct {
 	Forbid    []string
 	BudgetUSD float64
 	// Status is Submitted, or InputRequired for a task that waits for a
-	// person before it starts.
+	// person before it starts; a card's is its column's.
 	Status string
+	// A card's (IMP-216): its board's note, its column, its rank, who
+	// closes it and the notes it is for.
+	Board  string
+	Column string
+	Rank   float64
+	DoneBy string
+	For    []string
 }
 
 var nonSlug = regexp.MustCompile(`[^a-z0-9]+`)
@@ -176,8 +213,21 @@ func (n NewTask) Render(project string, at time.Time) []byte {
 		status = Submitted
 	}
 	fmt.Fprintf(&b, "status: %s\n", status)
-	fmt.Fprintf(&b, "team: %s\n", yamlString(Link(n.Team)))
-	fmt.Fprintf(&b, "assignee: %s\n", n.Assignee)
+	if n.Team != "" {
+		fmt.Fprintf(&b, "team: %s\n", yamlString(Link(n.Team)))
+		fmt.Fprintf(&b, "assignee: %s\n", n.Assignee)
+	}
+	if n.Board != "" {
+		fmt.Fprintf(&b, "board: %s\n", yamlString(Link(n.Board)))
+		fmt.Fprintf(&b, "%s: %s\n", KeyColumn, yamlString(n.Column))
+		fmt.Fprintf(&b, "%s: %s\n", KeyColumnSince, at.Format(time.RFC3339))
+		if n.Rank > 0 {
+			fmt.Fprintf(&b, "%s: %s\n", KeyRank, strconv.FormatFloat(n.Rank, 'f', -1, 64))
+		}
+	}
+	if n.DoneBy != "" {
+		fmt.Fprintf(&b, "done_by: %s\n", n.DoneBy)
+	}
 	if n.Parent != "" {
 		fmt.Fprintf(&b, "parent: %s\n", yamlString(Link(n.Parent)))
 	}
@@ -194,6 +244,7 @@ func (n NewTask) Render(project string, at time.Time) []byte {
 		}
 	}
 	writeList("depends_on", n.DependsOn, true)
+	writeList("for", n.For, true)
 	writeList("paths", n.Paths, false)
 	writeList("forbid", n.Forbid, false)
 	if n.BudgetUSD > 0 {
@@ -306,9 +357,11 @@ func LastSection(content []byte, heading string) string {
 }
 
 // Moves are the states a task may go to from each: the server's moves and
-// the people's (canceled, submitted again).
+// the people's (canceled, submitted again). A card of a board leaves the
+// backlog when it is ready, and goes back to it before it starts.
 var moves = map[string][]string{
-	Submitted:     {Working, InputRequired, Canceled},
+	Backlog:       {Submitted, Canceled},
+	Submitted:     {Working, InputRequired, Canceled, Backlog},
 	Working:       {Submitted, InputRequired, Review, Completed, Failed, Canceled},
 	InputRequired: {Submitted, Working, Canceled, Failed},
 	Review:        {Working, Submitted, Completed, Failed, Canceled},
@@ -380,7 +433,7 @@ func Update(t Task, content []byte, holder, status, message string, at time.Time
 
 // Complete closes t, held by holder, as status (one of Ends) with its
 // report: the section Report, which the tasks after it and the coordinator
-// read.
+// read. No attempt follows: the branch to continue goes.
 func Complete(t Task, content []byte, holder, status, report string, at time.Time) ([]byte, error) {
 	if err := held(t, holder); err != nil {
 		return nil, err
@@ -391,7 +444,7 @@ func Complete(t Task, content []byte, holder, status, report string, at time.Tim
 	if !CanMove(t.Status, status) {
 		return nil, fmt.Errorf("the task is %s: it does not close as %s", t.Status, status)
 	}
-	out, err := Set(content, map[string]any{KeyStatus: status, KeyUpdated: at.Format(time.RFC3339)}, KeyClaimedBy, KeyLeaseUntil)
+	out, err := Set(content, map[string]any{KeyStatus: status, KeyUpdated: at.Format(time.RFC3339)}, KeyClaimedBy, KeyLeaseUntil, KeyBranch)
 	if err != nil {
 		return nil, err
 	}
@@ -401,6 +454,55 @@ func Complete(t Task, content []byte, holder, status, report string, at time.Tim
 	}
 	r += fmt.Sprintf("\n\n%s by %s at %s, attempt %d, %s USD, %d tokens.", status, holder, at.Format("2006-01-02 15:04"), t.Attempts,
 		strconv.FormatFloat(t.CostUSD, 'f', -1, 64), t.Tokens)
+	return AppendSection(out, "Report", r), nil
+}
+
+// LeaseOver says whether an outside agent held t past its lease at now.
+func (t Task) LeaseOver(now time.Time) bool {
+	return t.ClaimedBy != "" && !t.LeaseUntil.IsZero() && now.After(t.LeaseUntil) && !Ended(t.Status)
+}
+
+// AfterLease is the state of t given back after its lease: submitted for
+// another attempt, failed at the max-th.
+func AfterLease(t Task, max int) string {
+	if t.Attempts >= max {
+		return Failed
+	}
+	return Submitted
+}
+
+// GiveBack gives back t, which its holder kept past its lease, at at (in
+// the notes' zone): to AfterLease's state, without its holder, with a dated
+// section that says so.
+func GiveBack(t Task, content []byte, max int, at time.Time) ([]byte, error) {
+	out, err := Set(content, map[string]any{KeyStatus: AfterLease(t, max), KeyUpdated: at.Format(time.RFC3339)}, KeyClaimedBy, KeyLeaseUntil)
+	if err != nil {
+		return nil, err
+	}
+	return AppendSection(out, at.Format("2006-01-02 15:04")+" — lease ended",
+		fmt.Sprintf("%s held the task until %s without a heartbeat (attempt %d of %d).", t.ClaimedBy,
+			t.LeaseUntil.In(at.Location()).Format(time.RFC3339), t.Attempts, max)), nil
+}
+
+// ToReview sends t, held by holder, to review with its report, for a
+// person to close: the card of a board that a person closes (DonePerson).
+// The holder lets it go.
+func ToReview(t Task, content []byte, holder, report string, at time.Time) ([]byte, error) {
+	if err := held(t, holder); err != nil {
+		return nil, err
+	}
+	if !CanMove(t.Status, Review) {
+		return nil, fmt.Errorf("the task is %s: it does not go to review", t.Status)
+	}
+	out, err := Set(content, map[string]any{KeyStatus: Review, KeyUpdated: at.Format(time.RFC3339)}, KeyClaimedBy, KeyLeaseUntil)
+	if err != nil {
+		return nil, err
+	}
+	r := strings.TrimSpace(report)
+	if r == "" {
+		r = "(no report)"
+	}
+	r += fmt.Sprintf("\n\nDone by %s at %s; a person closes it.", holder, at.Format("2006-01-02 15:04"))
 	return AppendSection(out, "Report", r), nil
 }
 

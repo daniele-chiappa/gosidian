@@ -202,15 +202,17 @@ func TestAdminRoleEdit(t *testing.T) {
 }
 
 // BUG-058: a non-owner's search is scoped inside the index query, so a big
-// unreadable project outranking everything cannot empty the result.
+// unreadable project outranking everything cannot empty the result. The
+// notes are named after the word too, since note-titles matches names, not
+// text (IMP-218).
 func TestSearchScopedBeforeLimit(t *testing.T) {
 	f := newNotesFixture(t)
 	guest := f.seedTwoProjects(t)
 	for k := 0; k < 40; k++ {
-		f.seedNote(t, fmt.Sprintf("privproj/z%02d.md", k), fmt.Sprintf("# Zephyr %d\nzephyr zephyr", k))
+		f.seedNote(t, fmt.Sprintf("privproj/zephyr-%02d.md", k), fmt.Sprintf("# Zephyr %d\nzephyr zephyr", k))
 	}
 	for k := 0; k < 3; k++ {
-		f.seedNote(t, fmt.Sprintf("pubproj/z%d.md", k), fmt.Sprintf("# Public %d\nlong prose that mentions zephyr once", k))
+		f.seedNote(t, fmt.Sprintf("pubproj/zephyr-%d.md", k), fmt.Sprintf("# Public %d\nlong prose that mentions zephyr once", k))
 	}
 	rec := f.req(t, http.MethodGet, "/api/v1/search?q=zephyr&limit=2", "", guest)
 	if rec.code != http.StatusOK {

@@ -6,6 +6,7 @@ import { errorText } from '@/api/errors'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
 import DateTime from '@/components/primitives/DateTime.vue'
 import { formatSize } from '@/api/format'
+import { announce } from '@/composables/useAnnounce'
 
 const { t } = useI18n()
 
@@ -21,7 +22,9 @@ const filters = reactive<{ actor: string; action: string; source: string; path_p
   limit: 100,
 })
 
-async function load() {
+// A filter applied says how many entries it keeps (IMP-217, F-10); the
+// first load says nothing.
+async function load(say = false) {
   loading.value = true
   error.value = null
   try {
@@ -32,6 +35,8 @@ async function load() {
       path_prefix: filters.path_prefix || undefined,
       limit: filters.limit,
     })
+    const n = entries.value.length
+    if (say) announce(n ? t('admin.audit.count', { n }, n) : t('admin.audit.empty'))
   } catch (e) {
     error.value = errorText(e, t, t('admin.audit.load_failed'))
   } finally {
@@ -45,16 +50,16 @@ function reset() {
   filters.source = ''
   filters.path_prefix = ''
   filters.limit = 100
-  void load()
+  void load(true)
 }
 
-onMounted(load)
+onMounted(() => load())
 </script>
 
 <template>
   <form
     class="grid grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-2 mb-4 text-sm"
-    @submit.prevent="load"
+    @submit.prevent="load(true)"
   >
     <input
       v-model.trim="filters.actor"

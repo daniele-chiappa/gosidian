@@ -122,7 +122,9 @@
     "action_focus_label": "Basculer le mode focus",
     "action_focus_desc": "Masquer barre supérieure et latérale",
     "action_new_note_label": "Nouvelle note",
-    "action_new_note_desc": "Créer une note vide"
+    "action_new_note_desc": "Créer une note vide",
+    "search_text": "Rechercher « {query} » dans le texte",
+    "title": "Aller à une note, un projet ou une étiquette"
   },
   "layout": {
     "sidebar_resize_label": "Glisser pour redimensionner, double-clic pour réinitialiser",
@@ -343,6 +345,8 @@
     "suggestions": "Notes",
     "no_value": "Sans valeur",
     "column_empty": "Aucune note",
+    "closed": "Fermées",
+    "wip_over": "{column} : au-delà de la limite de {wip}.",
     "move_to": "Déplacer {title} vers…",
     "new_row": "Nouvelle ligne",
     "new_row_in": "Nouvelle ligne dans {column}",

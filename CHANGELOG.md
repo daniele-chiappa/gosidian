@@ -10,6 +10,239 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.130.0] — 2026-11-02 — "boards and a faster search"
+
+The releases from 2.119.0 to 2.130.0 in one: boards of cards for a
+project's tasks, a search that also finds a note lacking one of its words
+and takes a fraction of the time, a web UI that keeps the focus where you
+work and speaks to a screen reader, web sessions that last what the
+configuration says, and a benchmark that guards the base. Pull the image
+and restart. The first start re-indexes the whole vault once, and the
+server answers 503 until the scan ends: give a healthcheck that restarts
+the container time for it. The settings of web sessions and failed
+logins now count, and a value that would refuse every login stops the
+start. Coming from 2.118.x, read the entries from 2.119.0 to 2.127.0 of
+[docs/upgrading.md](docs/upgrading.md).
+
+### Added
+- **Boards of cards** ([docs/board.md](docs/board.md)): a note
+  `type: board` with a ```` ```board ```` block puts a project's tasks in
+  columns, each of a state and with its limit of cards at work, and
+  orders the cards of a column by `rank`, which the server keeps. A card
+  is a task without a team, with `board`, `column`, `rank`,
+  `column_since`, `done_by` and `for` (the notes it serves); the new
+  state `backlog` holds what is not ready yet. The task tools work on the
+  cards: `memory_task_create` with `board`, `memory_task_claim` with
+  `board` takes the board's next ready card, `memory_task_update` with
+  `column`, `memory_task_complete` puts a card a person closes in review,
+  and `memory_tasks` with `board` gives its columns and their counts;
+  each answer on a card holds the board's text, where it says what done
+  means. A full column refuses a card to an agent and warns a person, by
+  default (`wip: {agents: hard, people: warn}`); the count and the write
+  happen under the board's lock, so two agents never both get the last
+  place; a card whose agent kept it past its lease goes back to the top
+  of the first ready column. In the web UI the note shows the board: its
+  columns, each with its count against its limit, red past it; a card
+  dropped onto another takes its place, Alt with the arrow keys moves it,
+  and the "+" of a column of `backlog` or `submitted` adds one.
+  `PATCH /api/v1/notes/<card>/frontmatter` with `column` or `status` and
+  `at` moves a card by the same rules. The lint rule `board-invalid`
+  reports a block that does not read, a card whose column disagrees with
+  its board, and a `tasks.md` that lost what the cards need. The first
+  card of a project rewrites the `fields` of its `tasks.md` (see
+  docs/upgrading.md).
+- **Another attempt at a task continues its branch**
+  ([docs/agents.md](docs/agents.md#the-pipelines-of-a-team)): a task that
+  the gate or a person sends back keeps the branch its agent pushed, and
+  the next attempt finds the files as the attempt before left them (the
+  repository's `resume` of the claude and pi plugins 0.4.0). Every
+  attempt used to start again from `main` and rewrite everything. A
+  branch with a file the role must not change, or outside its paths, goes
+  with its pull request. `task.gate` gives `resume`, `task.verdict`
+  `branch` and `delete_branch`, `task.update` takes `branch`, `task.pr`
+  `delete_branch`; a task keeps `branch` until it closes. A work pipeline
+  written before needs two settings (see docs/upgrading.md).
+- **A role's `access`**: `read`, `edit` or `exec`, the agent-run
+  contract's levels. With `exec` the agent runs commands in its
+  executor's sandbox, and is told to run the role's checks before it
+  finishes; the pipeline runs them again, and its run counts.
+- **The benchmark measures and guards the base**
+  ([docs/benchmark.md](docs/benchmark.md#level-b--the-base-across-versions-2026-10-27)):
+  `bench/base` starts any image of the server in a throwaway container on
+  a copy of the benchmark vault and measures it from outside, as an agent
+  uses it: search results, the tools and bootstrap an agent receives, the
+  latency of the everyday tools, cold and warm starts on a small and a
+  large vault, memory and CPU, image, binary, index, the web UI's first
+  load, and the code of the version. `bench/base/reference.json` gives
+  each number a reference, a room the wrong way and, for some, an
+  objective; `bench/base check` fails when a number is past its limit,
+  `bench/base reference` moves a reference in a commit that says why, and
+  `bench/base/guard.sh` waits for the load to go down, measures, checks,
+  and measures again before it fails. `bench/backlog` writes one backlog
+  of 180 entries as a note with a section per entry and as a database
+  note with one note per entry, with 22 status questions: every answer is
+  right in both shapes, and the database costs less than half a session.
+
+### Changed
+- **The command palette and Search find what you look for**
+  ([docs/web-ui/editor.md](docs/web-ui/editor.md#command-palette),
+  [docs/web-ui/overview.md](docs/web-ui/overview.md#search-window)):
+  - `[[` suggests a note by its title or its file name, ignoring case,
+    and no longer offers notes that only mention the word in their text;
+    a title that starts with the letters comes first, and each
+    suggestion shows the title with its path beside. A `relation` field
+    of the properties suggests the same way; `/api/v1/note-titles` does
+    this, and the OpenAPI describes it;
+  - the palette, a finder for names, ends with **Search the text for
+    "…"** once there is a text: it opens Search with it, or hands it to
+    the Search already open. The **Search** button in the top bar no
+    longer shows `Ctrl+K`, which opens the palette;
+  - to a screen reader the palette is a dialog named *Jump to a note, a
+    project or a tag*, its field an ARIA combobox that says the entry
+    chosen; `Tab` stays in the field, `Home` and `End` go to the first
+    and the last entry once the arrows are in the list, and the entry
+    chosen stays in view;
+  - Search shows how many notes it found and the project beside each
+    title; a search that finds nothing suggests checking the spelling,
+    removes the project filter with one button when there is one, and
+    with another looks for the text in the names, in the palette. Under
+    the title of a note without every word of the query it says the
+    words it lacks ("Without: deploy"); `/api/v1/search` returns them as
+    `missing`, and the OpenAPI describes the endpoint.
+- **The focus stays where you work**
+  ([docs/web-ui/overview.md](docs/web-ui/overview.md)): after an action
+  the focus fell to the page and a keyboard started over from the top.
+  - A window you open, from the tree, the palette, a link or a search
+    result, takes the focus on its title, which a screen reader says,
+    once it has loaded, unless a key moved it meanwhile; the windows a
+    reload brings back leave it where it is.
+  - A window closed or minimized gives the focus back where it was
+    opened from, if that is still on the page, or else to the title of
+    the window that takes over, and to the main once no window is left;
+    `Alt-←` / `Alt-→` take it to the title of the window they move to.
+    In tabs mode the tabs are one `Tab` stop that a screen reader hears
+    as tabs: the arrows, `Home` and `End` move between them, `Delete`
+    closes one, and their close button is bigger.
+  - A note just made opens with the focus in its editor; a creation the
+    server refuses puts it on the name field, with the reason; a field
+    of a note's properties, once saved, and a card moved on a board, in
+    its new column, keep it; the palette closed without a choice gives
+    it back where it was opened. *Save* stays in the `Tab` order when
+    there is nothing to save, and does nothing then.
+  - A confirmation that loses something, a delete or a revoke, now
+    starts on *Cancel*: `Tab` reaches the red button.
+  - From the top of the page, the first stop is *Skip to the active
+    window*. The parts of the page are landmarks, and headings go down
+    one level at a time.
+- **A screen reader hears what changes**: one live region of the shell
+  says a save, a card moved on a board ("Moved to Review, place 2"), how
+  many notes a search found or that none did, how many entries an audit
+  filter keeps, and a change made elsewhere to the note being edited. The
+  browser's tab says the focused window and its project
+  ("nota-alfa · agile-lab · gosidian"), the login page "Sign in ·
+  gosidian".
+- **A search finds a note that lacks one of its words**
+  ([docs/mcp/tools.md](docs/mcp/tools.md)): every word of a query was
+  required, so a note without one of them was no hit even with all the
+  others. When the notes with every word are fewer than the limit, the
+  notes with one of the query's less common words (in at most 10% of the
+  notes) now follow them, in `memory_search`, the web UI's search and the
+  `[[` suggestions: scored never above the last full hit, and marked
+  `partial: without "…"` in `why`. With `any_of`, the partial hits of
+  each phrasing follow a fusion that falls short, and the fusion counts
+  each list's first places more (Reciprocal Rank Fusion constant 5
+  instead of 60). On the benchmark's questions, one query's R@5 goes
+  from 0.71 to 0.80; on a vault of 24,000 real notes, the searches that
+  found nothing, one in eight, find something.
+  `gosidian_search_queries_total` counts a search with only partial hits
+  as `result="partial"`.
+- **A search takes a fraction of the time**
+  ([docs/benchmark.md](docs/benchmark.md)): the full-text index keeps
+  the prefixes of one to three characters, so a short word no longer
+  merges thousands of lists; the snippet of a note of 256 KB or more is
+  cut in one pass (FTS5's took 35 s on a report of 2.4 MB), and a note
+  of 8 KB or more gets its snippet only if it is among the hits; the
+  inflections of its words no longer write to a table, its queries are
+  prepared once, and the index is read through a memory map. On a vault
+  of 30,000 notes, with the queries agents write, the median search
+  drops from 11.7 to 8.0 ms and the 95th percentile from 269 to 65; with
+  variants the slowest search from 167 s to 0.9. The hits are the same.
+  The index file grows (434 to 558 MB there), and the first start after
+  the upgrade re-indexes the whole vault.
+- **A view, a search or a query no longer reads the whole vault**: to
+  keep a reader who is not the owner to the projects it may see, the
+  server read every note and tested each against a `LIKE` the path index
+  never served. The projects are now listed a lookup each, and the index
+  gains `notes_path_nocase` (about 3 MB for 30,000 notes, built once at
+  the first start). On 29,000 notes, a member's preview with a view goes
+  from 27 ms to 1.9, a search from 22.5 to 5.1.
+- **A large vault starts in a third of the time**: the scan at start
+  writes the notes 256 to a transaction, and reads and parses the next
+  ones on every core while it writes. On 5,087 notes with two CPUs the
+  cold start drops from 5.7 s to 2.0 s.
+- **The web UI's files go gzipped** to a browser that accepts it, each
+  compressed once and kept in memory: the first load drops from 590 KB
+  to 163 KB sent.
+- **An agent receives less, and the same rules**
+  ([docs/mcp/tools.md](docs/mcp/tools.md)):
+  - `memory_pipelines`, `memory_pipeline_run` and `memory_create_team`
+    are listed only while the server runs pipelines, `memory_in_upload`
+    only to a token that may write in a project with an IN folder, and
+    `memory_create_table_note` and `memory_create_media_note` only while
+    their format is on; hidden, they are also unknown to `tools/call`.
+    The heaviest descriptions say the same in fewer words. With the
+    default configuration and the formats off, `tools/list` goes from 71
+    tools and 93.5 KB to 65 and 78.8 KB;
+  - the directives speak of the `.html`, media and table notes, the IN
+    folder and the tag vocabulary only where the server or the project
+    has them on, and say the same rules in fewer words: the bootstrap of
+    the benchmark project goes from 25,237 to 21,604 bytes. The
+    directives are at v28, and `directives_version` names the variant
+    served (see docs/upgrading.md).
+- **A `mermaid` or `view` block no longer costs 5 ms a render**: the
+  renderer highlights fenced code itself, without
+  `goldmark-highlighting`, and keeps the answer for a language chroma
+  does not know; the server keeps about 0.6 MiB less at rest. The HTML is
+  the same, byte for byte.
+- **A team's coordinator and checks**: a review task depends on every
+  task whose work it checks; the agent of a role with `checks` is told
+  the command, and whether it may run it.
+
+### Fixed
+- **An unsaved draft survives the end of the session**
+  ([docs/web-ui/overview.md](docs/web-ui/overview.md)): when a session
+  ended, the editor's unsaved text was lost. The editor now keeps it in
+  the browser, per account and note, and the note offers it back
+  (*Restore* · *Discard*) after the login, a reload or a crash; a note
+  changed meanwhile asks before it is overwritten.
+- **A web session renews while you work, and lasts what the
+  configuration says** ([docs/configuration.md](docs/configuration.md)):
+  `GOSIDIAN_LOGIN_SESSION_TTL` was read and never used, and the web UI
+  never renewed its session, so it ended 24 hours after the login even
+  while in use. A key, a click or the wheel now renews it once less than
+  half of the TTL is left, until the new
+  `GOSIDIAN_LOGIN_SESSION_MAX_TTL` (`168h` by default). The server
+  refuses to start with a TTL under `2m` or a maximum shorter than it.
+- **The limits of the failed logins are the configured ones**:
+  `GOSIDIAN_LOGIN_WINDOW` and `GOSIDIAN_LOGIN_MAX_FAILURES` were read and
+  never used (always 5 failures in 15 minutes). They now count, and a
+  value that would refuse every login stops the start.
+- **A save no longer flashes "Changed elsewhere while you were
+  editing"**: the event of the save itself, when it came before its
+  reply, was taken for another writer's change.
+- **A reload leaves the focus to the active window**, not in Search's
+  field; and a Search field cleared no longer says there was nothing for
+  the text it held.
+- **A note format off says where it is turned on**: the refusals of a
+  `.html`, table or media note sent an admin to project toggles that
+  have no such switch; they now name `[vault] html_notes`, `media_notes`
+  and `table_notes`, read at start.
+- **The diagrams** (plancia-diagrams 0.6.2): the short form of an edge
+  (`a -> b: label`) and the id the pipeline editor makes from a node type
+  took a time quadratic in a run of blanks or underscores; a link card
+  of an Obsidian canvas lost its link when its label ended in a
+  backslash.
+
 ## [2.118.2] — 2026-10-26 — "Pillow 13 for the rag preset"
 
 The `rag` compose preset takes docling 0.5.5; gosidian itself is the same

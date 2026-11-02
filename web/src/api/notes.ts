@@ -30,6 +30,8 @@ export interface Note {
   source?: string
   /** An Obsidian canvas's cards, as the server resolved them (IMP-144). */
   canvas?: CanvasData
+  /** After a board's card moved: the column it took past its limit (IMP-216). */
+  warning?: string
 }
 
 /**
@@ -132,6 +134,8 @@ export interface PatchFrontmatterBody {
   unset?: string[]
   /** The values last seen, checked field by field: 409 when one changed. */
   expect?: Record<string, FieldValue>
+  /** A board's card: its place in its column, 0 the top (IMP-216). */
+  at?: number
 }
 
 /**

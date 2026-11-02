@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/gosidian/gosidian/internal/clock"
+	"github.com/gosidian/gosidian/internal/fleet"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/parser"
 )
@@ -19,6 +20,10 @@ type Data struct {
 	// of its columns in order ("" for the notes without one).
 	Group  *Column  `json:"group,omitempty"`
 	Groups []string `json:"groups,omitempty"`
+	// Lanes are the columns of a ```board block, with their states and
+	// limits (IMP-216): Groups are their names, then the closed cards
+	// without a column ("").
+	Lanes []fleet.Column `json:"lanes,omitempty"`
 	// Counts are the groups of a count view (as: count with group_by).
 	Counts []Count `json:"counts,omitempty"`
 	Rows   []Row   `json:"rows,omitempty"`
@@ -94,6 +99,7 @@ func (r *Result) Data(c Context) Data {
 		for _, gr := range groups {
 			d.Groups = append(d.Groups, gr.Value)
 		}
+		d.Lanes = r.Spec.Lanes
 	}
 	d.Rows = make([]Row, 0, len(r.Hits))
 	for _, h := range r.Hits {

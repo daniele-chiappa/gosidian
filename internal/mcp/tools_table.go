@@ -34,7 +34,7 @@ func (s *Server) registerTableTools() {
 
 func (s *Server) handleCreateTableNote(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if !s.vault.TableNotesEnabled() {
-		return mcp.NewToolResultError("table notes are disabled on this instance — a per-project flag an admin can flip live from the web UI project toggles (or [vault] table_notes / GOSIDIAN_VAULT_TABLE_NOTES). Meanwhile the CSV can still be stored as a plain attachment (memory_ingest or memory_upload_attachment)"), nil
+		return mcp.NewToolResultError("table notes are disabled on this instance: " + formatTurnOn("table_notes") + ". Meanwhile the CSV can still be stored as a plain attachment (memory_ingest or memory_upload_attachment)"), nil
 	}
 	project, err := req.RequireString("project")
 	if err != nil {

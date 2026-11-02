@@ -8,6 +8,7 @@ const open = vi.hoisted(() => vi.fn())
 vi.mock('plancia', async (orig) => ({
   ...(await orig<typeof import('plancia')>()),
   useWindowsStore: () => ({ open }),
+  usePlanciaFocus: () => ({ focusWindow: vi.fn(async () => true) }),
 }))
 vi.mock('@/stores/access', () => ({
   useAccessStore: () => ({ canWrite: () => false, visibility: () => 'internal' }),

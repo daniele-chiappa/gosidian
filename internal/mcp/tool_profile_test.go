@@ -115,3 +115,76 @@ func TestToolProfile_DynamicAdmissions(t *testing.T) {
 		t.Error("self_improve should appear for an opted-in core token")
 	}
 }
+
+// A note format off costs no schema either (roadmap M1.3): the creators of
+// table and media notes, which could only refuse while their format is off,
+// are listed only while it is on, and are "not found" on tools/call
+// meanwhile. memory_ingest stays the door for those files either way.
+func TestToolProfile_FormatToolsFollowTheirFormat(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	admin := context.Background()
+	lists := func(t *testing.T, table, media bool) {
+		t.Helper()
+		names := listToolNames(t, s, admin)
+		if has(names, "memory_create_table_note") != table || has(names, "memory_create_media_note") != media {
+			t.Errorf("table and media creators listed %v and %v, want %v and %v",
+				has(names, "memory_create_table_note"), has(names, "memory_create_media_note"), table, media)
+		}
+		if !has(names, "memory_ingest") {
+			t.Error("memory_ingest is not listed")
+		}
+	}
+	lists(t, false, false)
+	for _, name := range []string{"memory_create_table_note", "memory_create_media_note"} {
+		if out := rpcMessage(t, s, admin, "tools/call", `{"name":"`+name+`","arguments":{}}`); !strings.Contains(out, "not found") {
+			t.Errorf("%s answers with its format off: %s", name, out)
+		}
+	}
+	s.vault.SetTableNotes(true)
+	lists(t, true, false)
+	s.vault.SetMediaNotes(true)
+	lists(t, true, true)
+}
+
+// A branch off costs no schema (roadmap M2.2): its tools are listed only
+// while it is on, and are "not found" on tools/call while it is off.
+func TestToolProfile_BranchToolsFollowTheirBranch(t *testing.T) {
+	pipelineTools := []string{"memory_pipelines", "memory_pipeline_run", "memory_create_team"}
+	s := inUploadServer(t)
+	admin := context.Background()
+	names := listToolNames(t, s, admin)
+	for _, name := range pipelineTools {
+		if has(names, name) {
+			t.Errorf("%s is listed with the pipelines off", name)
+		}
+	}
+	if out := rpcMessage(t, s, admin, "tools/call", `{"name":"memory_pipelines","arguments":{}}`); !strings.Contains(out, "not found") {
+		t.Errorf("memory_pipelines answers with the pipelines off: %s", out)
+	}
+	s.SetPipelinesSwitch(true)
+	names = listToolNames(t, s, admin)
+	for _, name := range pipelineTools {
+		if !has(names, name) {
+			t.Errorf("%s is not listed with the pipelines on", name)
+		}
+	}
+
+	// memory_in_upload: only to a token that may write in a project with
+	// use_in (p has it, q has not).
+	for _, c := range []struct {
+		tok  *auth.Token
+		want bool
+	}{
+		{&auth.Token{ID: "w1", Name: "writer", Project: "p", Scopes: []string{auth.ScopeRead, auth.ScopeWrite}}, true},
+		{&auth.Token{ID: "r1", Name: "reader", Project: "p", Scopes: []string{auth.ScopeRead}}, false},
+		{&auth.Token{ID: "o1", Name: "other", Project: "q", Scopes: []string{auth.ScopeRead, auth.ScopeWrite}}, false},
+	} {
+		if got := has(listToolNames(t, s, ctxWithToken(c.tok)), "memory_in_upload"); got != c.want {
+			t.Errorf("%s sees memory_in_upload %v, want %v", c.tok.Name, got, c.want)
+		}
+	}
+	plain, _, _ := newTestServer(t)
+	if has(listToolNames(t, plain, admin), "memory_in_upload") {
+		t.Error("memory_in_upload is listed on a server with no IN folder")
+	}
+}

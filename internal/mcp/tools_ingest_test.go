@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/gosidian/gosidian/internal/auth"
+	mcplib "github.com/mark3labs/mcp-go/mcp"
 )
 
 func b64(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
@@ -248,5 +249,42 @@ func TestIngest_NotePathExtensionMismatch(t *testing.T) {
 	})
 	if out["path"] != "proj/renamed.md" {
 		t.Errorf("expected proj/renamed.md, got %v", out["path"])
+	}
+}
+
+// A note format off is the instance's configuration, read at start: every
+// message that says it is off says so, not a project's switch in the web UI
+// that does not exist (BUG-141).
+func TestFormatOff_MessagesNameTheInstanceConfig(t *testing.T) {
+	s, ctx := newScopedServer(t, "", []string{auth.ScopeRead, auth.ScopeWrite})
+	refused := func(res *mcplib.CallToolResult, _ error) string { return expectError(t, res) }
+	answered := func(res *mcplib.CallToolResult, _ error) string { return resultText(t, res) }
+	png := base64.StdEncoding.EncodeToString(pngBytes)
+	for _, c := range []struct {
+		name, key, msg string
+	}{
+		{"memory_create of a .html", "html_notes", refused(s.handleCreate(ctx, call(map[string]any{
+			"path": "proj/dash.html", "content": "<h1>dash</h1>"})))},
+		{"memory_ingest of a .html", "html_notes", refused(s.handleIngest(ctx, call(map[string]any{
+			"project": "proj", "data": b64("<h1>dash</h1>"), "filename": "dash.html"})))},
+		{"memory_create_table_note", "table_notes", refused(s.handleCreateTableNote(ctx, call(map[string]any{
+			"project": "audit", "data": csvB64(sampleCSV), "filename": "log.csv", "caption": "x"})))},
+		{"memory_create_media_note", "media_notes", refused(s.handleCreateMediaNote(ctx, call(map[string]any{
+			"project": "pics", "data": png, "filename": "dot.png", "caption": "x"})))},
+		{"memory_ingest of a .csv", "table_notes", answered(s.handleIngest(ctx, call(map[string]any{
+			"project": "audit", "data": b64(sampleCSV), "filename": "log.csv"})))},
+		{"memory_ingest of an image", "media_notes", answered(s.handleIngest(ctx, call(map[string]any{
+			"project": "pics", "data": png, "filename": "dot.png"})))},
+	} {
+		for _, want := range []string{"[vault] " + c.key, "GOSIDIAN_VAULT_" + strings.ToUpper(c.key), "restart"} {
+			if !strings.Contains(c.msg, want) {
+				t.Errorf("%s: the message lacks %q: %s", c.name, want, c.msg)
+			}
+		}
+		for _, wrong := range []string{"web UI", "toggle", "per-project", "flip"} {
+			if strings.Contains(c.msg, wrong) {
+				t.Errorf("%s: the message speaks of %q: %s", c.name, wrong, c.msg)
+			}
+		}
 	}
 }

@@ -65,6 +65,9 @@ trial, read the [root README](../README.md) first.
   project, served by a chat plugin, answered by a pipeline
 - [Teams of agents](agents.md) — notes `type: team` and the tasks of
   their roles, which pipelines on task give to agents, within a budget
+- [Boards](board.md) — notes `type: board`: a project's cards in columns
+  with their limits and their order, which agents take one after the
+  other and people drag
 - [The IN folder](in.md) — a project's files to work on, under their own
   names and in their own tree, which the pipelines take in batches
 - [Diagrams](diagrams.md) — ```` ```diagram ```` blocks of YAML: flows,

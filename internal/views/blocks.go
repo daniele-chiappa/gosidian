@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gosidian/gosidian/internal/fleet"
 	"github.com/gosidian/gosidian/internal/parser"
 )
 
@@ -18,9 +19,35 @@ type Block = parser.FencedBlock
 
 var fenceRe = regexp.MustCompile("^ {0,3}(`{3,}|~{3,})\\s*([^`\\s]*)")
 
-// FindBlocks returns the view blocks of body, in order. A ```view inside
-// another fence (a code sample showing a view) is not a block.
-func FindBlocks(body []byte) []Block { return FindFenced(body, "view") }
+// FindBlocks returns the blocks of body a read computes, in order: its
+// ```view blocks and its ```board blocks, which show a board's cards
+// (IMP-216). A block inside another fence (a code sample) is not one.
+func FindBlocks(body []byte) []Block {
+	var out []Block
+	for _, b := range computedBlocks(body) {
+		out = append(out, b.Block)
+	}
+	return out
+}
+
+// computed is a block a read computes, a ```view or a ```board.
+type computed struct {
+	Block
+	board bool
+}
+
+// computedBlocks returns the blocks of body a read computes, in order.
+func computedBlocks(body []byte) []computed {
+	var out []computed
+	for _, b := range FindFenced(body, "view") {
+		out = append(out, computed{Block: b})
+	}
+	for _, b := range FindFenced(body, fleet.BoardLang) {
+		out = append(out, computed{Block: b, board: true})
+	}
+	slices.SortFunc(out, func(a, b computed) int { return a.Start - b.Start })
+	return out
+}
 
 // FindFenced returns the fenced blocks of body whose info string is lang
 // (```pipeline, IMP-167); see parser.FindFenced.
@@ -36,7 +63,8 @@ const (
 
 var persistedRe = regexp.MustCompile(`(?s)\n?` + regexp.QuoteMeta(resultOpen) + `.*?` + regexp.QuoteMeta(resultClose) + `\n?`)
 
-// Expand returns body with every view block rendered by render. With
+// Expand returns body with every view and board block rendered by render
+// (board true for a ```board block). With
 // keepSpec the block stays and its result follows it between markers (the
 // form for agents, who must see what produces a section); without, the
 // block is replaced by its result inside <div class="gosidian-view"
@@ -44,9 +72,9 @@ var persistedRe = regexp.MustCompile(`(?s)\n?` + regexp.QuoteMeta(resultOpen) + 
 // for the web UI, whose editors find their view by N). The second
 // value hashes the results, so a caller can tell a changed view from an
 // unchanged file.
-func Expand(body []byte, keepSpec bool, render func(spec string) string) ([]byte, string) {
+func Expand(body []byte, keepSpec bool, render func(spec string, board bool) string) ([]byte, string) {
 	body = persistedRe.ReplaceAll(body, []byte("\n"))
-	blocks := FindBlocks(body)
+	blocks := computedBlocks(body)
 	if len(blocks) == 0 {
 		return body, ""
 	}
@@ -54,7 +82,7 @@ func Expand(body []byte, keepSpec bool, render func(spec string) string) ([]byte
 	var out bytes.Buffer
 	last := 0
 	for i, b := range blocks {
-		res := render(b.Spec)
+		res := render(b.Spec, b.board)
 		h.Write([]byte(res))
 		if keepSpec {
 			out.Write(body[last:b.End])
@@ -99,8 +127,8 @@ func ThisFields(notePath string, fm map[string]any) map[string][]string {
 // one-line warning instead of breaking the note.
 func RenderNote(body []byte, keepSpec bool, c Context, q QueryFunc) ([]byte, string) {
 	body, ehash := ExpandEmbeds(body, keepSpec, c)
-	out, hash := Expand(body, keepSpec, func(spec string) string {
-		r, err := compute(spec, c, q)
+	out, hash := Expand(body, keepSpec, func(spec string, board bool) string {
+		r, err := computeBlock(spec, board, c, q)
 		if err != nil {
 			return warning(err)
 		}
@@ -139,8 +167,8 @@ func RenderNoteWithin(body []byte, keepSpec bool, c Context, q QueryFunc, budget
 		text string
 	}
 	var vs []view
-	Expand(body, keepSpec, func(spec string) string {
-		r, err := compute(spec, c, q)
+	Expand(body, keepSpec, func(spec string, board bool) string {
+		r, err := computeBlock(spec, board, c, q)
 		if err != nil {
 			vs = append(vs, view{text: warning(err)})
 		} else {
@@ -154,7 +182,7 @@ func RenderNoteWithin(body []byte, keepSpec bool, c Context, q QueryFunc, budget
 	}
 	shares := fairShares(sizes, budget)
 	i := 0
-	out, hash = Expand(body, keepSpec, func(string) string {
+	out, hash = Expand(body, keepSpec, func(string, bool) string {
 		v, share := vs[i], shares[i]
 		i++
 		if v.r == nil || len(v.text) <= share {
@@ -206,8 +234,8 @@ func fairShares(sizes []int, budget int) []int {
 func RenderNoteData(body []byte, c Context, q QueryFunc) ([]byte, []Data) {
 	body, _ = ExpandEmbeds(body, false, c)
 	var data []Data
-	out, _ := Expand(body, false, func(spec string) string {
-		r, err := compute(spec, c, q)
+	out, _ := Expand(body, false, func(spec string, board bool) string {
+		r, err := computeBlock(spec, board, c, q)
 		if err != nil {
 			data = append(data, Data{Error: err.Error()})
 			return warning(err)

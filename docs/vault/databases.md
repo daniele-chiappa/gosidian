@@ -414,6 +414,9 @@ vault's notes are written.
 - The call needs write access to the project. It answers 200 with the
   note and its new `ETag`; an edit that changes nothing leaves the note
   and its etag as they were.
+- On a card of a [board](../board.md), an edit of `status` or `column`,
+  or `at`, is a move: alone, by the board's rules and limits
+  ([the web UI](../board.md#the-web-ui)).
 
 ## Backlogs and the directives
 

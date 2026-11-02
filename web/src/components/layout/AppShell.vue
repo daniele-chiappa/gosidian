@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Network, TriangleAlert } from 'lucide-vue-next'
 import {
   Plancia,
   PlanciaSidebar,
   usePlanciaSync,
-  useOpenWindow,
   useWindowsStore,
   type PlanciaLabels,
   type WindowInstance,
@@ -15,18 +14,26 @@ import TopBar from './TopBar.vue'
 import Sidebar from './Sidebar.vue'
 import CommandPalette from './CommandPalette.vue'
 import ConfirmHost from '@/components/primitives/ConfirmHost.vue'
+import AnnounceHost from '@/components/primitives/AnnounceHost.vue'
 import TotpEnroll from '@/components/domain/TotpEnroll.vue'
 import PasswordChange from '@/components/domain/PasswordChange.vue'
 import { windowRegistry } from '@/components/plancia/windowRegistry'
 import { windowTone } from '@/components/plancia/windowModules'
 import { codec, planciaKey } from '@/composables/planciaKey'
 import { useSidebarResize } from '@/composables/useSidebarResize'
+import { useSessionRenewal } from '@/composables/useSessionRenewal'
+import { useShellPageTitle } from '@/composables/usePageTitle'
+import { WINDOW_HEADING, provideOpenFocused } from '@/composables/useOpenFocused'
 import { useAuthStore } from '@/stores/auth'
 import { useUIStore } from '@/stores/ui'
 
 const { t } = useI18n()
 const { width, startDrag, reset } = useSidebarResize()
 const auth = useAuthStore()
+// The session renews while the shell is used (BUG-143).
+useSessionRenewal()
+// The tab says the focused window and its project (IMP-217, F-07).
+useShellPageTitle()
 const ui = useUIStore()
 // plancia layout mode (strip ↔ tabs), persisted in the UI store; the toggle
 // lives in the TopBar. Two-way via v-model, routed through the store action.
@@ -60,9 +67,10 @@ const planciaLabels = computed<PlanciaLabels>(() => ({
   viewToggle: t('plancia.viewToggle'),
 }))
 
-// Cross-window open for the ego-graph action below (plancia provides it through
-// the enclosing <Plancia>).
-const openWindow = useOpenWindow()
+// The open of a gesture, which puts the focus on the window's title: the
+// views inject it as 'openWindow', and so do the shell's own actions below
+// (IMP-217, F-03). The windows hydrated from the address open without it.
+const openWindow = provideOpenFocused()
 
 /** Note path carried by note-shaped windows; gates the "direct links" button. */
 function notePath(win: WindowInstance): string | null {
@@ -95,6 +103,16 @@ function onBeforeUnload(e: BeforeUnloadEvent) {
 onMounted(() => window.addEventListener('beforeunload', onBeforeUnload))
 onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload))
 
+// «Skip to the active window», the first stop of Tab (IMP-217, F-35): past
+// the bar and the sidebar to the title of the focused window, or to the
+// main while its view has not drawn one.
+const mainEl = ref<HTMLElement | null>(null)
+function skipToWindow(): void {
+  const id = windowsStore.focused?.id
+  const heading = id ? document.querySelector<HTMLElement>(`[data-win-id="${id}"] ${WINDOW_HEADING}`) : null
+  ;(heading ?? mainEl.value)?.focus()
+}
+
 // While a gate is up (a password to change, a TOTP to enrol) the server
 // refuses every data route: the sidebar and the windows are not mounted, so
 // they load once the gate is gone instead of keeping a 403 from behind it.
@@ -114,6 +132,15 @@ function openSettings(): void {
 
 <template>
   <div class="h-screen flex flex-col bg-bg text-text">
+    <a
+      v-if="!gated && windowsStore.focused"
+      href="#main"
+      class="fixed -top-12 left-2 z-50 rounded bg-accent px-3 py-2 text-sm text-accent-fg focus:top-2"
+      data-skip-to-window
+      @click.prevent="skipToWindow"
+    >
+      {{ t('plancia.skipToWindow') }}
+    </a>
     <TopBar />
     <!-- One-time notice after a login that consumed a recovery code: the
          user should know how many are left and where to regenerate them. -->
@@ -153,29 +180,55 @@ function openSettings(): void {
         :resizable="false"
         :aria-label="t('common.vault')"
         landmark="complementary"
+        class="mr-1"
       >
         <template #toggle><span /></template>
         <Sidebar />
+        <!-- The handle fills the gap right of the sidebar's border, inside
+             its landmark (IMP-217, F-35). Its containing block is the aside,
+             so the scrolling body neither clips nor scrolls it. -->
+        <div
+          class="absolute top-0 -right-[5px] h-full w-1 cursor-col-resize bg-border hover:bg-accent/40 select-none"
+          role="separator"
+          aria-orientation="vertical"
+          :aria-label="t('sidebar.resize')"
+          @pointerdown="startDrag"
+          @dblclick="reset"
+        />
       </PlanciaSidebar>
 
-      <div
-        class="w-1 cursor-col-resize bg-border hover:bg-accent/40 select-none flex-shrink-0"
-        role="separator"
-        aria-orientation="vertical"
-        :aria-label="t('sidebar.resize')"
-        @pointerdown="startDrag"
-        @dblclick="reset"
-      />
-
-      <main class="flex-1 min-w-0 overflow-hidden">
+      <main
+        id="main"
+        ref="mainEl"
+        tabindex="-1"
+        class="flex-1 min-w-0 overflow-hidden focus:outline-none"
+      >
+        <!-- The focus follows the windows (F-03): onto a window's title,
+             and to the main once the last window has gone with it. -->
         <Plancia
           v-model:view-mode="viewMode"
           :registry="windowRegistry"
           :labels="planciaLabels"
           :resolve-tone="windowTone"
+          :focus-target="WINDOW_HEADING"
+          @focus-out="mainEl?.focus()"
         >
           <!-- Domain action: open the ego-graph ("direct links") of a note
                window. Gated on a note path; lucide icon stays in gosidian. -->
+          <!-- The empty desk names itself (IMP-217, F-35): the plancia's own
+               two lines, the first as the page's h1. -->
+          <template #empty>
+            <div>
+              <h1>{{ planciaLabels.empty }}</h1>
+              <p class="mt-1 text-[0.75rem]">
+                {{
+                  windowsStore.minimizedList.length
+                    ? planciaLabels.minimizedHint(windowsStore.minimizedList.length)
+                    : planciaLabels.openHint
+                }}
+              </p>
+            </div>
+          </template>
           <template #window-actions="{ win }">
             <button
               v-if="notePath(win)"
@@ -196,15 +249,16 @@ function openSettings(): void {
          effective policy requires two-factor but no secret is enrolled. -->
     <!-- A password the owner chose (IMP-063): the account sets its own
          first; an enrolment it also owes comes after. -->
-    <div
+    <!-- A gate is the page while it is up, so it is the main (IMP-217). -->
+    <main
       v-if="auth.passwordChangeRequired"
       class="fixed inset-0 z-50 flex items-center justify-center bg-bg/95 p-4"
       data-password-interstitial
     >
       <div class="w-full max-w-md rounded-lg bg-surface p-6 ring-1 ring-border shadow">
-        <h2 class="text-lg font-semibold mb-1">
+        <h1 class="text-lg font-semibold mb-1">
           {{ t('password.interstitial_title') }}
-        </h2>
+        </h1>
         <!-- The owner's password is never set by someone else: a temporary
              one is the password of the first start (IMP-044). -->
         <p class="text-sm text-text-muted mb-4">
@@ -216,19 +270,20 @@ function openSettings(): void {
         </p>
         <PasswordChange @done="auth.clearPasswordChange()" />
       </div>
-    </div>
-    <div
+    </main>
+    <main
       v-else-if="auth.enrollmentRequired"
       class="fixed inset-0 z-50 flex items-center justify-center bg-bg/95 p-4"
     >
       <div class="w-full max-w-md rounded-lg bg-surface p-6 ring-1 ring-border shadow">
-        <h2 class="text-lg font-semibold mb-1">{{ t('totp.interstitial_title') }}</h2>
+        <h1 class="text-lg font-semibold mb-1">{{ t('totp.interstitial_title') }}</h1>
         <p class="text-sm text-text-muted mb-4">{{ t('totp.interstitial_desc') }}</p>
         <TotpEnroll @done="onEnrolled" />
       </div>
-    </div>
+    </main>
 
     <CommandPalette />
     <ConfirmHost />
+    <AnnounceHost />
   </div>
 </template>

@@ -191,6 +191,9 @@ type Server struct {
 	// session, keyed by correlation id — token id as fallback) so a client
 	// cannot pile up blocking long-polls and exhaust connections.
 	waiters sync.Map
+	// boardLocks are the locks of the boards of cards, by note (lockBoard,
+	// IMP-216).
+	boardLocks sync.Map
 	// ingestURLAllow is the URL-prefix allowlist for the memory_ingest `url`
 	// source (ADR-018). Empty (default) keeps the channel disabled — the
 	// allowlist is the SSRF boundary, so there is no implicit default.

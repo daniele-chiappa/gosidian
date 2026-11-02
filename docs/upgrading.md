@@ -7,6 +7,110 @@ one, newest first, and do what each one says. MCP clients keep the tool list
 they read when they connected, so reconnect them after an upgrade to see new
 tools and arguments. The full notes of every release are in `CHANGELOG.md`.
 
+## 2.127.0 — Web sessions as configured
+
+- `GOSIDIAN_LOGIN_SESSION_TTL` (`webauth.session_ttl`) now counts: until
+  now a web session lasted 24 hours whatever it said. A session lasts that
+  long since it was last renewed, and the web UI renews it while it is
+  used (a key, a click, the wheel); a tab left alone expires. The new
+  `GOSIDIAN_LOGIN_SESSION_MAX_TTL` (`webauth.session_max_ttl`, `168h`)
+  caps a session however often it is renewed. The server does not start
+  with a `session_ttl` under `2m`, or a maximum shorter than it: check
+  them before the upgrade if you set them.
+- `GOSIDIAN_LOGIN_WINDOW` and `GOSIDIAN_LOGIN_MAX_FAILURES`
+  (`webauth.login_window`, `login_max_failures`) now count too: until now
+  the login limiter kept 15 minutes and 5 failures. A window of `0` or
+  less, or `0` failures, which would refuse every login, stops the start.
+- The web UI keeps the text being edited in the browser (`localStorage`),
+  per account and note, so that a session that ends does not lose it. It
+  goes when the note is saved, at sign-out, when another account signs in
+  in that browser, and after `session_max_ttl` at most. On a computer
+  several people use, signing out removes it.
+
+## 2.125.0 — A search finds a note that lacks a word
+
+- `memory_search`, the web UI's search and the `[[` suggestions return,
+  when the notes with every word of the query are fewer than the limit,
+  the notes with one of its less common words after them. Over MCP each
+  is marked `partial: without "…"` in `why`; a client that took every hit
+  for a note with every word reads it there.
+- `gosidian_search_queries_total` has a third `result`, `partial`: a
+  search whose hits all lack a word. A dashboard or an alert on the
+  searches that found nothing adds it to `zero`.
+- Reconnect the MCP clients to see the new description of `query`.
+
+## 2.124.0 — A smaller tools/list
+
+- `memory_create_table_note` and `memory_create_media_note` are listed
+  only where table notes or media notes are on (`[vault] table_notes`,
+  `media_notes`): with the format off, a call to them answers "not
+  found" instead of the refusal. `memory_ingest` stores those files as
+  attachments, as before. Reconnect the MCP clients to see the new list.
+
+## 2.123.0 — A smaller bootstrap
+
+- The directives are at v28: agents read them at their next bootstrap,
+  and the first one after the upgrade sends the block again.
+- `memory_bootstrap`'s `directives_version` is no longer the directives'
+  version: it is 100 times it, plus a bit for each feature the directives
+  speak of (1 `.html` notes, 2 media notes, 4 table notes, 8 the IN
+  folder, 16 the tag vocabulary) and 32 for the reading sections only,
+  2800 to 2863 for v28. Agents need nothing: they hand it back as
+  `known_directives_version`, as before. A script that reads it as the
+  version should read the `v=` of the block's marker, or divide by 100.
+
+## 2.122.0 — Boards of cards
+
+- The first card of a project's [board](board.md) rewrites the `fields`
+  of its `tasks.md`, as the server: `backlog` goes first among the
+  options of `status`, `team` and `assignee` are no longer required, and
+  the card's fields (`board`, `column`, `rank`, `column_since`,
+  `done_by`, `for`) join the schema. The rest of the note stays as
+  written; a project without a board keeps its `tasks.md` as it is.
+- `PATCH /api/v1/notes/<path>/frontmatter` on a card (a task with
+  `board`) moves it when the edit touches `status`, `column` or `rank`,
+  by the board's rules: such an edit carries no other key (400), never
+  sets `rank` (400: give `at`, the card's place in its column), and a move
+  the board refuses answers 422. Edits of a team's tasks, and of a card's
+  other fields, work as before.
+- `memory_task_create` no longer requires `team` and `assignee` when it
+  gets `board`, `memory_task_claim` its `path` when it gets `board`, and
+  `memory_task_update` its `status` when it gets `column`: reconnect the
+  MCP clients to see them.
+
+## 2.121.0 — The full-text index keeps short prefixes
+
+- The first start re-indexes the whole vault, once: the full-text index
+  is rebuilt with its new prefix lists. Until the scan ends the server
+  answers 503, as at every start, and its healthcheck fails; on the lab's
+  vault, 29,000 notes, most of them long converted documents, among
+  5.5 GB of files, the scan took 47 s. Give a healthcheck that restarts
+  the container that much time.
+- The index file grows, by about a quarter on a vault of long converted
+  documents (434 to 558 MB on 30,000 notes); on a vault of short notes,
+  less. Check the free space of the state directory.
+- Going back to an earlier release keeps working with the new index.
+
+## 2.119.0 — Another attempt continues the branch
+
+- A team made before 2.119.0 keeps its work pipeline
+  (`pipelines/<team>-work.md`): every attempt sent back starts again from
+  the repository's base. To have it continue the branch of the attempt
+  before, add a setting to two nodes, as `memory_create_team` now writes
+  them, and use claude or pi 0.4.0:
+
+  ```yaml
+  - id: drop
+    use: task.pr
+    with: {url: "{{ gate.pr_url }}", action: close, delete_branch: "{{ verdict.delete_branch }}"}
+  - id: again
+    use: task.update
+    with: {status: submitted, message: "{{ verdict.feedback }}", branch: "{{ verdict.branch }}"}
+  ```
+
+- A role may say `access: exec`: its agent runs commands, its checks
+  among them. Its preset must allow it (Bash for claude).
+
 ## 2.116.0 — The checks of a team's tasks
 
 - A team made with 2.115.0 keeps its work pipeline

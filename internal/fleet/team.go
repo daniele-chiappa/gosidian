@@ -12,6 +12,9 @@
 // came from, the tasks it waits for, and what the server keeps on it (who
 // holds it, until when, its attempts and cost). The server takes and
 // releases tasks; this package only reads and writes the notes.
+//
+// A board (board.go, IMP-216) shows a project's tasks as cards in columns,
+// with limits of the cards at work; a card needs no team.
 package fleet
 
 import (
@@ -43,6 +46,14 @@ const (
 	ApproveOps = "ops"
 	// ApproveNone: its work closes the task without a person.
 	ApproveNone = "none"
+)
+
+// The access levels of a role's agent (agent-run/1's access): read,
+// edit (also writes files), exec (also runs commands).
+const (
+	AccessRead = "read"
+	AccessEdit = "edit"
+	AccessExec = "exec"
 )
 
 // The ways a coordinator splits the work.
@@ -101,6 +112,11 @@ type Role struct {
 	// MaxTokens is the tokens of a step, cache reads too, within the
 	// executor's preset; 0 for its default.
 	MaxTokens int `json:"max_tokens,omitempty"`
+	// Access is its agent's level, AccessRead, AccessEdit or AccessExec:
+	// with exec it runs commands, its checks among them, in its
+	// executor's sandbox. "" for the executor's default, which is edit for
+	// a role with a repo.
+	Access string `json:"access,omitempty"`
 	// Repo is the repository it works on, a name of the executor's preset;
 	// Host the host its commands run on.
 	Repo string `json:"repo,omitempty"`
@@ -159,15 +175,18 @@ func (p Problem) String() string {
 	return p.Msg
 }
 
-// Block is a ```team block of a note, at its line.
+// Block is a ```team or ```board block of a note, at its line.
 type Block struct {
 	Line int
 	Src  string
 }
 
 // Find returns the team blocks of a note's body.
-func Find(body []byte) []Block {
-	fenced := parser.FindFenced(body, Lang)
+func Find(body []byte) []Block { return findBlocks(body, Lang) }
+
+// findBlocks returns the blocks of language lang of a note's body.
+func findBlocks(body []byte, lang string) []Block {
+	fenced := parser.FindFenced(body, lang)
 	out := make([]Block, 0, len(fenced))
 	for _, b := range fenced {
 		out = append(out, Block{Line: strings.Count(string(body[:b.Start]), "\n") + 1, Src: b.Spec})
@@ -190,6 +209,7 @@ type rawRole struct {
 	MaxTurns    int      `yaml:"max_turns"`
 	MaxSeconds  int      `yaml:"max_seconds"`
 	MaxTokens   int      `yaml:"max_tokens"`
+	Access      string   `yaml:"access"`
 	Repo        string   `yaml:"repo"`
 	Host        string   `yaml:"host"`
 	Paths       []string `yaml:"paths"`
@@ -320,7 +340,7 @@ func parseRoles(n *yaml.Node, project string) ([]Role, []Problem) {
 		}
 		var rr rawRole
 		if err := decodeKnown(v, &rr); err != nil {
-			p := yamlProblem(err, "a role: agent, run, model, effort, max_turns, max_seconds, max_tokens, repo, host, paths, forbid, checks, preview, writes, delegates_to, approve")
+			p := yamlProblem(err, "a role: agent, run, model, effort, max_turns, max_seconds, max_tokens, access, repo, host, paths, forbid, checks, preview, writes, delegates_to, approve")
 			if p.Line == 0 {
 				p.Line = k.Line
 			}
@@ -330,7 +350,7 @@ func parseRoles(n *yaml.Node, project string) ([]Role, []Problem) {
 		}
 		ro := Role{Name: name, Agent: LinkPath(rr.Agent, project), Run: strings.TrimSpace(rr.Run),
 			Model: strings.TrimSpace(rr.Model), Effort: strings.TrimSpace(rr.Effort),
-			MaxTurns: rr.MaxTurns, MaxSeconds: rr.MaxSeconds, MaxTokens: rr.MaxTokens,
+			MaxTurns: rr.MaxTurns, MaxSeconds: rr.MaxSeconds, MaxTokens: rr.MaxTokens, Access: strings.TrimSpace(rr.Access),
 			Repo: strings.TrimSpace(rr.Repo), Host: strings.TrimSpace(rr.Host),
 			Checks: strings.TrimSpace(rr.Checks), Preview: strings.Trim(strings.TrimSpace(rr.Preview), "/"), DelegatesTo: trimList(rr.DelegatesTo),
 			Approve: strings.TrimSpace(rr.Approve)}
@@ -342,6 +362,15 @@ func parseRoles(n *yaml.Node, project string) ([]Role, []Problem) {
 		}
 		if ro.Repo != "" && ro.Host != "" {
 			bad("repo or host, not both")
+		}
+		switch ro.Access {
+		case "", AccessEdit, AccessExec:
+		case AccessRead:
+			if ro.Repo != "" {
+				bad("access read: a role with a repo changes its files (edit or exec)")
+			}
+		default:
+			bad("access %q: read, edit or exec", ro.Access)
 		}
 		if (ro.Checks != "" || ro.Preview != "") && ro.Repo == "" {
 			bad("checks and preview work on a repo: the role has none")

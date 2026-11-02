@@ -11,10 +11,11 @@ import { ref, onMounted } from 'vue'
 import { Lightbulb } from 'lucide-vue-next'
 import { fetchPendingInsights } from '@/api/insights'
 import { useSSE } from '@/composables/useSSE'
-import { useWindowsStore } from 'plancia'
+import { useOpenFocused } from '@/composables/useOpenFocused'
 import { planciaKey } from '@/composables/planciaKey'
 
-const windows = useWindowsStore()
+// A gesture's open puts the focus on the window's title (IMP-217, F-03).
+const openWindow = useOpenFocused()
 const count = ref(0)
 const project = ref('insights')
 const enabled = ref(false)
@@ -40,7 +41,7 @@ sse.on('insight', () => {
 
 function open() {
   const path = `${project.value}/README.md`
-  windows.open({ type: 'note', key: planciaKey('note', path), title: 'insights', props: { path } })
+  openWindow({ type: 'note', key: planciaKey('note', path), title: 'insights', props: { path } })
 }
 </script>
 
