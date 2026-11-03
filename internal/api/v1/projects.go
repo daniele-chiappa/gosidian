@@ -419,6 +419,10 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 			return
 		}
 		if newName != name {
+			// Both names stay locked until the record, and to the end of
+			// the answer: git sync leaves out the files under a name a
+			// writer holds (BUG-147).
+			defer r.deps.Vault.LockPaths(name, newName)()
 			_, err := projectops.Rename(r.deps.Vault, r.deps.Index, r.deps.Projects, r.mcpTokens(), name, newName)
 			switch {
 			case errors.Is(err, projectops.ErrInvalid):
@@ -480,7 +484,9 @@ func (r *Router) deleteProject(w http.ResponseWriter, req *http.Request, name st
 	}
 
 	// Into the trash with its access saved for the restore, then out of the
-	// index, the access store and the MCP token scopes (IMP-124).
+	// index, the access store and the MCP token scopes (IMP-124). The name
+	// stays locked until the record, as for a rename (BUG-147).
+	defer r.deps.Vault.LockPath(name)()
 	res, err := projectops.Delete(r.deps.Vault, r.deps.Index, r.deps.Projects, r.mcpTokens(), r.deps.Trash, name)
 	switch {
 	case errors.Is(err, projectops.ErrInvalid):

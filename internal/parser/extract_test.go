@@ -489,3 +489,31 @@ func TestFences_MatchCharAndLength(t *testing.T) {
 		t.Errorf("fenced = %v\nwant     %v", got, want)
 	}
 }
+
+// TitleForPath is the title the indexer stores of a note, read from its
+// text alone: the frontmatter's title, in the markdown block or in the
+// leading comment of an HTML note, or "" when there is none (IMP-219).
+func TestTitleForPath(t *testing.T) {
+	for _, tc := range []struct {
+		path, body, want string
+	}{
+		{"p/a.md", "---\ntitle: \"Nota delta\"\ntags: [x]\n---\n# Heading\n", "Nota delta"},
+		{"p/a.md", "# Only a heading\n", ""},
+		{"p/a.md", "---\ntags: [x]\n---\nbody\n", ""},
+		{"p/a.md", "---\ntitle: Plan: one\nbad: [\n---\n", "Plan: one"},
+		{"p/r.html", "<!--\n---\ntitle: Report\n---\n-->\n<h1>x</h1>\n", "Report"},
+		{"p/r.html", "---\ntitle: Bare\n---\n<p>x</p>\n", "Bare"},
+	} {
+		if got := TitleForPath(tc.path, []byte(tc.body)); got != tc.want {
+			t.Errorf("TitleForPath(%s, %q) = %q, want %q", tc.path, tc.body, got, tc.want)
+		}
+		// The indexer reads the same title.
+		_, _, title := Extract([]byte(tc.body))
+		if strings.HasSuffix(tc.path, ".html") {
+			_, _, title, _ = ExtractHTML([]byte(tc.body))
+		}
+		if title != tc.want {
+			t.Errorf("the indexer reads %q of %q, want %q", title, tc.body, tc.want)
+		}
+	}
+}

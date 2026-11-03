@@ -148,7 +148,8 @@ writing in its own folder does not start itself again; so are the runs
 notes, which every run's end rewrites, or two commit pipelines of the same
 folder would start each other forever. A commit of such files only starts
 none. Git sync commits the whole vault, some seconds after the last change
-(`commit_debounce`): a run reads the notes as they are when it runs, maybe
+(`commit_debounce`), or at most `commit_max_wait` after the first while the
+changes keep coming: a run reads the notes as they are when it runs, maybe
 newer than the commit. With git sync off a commit pipeline starts only by
 hand, and the Runs window says so. What a [`run` pipeline](#on-the-end-of-a-run)
 writes is left out as well.
@@ -754,9 +755,10 @@ the note's history shows one entry per revision.
 
 - **The commit** is git sync's: everything pending in the vault, not only
   what the run wrote, with git sync's author and the same files left out
-  (the projects with `skip_git_sync`, the IN folders). The commit pipelines
-  start on it as on any commit, without the files their own pipeline wrote
-  last. With nothing pending (a debounced commit took the run's writes a
+  (the projects with `skip_git_sync`, the IN folders); a note another
+  writer is saving at that moment waits for the next commit. The commit
+  pipelines start on it as on any commit, without the files their own
+  pipeline wrote last. With nothing pending (a debounced commit took the run's writes a
   moment before), `committed` is false and the tag goes on HEAD, the
   commit that holds them.
 - **The tag** needs the project's `pipeline_tags`. It is annotated, with

@@ -7,6 +7,60 @@ one, newest first, and do what each one says. MCP clients keep the tool list
 they read when they connected, so reconnect them after an upgrade to see new
 tools and arguments. The full notes of every release are in `CHANGELOG.md`.
 
+## 2.133.0 — Every write names its files
+
+- With git sync on, the writes that still went into the history as
+  `auto: <date>` now have their writer, with the configured email: a
+  restore from the trash, the files of a folder deleted, the notes whose
+  links a rename rewrote, and the attachments uploaded or deleted. What
+  git sync changes itself (`.gitignore`, a project taken out of git or
+  tracked again) keeps the configured author, with a message that says
+  what, `git sync: stop tracking p`. A hook, a CI job or a script on the
+  remote that picks the commits by the `auto:` prefix sees these as
+  others.
+- The audit log has an `upload_attachment` entry for each attachment
+  stored through the web UI (`POST /api/v1/attach`) and through
+  `POST /api/v1/upload`, as it had for the MCP tools. A dashboard or a
+  SIEM rule that counts the uploads counts these too.
+- `memory_rename_note` and `memory_move_note` rewrite the links to the
+  note only in the notes the token may write. The notes of other
+  projects keep the old link, and the answer counts them in
+  `not_rewritten`; an agent that renames notes linked from other
+  projects with a token scoped to one fixes those links with a token
+  that writes there.
+- Changes that keep coming no longer hold back git sync's commit until
+  they stop: a commit waits at most `git.commit_max_wait`
+  (`GOSIDIAN_GIT_MAX_WAIT`) after the first change it takes, 4
+  debounces by default, 2 minutes with the default debounce. A long
+  stream of writes makes a commit every 2 minutes rather than one at its
+  end; a longer `commit_max_wait` makes fewer.
+
+## 2.132.0 — A note read says its title
+
+- `GET /api/v1/notes/{path}` (and the note a create or an update of it
+  returns), its `/excerpt`, and the MCP tools `memory_get` and
+  `memory_batch_get` now give as `title` the `title` of the note's
+  frontmatter, as the list of notes and the search already did. They
+  gave the file name without its extension, as they still do for a note
+  without one. A script or an agent that read `title` as the file name
+  takes the name from `path`.
+
+## 2.131.0 — A commit names who wrote the note
+
+- With git sync on, a note written through gosidian is now committed in
+  the name `modified_by` shows (the account of the web UI, an MCP
+  token's name and its account, or `automation`), with the configured
+  `author_email`, and its subject says what was done to which note:
+  `update notes/plan.md`, `rename a.md -> b.md`, `restore x.md to
+  1a2b3c4`. Writers, and the projects of one writer, in the same debounce
+  window get a commit each. Only what no write of gosidian names (a pull,
+  an editor on the disk) keeps the configured author and `auto: <date>`.
+  A hook, a CI job or a script on the remote that picks the commits by
+  that author or by the `auto:` prefix sees these as others.
+- The audit log has a new action, `restore`: a version of a note written
+  back from its history. A dashboard, an alert or a SIEM rule that picks
+  the writes of notes by their action adds it.
+
 ## 2.127.0 — Web sessions as configured
 
 - `GOSIDIAN_LOGIN_SESSION_TTL` (`webauth.session_ttl`) now counts: until

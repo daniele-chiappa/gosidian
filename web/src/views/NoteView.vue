@@ -552,15 +552,22 @@ watch(dirty, (d) => emit('dirty', d))
 
 // ```view blocks are computed on the server when the note is rendered
 // (IMP-127): render again when other notes change, so the tables stay live.
-const refreshViews = useDebounceFn(async () => {
-  if (!note.value || isHtml.value) return
-  try {
-    const src = mode.value === 'edit' ? draft.value : note.value.content
-    await renderInto(src, path.value)
-  } catch {
-    /* keep the last render */
-  }
-}, 800)
+// Events closer than the pause it waits for held it back for good, with
+// many writers in the vault: while they keep coming it still runs every
+// 2 s (BUG-146).
+const refreshViews = useDebounceFn(
+  async () => {
+    if (!note.value || isHtml.value) return
+    try {
+      const src = mode.value === 'edit' ? draft.value : note.value.content
+      await renderInto(src, path.value)
+    } catch {
+      /* keep the last render */
+    }
+  },
+  800,
+  { maxWait: 2000 },
+)
 
 const bareEtag = (e?: string) => (e ?? '').replace(/"/g, '')
 

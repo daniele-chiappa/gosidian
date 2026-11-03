@@ -83,10 +83,17 @@ func (s *Server) registerAttachmentTools() {
 // storeAttachmentFromRequest validates and stores an uploaded file from one of
 // `bridge_filename` (a file staged in the bridge dir), a server-side
 // `source_path`, or base64 `data`, applying the same auth and size checks as
-// the upload tools. Returns the stored result plus its byte size, or a
+// the upload tools, and records it in the audit log while its lock is held
+// (BUG-148). Returns the stored result plus its byte size, or a
 // ready-to-return tool error result. Shared by the two upload tools and by
 // memory_create_media_note so the validation logic lives in one place.
 func (s *Server) storeAttachmentFromRequest(ctx context.Context, project, filename, dataB64, sourcePath, bridgeFilename string) (*attach.Result, int64, *mcp.CallToolResult) {
+	held := attach.Hold(s.vault, s.vault)
+	defer held.Release()
+	recorded := func(res *attach.Result, size int64) (*attach.Result, int64, *mcp.CallToolResult) {
+		s.auditWrite(ctx, audit.ActionUploadAttachment, res.Path, "", size)
+		return res, size, nil
+	}
 	// Bridge upload (IMP-059): the agent staged a file in the bridge dir and
 	// passes only its basename. We resolve it under the bridge dir (an allowed
 	// root), store it, then consume the staged copy. Near-zero token cost.
@@ -111,7 +118,7 @@ func (s *Server) storeAttachmentFromRequest(ctx context.Context, project, filena
 		if errRes != nil {
 			return nil, 0, errRes
 		}
-		res, err := attach.StoreFromPath(s.vault, staged, filename, project, s.effectiveUploadRoots())
+		res, err := attach.StoreFromPath(held, staged, filename, project, s.effectiveUploadRoots())
 		if err != nil {
 			refund()
 			return nil, 0, mcp.NewToolResultError(err.Error())
@@ -123,7 +130,7 @@ func (s *Server) storeAttachmentFromRequest(ctx context.Context, project, filena
 			}
 		}
 		_ = os.Remove(staged) // consume the staging copy (best-effort)
-		return res, size, nil
+		return recorded(res, size)
 	}
 
 	if sourcePath == "" && dataB64 == "" {
@@ -153,7 +160,7 @@ func (s *Server) storeAttachmentFromRequest(ctx context.Context, project, filena
 		if errRes != nil {
 			return nil, 0, errRes
 		}
-		res, err := attach.StoreFromPath(s.vault, real, filename, project, s.sourceRoots())
+		res, err := attach.StoreFromPath(held, real, filename, project, s.sourceRoots())
 		if err != nil {
 			refund()
 			return nil, 0, mcp.NewToolResultError(err.Error())
@@ -165,7 +172,7 @@ func (s *Server) storeAttachmentFromRequest(ctx context.Context, project, filena
 				size = fi.Size()
 			}
 		}
-		return res, size, nil
+		return recorded(res, size)
 	}
 
 	// Base64 path.
@@ -189,12 +196,12 @@ func (s *Server) storeAttachmentFromRequest(ctx context.Context, project, filena
 	if refusal != nil {
 		return nil, 0, mcp.NewToolResultError(refusal.Error())
 	}
-	res, err := attach.Store(s.vault, data, filename, project)
+	res, err := attach.Store(held, data, filename, project)
 	if err != nil {
 		refund()
 		return nil, 0, mcp.NewToolResultError(err.Error())
 	}
-	return res, int64(len(data)), nil
+	return recorded(res, int64(len(data)))
 }
 
 // reserveFileUpload is reserveUpload for a file on the server (staged in
@@ -219,7 +226,7 @@ func (s *Server) reserveFileUpload(tok *auth.Token, path string) (func(), *mcp.C
 
 func (s *Server) handleUploadAttachment(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	dataB64 := req.GetString("data", "")
-	res, dataSize, errRes := s.storeAttachmentFromRequest(
+	res, _, errRes := s.storeAttachmentFromRequest(
 		ctx,
 		req.GetString("project", ""),
 		req.GetString("filename", ""),
@@ -230,7 +237,6 @@ func (s *Server) handleUploadAttachment(ctx context.Context, req mcp.CallToolReq
 	if errRes != nil {
 		return errRes, nil
 	}
-	s.auditWrite(ctx, audit.ActionUploadAttachment, res.Path, "", dataSize)
 	s.arrived(ctx, res.Path, uploadName(req.GetString("filename", ""), req.GetString("source_path", ""), req.GetString("bridge_filename", "")), "")
 	out := map[string]any{
 		"path":     res.Path,
@@ -282,8 +288,6 @@ func (s *Server) handleUploadResource(ctx context.Context, req mcp.CallToolReque
 	if errRes != nil {
 		return errRes, nil
 	}
-
-	s.auditWrite(ctx, audit.ActionUploadAttachment, res.Path, "", dataSize)
 	s.arrived(ctx, res.Path, filename, "")
 
 	// Resolve kind and MIME from the validated extension (always reliable
@@ -387,6 +391,10 @@ func (s *Server) handleDeleteAttachment(ctx context.Context, req mcp.CallToolReq
 	if !s.vault.Exists(rel) {
 		return mcp.NewToolResultErrorf("attachment %q not found", rel), nil
 	}
+	// Locked until the record: git sync leaves the file for the commit
+	// after it (BUG-148).
+	unlock := s.vault.LockPath(rel)
+	defer unlock()
 	if err := s.vault.DeleteAttachment(rel, allowedExtSet()); err != nil {
 		return mcp.NewToolResultErrorFromErr("delete failed", err), nil
 	}

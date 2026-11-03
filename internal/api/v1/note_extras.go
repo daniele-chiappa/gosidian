@@ -87,7 +87,7 @@ func (r *Router) readExcerpt(w http.ResponseWriter, req *http.Request, notePath 
 	excerpt := firstNLines(string(note.Content), lines)
 	WriteJSON(w, http.StatusOK, excerptView{
 		Path:    note.Path,
-		Title:   note.Title,
+		Title:   note.DisplayTitle(),
 		Excerpt: excerpt,
 		Lines:   lines,
 	})

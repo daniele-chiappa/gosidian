@@ -156,6 +156,22 @@ describe('INWindow (IMP-172)', () => {
     }
   })
 
+  it('reloads while its IN folder changes without a pause (BUG-146)', async () => {
+    vi.useFakeTimers()
+    try {
+      await mountWindow()
+      const calls = vi.mocked(listIN).mock.calls.length
+      // An event every 100 ms for 5 s, as with a long upload.
+      for (let at = 0; at < 5000; at += 100) {
+        sseListeners.get('tree')!({ action: 'in', project: 'p' })
+        await vi.advanceTimersByTimeAsync(100)
+      }
+      expect(vi.mocked(listIN).mock.calls.length).toBeGreaterThanOrEqual(calls + 2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   describe('a source bound as a folder (IMP-172 phase 2)', () => {
     const source = (over: Partial<INSource> = {}): INSource => ({
       folder: 'nc', plugin: 'storage', source: 'docs', kind: 'webdav', changes: true, move: true, write: false,

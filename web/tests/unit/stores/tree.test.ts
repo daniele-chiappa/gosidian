@@ -38,6 +38,18 @@ describe('tree store (BUG-117, S7-11)', () => {
     await vi.waitFor(() => expect(store.byProject['']?.name).toBe('new'))
   })
 
+  it('refreshes while the events come without a pause (BUG-146)', async () => {
+    vi.useFakeTimers()
+    const store = useTreeStore()
+    vi.mocked(fetchTree).mockResolvedValue(tree('t'))
+    // An event every half a delay for 3 s, as with many writers.
+    for (let at = 0; at < 3000; at += REFRESH_DELAY_MS / 2) {
+      store.refresh()
+      await vi.advanceTimersByTimeAsync(REFRESH_DELAY_MS / 2)
+    }
+    expect(vi.mocked(fetchTree).mock.calls.length).toBeGreaterThanOrEqual(2)
+  })
+
   it('keeps the last answer when an older one lands after it', async () => {
     const store = useTreeStore()
     const first = held()

@@ -78,7 +78,8 @@ for the full behaviour.
 
 The top-level folder structure is a configuration choice, not a
 limitation of the tool. Refactor freely: `memory_rename_project` and
-`memory_move_note` keep wiki-links from breaking.
+`memory_move_note` keep wiki-links from breaking, in the notes the token
+may write.
 
 ## Project discovery / creation
 

@@ -13,7 +13,8 @@ import (
 // tag, doc/<code>/<revision>, so that `git show <tag>:<path>` gives that
 // revision back.
 
-// ErrDisabled is CommitNow's error while git sync is off.
+// ErrDisabled is the error of CommitNow, History and Version while git
+// sync is off.
 var ErrDisabled = errors.New("git sync is off")
 
 // MaxCommitMessage caps the message of CommitNow, in bytes.
@@ -120,6 +121,50 @@ func (s *Sync) CommitNow(ctx context.Context, message, tag string) (CommitResult
 	res.Pushed = true
 	s.succeeded()
 	return res, nil
+}
+
+// CommitWrites commits at once what is pending, as the debounced commit
+// would: a commit per writer and project, each saying what was done
+// (IMP-222, D5: a version restored shows at the top of the history at
+// once). With push on, the push follows in the background, so the caller
+// does not wait for the remote. Nothing pending is no error.
+func (s *Sync) CommitWrites() error {
+	if !s.cfg.Enabled {
+		return ErrDisabled
+	}
+	s.mu.Lock()
+	down, why := s.initFailed, s.status.LastError
+	if !down && s.timer != nil {
+		s.timer.Stop()
+		s.timer = nil
+	}
+	s.mu.Unlock()
+	if down {
+		return fmt.Errorf("git sync did not start: %s", why)
+	}
+	s.workMu.Lock()
+	s.mu.Lock()
+	s.pending = false
+	s.mu.Unlock()
+	committed, err := s.commit("")
+	s.workMu.Unlock()
+	if err != nil {
+		return s.failed(err)
+	}
+	if !committed || !s.cfg.Push {
+		s.succeeded()
+		return nil
+	}
+	go func() {
+		s.workMu.Lock()
+		defer s.workMu.Unlock()
+		if err := s.push(context.Background()); err != nil {
+			s.failed(err)
+			return
+		}
+		s.succeeded()
+	}()
+	return nil
 }
 
 // head reads HEAD's SHA and its abbreviation.

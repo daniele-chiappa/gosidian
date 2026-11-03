@@ -217,6 +217,42 @@ type Saver interface {
 	SaveAttachment(rel string, content []byte, allowedExt map[string]bool) error
 }
 
+// Locker takes the lock of a vault path, as vault.LockPath does.
+type Locker interface {
+	LockPath(path string) (unlock func())
+}
+
+// Held is a Saver that takes the lock of each file it saves and keeps it
+// until Release: the writer records the write after the save, and git sync
+// leaves a file whose lock is held for the commit after the record
+// (BUG-148). A file saved twice is locked once. One writer uses it.
+type Held struct {
+	Saver
+	locker Locker
+	held   map[string]func()
+}
+
+// Hold makes a Held of s, with the locks of l.
+func Hold(s Saver, l Locker) *Held {
+	return &Held{Saver: s, locker: l, held: map[string]func(){}}
+}
+
+// SaveAttachment locks rel, unless h holds it already, and saves.
+func (h *Held) SaveAttachment(rel string, content []byte, allowedExt map[string]bool) error {
+	if _, ok := h.held[rel]; !ok {
+		h.held[rel] = h.locker.LockPath(rel)
+	}
+	return h.Saver.SaveAttachment(rel, content, allowedExt)
+}
+
+// Release lets the locks go.
+func (h *Held) Release() {
+	for rel, unlock := range h.held {
+		unlock()
+		delete(h.held, rel)
+	}
+}
+
 // Result holds what Store returns on success.
 type Result struct {
 	Path     string // vault-relative path

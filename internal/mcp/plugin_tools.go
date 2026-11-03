@@ -319,7 +319,9 @@ func (s *Server) handFiles(t pluginTool, project string, args map[string]any) (s
 // text of a type attachments do not take) in place of their bytes.
 func (s *Server) storeToolFiles(ctx context.Context, project string, res *mcp.CallToolResult) *mcp.CallToolResult {
 	files, skipped := s.plugins.StoreFiles(res.Content, func(name string, data []byte) (string, error) {
-		r, err := attach.Store(s.vault, data, name, project)
+		held := attach.Hold(s.vault, s.vault) // until the record (BUG-148)
+		defer held.Release()
+		r, err := attach.Store(held, data, name, project)
 		if err != nil {
 			return "", err
 		}

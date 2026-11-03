@@ -96,7 +96,7 @@ func (r *Router) reclaimPersonalProject(req *http.Request, actor *RequestUser, a
 		why := r.personalProjectKept(archived, name)
 		var err error
 		if why == "" {
-			err = r.archiveProject(name, archived.Username)
+			err = r.archiveProject(req, actor, name, archived.Username)
 			if err != nil && !errors.Is(err, projectops.ErrIncomplete) {
 				why = err.Error()
 			}
@@ -106,9 +106,6 @@ func (r *Router) reclaimPersonalProject(req *http.Request, actor *RequestUser, a
 			return "", "", fmt.Sprintf("no personal project: the project %q stays as it is (%s)", name, why)
 		}
 		moved = archived.Username
-		if actor != nil {
-			r.auditNote(req, audit.ActionRenameProject, actor, name, moved, 0)
-		}
 		r.publishSidebarEvent("update", moved)
 		if err != nil {
 			// The old project moved, but tokens may still name the reused
@@ -146,9 +143,15 @@ func (r *Router) personalProjectKept(archived webauth.User, name string) string 
 }
 
 // archiveProject renames project from to to, with its grants and the MCP
-// tokens scoped to it.
-func (r *Router) archiveProject(from, to string) error {
+// tokens scoped to it, and records it in actor's name, an incomplete
+// rename too: it stands. Both names stay locked until the record: git sync
+// leaves out the files under a name a writer holds (BUG-147).
+func (r *Router) archiveProject(req *http.Request, actor *RequestUser, from, to string) error {
+	defer r.deps.Vault.LockPaths(from, to)()
 	_, err := projectops.Rename(r.deps.Vault, r.deps.Index, r.deps.Projects, r.mcpTokens(), from, to)
+	if actor != nil && (err == nil || errors.Is(err, projectops.ErrIncomplete)) {
+		r.auditNote(req, audit.ActionRenameProject, actor, from, to, 0)
+	}
 	return err
 }
 

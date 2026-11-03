@@ -180,6 +180,14 @@ func FrontmatterRawForPath(path string, body []byte) string {
 	return ExtractFrontmatterRaw(body)
 }
 
+// TitleForPath returns the title of a note's frontmatter, or "" when it has
+// none: the title the indexer stores of it, which falls back to the file
+// name (index.Extract). A note read off the vault is named by its file; this
+// gives the title a reader of it is shown (IMP-219).
+func TitleForPath(path string, body []byte) string {
+	return frontmatterTitle(FrontmatterRawForPath(path, body))
+}
+
 // BodyAfterFrontmatter returns the markdown body that follows the top
 // frontmatter block (--- ... ---), or the whole input when there is no
 // frontmatter. Used when promoting a foreign agent file: the frontmatter is

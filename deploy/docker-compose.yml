@@ -55,6 +55,7 @@ services:
       # GOSIDIAN_GIT_AUTHOR_NAME: "Gosidian"
       # GOSIDIAN_GIT_AUTHOR_EMAIL: "gosidian@example.com"
       # GOSIDIAN_GIT_DEBOUNCE: "30s"
+      # GOSIDIAN_GIT_MAX_WAIT: "2m"
       # GOSIDIAN_GIT_PUSH: "true"
       # GOSIDIAN_GIT_TOKEN_ENV: "GITEA_TOKEN"
       # GITEA_TOKEN: "${GITEA_TOKEN}"

@@ -79,6 +79,23 @@ func (r *Router) handleNoteByPath(w http.ResponseWriter, req *http.Request) {
 		r.handleNotes(w, req)
 		return
 	}
+	// A version of a note, /history/{sha} (IMP-222): the part before is a
+	// note file, so a note in a folder named history is still a note.
+	if i := strings.LastIndex(rel, "/history/"); i > 0 {
+		if notePath, sha := rel[:i], rel[i+len("/history/"):]; sha != "" && !strings.Contains(sha, "/") && r.deps.Vault.IsNoteFile(notePath) {
+			clean, err := r.deps.Vault.Rel(notePath)
+			if err != nil {
+				WriteError(w, http.StatusBadRequest, CodeValidationFormat, "invalid path: "+err.Error())
+				return
+			}
+			if req.Method != http.MethodGet {
+				WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
+				return
+			}
+			r.readVersion(w, req, clean, sha)
+			return
+		}
+	}
 	// Subroute detection: the raw rel may end with /backlinks,
 	// /excerpt, /history. Strip + dispatch before path validation so
 	// the handler sees only the note path proper.
@@ -112,11 +129,12 @@ func (r *Router) handleNoteByPath(w http.ResponseWriter, req *http.Request) {
 }
 
 // noteSubroutes lists the suffixes routed off /notes/{path}/: read-only
-// GETs, PATCH /frontmatter, POST /rows (a new row of a database note) and
-// POST /snapshot (the note frozen beside it). Order matters only for
-// documentation; the loop matches by suffix regardless. New entries get a
-// handler in dispatchNoteSubroute below.
-var noteSubroutes = []string{"backlinks", "excerpt", "history", "frontmatter", "fields", "new-row", "rows", "row-views", "snapshot"}
+// GETs, PATCH /frontmatter, POST /rows (a new row of a database note),
+// POST /snapshot (the note frozen beside it) and POST /restore (a version
+// of its history written back). Order matters only for documentation; the
+// loop matches by suffix regardless. New entries get a handler in
+// dispatchNoteSubroute below.
+var noteSubroutes = []string{"backlinks", "excerpt", "history", "frontmatter", "fields", "new-row", "rows", "row-views", "snapshot", "restore"}
 
 func (r *Router) dispatchNoteSubroute(w http.ResponseWriter, req *http.Request, notePath, sub string) {
 	switch sub {
@@ -140,6 +158,13 @@ func (r *Router) dispatchNoteSubroute(w http.ResponseWriter, req *http.Request, 
 			return
 		}
 		r.createSnapshot(w, req, notePath)
+		return
+	case "restore":
+		if req.Method != http.MethodPost {
+			WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
+			return
+		}
+		r.restoreNote(w, req, notePath)
 		return
 	}
 	if req.Method != http.MethodGet {
@@ -556,7 +581,7 @@ func (r *Router) publishNoteEvent(topic events.Topic, path, action string, fresh
 func (r *Router) toNoteResponse(n *vault.Note) noteResponse {
 	resp := noteResponse{
 		Path:    n.Path,
-		Title:   n.Title,
+		Title:   n.DisplayTitle(),
 		Content: string(n.Content),
 		Format:  noteFormat(n.Path),
 		ETag:    n.ETag(),

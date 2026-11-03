@@ -114,6 +114,39 @@ func TestMCP_BatchGet(t *testing.T) {
 	expectError(t, res)
 }
 
+// memory_get and memory_batch_get say a note's title, the frontmatter's, as
+// memory_search does; both said the file name (IMP-219).
+func TestMCP_GetSaysTheTitle(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	ctx := context.Background()
+	_, _ = s.handleCreate(ctx, call(map[string]any{"path": "p/imp-1.md", "content": "---\ntitle: \"IMP-1 — A title\"\n---\nbody\n"}))
+	_, _ = s.handleCreate(ctx, call(map[string]any{"path": "p/plain.md", "content": "# Plain\n"}))
+
+	var get struct {
+		Title string `json:"title"`
+	}
+	if err := json.Unmarshal([]byte(resultText(t, mustCall(s.handleGet(ctx, call(map[string]any{"path": "p/imp-1.md"}))))), &get); err != nil {
+		t.Fatal(err)
+	}
+	if get.Title != "IMP-1 — A title" {
+		t.Errorf("memory_get title = %q", get.Title)
+	}
+
+	var batch struct {
+		Results []struct {
+			Path  string `json:"path"`
+			Title string `json:"title"`
+		} `json:"results"`
+	}
+	body := resultText(t, mustCall(s.handleBatchGet(ctx, call(map[string]any{"paths": []any{"p/imp-1.md", "p/plain.md"}}))))
+	if err := json.Unmarshal([]byte(body), &batch); err != nil {
+		t.Fatal(err)
+	}
+	if len(batch.Results) != 2 || batch.Results[0].Title != "IMP-1 — A title" || batch.Results[1].Title != "plain" {
+		t.Errorf("memory_batch_get titles = %+v", batch.Results)
+	}
+}
+
 func TestMCP_Recent(t *testing.T) {
 	s, _, _ := newTestServer(t)
 	ctx := context.Background()

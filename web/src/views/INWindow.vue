@@ -19,6 +19,7 @@
  */
 import { computed, inject, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useDebounceFn } from '@vueuse/core'
 import { useWindowsStore, type OpenSpec } from 'plancia'
 import { ChevronRight, Cloud, Download, FileArchive, FileText, Folder, FolderUp, Inbox, Play, RefreshCw, RotateCcw, Search, Trash2, EyeOff, FolderInput, Upload } from 'lucide-vue-next'
 import {
@@ -396,14 +397,12 @@ async function loadPipelines() {
   }
 }
 
-let reloadTimer: ReturnType<typeof setTimeout> | null = null
+// After a pause in the events, and every 2 s while they keep coming: events
+// closer than the pause, as a long upload sends, held it back (BUG-146).
+const reload = useDebounceFn(load, 200, { maxWait: 2000 })
 sse.on('tree', (p) => {
   if (p.action !== 'in' || p.project !== props.project) return
-  if (reloadTimer) clearTimeout(reloadTimer)
-  reloadTimer = setTimeout(() => {
-    reloadTimer = null
-    void load()
-  }, 200)
+  void reload()
 })
 
 watch(search, () => void load())

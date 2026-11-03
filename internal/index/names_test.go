@@ -1,6 +1,7 @@
 package index
 
 import (
+	"fmt"
 	"slices"
 	"testing"
 )
@@ -55,6 +56,17 @@ func TestNotesByName_Order(t *testing.T) {
 	}
 	if got := namedPaths(t, idx, "al", nil, 2); !slices.Equal(got, want[:2]) {
 		t.Errorf("al, limit 2 = %q, want %q", got, want[:2])
+	}
+}
+
+// A limit past 500 gives 500 names at most, whatever the caller asks.
+func TestNotesByName_LimitCapped(t *testing.T) {
+	idx := openTest(t)
+	for k := range 501 {
+		upsert(t, idx, fmt.Sprintf("p/n-%03d.md", k), "", "")
+	}
+	if got := namedPaths(t, idx, "n-", nil, 1000); len(got) != 500 {
+		t.Errorf("n- with limit 1000 = %d names, want 500", len(got))
 	}
 }
 

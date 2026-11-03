@@ -6,10 +6,14 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/gosidian/gosidian/internal/parser"
 )
 
 type Note struct {
-	Path    string // relative to vault root, forward-slashed, e.g. "folder/note.md"
+	Path string // relative to vault root, forward-slashed, e.g. "folder/note.md"
+	// Title is the file name without its extension: the index keys a link
+	// by it (DisplayTitle gives the frontmatter's title).
 	Title   string
 	Content []byte
 	ModTime time.Time
@@ -22,6 +26,15 @@ type Note struct {
 // (request rejected if the note changed since they last read it).
 func (n *Note) ETag() string {
 	return etagOf(n.ModTime, n.Size)
+}
+
+// DisplayTitle is the title a reader of the note is shown: its
+// frontmatter's, else its file name, as the index stores it (IMP-219).
+func (n *Note) DisplayTitle() string {
+	if t := parser.TitleForPath(n.Path, n.Content); t != "" {
+		return t
+	}
+	return n.Title
 }
 
 // NoteStat describes a note file without reading it.

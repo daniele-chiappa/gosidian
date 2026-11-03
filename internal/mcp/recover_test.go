@@ -29,17 +29,18 @@ func TestRecoverMiddleware_PanicBecomesToolError(t *testing.T) {
 	}
 }
 
-// A panic under a path lock releases it: the next write of the path does
+// A panic under path locks releases them: the next write of a path does
 // not wait for good (IMP-161, S3-13).
 func TestUnderLock_ReleasesOnPanic(t *testing.T) {
 	s, _, _ := newTestServer(t)
 	func() {
 		defer func() { _ = recover() }()
-		_ = s.underLock("p/n.md", func() error { panic("boom") })
+		_ = s.underLock([]string{"p/n.md", "p/m.md"}, func() error { panic("boom") })
 	}()
 	done := make(chan struct{})
 	go func() {
 		s.vault.LockPath("p/n.md")()
+		s.vault.LockPath("p/m.md")()
 		close(done)
 	}()
 	select {

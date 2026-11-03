@@ -13,6 +13,8 @@ export interface TreeNode {
   is_dir: boolean
   is_project_root?: boolean
   kind: string
+  /** A note's title, where it is not its file name (IMP-219). */
+  title?: string
   note_count?: number
   in_progress?: boolean
   hidden_from_mcp?: boolean

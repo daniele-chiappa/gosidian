@@ -42,6 +42,7 @@ const (
 	AuthorAppend        = "append"
 	AuthorDelete        = "delete"
 	AuthorRename        = "rename"
+	AuthorRestore       = "restore" // a version written back: a write (IMP-222)
 	AuthorDeleteProject = "delete_project"
 	AuthorRenameProject = "rename_project"
 )
@@ -75,7 +76,7 @@ type authorTable map[string]*Author
 func (t authorTable) apply(e AuthorEvent) {
 	at := e.TS.UTC().Format(time.RFC3339)
 	switch e.Action {
-	case AuthorCreate, AuthorUpdate, AuthorAppend:
+	case AuthorCreate, AuthorUpdate, AuthorAppend, AuthorRestore:
 		a := t[e.Path]
 		if a == nil {
 			a = &Author{}
@@ -92,7 +93,14 @@ func (t authorTable) apply(e AuthorEvent) {
 			t[e.To] = a
 		}
 	case AuthorDelete:
+		// A folder deleted takes its notes' rows along (BUG-148); no note
+		// sits under a note, so a note's delete takes its own alone.
 		delete(t, e.Path)
+		for p := range t {
+			if strings.HasPrefix(p, e.Path+"/") {
+				delete(t, p)
+			}
+		}
 	case AuthorDeleteProject:
 		prefix := e.Path + "/"
 		for p := range t {
@@ -165,7 +173,9 @@ func (i *Index) RecordAuthor(e AuthorEvent) error {
 	var like string
 	paths := []string{e.Path}
 	switch e.Action {
-	case AuthorCreate, AuthorUpdate, AuthorAppend, AuthorDelete:
+	case AuthorCreate, AuthorUpdate, AuthorAppend, AuthorRestore:
+	case AuthorDelete: // a folder's notes go with it
+		like = likeUnder(e.Path)
 	case AuthorRename:
 		paths = append(paths, e.To)
 	case AuthorDeleteProject, AuthorRenameProject:

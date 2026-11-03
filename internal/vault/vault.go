@@ -1035,6 +1035,14 @@ func splitWikiLink(content string) (target, alias string) {
 // basename-based matching covers the common case; fully-qualified targets
 // like [[folder/OldBase]] are caught when they end with the old basename.
 func (v *Vault) RenameNote(idx *index.Index, from, to string) ([]string, error) {
+	return v.RenameNoteRewriting(idx, from, to, nil)
+}
+
+// RenameNoteRewriting is RenameNote that rewrites the links of the notes
+// rewrite allows only, every note when it is nil: a writer rewrites the
+// notes it may write, whose locks it holds (BUG-148, BUG-150). The others
+// keep the old link.
+func (v *Vault) RenameNoteRewriting(idx *index.Index, from, to string, rewrite func(path string) bool) ([]string, error) {
 	fromRel, err := v.Rel(from)
 	if err != nil {
 		return nil, fmt.Errorf("invalid source: %w", err)
@@ -1093,6 +1101,9 @@ func (v *Vault) RenameNote(idx *index.Index, from, to string) ([]string, error) 
 	for _, b := range backs {
 		if b.Path == fromRel {
 			continue // self-reference guard, shouldn't happen
+		}
+		if rewrite != nil && !rewrite(b.Path) {
+			continue
 		}
 		note, err := v.Load(b.Path)
 		if err != nil {
@@ -1241,6 +1252,12 @@ func codeSpans(body []byte) [][2]int {
 // wiki-link rewrite + index reindex logic in one place. An empty toProject
 // moves the note to the vault root.
 func (v *Vault) MoveNote(idx *index.Index, from, toProject string) ([]string, error) {
+	return v.MoveNoteRewriting(idx, from, toProject, nil)
+}
+
+// MoveNoteRewriting is MoveNote that rewrites the links of the notes
+// rewrite allows only, as RenameNoteRewriting does.
+func (v *Vault) MoveNoteRewriting(idx *index.Index, from, toProject string, rewrite func(path string) bool) ([]string, error) {
 	fromRel, err := v.Rel(from)
 	if err != nil {
 		return nil, fmt.Errorf("invalid source: %w", err)
@@ -1258,7 +1275,7 @@ func (v *Vault) MoveNote(idx *index.Index, from, toProject string) ([]string, er
 		}
 		target = clean + "/" + base
 	}
-	return v.RenameNote(idx, fromRel, target)
+	return v.RenameNoteRewriting(idx, fromRel, target, rewrite)
 }
 
 // RenameProject renames a top-level project directory and reindexes all its

@@ -59,6 +59,7 @@ type gitSettings struct {
 	AuthorName  string `json:"author_name"`
 	AuthorEmail string `json:"author_email"`
 	DebounceMS  int64  `json:"debounce_ms"`
+	MaxWaitMS   int64  `json:"max_wait_ms"` // 0 = 4 debounces (BUG-151)
 	Push        bool   `json:"push"`
 	TokenEnv    string `json:"token_env"` // env var name only; never the value
 }
@@ -89,6 +90,7 @@ type updateSettingsRequest struct {
 		AuthorName  *string `json:"author_name,omitempty"`
 		AuthorEmail *string `json:"author_email,omitempty"`
 		DebounceMS  *int64  `json:"debounce_ms,omitempty"`
+		MaxWaitMS   *int64  `json:"max_wait_ms,omitempty"`
 		Push        *bool   `json:"push,omitempty"`
 		TokenEnv    *string `json:"token_env,omitempty"`
 	} `json:"git,omitempty"`
@@ -404,6 +406,7 @@ func toSettingsView(c *config.Config) settingsView {
 			AuthorName:  c.Git.AuthorName,
 			AuthorEmail: c.Git.AuthorEmail,
 			DebounceMS:  c.Git.Debounce.Milliseconds(),
+			MaxWaitMS:   c.Git.MaxWait.Milliseconds(),
 			Push:        c.Git.Push,
 			TokenEnv:    c.Git.TokenEnv,
 		},
@@ -463,6 +466,14 @@ func applySettingsPatch(cfg *config.Config, body *updateSettingsRequest) string 
 				return "git.debounce_ms must be at least 1000"
 			}
 			cfg.Git.Debounce = time.Duration(*g.DebounceMS) * time.Millisecond
+		}
+		if g.MaxWaitMS != nil {
+			cfg.Git.MaxWait = time.Duration(*g.MaxWaitMS) * time.Millisecond
+		}
+		// 0 leaves the max wait to 4 debounces; one shorter than the
+		// debounce would never cut it short.
+		if w := cfg.Git.MaxWait; w != 0 && w < cfg.Git.Debounce {
+			return "git.max_wait_ms must be 0 or at least git.debounce_ms"
 		}
 		if g.Push != nil {
 			cfg.Git.Push = *g.Push

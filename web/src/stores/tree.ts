@@ -24,8 +24,15 @@ interface TreeState {
 const generation: Record<string, number> = {}
 let epoch = 0
 let refreshTimer: ReturnType<typeof setTimeout> | null = null
+// When the first event of the burst a refresh waits for came.
+let burstAt = 0
 /** How long a refresh waits for the rest of a burst of events. */
 export const REFRESH_DELAY_MS = 150
+/**
+ * How long a burst may hold a refresh back: events closer than the delay
+ * held it back for good, with many writers in the vault (BUG-146).
+ */
+export const REFRESH_MAX_WAIT_MS = 1000
 
 export const useTreeStore = defineStore('tree', {
   state: (): TreeState => ({
@@ -51,14 +58,17 @@ export const useTreeStore = defineStore('tree', {
         if (current()) this.loading[key] = false
       }
     },
-    /** Reloads in place, once for a burst of calls. */
+    /** Reloads in place, once for a burst of calls, and every second while it lasts. */
     refresh() {
+      const now = Date.now()
       if (refreshTimer) clearTimeout(refreshTimer)
+      else burstAt = now
+      const wait = Math.max(0, Math.min(REFRESH_DELAY_MS, burstAt + REFRESH_MAX_WAIT_MS - now))
       refreshTimer = setTimeout(() => {
         refreshTimer = null
         const keys = new Set(['', ...Object.keys(this.byProject)])
         for (const key of keys) void this.load(key)
-      }, REFRESH_DELAY_MS)
+      }, wait)
     },
     invalidate(project = '') {
       delete this.byProject[project]

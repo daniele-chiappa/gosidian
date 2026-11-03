@@ -255,3 +255,28 @@ func TestCheckTag(t *testing.T) {
 		}
 	}
 }
+
+// With push on, CommitWrites returns once committed, and the push follows
+// in the background: the remote gets the commit.
+func TestSync_CommitWritesPushes(t *testing.T) {
+	requireGit(t)
+	bare := filepath.Join(t.TempDir(), "remote.git")
+	gitOut(t, ".", "init", "-q", "--bare", bare)
+	dir := t.TempDir()
+	s := startSync(t, dir, func(s *Sync) { s.cfg.Push, s.cfg.Remote = true, bare })
+	writeFile(t, dir, "p/a.md", "# A\n")
+	s.RecordWrite("restore", "p/a.md", "0123456789abcdef0123456789abcdef01234567", "daniele")
+	if err := s.CommitWrites(); err != nil {
+		t.Fatal(err)
+	}
+	head := gitOut(t, dir, "rev-parse", "HEAD")
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		out, err := exec.Command("git", "-C", bare, "rev-parse", "main").Output()
+		if err == nil && strings.TrimSpace(string(out)) == head {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the remote has %q, want %s", out, head)
+		}
+	}
+}

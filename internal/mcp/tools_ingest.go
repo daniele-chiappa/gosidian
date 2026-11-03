@@ -246,7 +246,6 @@ func (s *Server) handleIngest(ctx context.Context, req mcp.CallToolRequest) (*mc
 		if errRes != nil {
 			return errRes, nil
 		}
-		s.auditWrite(ctx, audit.ActionUploadAttachment, res.Path, "", size)
 		s.arrived(ctx, res.Path, uploadName(filename, sourcePath, bridgeFilename), "")
 		out := map[string]any{
 			"path":     res.Path,
@@ -442,12 +441,17 @@ func (s *Server) ingestRaw(ctx context.Context, in ingestIntent, data []byte) (*
 	if refusal != nil {
 		return mcp.NewToolResultError(refusal.Error()), nil
 	}
-	res, err := attach.Store(s.vault, data, in.Filename, in.Project)
+	// Locked until the record: git sync leaves the file for the commit
+	// after it (BUG-148).
+	held := attach.Hold(s.vault, s.vault)
+	res, err := attach.Store(held, data, in.Filename, in.Project)
 	if err != nil {
+		held.Release()
 		refund()
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	s.auditWrite(ctx, audit.ActionUploadAttachment, res.Path, "", int64(len(data)))
+	held.Release()
 
 	switch kind {
 	case ingestTable, ingestMedia:

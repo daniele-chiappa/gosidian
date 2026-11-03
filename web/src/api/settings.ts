@@ -7,6 +7,7 @@ export interface GitSettings {
   author_name: string
   author_email: string
   debounce_ms: number
+  max_wait_ms: number // 0 = 4 debounces (BUG-151)
   push: boolean
   token_env: string
 }
@@ -45,6 +46,7 @@ export interface UpdateSettings {
     author_name: string
     author_email: string
     debounce_ms: number
+    max_wait_ms: number
     push: boolean
     token_env: string
   }>

@@ -28,7 +28,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useUIStore } from '@/stores/ui'
 
 const { t } = useI18n()
-const { width, startDrag, reset } = useSidebarResize()
+const { width, min: widthMin, max: widthMax, startDrag, onKeydown: onResizeKey, reset } = useSidebarResize()
 const auth = useAuthStore()
 // The session renews while the shell is used (BUG-143).
 useSessionRenewal()
@@ -186,13 +186,19 @@ function openSettings(): void {
         <Sidebar />
         <!-- The handle fills the gap right of the sidebar's border, inside
              its landmark (IMP-217, F-35). Its containing block is the aside,
-             so the scrolling body neither clips nor scrolls it. -->
+             so the scrolling body neither clips nor scrolls it. Tab reaches
+             it, and it says its width, as a window's separator (F-17). -->
         <div
-          class="absolute top-0 -right-[5px] h-full w-1 cursor-col-resize bg-border hover:bg-accent/40 select-none"
+          class="absolute top-0 -right-[5px] h-full w-1 cursor-col-resize bg-border hover:bg-accent/40 select-none focus-visible:bg-accent/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
           role="separator"
           aria-orientation="vertical"
+          tabindex="0"
           :aria-label="t('sidebar.resize')"
+          :aria-valuemin="widthMin"
+          :aria-valuemax="widthMax"
+          :aria-valuenow="width"
           @pointerdown="startDrag"
+          @keydown="onResizeKey"
           @dblclick="reset"
         />
       </PlanciaSidebar>

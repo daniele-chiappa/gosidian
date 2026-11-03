@@ -136,7 +136,6 @@ func (s *Server) handleCreateMediaNote(ctx context.Context, req mcp.CallToolRequ
 		if errRes != nil {
 			return errRes, nil
 		}
-		s.auditWrite(ctx, audit.ActionUploadAttachment, res.Path, "", size)
 	}
 
 	// Assemble and write the note.

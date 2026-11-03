@@ -316,3 +316,37 @@ func TestValidateSourcePath_RemoteSetupHint(t *testing.T) {
 		t.Errorf("happy path failed: %v", err)
 	}
 }
+
+// countLocker counts the locks taken and let go.
+type countLocker struct{ locked, unlocked map[string]int }
+
+func (c *countLocker) LockPath(p string) func() {
+	c.locked[p]++
+	return func() { c.unlocked[p]++ }
+}
+
+// nopSaver saves nothing.
+type nopSaver struct{}
+
+func (nopSaver) Rel(p string) (string, error)                         { return p, nil }
+func (nopSaver) SaveAttachment(string, []byte, map[string]bool) error { return nil }
+
+// A Held saver locks each file it saves once, a file saved twice included,
+// and keeps the locks until Release (BUG-148).
+func TestHold(t *testing.T) {
+	l := &countLocker{locked: map[string]int{}, unlocked: map[string]int{}}
+	h := Hold(nopSaver{}, l)
+	for _, rel := range []string{"p/attachments/a.png", "p/attachments/a.png", "p/attachments/b.png"} {
+		if err := h.SaveAttachment(rel, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if l.locked["p/attachments/a.png"] != 1 || l.locked["p/attachments/b.png"] != 1 || len(l.unlocked) != 0 {
+		t.Fatalf("before Release: locked %v, unlocked %v", l.locked, l.unlocked)
+	}
+	h.Release()
+	h.Release()
+	if l.unlocked["p/attachments/a.png"] != 1 || l.unlocked["p/attachments/b.png"] != 1 {
+		t.Errorf("after Release: unlocked %v, want each once", l.unlocked)
+	}
+}

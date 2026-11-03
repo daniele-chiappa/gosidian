@@ -63,13 +63,48 @@ when `git.push` is true.
 - `Remote URL` — clone URL of the git remote (Gitea, GitHub,
   self-hosted)
 - `Branch` — default `main`
-- `Author name` / `Author email` — used in the commit metadata
-- `Debounce` — minimum time between consecutive commits (`30s`, `2m`)
+- `Author name` / `Author email` — used in the commit metadata: the
+  email of every commit, the name of those no writer of gosidian names
+  (see below)
+- `Debounce` — how long a commit waits after the last change (`30s`,
+  `2m`)
+- `Longest wait` — how long a commit waits at most after the first
+  change it takes, when the changes keep coming closer than the
+  debounce: by default (`0`) 4 debounces, 2 minutes with the default
+  debounce, and never less than the debounce
 - `Push` — checkbox; when off, gosidian commits locally only
 - `Env var for the HTTPS token` — name of the environment variable
   containing the push token (e.g. `GITEA_TOKEN`). The token itself is
   **never** persisted to disk — it has to be exported in gosidian's
   environment
+
+A note written through gosidian is committed in the name of who wrote
+it, as `modified_by` shows it: the account of the web UI (`anna`), the
+token of an MCP client with its account (`claude-cli (anna)`), or
+`automation`. The email stays the configured one. The subject says what
+was done to which note (`update notes/plan.md`, `rename a.md -> b.md`,
+`delete project old`, `restore notes/old from the trash`,
+`upload notes/attachments/1a2b.png`); one writer of several notes of a
+project makes one commit, whose subject names the first and how many
+more and whose body has a line per note. A rename or a move also
+commits, as an `update` in the renamer's name, each note whose links it
+rewrote. Two writers, or one writer in two projects, in the same
+debounce window make a commit each: a commit names the notes of one
+project, so the history of a note never names a note of a project its
+reader cannot see. What git sync changes itself, the block of
+`.gitignore` it manages and the folders it takes out of git or tracks
+again (a project whose git sync goes off or on, an IN folder), is a
+commit of its own in the configured author's name, whose message says
+what: `git sync: stop tracking old`. What no write of gosidian names (a
+pull, an editor on the disk) keeps the configured author and the message
+`auto: <date>`. A note that a writer is saving, renaming or deleting
+while a commit runs, an attachment being uploaded or deleted, a folder
+being deleted or restored, or a project being renamed, deleted or
+restored, waits for the next commit, a debounce later: the commit that
+takes it knows who wrote it, so no write of gosidian goes into the
+history as `auto:`, nor with another writer's name. A
+pipeline's revision ([`vault.commit`](../pipelines.md#revisions-as-git-history))
+keeps its own message and the configured author.
 
 Push failures surface in `/healthz` (`git_sync.healthy=false`, plus
 `last_error` + `last_error_at` for a request with an owner's token, see

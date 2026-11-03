@@ -140,10 +140,6 @@ type packageNoteResult struct {
 	Unresolved       []string `json:"unresolved,omitempty"`
 }
 
-// errCreatedMeanwhile is a note of a package that appeared between the
-// check and the write, without overwrite.
-var errCreatedMeanwhile = errors.New("created meanwhile")
-
 // importPackage checks a read package and writes it, all or nothing: every
 // note is checked first (path, access, size, a note already there without
 // overwrite), and a write that fails midway takes back the ones done. It
@@ -277,50 +273,56 @@ func (s *Server) importPackage(ctx context.Context, in packageIntent, entries []
 	}
 	for _, i := range fresh {
 		a := plan.Attachments[i]
+		// Locked until the record: git sync leaves the file for the
+		// commit after it (BUG-148).
+		unlock := s.vault.LockPath(a.Path)
 		if err := s.vault.SaveAttachment(a.Path, a.Data, attach.ExtSet()); err != nil {
+			unlock()
 			// The bytes not written go back to the quota.
 			s.uploadQuota.Refund(uploadKey(tok), freshBytes)
 			return mcp.NewToolResultErrorFromErr("package not imported: attachment "+a.Src, err), nil
 		}
 		freshBytes -= int64(len(a.Data))
 		s.auditWrite(ctx, audit.ActionUploadAttachment, a.Path, "", int64(len(a.Data)))
+		unlock()
 	}
 	type done struct {
 		rel     string
 		created bool
 		prev    []byte
 	}
+	// The notes stay locked from the first write to the last record, all
+	// of them: git sync leaves out a file whose lock a writer holds
+	// (BUG-147). The records come once every note is written, so a note
+	// taken back has none. A deferred call lets them go, as underLock does.
+	rels := make([]string, len(plan.Notes))
+	for i, n := range plan.Notes {
+		rels[i], _ = s.vault.Rel(n.Path)
+	}
+	defer s.vault.LockPaths(rels...)()
 	var written []done
 	rollback := func() {
 		for i := len(written) - 1; i >= 0; i-- {
 			d := written[i]
-			_ = s.underLock(d.rel, func() error {
-				if d.created {
-					_ = s.vault.Delete(d.rel)
-					_ = s.index.Delete(d.rel)
-					return nil
-				}
-				return s.writeAndIndex(d.rel, d.prev)
-			})
+			if d.created {
+				_ = s.vault.Delete(d.rel)
+				_ = s.index.Delete(d.rel)
+				continue
+			}
+			_ = s.writeAndIndex(d.rel, d.prev)
 		}
 	}
 	for i, n := range plan.Notes {
-		rel, _ := s.vault.Rel(n.Path)
+		rel := rels[i]
 		d := done{rel: rel, created: true}
-		err := s.underLock(rel, func() error {
-			if prev, err := s.vault.Load(rel); err == nil {
-				if !in.Overwrite {
-					return errCreatedMeanwhile
-				}
-				d.created, d.prev = false, prev.Content
+		if prev, err := s.vault.Load(rel); err == nil {
+			if !in.Overwrite {
+				rollback()
+				return mcp.NewToolResultErrorf("package not imported: %s was created meanwhile; nothing is left written", rel), nil
 			}
-			return s.writeAndIndex(rel, n.Data)
-		})
-		if errors.Is(err, errCreatedMeanwhile) {
-			rollback()
-			return mcp.NewToolResultErrorf("package not imported: %s was created meanwhile; nothing is left written", rel), nil
+			d.created, d.prev = false, prev.Content
 		}
-		if err != nil {
+		if err := s.writeAndIndex(rel, n.Data); err != nil {
 			rollback()
 			return mcp.NewToolResultErrorFromErr("package not imported, the notes written are taken back: "+rel, err), nil
 		}

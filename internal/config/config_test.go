@@ -58,6 +58,7 @@ func TestApplyEnv(t *testing.T) {
 	t.Setenv("GOSIDIAN_GIT_AUTHOR_NAME", "Bot")
 	t.Setenv("GOSIDIAN_GIT_AUTHOR_EMAIL", "bot@ex")
 	t.Setenv("GOSIDIAN_GIT_DEBOUNCE", "12s")
+	t.Setenv("GOSIDIAN_GIT_MAX_WAIT", "3m")
 	t.Setenv("GOSIDIAN_GIT_PUSH", "1")
 	t.Setenv("GOSIDIAN_GIT_TOKEN_ENV", "MYTOK")
 
@@ -67,7 +68,7 @@ func TestApplyEnv(t *testing.T) {
 	if !cfg.Git.Enabled || cfg.Git.Remote != "https://g.example/v.git" ||
 		cfg.Git.Branch != "dev" || cfg.Git.AuthorName != "Bot" ||
 		cfg.Git.AuthorEmail != "bot@ex" || cfg.Git.Debounce != 12*time.Second ||
-		!cfg.Git.Push || cfg.Git.TokenEnv != "MYTOK" {
+		cfg.Git.MaxWait != 3*time.Minute || !cfg.Git.Push || cfg.Git.TokenEnv != "MYTOK" {
 		t.Errorf("env not applied: %+v", cfg.Git)
 	}
 }
@@ -99,10 +100,48 @@ func TestApplyEnv_EmptyDoesNotReset(t *testing.T) {
 }
 
 func TestApplyEnv_InvalidDuration(t *testing.T) {
-	cfg := Default()
-	t.Setenv("GOSIDIAN_GIT_DEBOUNCE", "not-a-duration")
-	if err := cfg.ApplyEnv(); err == nil {
-		t.Errorf("invalid duration should error")
+	for _, env := range []string{"GOSIDIAN_GIT_DEBOUNCE", "GOSIDIAN_GIT_MAX_WAIT"} {
+		t.Run(env, func(t *testing.T) {
+			cfg := Default()
+			t.Setenv(env, "not-a-duration")
+			if err := cfg.ApplyEnv(); err == nil {
+				t.Errorf("invalid duration should error")
+			}
+		})
+	}
+}
+
+// The commit waits at most commit_max_wait after the first change of a
+// burst, 4 debounces when unset, never less than the debounce (BUG-151).
+func TestGitConfig_CommitMaxWait(t *testing.T) {
+	for _, tc := range []struct {
+		debounce, maxWait, want time.Duration
+	}{
+		{30 * time.Second, 0, 2 * time.Minute},
+		{time.Minute, 0, 4 * time.Minute},
+		{30 * time.Second, 5 * time.Minute, 5 * time.Minute},
+		{30 * time.Second, 10 * time.Second, 30 * time.Second},
+	} {
+		g := GitConfig{Debounce: tc.debounce, MaxWait: tc.maxWait}
+		if got := g.CommitMaxWait(); got != tc.want {
+			t.Errorf("debounce %s, max wait %s: %s, want %s", tc.debounce, tc.maxWait, got, tc.want)
+		}
+	}
+}
+
+// An unset max wait stays unset through a save: 4 debounces of the debounce
+// in force, not of the one when the file was saved.
+func TestSave_MaxWaitUnsetStaysUnset(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := Save(path, Default()); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Git.MaxWait != 0 {
+		t.Errorf("max wait = %s after a save, want unset", loaded.Git.MaxWait)
 	}
 }
 

@@ -638,12 +638,27 @@ type GitConfig struct {
 	AuthorName  string        `toml:"author_name"`     // default "Gosidian"
 	AuthorEmail string        `toml:"author_email"`    // default "gosidian@localhost"
 	Debounce    time.Duration `toml:"commit_debounce"` // default 30s
-	Push        bool          `toml:"push"`            // default false: commit locally only unless enabled
-	TokenEnv    string        `toml:"token_env"`       // env var name for push credentials
+	// MaxWait is how long a commit waits at most after the first change of
+	// a burst, when changes keep coming faster than the debounce (BUG-151).
+	// 0 is 4 debounces; see CommitMaxWait.
+	MaxWait  time.Duration `toml:"commit_max_wait"`
+	Push     bool          `toml:"push"`      // default false: commit locally only unless enabled
+	TokenEnv string        `toml:"token_env"` // env var name for push credentials
 	// Maintenance is when git packs the repository (IMP-209): a time of day
 	// HH:MM in the server's time zone (default "03:30"), "auto" for git's
 	// own after each commit, or "off".
 	Maintenance string `toml:"maintenance"`
+}
+
+// CommitMaxWait is the max wait in force: MaxWait, 4 debounces when unset,
+// never shorter than the debounce. It is worked out here rather than set by
+// applyDefaults, so a save keeps it unset and it follows the debounce.
+func (g GitConfig) CommitMaxWait() time.Duration {
+	w := g.MaxWait
+	if w == 0 {
+		w = 4 * g.Debounce
+	}
+	return max(w, g.Debounce)
 }
 
 // Load reads the config file from path. Missing files return defaults with no
@@ -769,6 +784,13 @@ func (c *Config) ApplyEnv() error {
 			return err
 		}
 		c.Git.Debounce = d
+	}
+	if v := os.Getenv("GOSIDIAN_GIT_MAX_WAIT"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return err
+		}
+		c.Git.MaxWait = d
 	}
 	if v := os.Getenv("GOSIDIAN_GIT_PUSH"); v != "" {
 		c.Git.Push = envBool(v)

@@ -1,16 +1,22 @@
 <script setup lang="ts">
 /**
  * TreeNode — recursive component that renders one apiTreeNode shape
- * (see internal/api/v1/tree.go). Folders use <details> for native
- * keyboard accessibility + open/close persistence in localStorage
- * across reloads (mirrors the v1.x sidebar-tree.js behaviour).
+ * (see internal/api/v1/tree.go). A folder's row is a button that opens
+ * and closes it (aria-expanded), its open state persisted in localStorage
+ * across reloads; a closed folder draws nothing inside it. The folder's
+ * "+" (new note here) sits beside that button, not inside it: a control
+ * in a control is announced as neither (IMP-219, F-08).
  *
  * Project roots carry a visibility cue (lock = private, globe = public;
- * internal draws nothing) and the "+" (new note here) shows only where
- * the account may write — both from the access store, never from the role.
- * A right-click on a row (or the Menu key, or Shift+F10) opens the tree's
- * context menu (IMP-150). A project's IN folder (kind "in", IMP-172) is
- * one row, with what it holds: it opens the IN window, not its files.
+ * internal draws nothing) and the "+" shows only where the account may
+ * write — both from the access store, never from the role. A right-click
+ * on a row (or the Menu key, or Shift+F10) opens the tree's context menu
+ * (IMP-150); the rows do not say they open a menu, as a click opens the
+ * note or the folder. A project's IN folder (kind "in", IMP-172) is one
+ * row, with what it holds: it opens the IN window, not its files.
+ *
+ * A note's row shows its title where it has one, its file name on hover
+ * (NoteLabel, IMP-219, F-19); the rows stay in file-name order.
  */
 import type { TreeNode as TN } from '@/api/tree'
 import { computed, ref } from 'vue'
@@ -23,6 +29,7 @@ import { visibilityHelp } from '@/api/access'
 import { planciaKey } from '@/composables/planciaKey'
 import { useTreeMenu } from '@/composables/useTreeMenu'
 import { formatSize } from '@/api/format'
+import NoteLabel from '@/components/domain/NoteLabel.vue'
 
 const props = defineProps<{ node: TN }>()
 const { t } = useI18n()
@@ -62,7 +69,8 @@ const isOpen = ref(persistedOpen())
 
 function openNote() {
   if (props.node.is_dir) return
-  const title = props.node.name.replace(/\.md$/, '')
+  // The window starts with the title the row shows (F-19).
+  const title = props.node.title || props.node.name.replace(/\.md$/, '')
   recents.record(props.node.path, title)
   openWindow({
     type: 'note',
@@ -119,7 +127,6 @@ function createHere() {
     <template v-if="node.kind === 'in'">
       <button
         type="button"
-        aria-haspopup="menu"
         class="w-full flex items-center gap-1.5 py-0.5 px-1 rounded text-left hover:bg-surface-hover"
         :title="t('in.tree_hint', { files: node.in?.files ?? 0, size: formatSize(node.in?.bytes ?? 0) })"
         data-tree-in
@@ -138,13 +145,18 @@ function createHere() {
       </button>
     </template>
     <template v-else-if="node.is_dir">
-      <details
-        :open="isOpen"
-        @toggle="toggleExpanded(($event.target as HTMLDetailsElement).open)"
+      <!-- The row: a toggle and, beside it, the + (F-08). The + is a 24 px
+           target (F-18), shown with the pointer on the row, the focus in
+           it, or always where nothing hovers. -->
+      <div
+        class="group/row flex items-center rounded hover:bg-surface-hover"
+        data-tree-row
       >
-        <summary
-          class="group/row flex items-center gap-1.5 py-0.5 px-1 rounded cursor-pointer hover:bg-surface-hover select-none"
-          aria-haspopup="menu"
+        <button
+          type="button"
+          class="flex-1 min-w-0 flex items-center gap-1.5 py-0.5 px-1 rounded text-left select-none"
+          :aria-expanded="isOpen"
+          @click="toggleExpanded(!isOpen)"
           @contextmenu.prevent="onContextMenu"
           @keydown="onRowKeydown"
         >
@@ -166,16 +178,6 @@ function createHere() {
             :title="visibilityHelp('public')"
             :aria-label="t('tree.public_project')"
           />
-          <button
-            v-if="canWriteHere"
-            type="button"
-            class="rounded p-0.5 text-text-muted opacity-0 transition-opacity hover:bg-surface-hover hover:text-text group-hover/row:opacity-100 focus-visible:opacity-100"
-            :title="t('tree.new_note_here')"
-            :aria-label="t('tree.new_note_here')"
-            @click.stop.prevent="createHere"
-          >
-            <Plus class="h-3.5 w-3.5" />
-          </button>
           <span
             v-if="node.note_count"
             class="text-xs text-text-muted px-1"
@@ -185,28 +187,41 @@ function createHere() {
             class="text-[10px] uppercase text-warning"
             :title="t('tree.hidden_hint')"
           >hidden</span>
-        </summary>
-        <ul class="pl-4 border-l border-border ml-1.5">
-          <TreeNode
-            v-for="child in node.children ?? []"
-            :key="child.path"
-            :node="child"
-          />
-        </ul>
-      </details>
+        </button>
+        <button
+          v-if="canWriteHere"
+          type="button"
+          class="h-6 w-6 shrink-0 inline-flex items-center justify-center rounded text-text-muted opacity-0 transition-opacity hover:bg-surface-hover hover:text-text group-hover/row:opacity-100 group-focus-within/row:opacity-100 [@media(hover:none)]:opacity-100"
+          :title="t('tree.new_note_here')"
+          :aria-label="t('tree.new_note_here')"
+          @click="createHere"
+        >
+          <Plus class="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <ul v-if="isOpen" class="pl-4 border-l border-border ml-1.5">
+        <TreeNode
+          v-for="child in node.children ?? []"
+          :key="child.path"
+          :node="child"
+        />
+      </ul>
     </template>
 
     <template v-else>
       <button
         type="button"
-        aria-haspopup="menu"
         @click="openNote"
         @contextmenu.prevent="onContextMenu"
         @keydown="onRowKeydown"
         class="w-full flex items-center gap-1.5 py-0.5 px-2 rounded text-left text-text-muted hover:text-text hover:bg-surface-hover truncate"
       >
         <Dot class="h-3.5 w-3.5 shrink-0 opacity-50" aria-hidden="true" />
-        <span class="truncate">{{ node.name.replace(/\.md$/, '') }}</span>
+        <NoteLabel
+          class="flex-1"
+          :path="node.path"
+          :title="node.title"
+        />
         <span
           v-if="node.in_progress"
           class="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-info"

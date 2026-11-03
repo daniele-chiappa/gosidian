@@ -30,7 +30,7 @@ import { getSettings, updateSettings } from '@/api/settings'
 import SettingsView from '@/views/SettingsView.vue'
 
 const settings: Settings = {
-  git: { enabled: true, remote: 'https://git.example/vault.git', branch: 'main', author_name: '', author_email: '', debounce_ms: 30000, push: true, token_env: '' },
+  git: { enabled: true, remote: 'https://git.example/vault.git', branch: 'main', author_name: '', author_email: '', debounce_ms: 30000, max_wait_ms: 0, push: true, token_env: '' },
   trash: { enabled: true, retention_ms: 0 },
   i18n: { default_lang: 'en', enabled_langs: ['en', 'it'] },
   mcp: { write_per_minute: 300, max_note_bytes: 1 << 20 },
@@ -93,6 +93,18 @@ describe('SettingsView owner controls (BUG-109)', () => {
     reply({ ...settings, totp_mode: 'required' })
     await flushPromises()
     expect((policy(w)!.element as HTMLSelectElement).disabled).toBe(false)
+  })
+
+  it('shows and saves the longest wait of a commit (BUG-151)', async () => {
+    vi.mocked(getSettings).mockResolvedValue(structuredClone(settings))
+    const w = mountView()
+    await flushPromises()
+    const label = w.findAll('label').find((l) => l.text().includes('Longest wait'))!
+    expect((label.find('input').element as HTMLInputElement).value).toBe('0')
+    await label.find('input').setValue('300000')
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    expect(vi.mocked(updateSettings).mock.calls[0]![0].git).toMatchObject({ max_wait_ms: 300000 })
   })
 
   it('shows the saved value again when a toggle is refused', async () => {

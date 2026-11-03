@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -501,6 +502,56 @@ func TestTools_WriteConformance(t *testing.T) {
 			}
 			if n := len(auditEntries(t, al)); n != entries {
 				t.Errorf("refused call wrote %d audit entries", n-entries)
+			}
+		})
+	}
+}
+
+// gitWrites are the audit entries git sync takes as writes of notes and of
+// attachments, as cmd/gosidian's wireGitWriters reads them.
+var gitWrites = map[audit.Action]bool{
+	audit.ActionCreate: true, audit.ActionUpdate: true, audit.ActionAppend: true,
+	audit.ActionDelete: true, audit.ActionRename: true, audit.ActionRestore: true,
+	audit.ActionDeleteProject: true, audit.ActionRenameProject: true,
+	audit.ActionUploadAttachment: true, audit.ActionDeleteAttachment: true,
+}
+
+// Every write is recorded while its writer still holds the lock of what it
+// wrote: both ends of a rename, both names of a project renamed. A commit
+// of git sync in between took the file as nobody's, "auto:", and the
+// record, left over, gave its verb to the next commit of the note
+// (BUG-147).
+func TestTools_WritesRecordedUnderTheirLock(t *testing.T) {
+	for _, c := range writeConformanceCases() {
+		t.Run(c.label(), func(t *testing.T) {
+			s, ctx, arg, al, _ := conformanceRun(t, c, false)
+			var mu sync.Mutex
+			var free []string
+			al.OnWrite(func(e audit.Entry) {
+				if !gitWrites[e.Action] {
+					return
+				}
+				paths := []string{e.Path}
+				if e.Action == audit.ActionRename || e.Action == audit.ActionRenameProject {
+					paths = append(paths, e.To)
+				}
+				for _, p := range paths {
+					if !s.vault.PathBusy(p) {
+						mu.Lock()
+						free = append(free, string(e.Action)+" "+p)
+						mu.Unlock()
+					}
+				}
+			})
+			res, err := c.call(ctx, s, arg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resultText(t, res)
+			mu.Lock()
+			defer mu.Unlock()
+			if len(free) > 0 {
+				t.Errorf("recorded with no lock held: %q", free)
 			}
 		})
 	}

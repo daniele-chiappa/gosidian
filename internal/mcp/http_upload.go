@@ -89,9 +89,13 @@ func (s *Server) handleHTTPUpload(w http.ResponseWriter, r *http.Request) {
 		writeRateLimited(w, http.StatusRequestEntityTooLarge, refusal.Error(), refusal.Wait)
 		return
 	}
-	// attach.Store validates the extension, magic-bytes MIME, and the 10 MiB cap.
-	res, err := attach.Store(s.vault, data, hdr.Filename, project)
+	// attach.Store validates the extension, magic-bytes MIME, and the 10 MiB
+	// cap. The file stays locked until the record: git sync leaves it for
+	// the commit after it (BUG-148).
+	held := attach.Hold(s.vault, s.vault)
+	res, err := attach.Store(held, data, hdr.Filename, project)
 	if err != nil {
+		held.Release()
 		refund()
 		writeJSONError(w, http.StatusUnprocessableEntity, err.Error())
 		return
@@ -100,6 +104,7 @@ func (s *Server) handleHTTPUpload(w http.ResponseWriter, r *http.Request) {
 	// Audit under the authenticated token (reuse the tool audit path).
 	tctx := context.WithValue(r.Context(), tokenCtxKey, tok)
 	s.auditWrite(tctx, audit.ActionUploadAttachment, res.Path, "", int64(len(data)))
+	held.Release()
 	s.arrived(tctx, res.Path, hdr.Filename, "")
 
 	ext := strings.ToLower(filepath.Ext(res.Filename))

@@ -8,7 +8,8 @@
  * edits the rows, a list as HTML.
  *
  * The rows are other notes, so the views load again when the note changes
- * and, after a pause, when any other note does.
+ * and when any other note does: after a pause, or every 2 s while other
+ * notes keep changing.
  */
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -37,7 +38,9 @@ async function load() {
 }
 watch(() => [props.path, props.etag], load, { immediate: true })
 
-const reload = useDebounceFn(load, 800)
+// After a pause in the events, and every 2 s while they keep coming: events
+// closer than the pause held the views back for good (BUG-146).
+const reload = useDebounceFn(load, 800, { maxWait: 2000 })
 useSSE(['note']).on('note', (p: { path?: string }) => {
   if (data.value?.views.length && p.path !== props.path) void reload()
 })

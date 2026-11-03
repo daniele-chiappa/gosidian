@@ -80,7 +80,7 @@
     {
       "name": "tools/list, full (bytes)",
       "metric": "surface.tools_list_bytes_full",
-      "ref": 78944,
+      "ref": 79128,
       "target": 80000
     },
     {
@@ -228,7 +228,7 @@
     {
       "name": "Web UI, first load (bytes sent)",
       "metric": "spa.bytes",
-      "ref": 162786,
+      "ref": 163493,
       "target": 200000
     },
     {
@@ -423,6 +423,38 @@
         "base-2026-11-02-imp-218.json"
       ],
       "metrics": [
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-02",
+      "why": "IMP-222, the history of a note: fifteen new strings in the English and Italian catalogues of the first load (a version's diff and text, its restore and its confirmation, what is said when a version has nothing to show) and the History window's few new classes in the stylesheet take it from 162,786 bytes sent to 163,355 (locales +532, the stylesheet +41, −4 from chunk names), a cost the user accepted on 2026-11-02; memory_audit_tail's action described in two bytes less (the action restore in it) takes tools/list from 78,944 bytes to 78,942",
+      "from": [
+        "base-2026-11-02-imp-222.json"
+      ],
+      "metrics": [
+        "spa.bytes",
+        "surface.tools_list_bytes_full"
+      ]
+    },
+    {
+      "set": "2026-11-02",
+      "why": "IMP-219, the tree and the sidebar: the stylesheet's new rules (a folder's + shown with the focus in its row and where nothing hovers, the middle cut of a long file name, the separator's focus, the refresh button's margin) take it from 163,355 bytes sent to 163,439 (the stylesheet +71, the rest from chunk names), a cost the user accepted on 2026-11-02",
+      "from": [
+        "base-2026-11-02-imp-219.json"
+      ],
+      "metrics": [
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-03",
+      "why": "v2.133.0: the descriptions of memory_rename_note and memory_move_note say that the links are rewritten only in the notes the token may write, and what not_rewritten counts (BUG-150), taking tools/list from 78,942 bytes to 79,128 (its core unchanged); the web UI's longest waits of the views, the tree and the IN window (BUG-146) and the strings of git sync's longest wait (BUG-151) take the first load from 163,439 bytes sent to 163,493; a cost the user accepted on 2026-11-03",
+      "from": [
+        "base-2026-11-03-v2.133.0.json"
+      ],
+      "metrics": [
+        "surface.tools_list_bytes_full",
         "spa.bytes"
       ]
     }

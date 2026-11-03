@@ -2,6 +2,7 @@ package v1
 
 import (
 	"net/http"
+	"path"
 	"sort"
 	"strings"
 
@@ -17,8 +18,11 @@ import (
 // JSON keys here lets us evolve the HTML side without breaking the
 // SPA contract.
 type apiTreeNode struct {
-	Name          string `json:"name"`
-	Path          string `json:"path"`
+	Name string `json:"name"`
+	Path string `json:"path"`
+	// Title is a note's title where it is not its file name, so the row
+	// can show it (IMP-219, F-19); the index has it already.
+	Title         string `json:"title,omitempty"`
 	IsDir         bool   `json:"is_dir"`
 	IsProjectRoot bool   `json:"is_project_root,omitempty"`
 	Kind          string `json:"kind"`
@@ -63,6 +67,7 @@ func (r *Router) handleTree(w http.ResponseWriter, req *http.Request) {
 	}
 	p := principalFromContext(req)
 	paths := make([]string, 0, len(rows))
+	titles := map[string]string{}
 	for _, n := range rows {
 		if project != "" && !strings.HasPrefix(n.Path, project+"/") && n.Path != project {
 			continue
@@ -72,6 +77,9 @@ func (r *Router) handleTree(w http.ResponseWriter, req *http.Request) {
 			continue
 		}
 		paths = append(paths, n.Path)
+		if base := path.Base(n.Path); n.Title != "" && n.Title != strings.TrimSuffix(base, path.Ext(base)) {
+			titles[n.Path] = n.Title
+		}
 	}
 	// Obsidian bases and canvases are no notes, so the index does not hold
 	// them: they are read off the vault, read-only (IMP-118, IMP-144).
@@ -93,16 +101,17 @@ func (r *Router) handleTree(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	root := buildAPITree(paths, inProgress)
+	root := buildAPITree(paths, titles, inProgress)
 	r.annotateProjectFlags(root)
 	computeAPINoteCount(root)
 	WriteJSON(w, http.StatusOK, map[string]any{"root": root})
 }
 
 // buildAPITree assembles the tree from a flat list of slash-separated
-// paths. Mirrors the server-side buildTree but returns the
-// SPA-specific shape with explicit JSON tags.
-func buildAPITree(paths []string, inProgress map[string]bool) *apiTreeNode {
+// paths, with the titles of the notes not named by their file. Mirrors the
+// server-side buildTree but returns the SPA-specific shape with explicit
+// JSON tags.
+func buildAPITree(paths []string, titles map[string]string, inProgress map[string]bool) *apiTreeNode {
 	root := &apiTreeNode{Name: "", Path: "", IsDir: true, Kind: "folder"}
 	for _, p := range paths {
 		parts := strings.Split(p, "/")
@@ -127,6 +136,7 @@ func buildAPITree(paths []string, inProgress map[string]bool) *apiTreeNode {
 					child.Kind = "folder"
 				} else {
 					child.Kind = classifyAPIKind(child.Path)
+					child.Title = titles[child.Path]
 					if inProgress[child.Path] {
 						child.InProgress = true
 					}

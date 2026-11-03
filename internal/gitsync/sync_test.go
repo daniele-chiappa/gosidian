@@ -120,6 +120,35 @@ func TestSync_DebounceCoalesces(t *testing.T) {
 	}
 }
 
+// Changes that keep coming faster than the debounce still get their commit,
+// at most the max wait after the first of them, 4 debounces when unset
+// (BUG-151): before, the commit waited for a pause.
+func TestSync_ChangesThatKeepComingAreCommitted(t *testing.T) {
+	requireGit(t)
+	dir := t.TempDir()
+	cfg := testCfg()
+	cfg.Debounce = 200 * time.Millisecond
+	s := New(dir, cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_ = s.Start(ctx)
+
+	// A change every half debounce for 12 debounces: the commit is due
+	// after 4, the 8 after leave room for a slow runner.
+	for i := 0; i < 24; i++ {
+		if err := os.WriteFile(filepath.Join(dir, "a.md"), []byte(fmt.Sprint(i)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		s.TriggerCommit()
+		time.Sleep(cfg.Debounce / 2)
+	}
+	got := countAutoCommits(t, dir)
+	s.Flush()
+	if got == 0 {
+		t.Error("no commit while the changes kept coming")
+	}
+}
+
 // countAutoCommits returns how many "auto:" commits the repo at dir holds.
 func countAutoCommits(t *testing.T, dir string) int {
 	t.Helper()

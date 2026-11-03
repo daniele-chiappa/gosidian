@@ -136,7 +136,6 @@ func (s *Server) handleCreateTableNote(ctx context.Context, req mcp.CallToolRequ
 		if errRes != nil {
 			return errRes, nil
 		}
-		s.auditWrite(ctx, audit.ActionUploadAttachment, res.Path, "", size)
 	}
 
 	// Summarise the stored CSV (headers + row count) for the FTS body. An

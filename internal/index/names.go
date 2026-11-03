@@ -23,7 +23,11 @@ func (i *Index) NotesByName(q string, projects []string, limit int) ([]RecentNot
 	if limit <= 0 {
 		limit = 50
 	}
-	limit = min(limit, 500)
+	// A comparison, not min(): CodeQL reads only this as the bound of the
+	// allocation below (go/uncontrolled-allocation-size, #93).
+	if limit > 500 {
+		limit = 500
+	}
 	scope, args := scopeClause(projects, nil)
 	query := `SELECT n.path, n.title, n.mtime FROM notes n WHERE 1=1` + scope
 	// SQLite's LIKE folds ASCII only: an ASCII q narrows the rows in the

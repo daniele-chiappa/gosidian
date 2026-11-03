@@ -10,6 +10,160 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.133.0] — 2026-11-03 — "the history of a note"
+
+The releases from 2.131.0 to 2.133.0 in one: a note's history that opens,
+compares and restores its versions, git commits in the name of who wrote
+each change and saying what was done, a sidebar that shows the notes'
+titles and answers the keyboard, and a rename that writes only where its
+token may write. Pull the image and restart; nothing to migrate. With git
+sync on, the commits of gosidian's writes are no longer `auto: <date>` by
+the configured author: a hook, a CI job or a script on the remote that
+picks the commits by that author or that prefix sees these as others.
+Coming from 2.130.0, read the entries from 2.131.0 to 2.133.0 of
+[docs/upgrading.md](docs/upgrading.md).
+
+### Added
+- **The History window opens, compares and restores a version**
+  ([docs/web-ui/editor.md](docs/web-ui/editor.md#history)): the window
+  listed the commits of a note, and none could be opened nor brought
+  back. Each entry is now a button that opens the version under it: the
+  diff from it to the note now first, its lines removed and added marked
+  and said to a screen reader, then its text on request, and for who may
+  write the note, *Restore this version*, after a confirmation that opens
+  on *Cancel*. The restore is committed at once and the new entry at the
+  top of the list takes the focus; a note changed meanwhile is not
+  overwritten, and the window says so. An entry shows its author's name,
+  the email in its tooltip.
+- **A version of a note, and its diff to the note now, through the API**
+  (`GET /api/v1/notes/{path}/history/{sha}`): a version gives the note's
+  text in that commit, under the name it had then, and the unified diff
+  from it to the note as it is now, with the note's `etag` that diff was
+  made with; one over 1 MiB, one that is not text, or the commit that
+  deleted the note, gives neither and says why. Each commit of the
+  history now has the note's `path` in it, and `from` in the one that
+  renamed it. The commits of a note in a project its reader cannot read
+  are left out, and the subject of its move from there does not name it.
+- **A version of a note written back, through the API**
+  (`POST /api/v1/notes/{path}/restore`): who may write a note restores
+  one of its versions as a save, the index, the event an open editor
+  sees and the audit log with a new action, `restore`, which counts as a
+  write for `modified_by`; it is committed at once in their name,
+  `restore <path> to <sha7>`, so it shows at the top of the history, and
+  the push, with push on, follows in the background. `if_match`, or
+  `If-Match`, refuses it with 412 when the note changed since it was
+  read; a version the same as the note writes nothing, and says so.
+  `memory_audit_tail` filters by the new action too.
+- **A longest wait for git sync's commit** (`git.commit_max_wait`,
+  `GOSIDIAN_GIT_MAX_WAIT`, *Longest wait* in the settings): see Fixed.
+
+### Changed
+- **A commit names who wrote the change, and what was done**
+  ([docs/web-ui/settings.md](docs/web-ui/settings.md#git-sync)): with git
+  sync on, every save was committed by the configured author with the
+  message `auto: <date>`, so the history of a note could not say who
+  changed it, nor how. A write through gosidian is now committed in the
+  name `modified_by` shows, the account of the web UI, the token of an
+  MCP client with its account or `automation`, with the configured email,
+  and the subject says what was done: `update notes/plan.md`,
+  `rename a.md -> b.md`, `delete project old`,
+  `restore notes/old from the trash`, `upload notes/attachments/1a2b.png`.
+  A rename or a move also commits, as an `update` in the renamer's name,
+  each note whose links it rewrote. Two writers in the same debounce
+  window make a commit each, and so does one writer in two projects, so
+  that the history of a note never names a note of a project its reader
+  cannot see; one writer of several notes of a project makes one, which
+  names the first and how many more and lists them all in its body. What
+  git sync changes itself, the block of `.gitignore` it manages and the
+  folders it takes out of git or tracks again, is a commit of its own in
+  the configured author's name, whose message says what:
+  `git sync: stop tracking old`. What no write of gosidian names, a pull
+  or an editor on the disk, keeps the configured author and
+  `auto: <date>`. A write on its way while a commit runs waits for the
+  next commit, which knows who wrote it.
+- **The audit log records the uploads of the web UI**:
+  `POST /api/v1/attach` and `POST /api/v1/upload` now write an
+  `upload_attachment` entry, as the MCP tools do.
+- **A note read says its title, not its file name**:
+  `GET /api/v1/notes/{path}`, its `/excerpt`, `memory_get` and
+  `memory_batch_get` gave as `title` the file name without its
+  extension, while the list of notes, the search and `memory_search`
+  gave the frontmatter's title. They now give the frontmatter's title,
+  and the file name only for a note without one. `GET /api/v1/tree`
+  gives a note's `title` where it is not its file name, so the sidebar
+  can show it (documented in the OpenAPI spec, where the tree was a
+  placeholder).
+- **The tree and Recent show a note's title**
+  ([docs/web-ui/overview.md](docs/web-ui/overview.md#sidebar-tree)): a
+  note's row showed its file name, cut at its end, so a folder of
+  date-named notes read as a column of dates, `20261031-004…`. A row now
+  shows the note's title, with its file name on hover; a note without a
+  title shows its file name cut in the middle, its last ten letters
+  always in sight. The window a row opens starts with the title. The
+  rows stay in file-name order, so date-named notes stay in time order.
+- **The sidebar's width changes from the keyboard**
+  ([docs/web-ui/overview.md](docs/web-ui/overview.md#sidebar-tree)): the
+  sidebar's edge moved with the pointer only, and a screen reader heard
+  a separator with no value (WCAG 2.1.1). `Tab` now reaches it, it says
+  its width and its bounds, and the arrows move it by 24 px, 64 with
+  `Shift`; `Home`, like a double click, brings it back to 260 px, as a
+  window's separator does.
+- **A folder of the tree is a button that opens it, its + beside it**
+  ([docs/web-ui/overview.md](docs/web-ui/overview.md#sidebar-tree)): a
+  folder's row held its **+** (new note here) inside the row that opens
+  the folder, a control in a control that a screen reader announces as
+  neither, and every row said it opened a menu. A folder's row is now a
+  button that says whether the folder is open, with the **+** beside it;
+  no row says it opens a menu, and the menu stays on the right click, the
+  Menu key and `Shift+F10`. The **+** is 24 px, not 18, and shows with
+  the pointer on the row, with the focus in it, and always on a touch
+  screen, where it was there but unseen. A closed folder draws nothing
+  inside it: on a vault of 30,000 notes the page held them all, hidden.
+- **The sidebar's small buttons are 24 px**: the entries of *Recent*
+  were 20 px tall, the tree's refresh 14 x 14 and the clear button of a
+  search select, in the graph's note picker, 22 x 14, small to hit with
+  a finger or an unsteady hand (WCAG 2.5.8). They are now 24 px tall,
+  the two buttons 24 x 24, and the rows around them keep their height.
+
+### Fixed
+- **The tables follow notes that change without a pause**: a note's
+  views, the views of a database row, the tree and the IN window load
+  again after a pause in the events. With events closer than the pause,
+  as many writers send them, they never did: a table kept a row that had
+  left its filter until the writes stopped. They now load again while
+  the events keep coming too: the views and the IN window every 2 s, the
+  tree every second.
+- **A commit no longer waits for the writes to stop**
+  ([docs/web-ui/settings.md](docs/web-ui/settings.md#git-sync)): with git
+  sync on, each change pushed the commit back by a debounce, so changes
+  closer than the debounce, such as an agent saving a note every 20 s
+  with the 30 s default, held the commit back until they stopped, and
+  the remote got nothing meanwhile. A commit now waits at most
+  `git.commit_max_wait` after the first change it takes
+  (`GOSIDIAN_GIT_MAX_WAIT`, *Longest wait* in the settings): by default
+  4 debounces, 2 minutes with the default debounce, and never less than
+  the debounce.
+- **Attachments, folders and a project's git sync reach the remote
+  without waiting for a note**: with git sync on, only the save of a
+  note started a commit, so an attachment uploaded or deleted, a folder
+  deleted or restored through the web UI, or a project whose git sync
+  went off or on waited for the next save of a note, off the remote
+  meanwhile. Each now asks for its commit.
+- **A code-scanning alert on the notes' names is closed**
+  (`go/uncontrolled-allocation-size`): the cap of 500 names a lookup
+  returns is the same, written as a comparison the analyzer reads.
+  Nothing changes for a caller.
+
+### Security
+- **A rename writes only where its token may write**
+  ([docs/mcp/tools.md](docs/mcp/tools.md#write-all-support-optional-if_match-etag)):
+  `memory_rename_note` and `memory_move_note` rewrote the links to the
+  note in every note of the vault, so a token that writes in one project
+  changed the notes of others, and the answer named notes of projects it
+  may not see. The links are now rewritten in the notes the token may
+  write; the others keep the old link, and the answer only counts them
+  (`not_rewritten`, with a notice).
+
 ## [2.130.0] — 2026-11-02 — "boards and a faster search"
 
 The releases from 2.119.0 to 2.130.0 in one: boards of cards for a

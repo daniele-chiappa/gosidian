@@ -65,3 +65,16 @@ describe('SearchSelect keyboard', () => {
     expect(w.emitted('update:modelValue')?.at(-1)).toEqual(['beta'])
   })
 })
+
+// F-18 (IMP-219): the clear button was 22 x 14 px.
+describe('SearchSelect clear', () => {
+  it('is a 24 x 24 target that empties the value', async () => {
+    const w = mountSelect('beta')
+    await w.find('input').setValue('be')
+    const clear = w.find('button[aria-label="Clear"]')
+    expect(clear.classes()).toEqual(expect.arrayContaining(['h-6', 'w-6']))
+    await clear.trigger('click')
+    expect((w.find('input').element as HTMLInputElement).value).toBe('')
+    expect(w.emitted('update:modelValue')?.at(-1)).toEqual([''])
+  })
+})

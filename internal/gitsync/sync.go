@@ -63,6 +63,12 @@ type Sync struct {
 	// tracks (track_in_git), taken out of a commit in this process: the
 	// managed .gitignore names them afterwards. Used by commitAndPush only.
 	bigIN map[string]bool
+	// ignoreChanged says refreshGitignore changed the file since the last
+	// commit, and retracked holds the folders git tracks again since then
+	// (a project's git sync back on, an IN folder tracked): git sync's own
+	// changes, which the commit tells as such (BUG-148). Under workMu.
+	ignoreChanged bool
+	retracked     map[string]bool
 
 	// workMu runs one commit at a time: a timer's flush and Flush at
 	// shutdown ran together, the second met the first's index.lock, and the
@@ -77,9 +83,21 @@ type Sync struct {
 	// onCommit are told of each commit git sync makes (OnCommit).
 	onCommit []func(CommitChanges)
 
+	// writes are the writes noted since the last commit, writeSeq the
+	// number of the last one (RecordWrite, IMP-222). Under mu.
+	writes   []write
+	writeSeq uint64
+	// busy (optional) says whether a writer holds the lock of a vault path
+	// now, or of a folder above it (SetBusy). Under mu.
+	busy func(rel string) bool
+
 	mu      sync.Mutex
 	timer   *time.Timer
 	pending bool
+	// burstAt is when the timer on its way was started: TriggerCommit
+	// pushes the commit back up to the max wait after it, not further
+	// (BUG-151). Under mu.
+	burstAt time.Time
 	stopped bool
 	// initFailed is set when Start's ensureRepo returned an error. Once true,
 	// all TriggerCommit/Flush become no-ops: the repo is unusable for the
@@ -183,6 +201,14 @@ func (s *Sync) SetStateDir(rel string) {
 func (s *Sync) SetStagingDirs(rels []string) {
 	s.mu.Lock()
 	s.stagingRels = append([]string(nil), rels...)
+	s.mu.Unlock()
+}
+
+// SetBusy wires busy, which says whether a writer holds the lock of a
+// vault path now (vault.PathBusy, BUG-147). Safe to call before Start.
+func (s *Sync) SetBusy(busy func(rel string) bool) {
+	s.mu.Lock()
+	s.busy = busy
 	s.mu.Unlock()
 }
 
@@ -378,7 +404,10 @@ func hasCorruptionSignature(s string) bool {
 }
 
 // TriggerCommit resets the debounce timer. When it fires, a commit (and
-// optional push) is executed. Safe to call from multiple goroutines.
+// optional push) is executed. Changes that keep coming push it back up to
+// the max wait after the first of them, not further: they would hold the
+// commit back as long as they come (BUG-151). Safe to call from multiple
+// goroutines.
 func (s *Sync) TriggerCommit() {
 	if !s.cfg.Enabled {
 		return
@@ -392,7 +421,46 @@ func (s *Sync) TriggerCommit() {
 	if s.timer != nil {
 		s.timer.Stop()
 	}
-	s.timer = time.AfterFunc(s.cfg.Debounce, s.flush)
+	s.schedule()
+}
+
+// RequestCommit asks for the debounced commit as TriggerCommit does, but
+// leaves alone one already on its way: a write recorded must not push back
+// the commit the watcher asked for, or writes that keep coming would hold
+// it back (BUG-148). Safe to call from multiple goroutines.
+func (s *Sync) RequestCommit() {
+	if !s.cfg.Enabled {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopped || s.initFailed {
+		return
+	}
+	s.pending = true
+	if s.timer == nil {
+		s.schedule()
+	}
+}
+
+// schedule starts the debounce timer, cut short at the max wait after the
+// first timer of the burst; once it fires, s.timer is nil again until the
+// next one. The caller holds mu.
+func (s *Sync) schedule() {
+	if s.timer == nil {
+		s.burstAt = time.Now()
+	}
+	d := min(s.cfg.Debounce, time.Until(s.burstAt.Add(s.cfg.CommitMaxWait())))
+	var t *time.Timer
+	t = time.AfterFunc(max(d, 0), func() {
+		s.mu.Lock()
+		if s.timer == t {
+			s.timer = nil
+		}
+		s.mu.Unlock()
+		s.flush()
+	})
+	s.timer = t
 }
 
 // Flush forces an immediate commit attempt (no debounce). Useful from tests
@@ -603,6 +671,10 @@ func (s *Sync) refreshGitignore() error {
 	} else {
 		combined = managed + "\n" + user + "\n"
 	}
+	if combined == string(old) {
+		return nil
+	}
+	s.ignoreChanged = true
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, []byte(combined), 0o644); err != nil {
 		return err
@@ -750,10 +822,17 @@ func (s *Sync) commitAndPush() error {
 	return s.push(context.Background())
 }
 
-// commit stages what changed in the vault and commits it with msg (""
-// gives the auto message), then tells the listeners. false: there was
-// nothing to commit. The caller holds workMu.
+// commit stages what changed in the vault and commits it, then tells the
+// listeners. With msg, one commit in the configured author's name; without,
+// one for what git sync changed itself, saying what, one per writer the
+// audit log named (RecordWrite), with what each did, and one with the auto
+// message for the rest. A file a write on its way may
+// still change waits for the next commit, which this one asks for
+// (leaveOut). false: there was nothing to commit. The caller holds workMu.
 func (s *Sync) commit(msg string) (bool, error) {
+	// The writes recorded before the commit reads the files: theirs are on
+	// disk.
+	writes, from := s.pendingWrites()
 	// Refresh the managed block of .gitignore from the current projects state
 	// before staging, so newly skipped projects are excluded from the next
 	// commit (and ones unchecked become trackable again).
@@ -770,6 +849,8 @@ func (s *Sync) commit(msg string) (bool, error) {
 		return false, fmt.Errorf("git status: %w", err)
 	}
 	if strings.TrimSpace(out) == "" {
+		s.forgetWrites(from, nil)
+		s.ownCommitted()
 		return false, nil
 	}
 
@@ -780,15 +861,81 @@ func (s *Sync) commit(msg string) (bool, error) {
 		return false, err
 	}
 	if s.run("git", "diff", "--cached", "--quiet") == nil {
+		s.forgetWrites(from, nil)
+		s.ownCommitted()
 		return false, nil // all it staged was left out
 	}
 
-	if msg == "" {
-		msg = "auto: " + time.Now().UTC().Format(time.RFC3339)
+	staged, err := s.capture("git", "diff", "--cached", "--name-status", "-z", "-M")
+	if err != nil {
+		return false, fmt.Errorf("git diff: %w", err)
 	}
-	author := fmt.Sprintf("%s <%s>", s.cfg.AuthorName, s.cfg.AuthorEmail)
+	ours, theirs := s.splitOutOfGit(parseNameStatus(staged))
+	changes, left := s.leaveOut(theirs, from)
+	if len(changes) == 0 && len(ours) == 0 {
+		if err := s.run("git", "reset", "-q"); err != nil {
+			return false, fmt.Errorf("git reset: %w", err)
+		}
+		s.forgetWrites(from, left)
+		s.TriggerCommit()
+		return false, nil
+	}
+	groups := []group{{files: append(changes, ours...)}}
+	if msg == "" {
+		own, rest := s.ownChanges(changes, writes)
+		groups = groupByWriter(rest, writes)
+		if own = append(own, ours...); len(own) > 0 {
+			groups = append([]group{{files: own, sync: s.syncLines(own)}}, groups...)
+		}
+	}
+	restage := len(groups) > 1 || len(left) > 0
+	var tree string
+	if restage {
+		// A commit per group, and none for what is left out: the index is
+		// staged again a group at a time, from the tree of what git read. The
+		// disk may hold a write that came since, whose writer is not known yet.
+		out, err := s.capture("git", "write-tree")
+		if err != nil {
+			return false, fmt.Errorf("git write-tree: %w", err)
+		}
+		tree = strings.TrimSpace(out)
+		if err := s.run("git", "reset", "-q"); err != nil {
+			return false, fmt.Errorf("git reset: %w", err)
+		}
+	}
+	for _, g := range groups {
+		if restage {
+			if err := s.stage(tree, g.paths()); err != nil {
+				return false, fmt.Errorf("git reset: %w", err)
+			}
+		}
+		name, m := s.cfg.AuthorName, msg
+		if msg == "" {
+			if g.by != "" {
+				name = g.by
+			}
+			if m = g.message(); m == "" {
+				m = "auto: " + time.Now().UTC().Format(time.RFC3339)
+			}
+		}
+		if err := s.commitStaged(name, m); err != nil {
+			return false, err
+		}
+	}
+	s.ownCommitted()
+	s.forgetWrites(from, left)
+	if len(left) > 0 {
+		s.TriggerCommit()
+	}
+	return true, nil
+}
+
+// commitStaged commits the index in name's name, with the configured
+// email, and tells the listeners.
+func (s *Sync) commitStaged(name, msg string) error {
+	author := fmt.Sprintf("%s <%s>", name, s.cfg.AuthorEmail)
 	if err := s.run("git", "commit", "-q", "--author", author, "-m", msg); err != nil {
-		return false, fmt.Errorf("git commit: %w", err)
+		return fmt.Errorf("git commit: %w", err)
 	}
 	log.Printf("gitsync: committed %q", firstLine(msg))
 	s.mu.Lock()
@@ -803,7 +950,7 @@ func (s *Sync) commit(msg string) (bool, error) {
 			}
 		}
 	}
-	return true, nil
+	return nil
 }
 
 func firstLine(s string) string {
@@ -837,6 +984,10 @@ func (s *Sync) untrackIgnored() error {
 	for dir := range s.untracked {
 		if !want[dir] {
 			delete(s.untracked, dir) // tracked again: a later skip untracks again
+			if s.retracked == nil {
+				s.retracked = map[string]bool{}
+			}
+			s.retracked[dir] = true
 		}
 	}
 	for dir := range want {

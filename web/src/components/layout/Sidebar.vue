@@ -12,6 +12,7 @@ import { useUIStore } from '@/stores/ui'
 import { planciaKey } from '@/composables/planciaKey'
 import TreeNode from '@/components/domain/TreeNode.vue'
 import TreeContextMenu from '@/components/domain/TreeContextMenu.vue'
+import NoteLabel from '@/components/domain/NoteLabel.vue'
 import {
   RefreshCw,
   ChevronRight,
@@ -144,13 +145,14 @@ onMounted(() => {
     </div>
 
     <!-- Vault tree -->
-    <div class="px-3 py-2 border-b border-border flex items-center justify-between">
+    <!-- py-1 keeps the row 32 px around the 24 px refresh (F-18). -->
+    <div class="px-3 py-1 border-b border-border flex items-center justify-between">
       <span class="text-xs font-semibold uppercase tracking-wide text-text-muted">
         {{ t('common.vault') }}
       </span>
       <button
         type="button"
-        class="text-text-muted hover:text-text disabled:opacity-50"
+        class="h-6 w-6 -mr-1.5 inline-flex items-center justify-center rounded text-text-muted hover:text-text disabled:opacity-50"
         :disabled="loading"
         @click="treeStore.load()"
         :aria-label="t('sidebar.refresh')"
@@ -189,8 +191,14 @@ onMounted(() => {
           <button
             type="button"
             @click="openRecent(entry.path, entry.title)"
-            class="block w-full truncate text-left text-text-muted hover:text-text"
-          >{{ entry.title }}</button>
+            class="flex h-6 leading-6 w-full text-left text-text-muted hover:text-text"
+          >
+            <NoteLabel
+              class="flex-1"
+              :path="entry.path"
+              :title="entry.title"
+            />
+          </button>
         </li>
       </ul>
     </div>

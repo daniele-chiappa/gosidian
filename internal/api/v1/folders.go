@@ -99,6 +99,9 @@ func (r *Router) deleteFolder(w http.ResponseWriter, req *http.Request, dir stri
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "the folder holds the server's state directory")
 		return
 	}
+	// Locked until the record: git sync leaves the folder's files for the
+	// commit after it (BUG-148).
+	defer r.deps.Vault.LockPath(clean)()
 	id, removed, err := r.deps.Trash.DiscardFolder(clean)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, "trash: "+err.Error())

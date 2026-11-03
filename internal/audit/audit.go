@@ -45,11 +45,14 @@ const (
 type Action string
 
 const (
-	ActionCreate           Action = "create"
-	ActionUpdate           Action = "update"
-	ActionAppend           Action = "append"
-	ActionDelete           Action = "delete"
-	ActionRename           Action = "rename"
+	ActionCreate Action = "create"
+	ActionUpdate Action = "update"
+	ActionAppend Action = "append"
+	ActionDelete Action = "delete"
+	ActionRename Action = "rename"
+	// ActionRestore: a note written back as a version of its history held
+	// it (IMP-222). Path is the note, To the version's commit.
+	ActionRestore          Action = "restore"
 	ActionCreateProject    Action = "create_project"
 	ActionDeleteProject    Action = "delete_project"
 	ActionRenameProject    Action = "rename_project"

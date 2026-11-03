@@ -123,6 +123,12 @@ func TestAuthors_Record(t *testing.T) {
 	if c, m := authorFields(t, idx, "p/a.md"); c != "alice" || m != "bob" {
 		t.Errorf("a: %s | %s", c, m)
 	}
+	// A version restored is a write of the note (IMP-222).
+	rec(AuthorRestore, "p/a.md", "0123456789abcdef0123456789abcdef01234567", "erin")
+	if c, m := authorFields(t, idx, "p/a.md"); c != "alice" || m != "erin" {
+		t.Errorf("restored: %s | %s", c, m)
+	}
+	rec(AuthorUpdate, "p/a.md", "", "bob")
 	rec(AuthorCreate, "q/docs/report.md", "", "carol")
 	rec(AuthorRenameProject, "q", "r", "dave")
 	if _, ok, _ := idx.AuthorOf("q/docs/report.md"); ok {
@@ -140,4 +146,40 @@ func TestAuthors_Record(t *testing.T) {
 		t.Errorf("deleted: %s | %s", c, m)
 	}
 	rec("upload_attachment", "p/attachments/x.png", "", "bob") // ignored
+}
+
+// A folder deleted takes the rows of its notes along, as a project deleted
+// does: they stayed, and came back with a restore (BUG-148). A note's delete
+// is the same as before, and a sibling with a longer name keeps its row.
+func TestAuthors_DeleteAFolder(t *testing.T) {
+	now := time.Now()
+	events := []AuthorEvent{
+		{TS: now, Action: AuthorCreate, Path: "p/f/a.md", By: "alice"},
+		{TS: now, Action: AuthorCreate, Path: "p/f/sub/b.md", By: "alice"},
+		{TS: now, Action: AuthorCreate, Path: "p/fx.md", By: "alice"},
+		{TS: now, Action: AuthorDelete, Path: "p/f", By: "bob"},
+	}
+	check := func(idx *Index, how string) {
+		t.Helper()
+		for _, p := range []string{"p/f/a.md", "p/f/sub/b.md"} {
+			if _, ok, _ := idx.AuthorOf(p); ok {
+				t.Errorf("%s: %s keeps its row after its folder's delete", how, p)
+			}
+		}
+		if a, ok, _ := idx.AuthorOf("p/fx.md"); !ok || a.CreatedBy != "alice" {
+			t.Errorf("%s: p/fx.md = %+v %v, want alice's row", how, a, ok)
+		}
+	}
+	idx := authorsIndex(t)
+	for _, e := range events {
+		if err := idx.RecordAuthor(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	check(idx, "recorded")
+	idx = authorsIndex(t)
+	if err := idx.RebuildAuthors(events); err != nil {
+		t.Fatal(err)
+	}
+	check(idx, "rebuilt")
 }

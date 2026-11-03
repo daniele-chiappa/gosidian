@@ -45,8 +45,34 @@ the same way.
   the time, and a screen reader hears it, at each save; in a narrow
   window the toolbar keeps the time with a check, the whole in its
   tooltip.
-- **History** (`/notes/<path>/history`) lists previous states captured
-  by git sync when enabled — with a one-click `restore` action.
+- **History** (`/notes/<path>/history`, or *History* in the note's
+  menu) lists the commits of the note when git sync is on, newest first:
+  the date, who wrote it, and what was done (`update notes/plan.md`,
+  `rename a.md -> b.md`). See [History](#history) below.
+
+## History
+
+Each entry of the **History** window is a button: a click opens that
+version under it, and a second click closes it.
+
+- **The diff** comes first: what changed from that version to the note
+  as it is now. A line it had that is gone has a red background and a
+  `−`, a line added since a green one and a `+`; a screen reader hears
+  *removed* and *added*. The newest version is the note itself, and says
+  so. A note renamed since says the name it had then.
+- **Show the text of this version** shows it as it was, read-only.
+- **Restore this version**, for who may write the note, asks first, in a
+  dialog that opens on *Cancel*. The note goes back to that version as a
+  save writes it: an editor open on it sees it changed elsewhere, and
+  the history gets a new commit at its top, in your name, `restore
+  <path> to <commit>`, which takes the focus. The note as it was before
+  stays in the history, a version like the others. If the note changed
+  since the version was opened, nothing is written and the window says
+  so, with the diff read again.
+- A version over 1 MiB, one that is not text, or the commit that
+  deleted the note shows neither diff nor text, and says why.
+
+The versions a note had in a project you cannot read are not listed.
 
 ## Notes over 1 MiB
 

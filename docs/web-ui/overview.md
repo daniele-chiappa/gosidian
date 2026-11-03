@@ -128,6 +128,32 @@ are a table; a title opens the note. The whole query lives in the URL,
 so it survives a reload and can be shared as a link. The backend is
 `POST /api/v1/query`, scoped to the projects the account can read.
 
+## Sidebar tree
+
+The sidebar lists the vault's projects, folders and notes. A folder's
+row is a button that opens and closes it (`Enter` or `Space` from the
+keyboard), and remembers it in this browser; a screen reader hears
+whether it is open. A closed folder draws nothing inside it, so a large
+vault costs the page only the folders open.
+
+Where the account may write, a folder has a **+** beside its row that
+opens the creation window for that folder. It shows with the pointer on
+the row or the focus in it (`Tab` from the row reaches it), and always
+on a touch screen.
+
+A note's row shows the note's title, the `title` of its frontmatter,
+and its file name on hover. A note without a title shows its file name,
+cut in the middle where the row is too narrow, so that its last ten
+letters (the words after a date) stay in sight; a screen reader reads it
+whole. The rows stay in file-name order, so notes named by their date
+stay in time order, and the window a row opens starts with the title.
+**Recent**, under the tree, shows its notes the same way.
+
+The sidebar's width changes by dragging its right edge, or from the
+keyboard, as a window's: `Tab` reaches the edge, the arrows move it by
+24 px (64 with `Shift`), and `Home`, like a double click, brings it back
+to 260 px. It goes from 180 to 560 px, and this browser keeps it.
+
 ## Tree context menu
 
 A right-click on a row of the sidebar tree (or the Menu key, or

@@ -416,7 +416,9 @@ func (h pipelineHost) StatFile(project, rel string) (pipeline.FileStat, error) {
 // attachment of the project, audited as the pipeline. It does not call
 // arrived: a run's files start no runs.
 func (h pipelineHost) StoreAttachment(project, name string, data []byte, actor string) (string, error) {
-	res, err := attach.Store(batchSaver{h.s.vault}, data, name, project)
+	held := attach.Hold(batchSaver{h.s.vault}, h.s.vault) // until the record (BUG-148)
+	defer held.Release()
+	res, err := attach.Store(held, data, name, project)
 	if err != nil {
 		return "", err
 	}

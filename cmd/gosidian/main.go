@@ -281,7 +281,9 @@ func main() {
 	warnDanglingTokenOwners(tokenStore, webauthStore)
 	// Who created and last modified each note, from the audit log, as the
 	// fields created_by and modified_by of queries (IMP-127 iteration 3).
-	wireAuthors(idx, auditLog, tokenStore, webauthStore)
+	// The same names are the authors of the git commits (IMP-222).
+	authors := &authorNames{tokens: tokenStore, accounts: webauthStore}
+	wireAuthors(idx, auditLog, authors)
 	// The marks the pipelines put on notes (IMP-188), in the state dir; a
 	// note renamed or deleted takes them along.
 	marksStore, err := marks.Open(filepath.Join(sdir, "marks.db"))
@@ -506,6 +508,7 @@ func main() {
 	syncer.SetStateDir(v.StateDirInside())
 	syncer.SetStagingDirs(stagingInVault(v, cfg.MCP.BridgeDir, cfg.MCP.AllowedUploadRoots))
 	syncer.SetTokenStore(gitTokenStore)
+	wireGitWriters(syncer, auditLog, authors, v)
 	if err := syncer.Start(ctx); err != nil {
 		// IMP-002: gitsync init failure is non-fatal. Log loudly, mark the
 		// subsystem as degraded (Sync.Status() + Prometheus gauge), and keep
@@ -537,7 +540,7 @@ func main() {
 	}
 	if cfg.Git.Enabled {
 		if syncer.Status().Healthy {
-			log.Printf("gitsync: enabled (debounce=%s push=%v)", cfg.Git.Debounce, cfg.Git.Push)
+			log.Printf("gitsync: enabled (debounce=%s max_wait=%s push=%v)", cfg.Git.Debounce, cfg.Git.CommitMaxWait(), cfg.Git.Push)
 		} else {
 			log.Printf("gitsync: enabled in config but subsystem is DEGRADED — commits will be skipped")
 		}

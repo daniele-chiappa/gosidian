@@ -226,13 +226,13 @@ func (s *Server) registerTools() {
 	), s.handleDelete)
 
 	s.impl.AddTool(mcp.NewTool("memory_rename_note",
-		mcp.WithDescription("Rename a note. Updates the index and rewrites wiki-links in other notes that referenced the old name. Both the source and destination paths must be inside the token's scope."),
+		mcp.WithDescription("Rename a note. Updates the index and rewrites wiki-links in the other notes that referenced the old name and that the token may write (rewritten); notes in projects it may not write keep the old link, and are only counted (not_rewritten). Both the source and destination paths must be inside the token's scope."),
 		mcp.WithString("from", mcp.Required(), mcp.Description("Current vault-relative path of the note.")),
 		mcp.WithString("to", mcp.Required(), mcp.Description("New vault-relative path. The .md extension is added if missing.")),
 	), s.handleRenameNote)
 
 	s.impl.AddTool(mcp.NewTool("memory_move_note",
-		mcp.WithDescription("Move a note to a different project. Both the current and target locations must be inside the token's scope."),
+		mcp.WithDescription("Move a note to a different project, rewriting wiki-links as memory_rename_note does. Both the current and target locations must be inside the token's scope."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Current vault-relative path of the note.")),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Destination project name. Empty string moves the note to the vault root.")),
 	), s.handleMoveNote)
@@ -668,7 +668,7 @@ func (s *Server) handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	}
 	nc := noteContent{
 		Path:    note.Path,
-		Title:   note.Title,
+		Title:   note.DisplayTitle(),
 		Content: string(note.Content),
 		ETag:    note.ETag(),
 	}
@@ -1204,28 +1204,85 @@ func (s *Server) handleRenameNote(ctx context.Context, req mcp.CallToolRequest) 
 	if errRes := s.checkWriteLimits(ctx, tok, 0); errRes != nil {
 		return errRes, nil
 	}
-	// Lock the source path only: it serializes rename-vs-update on the note
-	// being moved. The target-exists probe inside RenameNote keeps its own
-	// (benign) race window; locking both endpoints would need deadlock-safe
-	// ordering for little gain.
+	// The extension was resolved above, so toRel already is the canonical path
+	// (this used to force .md, which mislabelled .html notes).
+	canonical := toRel
+	// Both ends, and the notes whose links it rewrites, stay locked until
+	// their records: it serializes rename-vs-update on the note moved and on
+	// the one it would land on, and git sync leaves out a file whose lock a
+	// writer holds (BUG-147, BUG-148).
+	mine, others := s.referrers(tok, fromRel)
 	var rewritten []string
-	err = s.underLock(fromRel, func() (err error) {
-		rewritten, err = s.vault.RenameNote(s.index, fromRel, toRel)
-		return err
+	err = s.underLock(append([]string{fromRel, canonical}, mine...), func() (err error) {
+		if rewritten, err = s.vault.RenameNoteRewriting(s.index, fromRel, canonical, inSet(mine)); err != nil {
+			return err
+		}
+		s.auditWrite(ctx, audit.ActionRename, fromRel, canonical, 0)
+		s.auditRewritten(ctx, fromRel, canonical, rewritten)
+		return nil
 	})
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("rename failed", err), nil
 	}
-	// The extension was resolved above, so toRel already is the canonical path
-	// (this used to force .md, which mislabelled .html notes).
-	canonical := toRel
-	s.auditWrite(ctx, audit.ActionRename, fromRel, canonical, 0)
 	s.publishRename(fromRel, canonical, rewritten)
-	return mcp.NewToolResultJSON(map[string]any{
-		"from":      fromRel,
-		"to":        canonical,
-		"rewritten": rewritten,
-	})
+	return renameResult(fromRel, canonical, rewritten, others)
+}
+
+// referrers splits the notes linking to rel between those tok may write,
+// whose links a rename of rel rewrites, and how many others there are: the
+// paths of those may be in projects tok does not see (BUG-150).
+func (s *Server) referrers(tok *auth.Token, rel string) (mine []string, others int) {
+	backs, err := s.index.Backlinks(rel)
+	if err != nil {
+		return nil, 0 // the rename looks them up again, and fails
+	}
+	for _, b := range backs {
+		switch {
+		case b.Path == rel:
+		case s.mayWrite(tok, b.Path):
+			mine = append(mine, b.Path)
+		default:
+			others++
+		}
+	}
+	return mine, others
+}
+
+// mayWrite says whether tok may write path, as authorizeWrite judges it, in
+// a project MCP sees.
+func (s *Server) mayWrite(tok *auth.Token, path string) bool {
+	return tok != nil && tok.HasScope(auth.ScopeWrite) && tok.AllowsPath(path) && tok.InWritePaths(path) &&
+		tok.AllowsWrite(path) && !s.pathInHiddenProject(path)
+}
+
+// inSet says whether a path is one of paths.
+func inSet(paths []string) func(string) bool {
+	return func(p string) bool { return slices.Contains(paths, p) }
+}
+
+// auditRewritten records an update of each note a rename from -> to
+// rewrote, in the renamer's name (BUG-148).
+func (s *Server) auditRewritten(ctx context.Context, from, to string, rewritten []string) {
+	for _, p := range rewritten {
+		if p != from && p != to {
+			s.auditWrite(ctx, audit.ActionUpdate, p, "", 0)
+		}
+	}
+}
+
+// renameResult is the answer of a rename or a move: the notes whose links it
+// rewrote, and how many keep the old link, in projects the token may not
+// write.
+func renameResult(from, to string, rewritten []string, others int) (*mcp.CallToolResult, error) {
+	out := map[string]any{"from": from, "to": to, "rewritten": rewritten}
+	if others > 0 {
+		out["not_rewritten"] = others
+	}
+	res, err := mcp.NewToolResultJSON(out)
+	if err == nil && others > 0 {
+		appendNotice(res, fmt.Sprintf("%d note(s) linking here are in projects this token may not write: they keep the old link.", others))
+	}
+	return res, err
 }
 
 func (s *Server) handleMoveNote(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1258,21 +1315,23 @@ func (s *Server) handleMoveNote(ctx context.Context, req mcp.CallToolRequest) (*
 	if errRes := s.checkWriteLimits(ctx, tok, 0); errRes != nil {
 		return errRes, nil
 	}
+	// Both ends, and the notes whose links it rewrites, stay locked until
+	// their records, as for a rename (BUG-147, BUG-148).
+	mine, others := s.referrers(tok, fromRel)
 	var rewritten []string
-	err = s.underLock(fromRel, func() (err error) {
-		rewritten, err = s.vault.MoveNote(s.index, fromRel, project)
-		return err
+	err = s.underLock(append([]string{fromRel, dest}, mine...), func() (err error) {
+		if rewritten, err = s.vault.MoveNoteRewriting(s.index, fromRel, project, inSet(mine)); err != nil {
+			return err
+		}
+		s.auditWrite(ctx, audit.ActionRename, fromRel, dest, 0)
+		s.auditRewritten(ctx, fromRel, dest, rewritten)
+		return nil
 	})
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("move failed", err), nil
 	}
-	s.auditWrite(ctx, audit.ActionRename, fromRel, dest, 0)
 	s.publishRename(fromRel, dest, rewritten)
-	return mcp.NewToolResultJSON(map[string]any{
-		"from":      fromRel,
-		"to":        dest,
-		"rewritten": rewritten,
-	})
+	return renameResult(fromRel, dest, rewritten, others)
 }
 
 func (s *Server) handleRenameProject(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1306,13 +1365,21 @@ func (s *Server) handleRenameProject(ctx context.Context, req mcp.CallToolReques
 	if errRes := s.checkWriteLimits(ctx, tok, 0); errRes != nil {
 		return errRes, nil
 	}
-	moved, err := projectops.Rename(s.vault, s.index, s.projects, s.tokens, from, to)
+	// Both names stay locked until the record: git sync leaves out the
+	// files under a name a writer holds (BUG-147). An incomplete rename
+	// still stands: audited and announced, with a note on what did not
+	// follow.
+	var moved int
+	err = s.underLock([]string{from, to}, func() (err error) {
+		moved, err = projectops.Rename(s.vault, s.index, s.projects, s.tokens, from, to)
+		if err == nil || errors.Is(err, projectops.ErrIncomplete) {
+			s.auditWrite(ctx, audit.ActionRenameProject, from, to, 0)
+		}
+		return err
+	})
 	if err != nil && !errors.Is(err, projectops.ErrIncomplete) {
 		return mcp.NewToolResultErrorFromErr("rename project failed", err), nil
 	}
-	// An incomplete rename still stands: audited and announced, with a note
-	// on what did not follow.
-	s.auditWrite(ctx, audit.ActionRenameProject, from, to, 0)
 	s.publishTreeChange("rename_project", from, map[string]any{"to": to})
 	s.publishSidebar("update", to)
 	res, jerr := mcp.NewToolResultJSON(map[string]any{"from": from, "to": to, "tokens_moved": moved})
@@ -1346,12 +1413,19 @@ func (s *Server) handleDeleteProject(ctx context.Context, req mcp.CallToolReques
 	// The same path as the web UI: into the trash when it is on, with the
 	// access saved for the restore, then out of the index, the access store
 	// and the MCP token scopes (IMP-124).
-	res, err := projectops.Delete(s.vault, s.index, s.projects, s.tokens, s.trash, name)
+	// The name stays locked until the record, as for a rename (BUG-147).
+	var res projectops.DeleteResult
+	err = s.underLock([]string{strings.TrimSpace(name)}, func() (err error) {
+		res, err = projectops.Delete(s.vault, s.index, s.projects, s.tokens, s.trash, name)
+		if err == nil || errors.Is(err, projectops.ErrIncomplete) {
+			s.auditWrite(ctx, audit.ActionDeleteProject, res.Name, res.TrashID, int64(len(res.Removed)))
+		}
+		return err
+	})
 	if err != nil && !errors.Is(err, projectops.ErrIncomplete) {
 		return mcp.NewToolResultErrorFromErr("delete project failed", err), nil
 	}
 	removed := res.Removed
-	s.auditWrite(ctx, audit.ActionDeleteProject, res.Name, res.TrashID, int64(len(removed)))
 	s.publishTreeChange("delete_project", res.Name, map[string]any{"removed_notes": len(removed)})
 	s.publishSidebar("delete", res.Name)
 	out, jerr := mcp.NewToolResultJSON(map[string]any{
@@ -1395,12 +1469,12 @@ func (s *Server) handleBacklinks(ctx context.Context, req mcp.CallToolRequest) (
 	return mcp.NewToolResultJSON(map[string]any{"backlinks": out})
 }
 
-// underLock runs fn holding rel's path lock, released by a deferred call:
-// when fn panics, recoverMiddleware turns the panic into the call's error,
-// and a lock released by hand after fn stayed taken for good (IMP-161,
-// S3-13).
-func (s *Server) underLock(rel string, fn func() error) error {
-	defer s.vault.LockPath(rel)()
+// underLock runs fn holding the path locks of rels (vault.LockPaths),
+// released by a deferred call: when fn panics, recoverMiddleware turns the
+// panic into the call's error, and a lock released by hand after fn stayed
+// taken for good (IMP-161, S3-13).
+func (s *Server) underLock(rels []string, fn func() error) error {
+	defer s.vault.LockPaths(rels...)()
 	return fn()
 }
 
@@ -1545,7 +1619,7 @@ func (s *Server) handleBatchGet(ctx context.Context, req mcp.CallToolRequest) (*
 			out = append(out, entry)
 			continue
 		}
-		entry.Title = note.Title
+		entry.Title = note.DisplayTitle()
 		entry.ETag = note.ETag()
 		switch mode {
 		case "outline":

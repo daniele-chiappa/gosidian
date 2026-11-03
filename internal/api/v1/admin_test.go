@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/auth"
@@ -214,6 +215,35 @@ func TestSettings_PutInvalidDebounce(t *testing.T) {
 	w := f.doAuthRecorder(http.MethodPut, "/api/v1/settings", body, nil)
 	if w.code != http.StatusBadRequest {
 		t.Errorf("status=%d, want 400 body=%s", w.code, w.body)
+	}
+}
+
+// The commit's max wait (BUG-151) is saved and shown; 0 leaves it to 4
+// debounces, one shorter than the debounce is refused.
+func TestSettings_PutMaxWait(t *testing.T) {
+	f := newAdminFixture(t)
+	if w := f.doAuthRecorder(http.MethodPut, "/api/v1/settings", `{"git":{"max_wait_ms":300000}}`, nil); w.code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.code, w.body)
+	}
+	if cfg, _ := config.Load(f.configPath); cfg.Git.MaxWait != 5*time.Minute {
+		t.Errorf("max wait saved = %s, want 5m", cfg.Git.MaxWait)
+	}
+	if w := f.doAuthRecorder(http.MethodGet, "/api/v1/settings", "", nil); !strings.Contains(w.body, `"max_wait_ms":300000`) {
+		t.Errorf("max wait not shown: %s", w.body)
+	}
+	if w := f.doAuthRecorder(http.MethodPut, "/api/v1/settings", `{"git":{"max_wait_ms":0}}`, nil); w.code != http.StatusOK {
+		t.Fatalf("unset: status=%d body=%s", w.code, w.body)
+	}
+	if cfg, _ := config.Load(f.configPath); cfg.Git.MaxWait != 0 {
+		t.Errorf("max wait saved = %s, want unset", cfg.Git.MaxWait)
+	}
+	for _, body := range []string{
+		`{"git":{"max_wait_ms":-1}}`,
+		`{"git":{"debounce_ms":60000,"max_wait_ms":30000}}`,
+	} {
+		if w := f.doAuthRecorder(http.MethodPut, "/api/v1/settings", body, nil); w.code != http.StatusBadRequest {
+			t.Errorf("%s: status=%d, want 400 body=%s", body, w.code, w.body)
+		}
 	}
 }
 

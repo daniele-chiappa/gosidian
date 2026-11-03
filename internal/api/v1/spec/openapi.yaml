@@ -239,6 +239,41 @@ components:
         commit:
           type: string
 
+    NoteCommit:
+      type: object
+      required: [sha, short_sha, author, date, subject, path]
+      properties:
+        sha: {type: string}
+        short_sha: {type: string}
+        author:
+          type: string
+          description: '`name <email>`: who wrote the note, with the configured email.'
+        date: {type: string, format: date-time}
+        subject:
+          type: string
+          description: 'What was done, e.g. `update notes/plan.md`; `auto: <date>` for what no write of gosidian names.'
+        path: {type: string, description: The note's path in this commit.}
+        from: {type: string, description: The path before, in the commit that renamed the note; only when the principal can read it.}
+
+    TreeNode:
+      type: object
+      required: [name, path, is_dir, kind]
+      properties:
+        name: {type: string, description: "The file or folder name."}
+        path: {type: string}
+        title: {type: string, description: "A note's title, where it is not its file name without its extension."}
+        is_dir: {type: boolean}
+        is_project_root: {type: boolean}
+        kind: {type: string, description: "folder, in, or the kind of a note: note, plan, skill, memory, agent, doc, index, base, canvas."}
+        note_count: {type: integer, description: "A folder's notes, at every depth."}
+        in_progress: {type: boolean, description: "The note is tagged status:in-progress."}
+        hidden_from_mcp: {type: boolean}
+        skip_git_sync: {type: boolean}
+        in: {type: object, description: "What the IN folder holds: files, bytes, new, working, errors."}
+        children:
+          type: array
+          items:
+            $ref: "#/components/schemas/TreeNode"
     HealthResponse:
       type: object
       required: [api, status]
@@ -678,6 +713,148 @@ paths:
         "501":
           $ref: "#/components/responses/NotImplemented"
 
+  /api/v1/notes/{path}/history:
+    get:
+      tags: [history]
+      summary: The commits of a note, newest first (git sync on).
+      description: >-
+        `git log --follow`: a renamed note has its commits under the name it
+        had then, in path. The commits the note had in a project the
+        principal cannot read are left out, and the subject of its move
+        from there does not name it. A commit is made in the name of who
+        wrote the note, its subject says what was done (IMP-222).
+      parameters:
+        - in: path
+          name: path
+          required: true
+          schema: {type: string}
+          description: The note's vault path, e.g. `notes/plan.md`.
+        - in: query
+          name: limit
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 500, default: 50}
+      responses:
+        "200":
+          description: The commits.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/NoteCommit"
+                  total: {type: integer}
+                  limit: {type: integer}
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          description: Git sync off.
+
+  /api/v1/notes/{path}/history/{sha}:
+    get:
+      tags: [history]
+      summary: A version of a note and the diff to the note now (IMP-222).
+      description: >-
+        The note as the commit sha of its history held it, under the name
+        it had then, and the unified diff from it to the note as it is now
+        (its hunks, without a header). A version over 1 MiB, or the note
+        now over it, gives neither, nor one that is not text, nor the
+        commit that deleted the note: omitted says why.
+      parameters:
+        - in: path
+          name: path
+          required: true
+          schema: {type: string}
+        - in: path
+          name: sha
+          required: true
+          schema: {type: string, pattern: "^[0-9a-f]{7,64}$"}
+          description: A commit of the note's history, its full hash or at least 7 of its first digits.
+      responses:
+        "200":
+          description: The version.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/NoteCommit"
+                  - type: object
+                    required: [same]
+                    properties:
+                      content: {type: string, description: The note's text then.}
+                      diff: {type: string, description: From that version to the note now; empty when the same.}
+                      same: {type: boolean}
+                      omitted:
+                        type: string
+                        enum: [deleted, too_large, not_text]
+                      etag: {type: string, description: The note's etag as the diff read it, the if_match of a restore from it.}
+        "404":
+          description: No such note, or the sha is no version of it, or the version is in a project the principal cannot read.
+        "503":
+          description: Git sync off.
+
+  /api/v1/notes/{path}/restore:
+    post:
+      tags: [history]
+      summary: Write a version of the note back, and commit it at once (IMP-222).
+      description: >-
+        The text of the version sha, written at the note's path today as a
+        save writes it: the index, the event an open editor sees, the audit
+        log with the action restore (To the commit). Then a commit at once in
+        the writer's name, `restore <path> to <sha7>`, the top of the
+        history. A version the same as the note writes nothing (restored
+        false). For who may write the note.
+      parameters:
+        - in: path
+          name: path
+          required: true
+          schema: {type: string}
+        - in: header
+          name: If-Match
+          required: false
+          schema: {type: string}
+          description: The note's etag; if_match in the body does the same.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sha]
+              properties:
+                sha: {type: string, description: The version, a commit of the note's history.}
+                if_match: {type: string, description: The etag of the note as the client read it.}
+      responses:
+        "200":
+          description: Restored, or the same already.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [restored, note]
+                properties:
+                  restored: {type: boolean}
+                  note: {type: object, description: "The note as GET /api/v1/notes/{path} gives it."}
+                  commit:
+                    $ref: "#/components/schemas/NoteCommit"
+                  commit_error:
+                    type: string
+                    description: Why the commit failed; the note is restored, and the next debounced commit takes it.
+        "400":
+          description: No sha.
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: No such note, or the sha is no version of it, or the version is in a project the principal cannot read.
+        "412":
+          description: The note changed since the client read it; details.current_etag is its etag now.
+        "422":
+          description: The version deleted the note, or is over 1 MiB.
+        "503":
+          description: Git sync off.
+
   /api/v1/preview:
     post:
       tags: [notes]
@@ -766,10 +943,30 @@ paths:
   /api/v1/tree:
     get:
       tags: [tree]
-      summary: Sidebar tree JSON (Phase 1 follow-up).
+      summary: The sidebar tree, the folders and notes the account can read.
+      description: >-
+        One node per folder and note, folders first, then by name. A note
+        has title where its title, the frontmatter's, is not its file name
+        without its extension, so the row can show it. A project root has
+        its flags; a project with use_in has its IN folder first, as one
+        node with what it holds.
+      parameters:
+        - in: query
+          name: project
+          required: false
+          description: Only that project's subtree, still under the root.
+          schema:
+            type: string
       responses:
-        "501":
-          $ref: "#/components/responses/NotImplemented"
+        "200":
+          description: The tree from its root.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  root:
+                    $ref: "#/components/schemas/TreeNode"
 
   /api/v1/folders/{path}/export.zip:
     get:

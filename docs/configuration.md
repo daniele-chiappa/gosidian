@@ -25,7 +25,8 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_GIT_BRANCH` | `git.branch` | `main` |
 | `GOSIDIAN_GIT_AUTHOR_NAME` | `git.author_name` | `Gosidian` |
 | `GOSIDIAN_GIT_AUTHOR_EMAIL` | `git.author_email` | `gosidian@localhost` |
-| `GOSIDIAN_GIT_DEBOUNCE` | `git.commit_debounce` | `30s` |
+| `GOSIDIAN_GIT_DEBOUNCE` | `git.commit_debounce` | `30s` (how long a commit waits after the last change) |
+| `GOSIDIAN_GIT_MAX_WAIT` | `git.commit_max_wait` | unset: 4 × `commit_debounce` (how long a commit waits at most after the first change it takes, when the changes keep coming closer than the debounce; never less than the debounce) |
 | `GOSIDIAN_GIT_PUSH` | `git.push` | `false` (when on, each commit is pushed, with the annotated tags of the branch the remote lacks: those of [`vault.commit`](pipelines.md#revisions-as-git-history)) |
 | `GOSIDIAN_GIT_TOKEN_ENV` | `git.token_env` | empty (the variable holding the push token; the push hands it to git as an `http.extraheader` in the environment, after any `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n`/`GIT_CONFIG_VALUE_n` you set yourself, such as a `safe.directory` for a vault another uid owns: those stay) |
 | `GOSIDIAN_GIT_MAINTENANCE` | `git.maintenance` | `03:30` (when git packs the repository: a time of day in the server's time zone, `auto` for git's own after each commit, or `off`; see [Git maintenance](#git-maintenance)) |

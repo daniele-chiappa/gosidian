@@ -121,6 +121,9 @@ func (r *Router) restoreTrash(w http.ResponseWriter, req *http.Request, id strin
 		if denyTrashLevel(w, lvl, authz.LevelAdmin) {
 			return
 		}
+		// Locked until the record: git sync leaves the project's files for
+		// the commit after it (BUG-148).
+		defer r.deps.Vault.LockPath(e.OriginPath)()
 		res, err := projectops.RestoreProject(r.deps.Vault, r.deps.Index, r.deps.Projects, r.mcpTokens(), r.deps.Trash, id, user.ID)
 		switch {
 		case errors.Is(err, projectops.ErrExists):
@@ -155,6 +158,7 @@ func (r *Router) restoreTrash(w http.ResponseWriter, req *http.Request, id strin
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "the origin is in the server's state directory")
 		return
 	}
+	defer r.deps.Vault.LockPath(e.OriginPath)() // until the record (BUG-148)
 	restored, _, err := r.deps.Trash.Restore(id)
 	if err != nil {
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())

@@ -100,19 +100,10 @@ func (s *Server) handleGCAttachments(ctx context.Context, req mcp.CallToolReques
 		removed := 0
 		var failed []string
 		for i := range orphans {
-			o := &orphans[i]
-			if s.trash != nil {
-				id, err := s.trash.DiscardNote(o.Path)
-				if err != nil {
-					failed = append(failed, o.Path+": "+err.Error())
-					continue
-				}
-				o.TrashID = id
-			} else if err := s.vault.DeleteAttachment(o.Path, allowedExtSet()); err != nil {
-				failed = append(failed, o.Path+": "+err.Error())
+			if err := s.removeOrphan(ctx, &orphans[i]); err != nil {
+				failed = append(failed, orphans[i].Path+": "+err.Error())
 				continue
 			}
-			s.auditWrite(ctx, audit.ActionDeleteAttachment, o.Path, o.TrashID, o.Size)
 			removed++
 		}
 		out["removed"] = removed
@@ -129,4 +120,22 @@ func (s *Server) handleGCAttachments(ctx context.Context, req mcp.CallToolReques
 	}
 	out["orphans"] = orphans
 	return mcp.NewToolResultJSON(out)
+}
+
+// removeOrphan moves o to the trash, or deletes it with the trash off, and
+// records it, holding its lock until the record: git sync leaves the file
+// for the commit after it (BUG-148).
+func (s *Server) removeOrphan(ctx context.Context, o *gcOrphan) error {
+	defer s.vault.LockPath(o.Path)()
+	if s.trash != nil {
+		id, err := s.trash.DiscardNote(o.Path)
+		if err != nil {
+			return err
+		}
+		o.TrashID = id
+	} else if err := s.vault.DeleteAttachment(o.Path, allowedExtSet()); err != nil {
+		return err
+	}
+	s.auditWrite(ctx, audit.ActionDeleteAttachment, o.Path, o.TrashID, o.Size)
+	return nil
 }

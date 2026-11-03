@@ -102,6 +102,7 @@ const draft = reactive<{
     remote: string
     branch: string
     debounce_ms: number
+    max_wait_ms: number
     push: boolean
     token_env: string
   }
@@ -111,7 +112,7 @@ const draft = reactive<{
   default_visibility: string
   personal_projects: boolean
 }>({
-  git: { enabled: false, remote: '', branch: '', debounce_ms: 30000, push: false, token_env: '' },
+  git: { enabled: false, remote: '', branch: '', debounce_ms: 30000, max_wait_ms: 0, push: false, token_env: '' },
   trash: { enabled: false, retention_ms: 0 },
   i18n: { default_lang: 'en', enabled_langs: [] },
   totp_mode: 'off',
@@ -154,6 +155,7 @@ function hydrate(s: Settings) {
     remote: s.git.remote,
     branch: s.git.branch,
     debounce_ms: s.git.debounce_ms,
+    max_wait_ms: s.git.max_wait_ms ?? 0,
     push: s.git.push,
     token_env: s.git.token_env,
   }
@@ -485,6 +487,16 @@ onMounted(load)
               :disabled="!auth.isOwner || fromEnv('git.debounce_ms')"
               type="number"
               min="1000"
+              class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3"
+            />
+          </label>
+          <label class="block text-sm">
+            <span class="text-text-muted">{{ t('settings_view.max_wait') }}</span>
+            <input
+              v-model.number="draft.git.max_wait_ms"
+              :disabled="!auth.isOwner || fromEnv('git.max_wait_ms')"
+              type="number"
+              min="0"
               class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3"
             />
           </label>

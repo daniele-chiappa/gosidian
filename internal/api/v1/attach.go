@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gosidian/gosidian/internal/attach"
+	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/uploadquota"
 )
 
@@ -31,6 +32,21 @@ type attachResponse struct {
 	Path     string `json:"path"`
 	Filename string `json:"filename"`
 	Markdown string `json:"markdown"`
+}
+
+// storeAttachment stores data as an attachment of project and records it in
+// the audit log, as the MCP uploads are, while its lock is held: git sync
+// names its writer, and leaves the file for the commit after the record
+// (BUG-148). Neither route wrote an entry.
+func (r *Router) storeAttachment(req *http.Request, data []byte, filename, project string) (*attach.Result, error) {
+	held := attach.Hold(r.deps.Vault, r.deps.Vault)
+	defer held.Release()
+	res, err := attach.Store(held, data, filename, project)
+	if err != nil {
+		return nil, err
+	}
+	r.auditNote(req, audit.ActionUploadAttachment, UserFromContext(req.Context()), res.Path, "", int64(len(data)))
+	return res, nil
 }
 
 // handleAttach mirrors the v1.x /api/attach route used by the editor
@@ -59,7 +75,7 @@ func (r *Router) handleAttach(w http.ResponseWriter, req *http.Request) {
 	if !ok {
 		return
 	}
-	res, err := attach.Store(r.deps.Vault, data, header.Filename, project)
+	res, err := r.storeAttachment(req, data, header.Filename, project)
 	if err != nil {
 		refund()
 		if strings.Contains(err.Error(), "MIME mismatch") {
@@ -109,7 +125,7 @@ func (r *Router) handleUpload(w http.ResponseWriter, req *http.Request) {
 	if !ok {
 		return
 	}
-	res, err := attach.Store(r.deps.Vault, data, header.Filename, project)
+	res, err := r.storeAttachment(req, data, header.Filename, project)
 	if err != nil {
 		refund()
 		if strings.Contains(err.Error(), "MIME mismatch") {

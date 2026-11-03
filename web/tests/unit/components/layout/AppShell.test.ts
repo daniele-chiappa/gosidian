@@ -49,6 +49,25 @@ describe('AppShell landmarks (IMP-217, F-35)', () => {
     w.unmount()
   })
 
+  // F-17 (IMP-219): the separator is reached with Tab, and says its width
+  // and its bounds; the arrows move it.
+  it("makes the sidebar's separator a control of the keyboard that says its width", async () => {
+    localStorage.removeItem('gosidian.sidebar-width')
+    const w = mountShell()
+    const separator = w.findAll('[role="separator"]').find((s) => s.attributes('aria-label') === 'Resize the sidebar')!
+    expect(separator.attributes()).toMatchObject({
+      tabindex: '0',
+      'aria-valuemin': '180',
+      'aria-valuemax': '560',
+      'aria-valuenow': '260',
+    })
+    expect(separator.classes()).toEqual(expect.arrayContaining(['focus-visible:outline', 'focus-visible:outline-accent']))
+    await separator.trigger('keydown', { key: 'ArrowRight' })
+    expect(separator.attributes('aria-valuenow')).toBe('284')
+    localStorage.removeItem('gosidian.sidebar-width')
+    w.unmount()
+  })
+
   it('names the empty desk in an h1, and says where the minimized windows went', async () => {
     const w = mountShell()
     expect(w.find('main h1').text()).toBe('No windows open.')
