@@ -384,6 +384,33 @@ func TestUploadsQuota(t *testing.T) {
 	}
 }
 
+// The largest attachment is 10 MiB unless the file or the environment
+// says otherwise (IMP-226).
+func TestUploadsMaxAttachment(t *testing.T) {
+	dir := t.TempDir()
+	cfg, err := Load(filepath.Join(dir, "nope.toml"))
+	if err != nil || cfg.Uploads.MaxAttachmentBytes != 10<<20 {
+		t.Fatalf("default = %+v, %v", cfg.Uploads, err)
+	}
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte("[uploads]\nmax_attachment_bytes = 52428800\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err = Load(path); err != nil || cfg.Uploads.MaxAttachmentBytes != 50<<20 {
+		t.Fatalf("file = %+v, %v", cfg.Uploads, err)
+	}
+	t.Setenv("GOSIDIAN_UPLOAD_MAX_ATTACHMENT_BYTES", "104857600")
+	if err := cfg.ApplyEnv(); err != nil || cfg.Uploads.MaxAttachmentBytes != 100<<20 {
+		t.Errorf("env = %+v, %v", cfg.Uploads, err)
+	}
+	for _, bad := range []string{"lots", "0", "-1"} {
+		t.Setenv("GOSIDIAN_UPLOAD_MAX_ATTACHMENT_BYTES", bad)
+		if err := cfg.ApplyEnv(); err == nil {
+			t.Errorf("%q was accepted", bad)
+		}
+	}
+}
+
 // The shrink guard is on by default; an explicit 0 in the file turns it
 // off, and the environment overrides both (IMP-147).
 func TestShrinkGuard(t *testing.T) {

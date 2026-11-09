@@ -178,6 +178,83 @@ func TestRegistry_ExposeAndCallTool(t *testing.T) {
 	}
 }
 
+func TestManifest_InternalToolTakesNoFiles(t *testing.T) {
+	b, _ := json.Marshal(map[string]any{"name": "vec", "version": "1", "gosidian": 1,
+		"tools":       []any{map[string]any{"name": "put", "access": "read", "internal": true, "files": []string{"f"}, "file_refs": true}},
+		"permissions": map[string]any{"files": true, "network": []string{}}})
+	if _, err := ParseManifest(b, "vec"); err == nil || !strings.Contains(err.Error(), "internal") {
+		t.Errorf("an internal tool with files: %v", err)
+	}
+}
+
+// engineManifest is a plugin that opens the notes type: layout and has its
+// engine in internal tools only.
+func engineManifest() map[string]any {
+	return map[string]any{"name": "vec", "version": "1.0", "gosidian": 1,
+		"tools": []any{map[string]any{"name": "search", "access": "read", "internal": true}},
+		"apps": []any{map[string]any{"name": "editor", "title": "Editor", "url": "https://e.example.com/app/",
+			"note_type": "layout", "bridge": "layout/2", "engine": "e 1"}},
+		"permissions": map[string]any{"files": false, "network": []string{}}}
+}
+
+func TestRegistry_InternalToolIsGosidiansAlone(t *testing.T) {
+	ts := toolPlugin(t, engineManifest())
+	reg, err := New([]Config{{Name: "vec", URL: ts.URL + "/mcp"}}, t.TempDir(), nil, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, ok := reg.AppTool("layout", "search"); ok {
+		t.Error("a manifest not accepted yet gives its tool")
+	}
+	reg.Check(ctx)
+	st, _ := reg.State("vec")
+	if _, err := reg.Accept(ctx, "vec", st.SHA, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if got := reg.Tools(); len(got) != 0 {
+		t.Errorf("offered to the agents: %+v", got)
+	}
+	// The exposure decides where gosidian's own tools work, so a plugin with
+	// internal tools alone is exposed like any other.
+	if _, err := reg.Expose("vec", "p", "test"); err != nil {
+		t.Fatal(err)
+	}
+	plugin, ok := reg.AppTool("layout", "search")
+	if !ok || plugin != "vec" {
+		t.Fatalf("AppTool = %q %v", plugin, ok)
+	}
+	if _, ok := reg.AppTool("other", "search"); ok {
+		t.Error("the tool of an app of another note type")
+	}
+	if _, ok := reg.AppTool("layout", "none"); ok {
+		t.Error("a tool the manifest does not have")
+	}
+	res, err := reg.CallTool(ctx, plugin, "search", map[string]any{"q": 1}, nil)
+	if err != nil || res.IsError {
+		t.Fatalf("CallTool: %v %+v", err, res)
+	}
+}
+
+func TestRegistry_AppToolIsInternal(t *testing.T) {
+	m := engineManifest()
+	m["tools"] = []any{map[string]any{"name": "search", "access": "read"}}
+	ts := toolPlugin(t, m)
+	reg, err := New([]Config{{Name: "vec", URL: ts.URL + "/mcp"}}, t.TempDir(), nil, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	reg.Check(ctx)
+	st, _ := reg.State("vec")
+	if _, err := reg.Accept(ctx, "vec", st.SHA, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := reg.AppTool("layout", "search"); ok {
+		t.Error("a tool offered to the agents is not gosidian's own")
+	}
+}
+
 func TestRegistry_ExposeNeedsTools(t *testing.T) {
 	m := vecManifest()
 	delete(m, "tools")

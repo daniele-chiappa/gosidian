@@ -20,8 +20,11 @@ import (
 	"github.com/gosidian/gosidian/internal/authz"
 	"github.com/gosidian/gosidian/internal/automation"
 	"github.com/gosidian/gosidian/internal/chatbot"
+	"github.com/gosidian/gosidian/internal/fonts"
+	"github.com/gosidian/gosidian/internal/gitsync"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/infolder"
+	"github.com/gosidian/gosidian/internal/layout"
 	"github.com/gosidian/gosidian/internal/marks"
 	"github.com/gosidian/gosidian/internal/pipeline"
 	"github.com/gosidian/gosidian/internal/plugins"
@@ -132,6 +135,12 @@ type Server struct {
 	impl         *server.MCPServer
 	limiter      *writeLimiter
 	maxNoteBytes int64
+	// layoutLimits and fonts are for the layout tools (SetLayout);
+	// layoutSessions the designs open, under layoutMu.
+	layoutLimits   layout.Limits
+	fonts          *fonts.Store
+	layoutMu       sync.Mutex
+	layoutSessions map[string]*layoutSession
 	// maxPluginResult caps a plugin tool's result ([mcp] max_plugin_result).
 	maxPluginResult int64
 	// pluginToolTimeout caps an agent's call of a plugin's tool ([mcp]
@@ -238,6 +247,8 @@ type Server struct {
 	// it was issued for; nil when OAuth is off. Consulted only for bearers the
 	// static token store does not know.
 	accessResolver func(plaintext string) (*auth.Token, bool)
+	// git is the git sync, for the versions of a note; nil without one.
+	git *gitsync.Sync
 	// principalResolver maps a token's OwnerUserID to that account's authz
 	// principal (role) so a token can never outrun the account it belongs to:
 	// see effectiveToken (BUG-055). nil (tests, deployments without web

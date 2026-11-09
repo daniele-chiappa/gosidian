@@ -593,12 +593,12 @@ func (s *Server) fetchIngestURL(rawURL string) ([]byte, string, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, "", fmt.Errorf("fetch %q: HTTP %d", rawURL, resp.StatusCode)
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, attach.MaxBytes+1))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, attach.MaxBytes()+1))
 	if err != nil {
 		return nil, "", fmt.Errorf("fetch %q: read body: %w", rawURL, err)
 	}
-	if len(data) > attach.MaxBytes {
-		return nil, "", errors.New("file too large (max 10 MiB)")
+	if int64(len(data)) > attach.MaxBytes() {
+		return nil, "", errors.New(attach.TooLarge())
 	}
 	name := path.Base(resp.Request.URL.Path)
 	if name == "." || name == "/" {

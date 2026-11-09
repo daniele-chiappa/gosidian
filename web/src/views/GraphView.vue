@@ -19,6 +19,7 @@ import { listProjects, type Project } from '@/api/projects'
 import { listTags, type TagCount } from '@/api/tags'
 import { suggestNoteTitles, type NoteTitleHit } from '@/api/noteTitles'
 import SearchSelect from '@/components/primitives/SearchSelect.vue'
+import GraphList from '@/components/graph/GraphList.vue'
 import { useWindowsStore, type OpenSpec } from 'plancia'
 import { planciaKey, base } from '@/composables/planciaKey'
 import { useUIStore, type GraphRenderMode } from '@/stores/ui'
@@ -45,6 +46,8 @@ const props = defineProps<{
    *  arguments (IMP-183). */
   source?: string
   with?: Record<string, unknown>
+  /** Every project, chosen by hand: no default project (BUG-158). */
+  allProjects?: boolean
 }>()
 
 const store = useWindowsStore()
@@ -65,6 +68,18 @@ function setMode(m: GraphRenderMode) {
   mode.value = m
   ui.setGraphMode(m)
 }
+
+// The graph as text beside the drawings (IMP-224, F-32): the drawing is a
+// picture named by its counts, the list says it.
+const listView = ref(false)
+const views = computed(() => [
+  { key: '2d', label: '2D', on: !listView.value && mode.value === '2d', pick: () => ((listView.value = false), setMode('2d')) },
+  { key: '3d', label: '3D', on: !listView.value && mode.value === '3d', pick: () => ((listView.value = false), setMode('3d')) },
+  { key: 'list', label: t('graph.view_list'), on: listView.value, pick: () => (listView.value = true) },
+])
+const drawingLabel = computed(() =>
+  data.value ? t('graph.drawing_label', { nodes: data.value.nodes.length, edges: data.value.edges.length }) : '',
+)
 
 // 3D-only semantic z-axis. Exploratory by nature → not persisted.
 const zMode = ref<ZMode>('free')
@@ -203,18 +218,25 @@ function syncWindow() {
     selfId.value = null
     return
   }
+  // Every filter, undefined when empty: identify merges the props, so one
+  // left out kept its old value in the address (BUG-158).
   store.identify(w.id, w.key, {
-    ...(plugin.value ? { source: source.value, with: { ...args.value } } : {}),
-    ...(project.value ? { project: project.value } : {}),
-    ...(tag.value ? { tag: tag.value } : {}),
-    ...(focus.value ? { focus: focus.value, depth: depth.value } : {}),
-    ...(minDegree.value > 0 ? { minDegree: minDegree.value } : {}),
-    ...(limitSet.value ? { limit: limitSet.value } : {}),
+    source: plugin.value ? source.value : undefined,
+    with: plugin.value ? { ...args.value } : undefined,
+    project: project.value || undefined,
+    // No project, tag nor focus: every project, so that a reload does not
+    // open on the most recent one.
+    allProjects: !project.value && !tag.value && !focus.value ? true : undefined,
+    tag: tag.value || undefined,
+    focus: focus.value || undefined,
+    depth: focus.value ? depth.value : undefined,
+    minDegree: minDegree.value > 0 ? minDegree.value : undefined,
+    limit: limitSet.value,
     global: true,
   })
   store.setTitle(w.id, project.value ? `${t('nav.graph')} · ${project.value}` : t('nav.graph'))
 }
-const hadInitialFilter = Boolean(project.value || tag.value || focus.value)
+const hadInitialFilter = Boolean(project.value || tag.value || focus.value || props.allProjects)
 const params = computed(() => plugin.value
   ? { source: source.value, project: project.value || undefined, with: { ...args.value } }
   : {
@@ -357,6 +379,7 @@ onMounted(async () => {
           :value-key="(p: Project) => p.name"
           :label="(p: Project) => p.name"
           :secondary="(p: Project) => String(p.note_count)"
+          :accessible-name="t('graph.project')"
           :placeholder="t('graph.project_placeholder')"
         />
       </div>
@@ -365,7 +388,7 @@ onMounted(async () => {
         <span class="text-text-muted text-xs">{{ t('graph.source') }}</span>
         <select
           v-model="source"
-          class="h-control py-0 mt-1 w-full rounded bg-bg border border-border px-2 text-sm"
+          class="h-control py-0 mt-1 w-full rounded bg-bg border border-border-input px-2 text-sm"
           data-graph-source
         >
           <option value="links">
@@ -397,7 +420,7 @@ onMounted(async () => {
           <select
             v-if="f.options"
             :value="String(args[f.name] ?? '')"
-            class="h-control py-0 mt-1 w-full rounded bg-bg border border-border px-2 text-sm"
+            class="h-control py-0 mt-1 w-full rounded bg-bg border border-border-input px-2 text-sm"
             :required="f.required"
             :aria-required="f.required ? 'true' : undefined"
             @change="setArg(f.name, f.type, ($event.target as HTMLSelectElement).value)"
@@ -422,7 +445,7 @@ onMounted(async () => {
             v-else
             :type="f.type === 'integer' || f.type === 'number' ? 'number' : 'text'"
             :value="args[f.name] ?? ''"
-            class="h-control py-0 mt-1 w-full rounded bg-bg border border-border px-2 text-sm"
+            class="h-control py-0 mt-1 w-full rounded bg-bg border border-border-input px-2 text-sm"
             :required="f.required"
             :aria-required="f.required ? 'true' : undefined"
             @change="setArg(f.name, f.type, ($event.target as HTMLInputElement).value)"
@@ -448,6 +471,7 @@ onMounted(async () => {
             :value-key="(t: TagCount) => t.tag"
             :label="(t: TagCount) => '#' + t.tag"
             :secondary="(t: TagCount) => String(t.count)"
+            :accessible-name="t('graph.tag')"
             :placeholder="t('graph.tag_placeholder')"
           />
         </div>
@@ -461,6 +485,7 @@ onMounted(async () => {
             :value-key="(n: NoteTitleHit) => n.path"
             :label="(n: NoteTitleHit) => n.title || n.path"
             :secondary="(n: NoteTitleHit) => n.path"
+            :accessible-name="t('graph.focus')"
             :placeholder="t('graph.focus_placeholder')"
           />
         </div>
@@ -472,7 +497,7 @@ onMounted(async () => {
             type="number"
             min="1"
             max="6"
-            class="h-control py-0 mt-1 w-full rounded bg-bg border border-border px-2 text-sm"
+            class="h-control py-0 mt-1 w-full rounded bg-bg border border-border-input px-2 text-sm"
           >
         </label>
         <label class="block text-sm">
@@ -482,7 +507,7 @@ onMounted(async () => {
             type="number"
             min="0"
             max="20"
-            class="h-control py-0 mt-1 w-full rounded bg-bg border border-border px-2 text-sm"
+            class="h-control py-0 mt-1 w-full rounded bg-bg border border-border-input px-2 text-sm"
           >
         </label>
         <label class="block text-sm">
@@ -493,7 +518,7 @@ onMounted(async () => {
             min="0"
             :max="ui.graphMaxNodes"
             :placeholder="String(ui.graphDefaultNodes)"
-            class="h-control py-0 mt-1 w-full rounded bg-bg border border-border px-2 text-sm"
+            class="h-control py-0 mt-1 w-full rounded bg-bg border border-border-input px-2 text-sm"
           >
         </label>
       </template>
@@ -591,9 +616,9 @@ onMounted(async () => {
         class="absolute top-3 left-3 z-10 max-w-[80%] text-xs bg-bg-elevated px-2 py-1 rounded border border-danger"
       />
       <select
-        v-if="mode === '3d'"
+        v-if="mode === '3d' && !listView"
         v-model="zMode"
-        class="h-control-sm py-0 absolute top-3 right-24 z-10 rounded border border-border bg-bg-elevated text-xs text-text-muted px-1.5"
+        class="h-control-sm py-0 absolute top-3 right-24 z-10 rounded border border-border-input bg-bg-elevated text-xs text-text-muted px-1.5"
         :aria-label="t('graph.z_mode')"
       >
         <option value="free">
@@ -610,28 +635,31 @@ onMounted(async () => {
         class="absolute top-3 right-3 z-10 flex rounded border border-border overflow-hidden text-xs bg-bg-elevated"
         role="group"
         :aria-label="t('graph.renderer')"
+        data-graph-views
       >
         <button
+          v-for="(v, i) in views"
+          :key="v.key"
           type="button"
           class="h-control-sm px-2"
-          :class="mode === '2d' ? 'bg-surface-hover text-text font-semibold' : 'text-text-muted hover:bg-surface-hover'"
-          @click="setMode('2d')"
+          :class="[i > 0 && 'border-l border-border', v.on ? 'bg-surface-hover text-text font-semibold' : 'text-text-muted hover:bg-surface-hover']"
+          :aria-pressed="v.on"
+          @click="v.pick()"
         >
-          2D
-        </button>
-        <button
-          type="button"
-          class="h-control-sm px-2 border-l border-border"
-          :class="mode === '3d' ? 'bg-surface-hover text-text font-semibold' : 'text-text-muted hover:bg-surface-hover'"
-          @click="setMode('3d')"
-        >
-          3D
+          {{ v.label }}
         </button>
       </div>
-      <GraphCanvas
-        v-if="data && mode === '2d'"
+      <GraphList
+        v-if="data && listView"
         :nodes="data.nodes"
         :edges="data.edges"
+        @select="onNode"
+      />
+      <GraphCanvas
+        v-else-if="data && mode === '2d'"
+        :nodes="data.nodes"
+        :edges="data.edges"
+        :label="drawingLabel"
         @select="onNode"
       />
       <Graph3DCanvas
@@ -639,6 +667,7 @@ onMounted(async () => {
         :nodes="data.nodes"
         :edges="data.edges"
         :z-mode="zMode"
+        :label="drawingLabel"
         @select="onNode"
       />
       <p

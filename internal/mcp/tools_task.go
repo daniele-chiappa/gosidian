@@ -29,61 +29,63 @@ import (
 
 func (s *Server) registerTaskTools() {
 	s.impl.AddTool(mcp.NewTool("memory_tasks",
-		mcp.WithDescription("List a project's tasks (IMP-195): status, role, holder, attempts, cost, a card's column and, if submitted, why it waits; and each team's spend today against its budget. Tasks are notes in <project>/tasks/; a team is a note with a ```team block, a board one with a ```board block (docs/agents.md, docs/board.md)."),
+		mcp.WithDescription("A project's tasks (IMP-195): status, role, holder, attempts, cost, a card's column, why a submitted one waits; teams' spend today and budget; a board's flow and iteration. Tasks are notes in <project>/tasks/; teams and boards, notes with a ```team or ```board block (docs/agents.md, docs/board.md)."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("The project. "+scopedProjectNote)),
-		mcp.WithString("team", mcp.Description("Only this team's tasks: a link to its note or its path.")),
-		mcp.WithString("board", mcp.Description("Only this board's cards, with its columns.")),
-		mcp.WithString("status", mcp.Description("open (default: not completed, failed or canceled), all, or one status.")),
-		mcp.WithString("role", mcp.Description("Only the tasks of this role.")),
+		mcp.WithString("team", mcp.Description("Only this team's tasks (link or path).")),
+		mcp.WithString("board", mcp.Description("Only this board's cards, and the board.")),
+		mcp.WithString("status", mcp.Description("open (default: not completed, failed, canceled), all, or one.")),
+		mcp.WithString("role", mcp.Description("Only this role's tasks.")),
 	), s.handleTasks)
 
 	s.impl.AddTool(mcp.NewTool("memory_task_create",
-		mcp.WithDescription("Create a task (IMP-195) for a team's role: it starts the role's pipeline once submitted and its dependencies completed; a run token gives tasks only to roles yours delegates to, under your task. Or a card of a board, with no team (IMP-216)."),
+		mcp.WithDescription("Create a task (IMP-195) for a team's role: submitted, its dependencies completed, it starts the role's pipeline; a run token gives tasks only to roles yours delegates to, under your task. Or a board's card, no team (IMP-216)."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("The project. "+scopedProjectNote)),
 		mcp.WithString("team", mcp.Description("The team ([[p/squadra]]), with assignee.")),
-		mcp.WithString("assignee", mcp.Description("The team's role that does it.")),
-		mcp.WithString("board", mcp.Description("Or the board of a card.")),
-		mcp.WithString("column", mcp.Description("A card's column, of backlog or submitted; default the first.")),
-		mcp.WithString("title", mcp.Required(), mcp.Description("What to do, in a line.")),
-		mcp.WithString("body", mcp.Description("What to do and how it is accepted.")),
-		mcp.WithString("parent", mcp.Description("Its objective; a run token's own task by default.")),
-		mcp.WithArray("depends_on", mcp.Description("Tasks completed before it starts; their reports are in its prompt.")),
-		mcp.WithArray("for", mcp.Description("The notes a card serves: IMP, plan, bug.")),
+		mcp.WithString("assignee", mcp.Description("The team's role doing it.")),
+		mcp.WithString("board", mcp.Description("Or a card's board.")),
+		mcp.WithString("column", mcp.Description("A card's column (backlog or submitted); default the first.")),
+		mcp.WithString("iteration", mcp.Description("A card's iteration, of its board.")),
+		mcp.WithString("title", mcp.Required(), mcp.Description("What to do, one line.")),
+		mcp.WithString("body", mcp.Description("Details and acceptance.")),
+		mcp.WithString("parent", mcp.Description("Its objective; default a run token's task.")),
+		mcp.WithArray("depends_on", mcp.Description("Tasks to complete first; their reports go in its prompt.")),
+		mcp.WithArray("for", mcp.Description("Notes a card serves: IMP, plan, bug.")),
 		mcp.WithString("done_by", mcp.Description("agent, or person after review; default the board's.")),
 		mcp.WithArray("paths", mcp.Description("Repo paths it may change beyond its role's.")),
 		mcp.WithArray("forbid", mcp.Description("Repo paths it must not change.")),
-		mcp.WithNumber("budget_usd", mcp.Description("Cost cap in USD; default the team's task_usd.")),
-		mcp.WithBoolean("hold", mcp.Description("true: input-required, so a person starts it.")),
+		mcp.WithNumber("budget_usd", mcp.Description("USD cap; default the team's task_usd.")),
+		mcp.WithBoolean("hold", mcp.Description("true: input-required, a person starts it.")),
 	), s.handleTaskCreate)
 
 	s.impl.AddTool(mcp.NewTool("memory_task_claim",
-		mcp.WithDescription("Take a ready task as an outside agent (IMP-195): it goes working, held by your token for [agents] lease (15 min), which memory_task_heartbeat renews; an ended lease gives it back. With board, the board's next card, and the board's text: what done means there. A column at its wip limit refuses it. A run's agent takes none."),
+		mcp.WithDescription("Take a ready task as an outside agent (IMP-195): working, held by your token for [agents] lease (15 min), renewed by memory_task_heartbeat; an ended lease gives it back. With board: its next card, text (what done means there) and stale cards; a column at its wip limit refuses it. A run's agent takes none."),
 		mcp.WithString("path", mcp.Description("The task's note.")),
 		mcp.WithString("board", mcp.Description("Or a board's note ([[p/board]]).")),
 	), s.handleTaskClaim)
 
 	s.impl.AddTool(mcp.NewTool("memory_task_heartbeat",
-		mcp.WithDescription("Renew the lease of a task you hold as an outside agent (IMP-195): call it more often than [agents] lease while you work."),
+		mcp.WithDescription("Renew the lease of a task you hold as an outside agent (IMP-195), more often than [agents] lease while working."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("The task's note.")),
 	), s.handleTaskHeartbeat)
 
 	s.impl.AddTool(mcp.NewTool("memory_task_update",
-		mcp.WithDescription("Move a task you hold as an outside agent (IMP-195): input-required for a person's answer, review for their approval, working again, submitted to give it back; a card, to a column. The message goes in the task as a dated section. A run's agent moves none."),
+		mcp.WithDescription("Move a task you hold as an outside agent (IMP-195): input-required for a person's answer, review for approval, working again, submitted to give it back; a card to a column, or any card into an iteration. message goes in it, dated. A run's agent moves none."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("The task's note.")),
 		mcp.WithString("status", mcp.Description("working, input-required, review or submitted.")),
 		mcp.WithString("column", mcp.Description("Or a card's column.")),
-		mcp.WithString("message", mcp.Description("What you ask, or what the next attempt must know.")),
+		mcp.WithString("iteration", mcp.Description("A card's iteration; empty: none.")),
+		mcp.WithString("message", mcp.Description("What you ask, or the next attempt must know.")),
 	), s.handleTaskUpdate)
 
 	s.impl.AddTool(mcp.NewTool("memory_task_complete",
-		mcp.WithDescription("Close a task you hold as an outside agent with your report (IMP-195): its section Report, which the tasks after it and the coordinator read. A card a person closes goes to review instead. A run's agent closes none: its pipeline does, after its checks."),
+		mcp.WithDescription("Close a task you hold as an outside agent with your report (IMP-195): its section Report, read by later tasks and the coordinator. A card a person closes goes to review. A run's agent closes none: its pipeline does, after its checks."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("The task's note.")),
 		mcp.WithString("status", mcp.Description("completed (default), failed or canceled.")),
 		mcp.WithString("report", mcp.Required(), mcp.Description("What was done, where it is, what is left.")),
 	), s.handleTaskComplete)
 
 	s.impl.AddTool(mcp.NewTool("memory_create_team",
-		mcp.WithDescription("Create a team of agents in a project (IMP-195): the team's note with a ```team block to fill in (roles, budget, approvals: docs/agents.md), an agent note per role (agents/<role>.md) when missing, the pipeline that gives the roles' tasks to their agents (pipelines/<team>-work.md: the agent, the checks, the gate, the approval) and, with a coordinator, its own (pipelines/<team>-coordinate.md), the database of the project's tasks (tasks.md) when it has none, and a note that shows the team's tasks."),
+		mcp.WithDescription("Create a team of agents in a project (IMP-195): its note with a ```team block to fill in (roles, budget, approvals: docs/agents.md), an agent note per role when missing (agents/<role>.md), the pipeline giving the roles' tasks to their agents (pipelines/<team>-work.md: agent, checks, gate, approval), a coordinator's own (pipelines/<team>-coordinate.md), the tasks' database when missing (tasks.md), and a note showing the team's tasks."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("The project. "+scopedProjectNote)),
 		mcp.WithString("name", mcp.Description("The team's note, in the project's root: lower-case letters, digits and -; default team.")),
 		mcp.WithArray("roles", mcp.Description("The roles' names; default [dev].")),
@@ -229,7 +231,9 @@ func (s *Server) handleTasks(ctx context.Context, req mcp.CallToolRequest) (*mcp
 		for _, c := range b.Columns {
 			columns = append(columns, column{c, b.Count(tasks, c.Name, "")})
 		}
-		out["board"] = map[string]any{"path": b.Path, "columns": columns, "wip": b.WIP, "done": b.Done}
+		state := s.boardState(b, tasks, time.Now())
+		state["path"], state["columns"], state["wip"], state["done"] = b.Path, columns, b.WIP, b.Done
+		out["board"] = state
 	}
 	return mcp.NewToolResultJSON(out)
 }
@@ -405,6 +409,12 @@ func (s *Server) createCard(ctx context.Context, tok *auth.Token, req mcp.CallTo
 		}
 		n.For = append(n.For, fp)
 	}
+	if it := fleet.LinkPath(req.GetString("iteration", ""), project); it != "" {
+		if err := s.cardIteration(project, b, it); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		n.Iteration = it
+	}
 	unlock := s.lockBoard(b.Path)
 	defer unlock()
 	tasks, err := s.boardCards(ctx, b, project)
@@ -539,18 +549,26 @@ func (s *Server) claimCard(ctx context.Context, board, rel string) (*mcp.CallToo
 	if err != nil {
 		return taskError(err), nil
 	}
-	return cardResult(tok, t, b, content, warning, map[string]any{"lease_until": clock.NoteTime(lease)})
+	return cardResult(tok, t, b, content, warning, cards, map[string]any{"lease_until": clock.NoteTime(lease)})
 }
 
-// cardResult is a task tool's answer for a card: with its board's text,
-// for a token that reads, and the warning of a column past its limit.
-func cardResult(tok *auth.Token, t fleet.Task, b fleet.Board, content []byte, warning string, extra map[string]any) (*mcp.CallToolResult, error) {
+// cardResult is a task tool's answer for a card t, written over its copy
+// among the board's cards: with its board's text and stale cards, for a
+// token that reads, and the warning of a column past its limit.
+func cardResult(tok *auth.Token, t fleet.Task, b fleet.Board, content []byte, warning string, cards []fleet.Task, extra map[string]any) (*mcp.CallToolResult, error) {
 	if extra == nil {
 		extra = map[string]any{}
 	}
 	board := map[string]any{"path": b.Path}
 	if tok.HasScope(auth.ScopeRead) {
 		board["text"] = fleet.BoardText(content)
+		now := slices.Clone(cards)
+		if i := slices.IndexFunc(now, func(c fleet.Task) bool { return c.Path == t.Path }); i >= 0 {
+			now[i] = t
+		}
+		if stale := b.StaleCards(now, time.Now()); len(stale) > 0 {
+			board["stale"] = stale
+		}
 	}
 	extra["board"] = board
 	if warning != "" {
@@ -616,23 +634,61 @@ func (s *Server) handleTaskUpdate(ctx context.Context, req mcp.CallToolRequest) 
 		return res, nil
 	}
 	status, column, message := req.GetString("status", ""), req.GetString("column", ""), req.GetString("message", "")
-	if status == "" && column == "" {
-		return mcp.NewToolResultError("status or column: where the task goes"), nil
+	for _, k := range []string{fleet.KeyStarted, fleet.KeyFinished} {
+		if _, ok := req.GetArguments()[k]; ok {
+			return mcp.NewToolResultErrorf("%s is the server's: it writes it as the card moves", k), nil
+		}
 	}
+	_, linking := req.GetArguments()["iteration"]
+	if status == "" && column == "" && !linking {
+		return mcp.NewToolResultError("status, column or a card's iteration: where the task goes"), nil
+	}
+	project, _, _ := strings.Cut(rel, "/")
 	res, card, err := s.withCard(ctx, rel, func(b fleet.Board, content []byte, cards []fleet.Task, cur fleet.Task) (*mcp.CallToolResult, error) {
+		// The iteration of a card is planning: who writes the cards sets it,
+		// holding the card or not.
+		it := fleet.LinkPath(req.GetString("iteration", ""), project)
+		if linking && it != "" {
+			if err := s.cardIteration(project, b, it); err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+		}
+		link := func(content []byte) ([]byte, error) {
+			switch {
+			case !linking:
+				return content, nil
+			case it == "":
+				return fleet.Set(content, nil, fleet.KeyIteration)
+			}
+			return fleet.Set(content, map[string]any{fleet.KeyIteration: fleet.Link(it)})
+		}
+		if status == "" && column == "" {
+			if err := s.cardsDatabase(ctx, project); err != nil {
+				return taskError(err), nil
+			}
+			t, err := s.fleetUpdate(ctx, taskWrite{tok: tok}, rel, func(_ fleet.Task, content []byte) ([]byte, error) { return link(content) })
+			if err != nil {
+				return taskError(err), nil
+			}
+			return cardResult(tok, t, b, content, "", cards, nil)
+		}
 		t, warning, err := s.moveCard(ctx, taskWrite{tok: tok}, b, cards, cur, column, status, nil, func(c fleet.Task, content []byte, status string) ([]byte, error) {
-			return fleet.Update(c, content, holder, status, message, clock.Now())
+			out, err := fleet.Update(c, content, holder, status, message, clock.Now())
+			if err != nil {
+				return nil, err
+			}
+			return link(out)
 		})
 		if err != nil {
 			return taskError(err), nil
 		}
-		return cardResult(tok, t, b, content, warning, nil)
+		return cardResult(tok, t, b, content, warning, cards, nil)
 	})
 	switch {
 	case card:
 		return res, err
-	case column != "":
-		return mcp.NewToolResultErrorf("the task %s is on no board: it has no column", rel), nil
+	case column != "", linking:
+		return mcp.NewToolResultErrorf("the task %s is on no board: it has no column nor iteration", rel), nil
 	}
 	t, err := s.fleetUpdate(ctx, taskWrite{tok: tok}, rel, func(cur fleet.Task, content []byte) ([]byte, error) {
 		return fleet.Update(cur, content, holder, status, message, clock.Now())
@@ -668,7 +724,7 @@ func (s *Server) handleTaskComplete(ctx context.Context, req mcp.CallToolRequest
 		if err != nil {
 			return taskError(err), nil
 		}
-		return cardResult(tok, t, b, content, warning, nil)
+		return cardResult(tok, t, b, content, warning, cards, nil)
 	})
 	if card {
 		return res, err

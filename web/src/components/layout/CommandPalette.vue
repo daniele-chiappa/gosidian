@@ -28,6 +28,7 @@ import { Search } from 'lucide-vue-next'
 import { useOpenFocused } from '@/composables/useOpenFocused'
 import { planciaKey } from '@/composables/planciaKey'
 import { paletteRequest } from '@/composables/usePalette'
+import { appForType } from '@/composables/pluginApps'
 
 interface PaletteItem {
   kind: 'note' | 'project' | 'tag' | 'action'
@@ -58,6 +59,18 @@ const optionId = (i: number) => `${listId}-${i}`
 // Where the palette was opened from: closed without a choice, it gives the
 // focus back there (IMP-217, F-04); a choice opens a window, which takes it.
 let opener: HTMLElement | null = null
+
+// A new page layout goes where the work is: the folder of the note in the
+// focused window, the note or its design (IMP-232), else of the last note
+// read, else the first project. Offered only when an app opens it (IMP-226).
+const canLayout = ref(false)
+const layoutFolder = computed(() => {
+  const win = windows.focused
+  const path = win?.props?.path
+  const open = (win?.type === 'note' || win?.type === 'app') && typeof path === 'string' ? path : ''
+  const note = open || recents.entries.value[0]?.path || ''
+  return note.slice(0, Math.max(0, note.lastIndexOf('/'))) || dataset.value?.projects[0]?.name || ''
+})
 
 const baseItems = computed<PaletteItem[]>(() => {
   const items: PaletteItem[] = []
@@ -90,6 +103,19 @@ const baseItems = computed<PaletteItem[]>(() => {
       label: '#' + tag.tag,
       detail: t('projects.notes', { n: tag.count }, tag.count),
       open: { type: 'tags', key: planciaKey('tags', tag.tag), title: '#' + tag.tag, props: { tag: tag.tag } },
+    })
+  }
+  if (canLayout.value && layoutFolder.value) {
+    items.push({
+      kind: 'action',
+      label: t('plugin_app.palette_new'),
+      detail: layoutFolder.value,
+      open: {
+        type: 'create',
+        key: planciaKey('create', layoutFolder.value),
+        title: t('note_create.window_title', { name: layoutFolder.value }),
+        props: { path: layoutFolder.value, startKind: 'layout' },
+      },
     })
   }
   return items
@@ -163,6 +189,7 @@ async function refreshDataset() {
 async function show(q = '') {
   opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
   open.value = true
+  void appForType('layout').then((a) => (canLayout.value = a !== null))
   query.value = q
   selected.value = 0
   browsing.value = false
@@ -180,13 +207,17 @@ function hide(giveBack = true) {
   opener = null
 }
 
+// A Search or Projects already open only takes the focus: what was asked
+// goes to it too, with when it was asked, so the same asked again acts
+// again (IMP-218, F-06; BUG-160).
+const askedAt: Record<string, string> = { search: 'qAt', projects: 'projectAt' }
+
 function pick(item: PaletteItem | undefined) {
   if (!item) return
   hide(false)
   const id = openWindow(item.open)
-  // A Search already open only takes the focus: the text goes to it too,
-  // with when it was asked, so the same text asked again searches again.
-  if (item.open.type === 'search' && id) windows.identify(id, planciaKey('search'), { ...item.open.props, qAt: Date.now() })
+  const at = askedAt[item.open.type]
+  if (at && id) windows.identify(id, planciaKey(item.open.type), { ...item.open.props, [at]: Date.now() })
 }
 
 // A move of the keyboard keeps the entry in view: a mouse is already on it.
@@ -281,7 +312,7 @@ onUnmounted(() => {
           :aria-controls="listId"
           :aria-activedescendant="entries.length ? optionId(selected) : undefined"
           :placeholder="t('palette.placeholder')"
-          class="w-full px-4 py-3 bg-bg-elevated border-b border-border focus:outline-none"
+          class="w-full px-4 py-3 bg-bg-elevated border-b border-border-input focus:outline-none"
         />
         <p
           v-if="!filtered.length"

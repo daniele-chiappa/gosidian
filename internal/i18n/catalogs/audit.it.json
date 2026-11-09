@@ -1,0 +1,106 @@
+{
+  "admin": {
+    "audit": {
+      "table": "Righe dell'audit",
+      "range": "{from}–{to} di {total}",
+      "pages": "Pagine dell'audit",
+      "previous": "Pagina precedente",
+      "next": "Pagina successiva",
+      "newest_first": "Prima le più recenti",
+      "oldest_first": "Prima le più vecchie",
+      "action_groups": {
+        "note": "Note e file",
+        "project": "Progetti",
+        "access": "Permessi e team",
+        "account": "Account",
+        "session": "Accessi",
+        "token": "Token MCP",
+        "pipeline": "Pipeline e plugin",
+        "server": "Server"
+      },
+      "actions": {
+        "note": {
+          "create": "nota o file creato",
+          "update": "nota o file modificato",
+          "append": "testo aggiunto a una nota",
+          "delete": "nota o file eliminato",
+          "rename": "nota o file rinominato",
+          "restore": "nota ripristinata da una versione",
+          "upload_attachment": "allegato caricato",
+          "delete_attachment": "allegato eliminato",
+          "ingest_package": "pacchetto di note importato",
+          "in_upload": "caricamento in IN concluso",
+          "in_upload_open": "caricamento in IN aperto da un agent",
+          "export": "esportazione zip scaricata",
+          "mirror_sync": "copia locale sincronizzata"
+        },
+        "project": {
+          "create_project": "progetto creato",
+          "delete_project": "progetto eliminato",
+          "rename_project": "progetto rinominato",
+          "project_flags_update": "flag di un progetto cambiati",
+          "personal_project_create": "progetto personale creato"
+        },
+        "access": {
+          "project_member_set": "permesso dato a un account",
+          "project_member_remove": "permesso tolto a un account",
+          "project_team_set": "permesso dato a un team, dal progetto",
+          "project_team_remove": "permesso tolto a un team, dal progetto",
+          "team_create": "team creato",
+          "team_update": "team modificato",
+          "team_delete": "team eliminato",
+          "team_user_add": "account aggiunto a un team",
+          "team_user_remove": "account tolto da un team",
+          "team_grant_set": "permesso dato a un team, dal team",
+          "team_grant_remove": "permesso tolto a un team, dal team"
+        },
+        "account": {
+          "user_create": "account creato",
+          "user_update": "account modificato",
+          "user_disable": "account disattivato",
+          "user_archive": "account archiviato, nome liberato",
+          "invite_create": "invito creato",
+          "invite_revoke": "invito revocato",
+          "password_change": "password cambiata",
+          "password_reset": "password reimpostata dall'owner",
+          "totp_enroll": "verifica in due passaggi attivata",
+          "totp_disenroll": "verifica in due passaggi disattivata",
+          "totp_reset": "verifica in due passaggi azzerata dall'owner",
+          "totp_recovery_used": "codice di recupero usato",
+          "totp_recovery_regen": "codici di recupero rigenerati"
+        },
+        "session": {
+          "spa_token_create": "accesso alla web UI",
+          "spa_token_refresh": "sessione della web UI rinnovata",
+          "spa_token_revoke": "uscita dalla web UI",
+          "spa_login_failed": "accesso non riuscito",
+          "oauth_client_register": "client OAuth registrato",
+          "oauth_grant": "autorizzazione OAuth data",
+          "oauth_refresh": "autorizzazione OAuth rinnovata",
+          "oauth_revoke": "autorizzazione OAuth revocata"
+        },
+        "token": {
+          "token_create": "token MCP creato",
+          "token_update": "token MCP modificato",
+          "token_revoke": "token MCP revocato"
+        },
+        "pipeline": {
+          "pipeline_run": "pipeline avviata",
+          "pipeline_resume": "pipeline ripresa",
+          "pipeline_cancel": "pipeline annullata",
+          "plugin_call": "strumento di un plugin chiamato"
+        },
+        "server": {
+          "settings_update": "impostazioni del server cambiate",
+          "git_token_set": "token di git impostato",
+          "git_token_unset": "token di git tolto",
+          "note_tag": "versione di una nota segnata",
+          "note_valid": "versione valida di una nota cambiata",
+          "note_mcp_version": "versione per l’MCP di una nota cambiata",
+          "font_add": "font aggiunto al catalogo",
+          "font_delete": "font tolto dal catalogo"
+        }
+      }
+    }
+  }
+}

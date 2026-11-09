@@ -245,6 +245,14 @@ func (v *Vault) save(rel string, content []byte, batched bool) error {
 		return err
 	}
 	abs := filepath.Join(v.Root, filepath.FromSlash(r))
+	if content, err = keepVersions(r, abs, content); err != nil {
+		return err
+	}
+	return v.write(r, abs, content, batched)
+}
+
+// write puts the note r on disk at abs.
+func (v *Vault) write(r, abs string, content []byte, batched bool) error {
 	synced := v.syncs(batched)
 	if err := writeInDir(abs, content, synced); err != nil {
 		return err
@@ -622,11 +630,11 @@ func (v *Vault) Scan(idx *index.Index) (ScanStats, error) {
 		defer idx.BulkLoad(false)
 	}
 	onDisk := make(map[string]bool, len(paths))
-	next := v.readBatch(paths[:min(scanBatch, len(paths))], stamps)
+	next := v.readBatch(idx, paths[:min(scanBatch, len(paths))], stamps)
 	for from := 0; from < len(paths); from += scanBatch {
 		batch := <-next
 		if to := from + scanBatch; to < len(paths) {
-			next = v.readBatch(paths[to:min(to+scanBatch, len(paths))], stamps)
+			next = v.readBatch(idx, paths[to:min(to+scanBatch, len(paths))], stamps)
 		}
 		var changed []index.Extracted
 		for _, s := range batch {
@@ -687,7 +695,7 @@ type scanned struct {
 // readBatch reads the notes at paths on every core and delivers them in
 // their order. A note whose content the index holds (stamps) is only read;
 // the others are extracted for the upsert too.
-func (v *Vault) readBatch(paths []string, stamps map[string]index.Stamp) <-chan []scanned {
+func (v *Vault) readBatch(idx *index.Index, paths []string, stamps map[string]index.Stamp) <-chan []scanned {
 	out := make(chan []scanned, 1)
 	go func() {
 		batch := make([]scanned, len(paths))
@@ -696,7 +704,7 @@ func (v *Vault) readBatch(paths []string, stamps map[string]index.Stamp) <-chan 
 		for range min(runtime.GOMAXPROCS(0), len(paths)) {
 			wg.Go(func() {
 				for k := next.Add(1) - 1; k < int64(len(paths)); k = next.Add(1) - 1 {
-					batch[k] = v.readNote(paths[k], stamps)
+					batch[k] = v.readNote(idx, paths[k], stamps)
 				}
 			})
 		}
@@ -706,7 +714,7 @@ func (v *Vault) readBatch(paths []string, stamps map[string]index.Stamp) <-chan 
 	return out
 }
 
-func (v *Vault) readNote(p string, stamps map[string]index.Stamp) scanned {
+func (v *Vault) readNote(idx *index.Index, p string, stamps map[string]index.Stamp) scanned {
 	n, err := loadNote(v.Root, p)
 	if err != nil {
 		return scanned{err: fmt.Errorf("load %s: %w", p, err)}
@@ -716,7 +724,7 @@ func (v *Vault) readNote(p string, stamps map[string]index.Stamp) scanned {
 		s.held = true
 		return s
 	}
-	s.note = index.Extract(s.doc)
+	s.note = idx.Extract(s.doc)
 	return s
 }
 
@@ -1280,61 +1288,12 @@ func (v *Vault) MoveNoteRewriting(idx *index.Index, from, toProject string, rewr
 
 // RenameProject renames a top-level project directory and reindexes all its
 // notes under the new prefix. Wiki-links by basename keep resolving because
-// the note filenames don't change; full-path wiki-links are rewritten to use
-// the new prefix.
+// the note filenames don't change; the references with the project's path
+// (wiki-links, links to its attachments, media pointers) stay as written:
+// RenameProjectRewriting rewrites them, in the notes its caller may write.
 func (v *Vault) RenameProject(idx *index.Index, from, to string) error {
-	fromClean, err := v.CheckExistingProject(from)
-	if err != nil {
-		return fmt.Errorf("source name: %w", err)
-	}
-	toClean, err := v.CheckProject(to)
-	if err != nil {
-		return fmt.Errorf("target name: %w", err)
-	}
-	if fromClean == toClean {
-		return nil
-	}
-
-	fromAbs := filepath.Join(v.Root, fromClean)
-	toAbs := filepath.Join(v.Root, toClean)
-
-	st, err := os.Stat(fromAbs)
-	if err != nil {
-		return fmt.Errorf("source: %w", err)
-	}
-	if !st.IsDir() {
-		return fmt.Errorf("%q is not a directory", fromClean)
-	}
-	if _, err := os.Stat(toAbs); err == nil {
-		return fmt.Errorf("target %q already exists", toClean)
-	}
-
-	// Snapshot the notes that live in the project before the rename: we'll
-	// need to shift their paths in the index afterwards.
-	oldNotes, err := idx.NotesByPrefix(fromClean)
-	if err != nil {
-		return err
-	}
-
-	if err := os.Rename(fromAbs, toAbs); err != nil {
-		return err
-	}
-
-	// Rebuild index entries under the new prefix.
-	for _, n := range oldNotes {
-		newPath := toClean + strings.TrimPrefix(n.Path, fromClean)
-		note, err := v.Load(newPath)
-		if err != nil {
-			continue
-		}
-		if err := idx.Upsert(toIndexNote(note)); err != nil {
-			return fmt.Errorf("index upsert %s: %w", newPath, err)
-		}
-		if err := idx.Delete(n.Path); err != nil {
-			return fmt.Errorf("index delete %s: %w", n.Path, err)
-		}
-	}
-	return nil
+	_, err := v.RenameProjectRewriting(idx, from, to, nil)
+	return err
 }
 
 func toIndexNote(n *Note) index.NoteDoc {

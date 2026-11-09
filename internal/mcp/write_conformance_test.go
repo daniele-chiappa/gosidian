@@ -94,6 +94,29 @@ func writeConformanceCases() []conformanceCase {
 			return h(s)(ctx, call(m))
 		}
 	}
+	// The versions of a note (IMP-201) work on a tagged note, in a vault
+	// with git.
+	gitServer := func(t *testing.T) *Server {
+		s, _, _ := newTestServer(t)
+		startGit(t, s)
+		return s
+	}
+	committed := func(t *testing.T, s *Server, ctx context.Context) string {
+		writeVaultFile(t, s.vault.Root, "p/a.md", "---\ntitle: A\n---\nbody\n")
+		if _, err := s.git.TagNote(ctx, "p/a.md", "", "V1", "", "t"); err != nil {
+			t.Fatal(err)
+		}
+		return ""
+	}
+	versionsCall := func(a map[string]any) func(context.Context, *Server, string) (*mcplib.CallToolResult, error) {
+		return func(ctx context.Context, s *Server, _ string) (*mcplib.CallToolResult, error) {
+			m := map[string]any{"path": "p/a.md"}
+			for k, v := range a {
+				m[k] = v
+			}
+			return s.handleVersions(ctx, call(m))
+		}
+	}
 	handoff := func(claim bool) func(*testing.T, *Server, context.Context) string {
 		return func(t *testing.T, s *Server, ctx context.Context) string {
 			path := createTestHandoff(t, s, ctx)
@@ -158,6 +181,17 @@ func writeConformanceCases() []conformanceCase {
 			call:   args(func(s *Server) toolFn { return s.handleAsk }, map[string]any{"project": "p", "question": "why?"}),
 			audit:  []auditWant{{audit.ActionAppend, "p/docs/open-questions.md"}},
 			events: []seenEvent{{events.TopicNote, "create", "p/docs/open-questions.md"}, {events.TopicTree, "create", "p/docs/open-questions.md"}}},
+		{tool: "memory_versions", name: "tag", server: gitServer, setup: committed,
+			call:  versionsCall(map[string]any{"action": "tag", "label": "V2"}),
+			audit: []auditWant{{audit.ActionNoteTag, "p/a.md"}}},
+		{tool: "memory_versions", name: "valid", server: gitServer, setup: committed,
+			call:   versionsCall(map[string]any{"action": "valid", "tag": "V1"}),
+			audit:  []auditWant{{audit.ActionNoteValid, "p/a.md"}},
+			events: []seenEvent{{events.TopicNote, "update", "p/a.md"}}},
+		{tool: "memory_versions", name: "clear", server: gitServer, setup: committed,
+			call:   versionsCall(map[string]any{"action": "clear"}),
+			audit:  []auditWant{{audit.ActionNoteValid, "p/a.md"}},
+			events: []seenEvent{{events.TopicNote, "update", "p/a.md"}}},
 		{tool: "memory_snapshot", setup: note(map[string]string{"p/hot.md": "---\ntitle: Hot\ntags: [p]\n---\n\n# Hot\n"}),
 			call:   args(func(s *Server) toolFn { return s.handleSnapshot }, map[string]any{"path": "p/hot.md"}),
 			audit:  []auditWant{{audit.ActionCreate, "p/hot.snapshots/*"}},
@@ -224,6 +258,17 @@ func writeConformanceCases() []conformanceCase {
 			}),
 			audit:  []auditWant{{audit.ActionCreate, "insights/*"}},
 			events: []seenEvent{{events.TopicNote, "create", "insights/*"}, {events.TopicTree, "create", "insights/*"}}},
+		{tool: "layout_add_piece", server: layoutConformance, setup: layoutNoteSetup,
+			call:   args(func(s *Server) toolFn { return s.handleLayoutAddPiece }, map[string]any{"note": "p/libro.md", "text": "Un pezzo"}),
+			audit:  []auditWant{{audit.ActionUpdate, "$"}},
+			events: []seenEvent{{events.TopicNote, "update", "$"}}},
+		{tool: "layout_number_pieces", server: layoutConformance, setup: layoutNoteSetup,
+			call:   args(func(s *Server) toolFn { return s.handleLayoutNumberPieces }, map[string]any{"note": "p/libro.md"}),
+			audit:  []auditWant{{audit.ActionUpdate, "$"}},
+			events: []seenEvent{{events.TopicNote, "update", "$"}}},
+		{tool: "layout_save", server: layoutConformance, setup: layoutSessionSetup, call: layoutSaveCall,
+			audit:  []auditWant{{audit.ActionUploadAttachment, "p/attachments/*"}, {audit.ActionUpdate, "p/libro.md"}},
+			events: []seenEvent{{events.TopicNote, "update", "p/libro.md"}}},
 		{tool: "memory_create_table_note",
 			setup: func(t *testing.T, s *Server, _ context.Context) string { s.vault.SetTableNotes(true); return "" },
 			call: args(func(s *Server) toolFn { return s.handleCreateTableNote }, map[string]any{
@@ -336,6 +381,8 @@ type toolFn = func(context.Context, mcplib.CallToolRequest) (*mcplib.CallToolRes
 // readOnlyTools never change the vault. A tool that is neither here nor in
 // writeConformanceCases fails TestTools_EveryToolClassified.
 var readOnlyTools = map[string]bool{
+	"layout_close": true, "layout_commands": true, "layout_open": true, "layout_pieces": true,
+	"layout_render": true, "layout_run": true,
 	"memory_attachment_info": true, "memory_audit_tail": true, "memory_backlinks": true,
 	"memory_batch_get": true, "memory_bootstrap": true, "memory_get": true,
 	"memory_get_frontmatter": true, "memory_get_outline": true, "memory_get_section": true,

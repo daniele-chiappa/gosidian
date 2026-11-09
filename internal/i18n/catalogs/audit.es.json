@@ -1,0 +1,106 @@
+{
+  "admin": {
+    "audit": {
+      "table": "Entradas de la auditoría",
+      "range": "{from}–{to} de {total}",
+      "pages": "Páginas de la auditoría",
+      "previous": "Página anterior",
+      "next": "Página siguiente",
+      "newest_first": "Primero las más recientes",
+      "oldest_first": "Primero las más antiguas",
+      "action_groups": {
+        "note": "Notas y archivos",
+        "project": "Proyectos",
+        "access": "Permisos y equipos",
+        "account": "Cuentas",
+        "session": "Inicios de sesión",
+        "token": "Tokens MCP",
+        "pipeline": "Pipelines y plugins",
+        "server": "Servidor"
+      },
+      "actions": {
+        "note": {
+          "create": "nota o archivo creado",
+          "update": "nota o archivo modificado",
+          "append": "texto añadido a una nota",
+          "delete": "nota o archivo eliminado",
+          "rename": "nota o archivo renombrado",
+          "restore": "nota restaurada desde una versión",
+          "upload_attachment": "adjunto subido",
+          "delete_attachment": "adjunto eliminado",
+          "ingest_package": "paquete de notas importado",
+          "in_upload": "subida a IN terminada",
+          "in_upload_open": "subida a IN abierta por un agente",
+          "export": "exportación zip descargada",
+          "mirror_sync": "copia local sincronizada"
+        },
+        "project": {
+          "create_project": "proyecto creado",
+          "delete_project": "proyecto eliminado",
+          "rename_project": "proyecto renombrado",
+          "project_flags_update": "flags de un proyecto modificados",
+          "personal_project_create": "proyecto personal creado"
+        },
+        "access": {
+          "project_member_set": "permiso dado a una cuenta",
+          "project_member_remove": "permiso retirado a una cuenta",
+          "project_team_set": "permiso dado a un equipo, desde el proyecto",
+          "project_team_remove": "permiso retirado a un equipo, desde el proyecto",
+          "team_create": "equipo creado",
+          "team_update": "equipo modificado",
+          "team_delete": "equipo eliminado",
+          "team_user_add": "cuenta añadida a un equipo",
+          "team_user_remove": "cuenta quitada de un equipo",
+          "team_grant_set": "permiso dado a un equipo, desde el equipo",
+          "team_grant_remove": "permiso retirado a un equipo, desde el equipo"
+        },
+        "account": {
+          "user_create": "cuenta creada",
+          "user_update": "cuenta modificada",
+          "user_disable": "cuenta desactivada",
+          "user_archive": "cuenta archivada, nombre liberado",
+          "invite_create": "invitación creada",
+          "invite_revoke": "invitación revocada",
+          "password_change": "contraseña cambiada",
+          "password_reset": "contraseña restablecida por el administrador",
+          "totp_enroll": "verificación en dos pasos activada",
+          "totp_disenroll": "verificación en dos pasos desactivada",
+          "totp_reset": "verificación en dos pasos restablecida por el administrador",
+          "totp_recovery_used": "código de recuperación usado",
+          "totp_recovery_regen": "códigos de recuperación regenerados"
+        },
+        "session": {
+          "spa_token_create": "inicio de sesión en la interfaz web",
+          "spa_token_refresh": "sesión de la interfaz web renovada",
+          "spa_token_revoke": "cierre de sesión en la interfaz web",
+          "spa_login_failed": "inicio de sesión fallido",
+          "oauth_client_register": "cliente OAuth registrado",
+          "oauth_grant": "autorización OAuth concedida",
+          "oauth_refresh": "autorización OAuth renovada",
+          "oauth_revoke": "autorización OAuth revocada"
+        },
+        "token": {
+          "token_create": "token MCP creado",
+          "token_update": "token MCP modificado",
+          "token_revoke": "token MCP revocado"
+        },
+        "pipeline": {
+          "pipeline_run": "pipeline iniciado",
+          "pipeline_resume": "pipeline reanudado",
+          "pipeline_cancel": "pipeline cancelado",
+          "plugin_call": "herramienta de un plugin invocada"
+        },
+        "server": {
+          "settings_update": "ajustes del servidor modificados",
+          "git_token_set": "token de git establecido",
+          "git_token_unset": "token de git eliminado",
+          "note_tag": "versión de una nota nombrada",
+          "note_valid": "versión válida de una nota cambiada",
+          "note_mcp_version": "versión para MCP de una nota cambiada",
+          "font_add": "fuente añadida al catálogo",
+          "font_delete": "fuente quitada del catálogo"
+        }
+      }
+    }
+  }
+}

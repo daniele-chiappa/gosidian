@@ -128,7 +128,7 @@ If you build your own MCP client:
 
 ## Verification
 
-Once connected, a client with a full-profile token should see 71 tools
+Once connected, a client with a full-profile token should see 81 tools
 in `tools/list` on a server that runs pipelines, and four fewer while they
 are off and no project it writes in has an IN folder: the branches' tools
 appear with their branch ([catalogue](tools.md)). A good smoke sequence

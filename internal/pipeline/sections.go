@@ -111,6 +111,20 @@ func noteMedia(host NoteReader, project, note string) (map[string]mediaText, err
 	return out, nil
 }
 
+// MediaDescriptions are what the image notes of a note say of its images, by
+// the image's path in the vault.
+func MediaDescriptions(host NoteReader, project, note string) (map[string]string, error) {
+	media, err := noteMedia(host, project, note)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(media))
+	for _, m := range media {
+		out[m.path] = m.description
+	}
+	return out, nil
+}
+
 // flatText is s on one line, its runs of spaces one space.
 func flatText(s string) string { return strings.Join(strings.Fields(s), " ") }
 
@@ -413,6 +427,7 @@ const (
 // version of the note to the next: the note, the path of its headings (and
 // which, when two have the same), its part and its paragraph.
 func cutNote(doc, title, body string, opt cutOptions) []piece {
+	body = parser.WithoutPieceMarks(body)
 	type section struct {
 		level   int
 		heading string
@@ -696,7 +711,7 @@ func noteSections(_ context.Context, env *Env, with map[string]any) (any, error)
 		return nil, err
 	}
 
-	note, err := env.Engine.host.ReadNote(env.Project, rel)
+	note, err := readNoteAt(env, rel, with)
 	if err != nil {
 		return nil, err
 	}

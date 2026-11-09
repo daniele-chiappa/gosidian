@@ -54,6 +54,10 @@ export interface Project {
    *  "last activity" (fs birth time isn't preserved by rsync /
    *  git checkout / container layer copy). Empty when stat failed. */
   mod_time?: string
+  /** In the answer of a rename only (BUG-153): the notes whose references
+   *  to the project's files it rewrote, and those in projects the caller may
+   *  not write, which keep the old name. */
+  links?: { rewritten: number; not_rewritten: number }
 }
 
 export interface ProjectListResponse {

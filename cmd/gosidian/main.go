@@ -17,18 +17,21 @@ import (
 	"time"
 
 	apiv1 "github.com/gosidian/gosidian/internal/api/v1"
+	"github.com/gosidian/gosidian/internal/attach"
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/gosidian/gosidian/internal/authz"
 	"github.com/gosidian/gosidian/internal/automation"
 	"github.com/gosidian/gosidian/internal/clock"
 	"github.com/gosidian/gosidian/internal/config"
+	"github.com/gosidian/gosidian/internal/fonts"
 	"github.com/gosidian/gosidian/internal/gitsync"
 	"github.com/gosidian/gosidian/internal/graphspec"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/infolder"
 	"github.com/gosidian/gosidian/internal/insights"
 	"github.com/gosidian/gosidian/internal/jobs"
+	"github.com/gosidian/gosidian/internal/layout"
 	"github.com/gosidian/gosidian/internal/ldap"
 	"github.com/gosidian/gosidian/internal/marks"
 	mcpsrv "github.com/gosidian/gosidian/internal/mcp"
@@ -486,6 +489,11 @@ func main() {
 		serveHTTP(legacyMCPSrv, "mcp legacy")
 	}
 
+	// A note with a valid version is searched by that version (IMP-201),
+	// read from git from the first scan on: the sync starts after it.
+	syncer := gitsync.New(absVault, cfg.Git)
+	idx.SetSearchText(syncer.ValidText)
+
 	log.Printf("scanning vault %s", absVault)
 	scanStart := time.Now()
 	scan, err := v.Scan(idx)
@@ -503,7 +511,6 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	syncer := gitsync.New(absVault, cfg.Git)
 	syncer.SetProjects(projectsStore)
 	syncer.SetStateDir(v.StateDirInside())
 	syncer.SetStagingDirs(stagingInVault(v, cfg.MCP.BridgeDir, cfg.MCP.AllowedUploadRoots))
@@ -610,7 +617,11 @@ func main() {
 	if len(cfg.MCP.IngestURLAllowlist) > 0 {
 		log.Printf("mcp ingest url allowlist: %s (memory_ingest url source enabled)", strings.Join(cfg.MCP.IngestURLAllowlist, ", "))
 	}
+	fontStore := fonts.New(filepath.Join(sdir, "fonts"))
+	mcpServer.SetLayout(layout.Limits{MaxBytes: int64(cfg.Web.LayoutMaxBytes), MaxDocument: int64(cfg.Web.LayoutMaxDocumentBytes),
+		MaxEntries: cfg.Web.LayoutMaxEntries}, fontStore)
 	mcpServer.SetProjects(projectsStore)
+	mcpServer.SetGit(syncer)
 	mcpServer.SetTrash(trashBin)
 	// The job runner (IMP-166): the pipelines' runs and the automations'
 	// actions, on with either of them; [pipelines] enabled governs only the
@@ -700,10 +711,23 @@ func main() {
 	// automations; off unless [pipelines] enabled.
 	if cfg.Pipelines.Enabled {
 		pluginReg = startPipelines(ctx, cfg, sdir, runner, mcpServer, inFolders, syncer)
+		var chatOrigins func() []string
 		if c := mcpServer.Chat(); c != nil {
 			wireChat(c, auditLog)
-			apiv1.SetFrameSources(c.FrameOrigins)
+			chatOrigins = c.FrameOrigins
 		}
+		// The SPA frames the bots' pages and the plugins' apps (IMP-226).
+		reg := pluginReg
+		apiv1.SetFrameSources(func() []string {
+			var out []string
+			if chatOrigins != nil {
+				out = append(out, chatOrigins()...)
+			}
+			if reg != nil {
+				out = append(out, reg.AppOrigins()...)
+			}
+			return out
+		})
 	}
 	// A token owned by a web account is narrowed on every request to what
 	// that account may currently read and write (BUG-055): the resolver maps
@@ -759,11 +783,18 @@ func main() {
 	// The graph blocks the lint, the web UI and the agents read ask for at
 	// most [web] graph_max_nodes.
 	graphspec.SetMaxLimit(cfg.Web.GraphMaxNodes)
+	// The largest attachment, by every way in ([uploads], IMP-226).
+	attach.SetMaxBytes(cfg.Uploads.MaxAttachmentBytes)
 	i18nCfg, i18nWarns := cfg.I18n.Effective()
 	for _, w := range i18nWarns {
 		log.Printf("config: %s", w)
 	}
 	apiv1.SetI18n(i18nCfg.DefaultLang, i18nCfg.EnabledLangs)
+	// The iterations of the boards (IMP-216 phase 2): the server closes
+	// each at its end, every 5 minutes, with the pipelines and the
+	// automations on or off; after the pipelines, which it starts, and the
+	// language its review is written in.
+	go mcpServer.RunIterations(ctx, 5*time.Minute)
 	apiv1.OpenMode = cfg.Webauth.OpenMode == "readonly"
 	apiv1.SelfImproveEnabled = cfg.SelfImprove.Enabled
 	apiv1.SelfImproveProject = cfg.SelfImprove.TargetProject
@@ -796,7 +827,9 @@ func main() {
 	apiRouter := apiv1.NewRouter(&apiv1.Deps{
 		UploadQuota: uploadQuota,
 		Web: apiv1.WebLimits{GraphDefaultNodes: cfg.Web.GraphDefaultNodes, GraphMaxNodes: cfg.Web.GraphMaxNodes,
-			GraphMaxEdges: cfg.Web.GraphMaxEdges, CutMaxChunks: cfg.Web.CutMaxChunks, PluginTimeout: cfg.Web.PluginTimeout},
+			GraphMaxEdges: cfg.Web.GraphMaxEdges, CutMaxChunks: cfg.Web.CutMaxChunks, PluginTimeout: cfg.Web.PluginTimeout,
+			LayoutMaxBytes: int64(cfg.Web.LayoutMaxBytes), LayoutMaxDocumentBytes: int64(cfg.Web.LayoutMaxDocumentBytes),
+			LayoutMaxEntries: cfg.Web.LayoutMaxEntries, LayoutMaxFontBytes: cfg.Web.LayoutMaxFontBytes},
 		Auth: &apiv1.AuthDeps{
 			WebAuth:   webauthStore,
 			SpaAuth:   spaTokenStore,
@@ -807,6 +840,7 @@ func main() {
 		},
 		Audit:      auditLog,
 		Vault:      v,
+		Fonts:      fontStore,
 		Events:     eventsHub,
 		Index:      idx,
 		Renderer:   parser.NewRenderer(),

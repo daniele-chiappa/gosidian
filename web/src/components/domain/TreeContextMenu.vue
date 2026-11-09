@@ -18,7 +18,7 @@ import { Download, Trash2 } from 'lucide-vue-next'
 import { useWindowsStore } from 'plancia'
 import { useTreeMenu } from '@/composables/useTreeMenu'
 import { useAccessStore } from '@/stores/access'
-import { useTreeStore } from '@/stores/tree'
+import { projectOfPath, useTreeStore } from '@/stores/tree'
 import { deleteFolder, exportFolder } from '@/api/folders'
 import { downloadNote, isReadOnlyNotePath } from '@/api/noteDownload'
 import { deleteNote } from '@/api/notes'
@@ -103,7 +103,9 @@ function afterDelete(paths: string[]) {
   for (const w of [...windows.windows]) {
     if (w.type === 'note' && !w.dirty && gone.has(String(w.props.path))) windows.close(w.id)
   }
-  treeStore.refresh()
+  // Their projects alone; a project itself, the whole tree (IMP-225).
+  const projects = new Set(paths.map(projectOfPath))
+  for (const project of projects) treeStore.refresh(project)
 }
 
 function menuItems(): HTMLButtonElement[] {

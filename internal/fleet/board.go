@@ -54,6 +54,10 @@ type Board struct {
 	WIP     Rigidity `json:"wip"`
 	// Done is who closes a new card, DoneAgent or DonePerson.
 	Done string `json:"done"`
+	// Stale is the days a card waits in a column of working,
+	// input-required or review before it shows as stale (phase 2), 0 for
+	// never.
+	Stale int `json:"stale"`
 }
 
 // Column is one column of a board: its cards are in Status. WIP is the
@@ -122,18 +126,19 @@ type rawBoard struct {
 		Agents string `yaml:"agents"`
 		People string `yaml:"people"`
 	} `yaml:"wip"`
-	Done string `yaml:"done"`
+	Done  string   `yaml:"done"`
+	Stale *float64 `yaml:"stale"`
 }
 
 // ParseBoard reads a block of the board note at notePath. A block that
 // does not read still gives what it could, with its problems.
 func ParseBoard(src, notePath string) (Board, []Problem) {
-	b := Board{Path: notePath, WIP: Rigidity{Agents: WIPHard, People: WIPWarn}, Done: DoneAgent}
+	b := Board{Path: notePath, WIP: Rigidity{Agents: WIPHard, People: WIPWarn}, Done: DoneAgent, Stale: DefaultStale}
 	var r rawBoard
 	dec := yaml.NewDecoder(strings.NewReader(src))
 	dec.KnownFields(true)
 	if err := dec.Decode(&r); err != nil && err.Error() != "EOF" {
-		return b, []Problem{yamlProblem(err, "a board: columns, wip, done")}
+		return b, []Problem{yamlProblem(err, "a board: columns, wip, done, stale")}
 	}
 	var problems []Problem
 	bad := func(line int, format string, args ...any) {
@@ -156,6 +161,14 @@ func ParseBoard(src, notePath string) (Board, []Problem) {
 		b.Done = d
 	default:
 		bad(0, "done %q: agent or person", d)
+	}
+	if r.Stale != nil {
+		if d := *r.Stale; d < 0 || d != math.Trunc(d) || d > 365 {
+			bad(0, "stale %s: the days a card waits in a column of working, input-required or review before it shows as stale, a whole number from 0 (never) to 365",
+				strconv.FormatFloat(d, 'f', -1, 64))
+		} else {
+			b.Stale = int(d)
+		}
 	}
 	columns, cp := parseColumns(&r.Columns)
 	problems = append(problems, cp...)

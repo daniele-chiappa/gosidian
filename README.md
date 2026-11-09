@@ -51,7 +51,7 @@ Other installation paths (source, custom compose, bare-metal):
   folder in Obsidian, VS Code, `vim`, or any editor you already use.
   Zero lock-in: delete `.gosidian/` and you have a pure Obsidian
   vault.
-- **An MCP server.** 71 typed tools let agents bootstrap a session, ingest files,
+- **An MCP server.** 81 typed tools let agents bootstrap a session, ingest files,
   search, read, write, link, handoff, self-check, audit. Bearer tokens
   and OAuth grants, each narrowed on every request to what its account
   may read and write.
@@ -121,7 +121,7 @@ mobile sync beyond git, real-time collaboration, a hosted offering. The
 - **Plancia** tiling window manager (niri-style): notes, graph, search
   and config forms open as resizable, side-by-side windows in a
   horizontally-scrollable workspace, restorable from the URL
-- MCP server over Streamable HTTP (legacy HTTP+SSE kept) with 71 typed tools
+- MCP server over Streamable HTTP (legacy HTTP+SSE kept) with 81 typed tools
 - Bearer tokens with scopes (`read` / `write`) and per-project
   restriction — including multi-project tokens for orchestrators;
   every token owned by an account is narrowed on each request to what

@@ -1,0 +1,441 @@
+{
+ "schema": 1,
+ "date": "2026-11-05",
+ "label": "guard",
+ "image": "gosidian:main-263d8e7",
+ "image_id": "sha256:e82e9e10f9f5cd7a875ac51fc03f34137ed45f949bdf804e6f9f9f71b441fa8b",
+ "version": "main-263d8e7",
+ "ref": "263d8e7",
+ "runs": 3,
+ "machine": {
+  "cpu": "AMD Ryzen 7 5700G with Radeon Graphics",
+  "cpus": 16,
+  "kernel": "7.0.14-24-pve",
+  "load_before": 3.92,
+  "load_after": 3.73
+ },
+ "limits": {
+  "cpus": "2",
+  "memory": "2g"
+ },
+ "vault": {
+  "notes": 87,
+  "bytes": 65965
+ },
+ "start": {
+  "cold_ms": [
+   449.3,
+   445.7,
+   452.2
+  ],
+  "warm_ms": [
+   232.2,
+   217.5,
+   213.3
+  ]
+ },
+ "retrieval": {
+  "any_of": {
+   "n": 45,
+   "r_at_1": 0.733,
+   "r_at_5": 0.956,
+   "mrr": 0.832,
+   "miss": 1,
+   "by_category": {
+    "cross-lingual": {
+     "n": 4,
+     "r_at_1": 0.75,
+     "r_at_5": 1,
+     "mrr": 0.875,
+     "miss": 0
+    },
+    "lexical": {
+     "n": 10,
+     "r_at_1": 0.8,
+     "r_at_5": 1,
+     "mrr": 0.9,
+     "miss": 0
+    },
+    "multi-hop": {
+     "n": 7,
+     "r_at_1": 0.857,
+     "r_at_5": 1,
+     "mrr": 0.929,
+     "miss": 0
+    },
+    "paraphrase": {
+     "n": 12,
+     "r_at_1": 0.5,
+     "r_at_5": 0.833,
+     "mrr": 0.635,
+     "miss": 1
+    },
+    "temporal": {
+     "n": 5,
+     "r_at_1": 0.8,
+     "r_at_5": 1,
+     "mrr": 0.9,
+     "miss": 0
+    },
+    "typed": {
+     "n": 7,
+     "r_at_1": 0.857,
+     "r_at_5": 1,
+     "mrr": 0.905,
+     "miss": 0
+    }
+   },
+   "ranks": {
+    "D1": 1,
+    "D2": 2,
+    "D3": 1,
+    "D4": 1,
+    "D5": 1,
+    "L1": 1,
+    "L10": 1,
+    "L2": 2,
+    "L3": 1,
+    "L4": 1,
+    "L5": 2,
+    "L6": 1,
+    "L7": 1,
+    "L8": 1,
+    "L9": 1,
+    "M1": 1,
+    "M2": 1,
+    "M3": 1,
+    "M4": 1,
+    "M5": 2,
+    "M6": 1,
+    "M7": 1,
+    "P1": 1,
+    "P10": 2,
+    "P11": 6,
+    "P12": 1,
+    "P2": 1,
+    "P3": 5,
+    "P4": 1,
+    "P5": 2,
+    "P6": 1,
+    "P7": 4,
+    "P8": 0,
+    "P9": 1,
+    "T1": 1,
+    "T2": 3,
+    "T3": 1,
+    "T4": 1,
+    "T5": 1,
+    "T7": 1,
+    "T8": 1,
+    "X1": 1,
+    "X2": 1,
+    "X3": 1,
+    "X4": 2
+   }
+  },
+  "query": {
+   "n": 45,
+   "r_at_1": 0.511,
+   "r_at_5": 0.8,
+   "mrr": 0.628,
+   "miss": 8,
+   "by_category": {
+    "cross-lingual": {
+     "n": 4,
+     "r_at_1": 0.25,
+     "r_at_5": 0.5,
+     "mrr": 0.333,
+     "miss": 2
+    },
+    "lexical": {
+     "n": 10,
+     "r_at_1": 0.3,
+     "r_at_5": 0.8,
+     "mrr": 0.529,
+     "miss": 1
+    },
+    "multi-hop": {
+     "n": 7,
+     "r_at_1": 0.714,
+     "r_at_5": 1,
+     "mrr": 0.857,
+     "miss": 0
+    },
+    "paraphrase": {
+     "n": 12,
+     "r_at_1": 0.5,
+     "r_at_5": 0.583,
+     "mrr": 0.542,
+     "miss": 5
+    },
+    "temporal": {
+     "n": 5,
+     "r_at_1": 0.6,
+     "r_at_5": 1,
+     "mrr": 0.74,
+     "miss": 0
+    },
+    "typed": {
+     "n": 7,
+     "r_at_1": 0.714,
+     "r_at_5": 1,
+     "mrr": 0.779,
+     "miss": 0
+    }
+   },
+   "ranks": {
+    "D1": 1,
+    "D2": 5,
+    "D3": 2,
+    "D4": 1,
+    "D5": 1,
+    "L1": 1,
+    "L10": 1,
+    "L2": 2,
+    "L3": 0,
+    "L4": 3,
+    "L5": 2,
+    "L6": 1,
+    "L7": 2,
+    "L8": 8,
+    "L9": 3,
+    "M1": 1,
+    "M2": 1,
+    "M3": 1,
+    "M4": 1,
+    "M5": 2,
+    "M6": 2,
+    "M7": 1,
+    "P1": 1,
+    "P10": 0,
+    "P11": 0,
+    "P12": 1,
+    "P2": 1,
+    "P3": 0,
+    "P4": 1,
+    "P5": 1,
+    "P6": 2,
+    "P7": 1,
+    "P8": 0,
+    "P9": 0,
+    "T1": 1,
+    "T2": 5,
+    "T3": 4,
+    "T4": 1,
+    "T5": 1,
+    "T7": 1,
+    "T8": 1,
+    "X1": 3,
+    "X2": 1,
+    "X3": 0,
+    "X4": 0
+   }
+  }
+ },
+ "surface": {
+  "tools_full": 65,
+  "tools_core": 27,
+  "tools_list_bytes_full": 79534,
+  "tools_list_bytes_core": 37897,
+  "bootstrap_bytes": 21604,
+  "bootstrap_reply_bytes": 43977,
+  "search_bytes": 1892
+ },
+ "latency": {
+  "memory_append": {
+   "n": 120,
+   "p50_ms": 4.198,
+   "p95_ms": 6.506,
+   "p99_ms": 16.286,
+   "mean_ms": 4.689
+  },
+  "memory_bootstrap": {
+   "n": 90,
+   "p50_ms": 3.282,
+   "p95_ms": 4.419,
+   "p99_ms": 4.541,
+   "mean_ms": 3.361
+  },
+  "memory_create": {
+   "n": 120,
+   "p50_ms": 4.097,
+   "p95_ms": 6.974,
+   "p99_ms": 22.202,
+   "mean_ms": 4.839
+  },
+  "memory_edit": {
+   "n": 120,
+   "p50_ms": 4.365,
+   "p95_ms": 5.376,
+   "p99_ms": 17.151,
+   "mean_ms": 4.9
+  },
+  "memory_get": {
+   "n": 450,
+   "p50_ms": 0.517,
+   "p95_ms": 0.747,
+   "p99_ms": 1.074,
+   "mean_ms": 0.548
+  },
+  "memory_list_notes": {
+   "n": 150,
+   "p50_ms": 0.764,
+   "p95_ms": 1.007,
+   "p99_ms": 1.136,
+   "mean_ms": 0.81
+  },
+  "memory_query": {
+   "n": 300,
+   "p50_ms": 1.437,
+   "p95_ms": 1.904,
+   "p99_ms": 2.304,
+   "mean_ms": 1.507
+  },
+  "memory_search": {
+   "n": 450,
+   "p50_ms": 1.195,
+   "p95_ms": 1.784,
+   "p99_ms": 2.013,
+   "mean_ms": 1.207
+  }
+ },
+ "resources": {
+  "idle_anon": [
+   23732224,
+   17248256,
+   17043456
+  ],
+  "idle_file": [
+   2306048,
+   2306048,
+   2306048
+  ],
+  "idle_current": [
+   29364224,
+   22515712,
+   22421504
+  ],
+  "cpu_idle_pct": [
+   0.294,
+   0.309,
+   0.282
+  ],
+  "load_anon": [
+   21889024,
+   21602304,
+   21278720
+  ],
+  "peak": [
+   34496512,
+   31674368,
+   31080448
+  ],
+  "cpu_per_call_us": [
+   1384.1,
+   1447.2,
+   1400.5
+  ]
+ },
+ "sizes": {
+  "image": 102418954,
+  "binary": 51163296,
+  "state": 2162688,
+  "index_db": 4096
+ },
+ "spa": {
+  "files": 14,
+  "bytes": 150354,
+  "gzip_bytes": 155004,
+  "served_gzip": true
+ },
+ "large": {
+  "notes": 5087,
+  "cold_ms": [
+   2879.8,
+   2864.5,
+   2844.9
+  ],
+  "warm_ms": [
+   291.1,
+   289.4,
+   287.3
+  ],
+  "idle_anon": [
+   22216704,
+   22396928,
+   22958080
+  ],
+  "index_db": 28278784,
+  "state": 39452672,
+  "search": {
+   "n": 450,
+   "p50_ms": 1.735,
+   "p95_ms": 4.743,
+   "p99_ms": 5.739,
+   "mean_ms": 2.062
+  }
+ },
+ "code": {
+  "ref": "263d8e7",
+  "go_lines": 94765,
+  "go_test_lines": 68720,
+  "base_lines": 74505,
+  "branch_lines": 20260,
+  "packages": {
+   "cmd/gosidian": 3671,
+   "internal/api": 14273,
+   "internal/attach": 403,
+   "internal/audit": 511,
+   "internal/auth": 1476,
+   "internal/authz": 247,
+   "internal/automation": 1339,
+   "internal/canvas": 324,
+   "internal/chatbot": 1409,
+   "internal/clock": 159,
+   "internal/config": 1862,
+   "internal/dbschema": 880,
+   "internal/diagram": 1327,
+   "internal/fleet": 1948,
+   "internal/frontmatter": 536,
+   "internal/gitsync": 2354,
+   "internal/graphspec": 215,
+   "internal/i18n": 50,
+   "internal/index": 4651,
+   "internal/infolder": 4272,
+   "internal/initprompt": 823,
+   "internal/insights": 183,
+   "internal/jobs": 1894,
+   "internal/layout": 555,
+   "internal/ldap": 115,
+   "internal/linkgraph": 355,
+   "internal/lint": 1947,
+   "internal/marks": 232,
+   "internal/mcp": 15726,
+   "internal/metrics": 195,
+   "internal/mirror": 534,
+   "internal/oauth": 1818,
+   "internal/parser": 2110,
+   "internal/pipeline": 9798,
+   "internal/pkgimport": 526,
+   "internal/plugins": 2833,
+   "internal/projectops": 463,
+   "internal/projects": 1435,
+   "internal/qrsvg": 110,
+   "internal/ratelimit": 69,
+   "internal/scaffold": 287,
+   "internal/secrets": 239,
+   "internal/server": 1231,
+   "internal/statedir": 158,
+   "internal/trash": 466,
+   "internal/uploadquota": 163,
+   "internal/vault": 3596,
+   "internal/views": 3250,
+   "internal/webauth": 1747
+  },
+  "web_lines": 27689,
+  "go_direct": 16,
+  "go_indirect": 23,
+  "npm": 23,
+  "npm_dev": 23
+ }
+}

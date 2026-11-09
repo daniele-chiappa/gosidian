@@ -12,6 +12,7 @@ import (
 
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/auth"
+	"github.com/gosidian/gosidian/internal/fonts"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/marks"
 	"github.com/gosidian/gosidian/internal/parser"
@@ -74,6 +75,7 @@ func newNotesFixture(t *testing.T) *notesFixture {
 		Auth:     &AuthDeps{WebAuth: wa, SpaAuth: spa, Logger: slog.Default()},
 		Audit:    al,
 		Vault:    v,
+		Fonts:    fonts.New(filepath.Join(dir, "state-fonts")),
 		Events:   hub,
 		Index:    idx,
 		Renderer: parser.NewRenderer(),

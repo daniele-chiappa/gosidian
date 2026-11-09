@@ -14,6 +14,7 @@ import (
 	"github.com/gosidian/gosidian/internal/attach"
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/auth"
+	"github.com/gosidian/gosidian/internal/gitsync"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/infolder"
 	"github.com/gosidian/gosidian/internal/jobs"
@@ -179,12 +180,57 @@ func (h pipelineHost) ReadNote(project, rel string) (pipeline.NoteData, error) {
 	if err != nil {
 		return pipeline.NoteData{}, err
 	}
+	return pipelineNote(note), nil
+}
+
+// pipelineNote is a note as the nodes read it.
+func pipelineNote(note *vault.Note) pipeline.NoteData {
 	fm := parser.ParseFrontmatterFields(parser.FrontmatterRawForPath(note.Path, note.Content))
 	title, _ := fm["title"].(string)
 	if title == "" {
 		title = note.Title
 	}
-	return pipeline.NoteData{Path: note.Path, Title: title, Frontmatter: fm, Body: parser.BodyAfterFrontmatter(note.Content), ETag: note.ETag(), Raw: note.Content}, nil
+	return pipeline.NoteData{Path: note.Path, Title: title, Frontmatter: fm, Body: parser.BodyAfterFrontmatter(note.Content), ETag: note.ETag(), Raw: note.Content}
+}
+
+// ReadNoteAt reads the note as a version holds it (pipeline.VersionReader):
+// "valid" is its valid version, and the note as it is when it has none or
+// that does not read, as for a reader; a tag must be of the project's. Its
+// etag is not the note's, so no write takes it over the draft.
+func (h pipelineHost) ReadNoteAt(project, rel, at string) (pipeline.NoteData, error) {
+	if err := inProject(project, rel); err != nil {
+		return pipeline.NoteData{}, err
+	}
+	note, err := h.s.vault.Load(rel)
+	if errors.Is(err, fs.ErrNotExist) {
+		return pipeline.NoteData{}, fmt.Errorf("%w: %s", pipeline.ErrNoNote, rel)
+	}
+	if err != nil {
+		return pipeline.NoteData{}, err
+	}
+	var v *gitsync.Version
+	if at == "valid" {
+		chosen := h.s.git.Valid(rel, note.Content, versionMaxBytes)
+		if chosen == nil || chosen.Missing {
+			return pipelineNote(note), nil
+		}
+		v = &chosen.Version
+	} else {
+		if h.s.git == nil {
+			return pipeline.NoteData{}, fmt.Errorf("with.at %q: git sync is off", at)
+		}
+		tagged, err := h.s.git.TagVersion(rel, at, versionMaxBytes)
+		if err != nil || tagged.Content == nil {
+			return pipeline.NoteData{}, fmt.Errorf("with.at %q: not a version of %s", at, rel)
+		}
+		if err := inProject(project, tagged.Path); err != nil {
+			return pipeline.NoteData{}, err
+		}
+		v = &tagged
+	}
+	version := *note
+	version.Content, version.Size, version.ModTime = v.Content, v.Size, v.Date
+	return pipelineNote(&version), nil
 }
 
 // NotesIn lists the notes directly in a folder of the project, from the

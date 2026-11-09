@@ -150,10 +150,38 @@ func TestStoreRejectsUnsupported(t *testing.T) {
 
 func TestStoreRejectsTooLarge(t *testing.T) {
 	s := &fakeSaver{saved: make(map[string][]byte)}
-	big := make([]byte, MaxBytes+1)
+	big := make([]byte, MaxBytes()+1)
 	_, err := Store(s, big, "big.png", "")
 	if err == nil {
 		t.Error("expected error for oversized file")
+	}
+}
+
+// The largest attachment is a setting of the server ([uploads]
+// max_attachment_bytes, IMP-226): 10 MiB unless it says otherwise.
+func TestMaxBytesSetting(t *testing.T) {
+	t.Cleanup(func() { SetMaxBytes(0) })
+	if MaxBytes() != DefaultMaxBytes || MaxSize() != "10 MiB" {
+		t.Fatalf("default %d %q", MaxBytes(), MaxSize())
+	}
+	png := func(n int) []byte { return append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, n)...) }
+	SetMaxBytes(1 << 10)
+	s := &fakeSaver{saved: make(map[string][]byte)}
+	if _, err := Store(s, png(2<<10), "a.png", ""); err == nil || !strings.Contains(err.Error(), "max 1 KiB") {
+		t.Errorf("past 1 KiB: %v", err)
+	}
+	if _, err := Store(s, png(100), "a.png", ""); err != nil {
+		t.Errorf("within 1 KiB: %v", err)
+	}
+	SetMaxBytes(50 << 20)
+	if MaxBytes() != 50<<20 || MaxSize() != "50 MiB" {
+		t.Errorf("50 MiB: %d %q", MaxBytes(), MaxSize())
+	}
+	if SetMaxBytes(1000); MaxSize() != "1000 bytes" {
+		t.Errorf("1000: %q", MaxSize())
+	}
+	if SetMaxBytes(0); MaxBytes() != DefaultMaxBytes {
+		t.Errorf("0 is the default: %d", MaxBytes())
 	}
 }
 

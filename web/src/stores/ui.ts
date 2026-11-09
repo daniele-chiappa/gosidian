@@ -19,7 +19,7 @@
  * default would always look identical to the persisted value.
  */
 import { defineStore } from 'pinia'
-import { i18n } from '@/locales'
+import { i18n, isLoaded, loadLocale } from '@/locales'
 import { getVersion, type VersionInfo } from '@/api/version'
 
 export type ThemePreset =
@@ -31,7 +31,8 @@ export type ThemePreset =
 
 export type LocaleCode = 'it' | 'en' | 'es' | 'fr' | 'de'
 
-/** plancia layout: the niri-style strip or a tab bar. Persisted like the rest. */
+/** plancia layout: a tab bar (the default) or the niri-style strip.
+ *  Persisted like the rest once the user picks one. */
 export type PlanciaViewMode = 'strip' | 'tabs'
 
 /** Graph window renderer: 2D canvas (default) or 3D WebGL. Global default;
@@ -42,6 +43,13 @@ interface UIState {
   preset: ThemePreset
   locale: LocaleCode | ''
   planciaViewMode: PlanciaViewMode
+  /** The user picked the view with the bar's buttons. The default was the
+   *  strip before the tabs, and a stored strip without this mark is that
+   *  old default, which hydrate replaces with the tabs. */
+  planciaViewChosen: boolean
+  /** The user closed the sidebar on a wide screen (IMP-229); the drawer of a
+   *  narrow screen leaves it as it is. */
+  sidebarClosed: boolean
   graphMode: GraphRenderMode
   /** The languages the operator enables (`i18n.enabled_langs`), read from
    *  /api/v1/version at every hydrate; not persisted. */
@@ -72,7 +80,9 @@ export const useUIStore = defineStore('ui', {
   state: (): UIState => ({
     preset: 'catppuccin-mocha',
     locale: '',
-    planciaViewMode: 'strip',
+    planciaViewMode: 'tabs',
+    planciaViewChosen: false,
+    sidebarClosed: false,
     graphMode: '2d',
     enabledLocales: [...VALID_LOCALES],
     pipelinesEnabled: false,
@@ -88,6 +98,10 @@ export const useUIStore = defineStore('ui', {
     setPlanciaViewMode(mode: PlanciaViewMode) {
       if (mode !== 'strip' && mode !== 'tabs') return
       this.planciaViewMode = mode
+      this.planciaViewChosen = true
+    },
+    setSidebarClosed(closed: boolean) {
+      this.sidebarClosed = closed
     },
     setGraphMode(mode: GraphRenderMode) {
       if (mode !== '2d' && mode !== '3d') return
@@ -96,24 +110,34 @@ export const useUIStore = defineStore('ui', {
     setLocale(locale: LocaleCode) {
       if (!VALID_LOCALES.includes(locale) || !this.enabledLocales.includes(locale)) return
       this.locale = locale
-      this.applyLocale()
+      void this.applyLocale()
     },
     applyPreset() {
       document.documentElement.dataset.preset = this.preset
     },
-    applyLocale() {
+    /** Switches vue-i18n and the page's lang once the language's catalogue
+     *  is in (IMP-220, F-20): until then the page stays in the language it
+     *  was, never German words under lang="en". */
+    async applyLocale() {
       // Empty (first boot, server fetch not done yet) → leave
       // vue-i18n on its `fallbackLocale` ('en').
       const lang = this.locale || 'en'
+      if (!isLoaded(lang)) {
+        await loadLocale(lang)
+        // A later choice came in while this one loaded: it applies itself.
+        if ((this.locale || 'en') !== lang) return
+      }
       const global = i18n.global
       ;(global.locale as unknown as { value: string }).value = lang
       document.documentElement.lang = lang
     },
     async hydrate() {
-      // The stored choice applies at once (no first-paint flash); the
-      // server's languages may still correct it.
+      // The stored choice applies at once (no first-paint flash: main.ts
+      // loads its catalogue before mounting); the server's languages may
+      // still correct it.
       this.applyPreset()
-      if (this.locale) this.applyLocale()
+      if (!this.planciaViewChosen) this.planciaViewMode = 'tabs'
+      if (this.locale) void this.applyLocale()
       await this.refreshLocales()
     },
     /** Reads the operator's default and enabled languages: a locale that is
@@ -137,8 +161,8 @@ export const useUIStore = defineStore('ui', {
         if (d && isLocale(d) && this.enabledLocales.includes(d)) this.locale = d
         else this.locale = this.enabledLocales.includes('en') ? 'en' : (this.enabledLocales[0] ?? 'en')
       }
-      this.applyLocale()
+      await this.applyLocale()
     },
   },
-  persist: { key: 'gosidian.ui', paths: ['preset', 'locale', 'planciaViewMode', 'graphMode'] },
+  persist: { key: 'gosidian.ui', paths: ['preset', 'locale', 'planciaViewMode', 'planciaViewChosen', 'sidebarClosed', 'graphMode'] },
 })

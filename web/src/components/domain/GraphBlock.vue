@@ -4,8 +4,9 @@
  * links with the block's filters, or a graph of a plugin exposed in the
  * note's project (the chunks of an archive of vectors and their
  * neighbours). «Open in the Graph» opens the Graph window on the same
- * view, «Code» shows the YAML. The canvas loads on first use; a block that
- * does not read shows its code and why.
+ * view, «Code» shows the YAML, «List» the graph as text (IMP-224, F-32).
+ * The canvas loads on first use; a block that does not read shows its
+ * code and why.
  */
 import { computed, defineAsyncComponent, inject, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -14,6 +15,7 @@ import { errorText } from '@/api/errors'
 import { useWindowsStore, type OpenSpec } from 'plancia'
 import { planciaKey, base } from '@/composables/planciaKey'
 import { graphQuery, isPluginSource, parseGraphBlock } from '@/components/graph/graphSpec'
+import GraphList from '@/components/graph/GraphList.vue'
 
 const props = defineProps<{ source: string; notePath?: string }>()
 const { t } = useI18n()
@@ -30,6 +32,10 @@ const data = ref<GraphResponse | null>(null)
 const error = ref<string | null>(null)
 const loading = ref(false)
 const showCode = ref(false)
+const showList = ref(false)
+const drawingLabel = computed(() =>
+  data.value ? t('graph.drawing_label', { nodes: data.value.nodes.length, edges: data.value.edges.length }) : '',
+)
 const selected = ref<{ label: string; text?: string; link?: string } | null>(null)
 
 async function load() {
@@ -103,6 +109,16 @@ function openInGraph() {
       >
         {{ showCode ? t('graph.show_drawing') : t('graph.code') }}
       </button>
+      <button
+        v-if="parsed.spec && !showCode"
+        type="button"
+        class="gosidian-diagram__button"
+        :aria-pressed="showList"
+        data-graph-list-toggle
+        @click="showList = !showList"
+      >
+        {{ t('graph.view_list') }}
+      </button>
       <span
         v-if="data"
         class="gosidian-diagram__status"
@@ -141,17 +157,25 @@ function openInGraph() {
         v-else-if="data"
         class="relative h-[420px] rounded border border-border overflow-hidden"
       >
+        <GraphList
+          v-if="showList"
+          :nodes="data.nodes"
+          :edges="data.edges"
+          @select="onNode"
+        />
         <Graph3DCanvas
-          v-if="parsed.spec?.mode === '3d'"
+          v-else-if="parsed.spec?.mode === '3d'"
           :nodes="data.nodes"
           :edges="data.edges"
           z-mode="free"
+          :label="drawingLabel"
           @select="onNode"
         />
         <GraphCanvas
           v-else
           :nodes="data.nodes"
           :edges="data.edges"
+          :label="drawingLabel"
           @select="onNode"
         />
       </div>

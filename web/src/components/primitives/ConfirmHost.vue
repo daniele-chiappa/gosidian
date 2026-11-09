@@ -66,7 +66,7 @@ function onEnter(e: KeyboardEvent) {
       v-model="draft"
       type="text"
       data-dialog-input
-      class="mt-3 h-control py-0 w-full rounded border border-border bg-bg-elevated px-2 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
+      class="mt-3 h-control py-0 w-full rounded border border-border-input bg-bg-elevated px-2 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
       :aria-label="current.message"
       @keydown.enter="onEnter"
     />

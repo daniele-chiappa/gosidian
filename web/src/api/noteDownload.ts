@@ -14,7 +14,7 @@ export function isReadOnlyNotePath(path: string): boolean {
  * JSON), not as what gosidian shows of it. `loaded` is the note already in
  * memory, if any: its content stands in when the download fails.
  */
-export async function downloadNote(path: string, loaded?: Note): Promise<void> {
+export async function downloadNote(path: string, loaded?: Note, version?: string): Promise<void> {
   const filename = path.split('/').pop() || loaded?.title || 'note'
   if (isReadOnlyNotePath(path) || loaded?.kind === 'base' || loaded?.kind === 'canvas') {
     const content = (loaded ?? (await getNote(path))).source ?? ''
@@ -22,7 +22,8 @@ export async function downloadNote(path: string, loaded?: Note): Promise<void> {
     return
   }
   try {
-    await downloadFile(`/notes/${encodeURIComponent(path)}?export=zip`, filename)
+    const at = version ? `&version=${encodeURIComponent(version)}` : ''
+    await downloadFile(`/notes/${encodeURIComponent(path)}?export=zip${at}`, filename)
   } catch (e) {
     if (!loaded) throw e
     const mime = filename.toLowerCase().endsWith('.html') ? 'text/html' : 'text/markdown'

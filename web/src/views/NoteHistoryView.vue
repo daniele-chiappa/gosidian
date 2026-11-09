@@ -3,10 +3,24 @@
  *  from window props; the back link opens the note read window. A version
  *  opens under its entry (IMP-222, F-01): the diff from it to the note now
  *  first, its text on request, and for who may write the note, the restore
- *  after a confirmation that starts on Cancel. */
+ *  after a confirmation that starts on Cancel. The versions that have a name
+ *  show on their entries; the project's admin names them there and chooses
+ *  the valid one (IMP-201). */
 import { useI18n } from 'vue-i18n'
 import { onMounted, ref, watch, computed, inject, nextTick } from 'vue'
-import { getHistory, getVersion, restoreVersion, type HistoryEntry, type Version } from '@/api/history'
+import {
+  clearValidVersion,
+  getHistory,
+  getVersion,
+  getVersions,
+  restoreVersion,
+  setValidVersion,
+  tagVersion,
+  type HistoryEntry,
+  type NoteTag,
+  type Version,
+  type Versions,
+} from '@/api/history'
 import { useWindowsStore, type OpenSpec } from 'plancia'
 import { planciaKey, base } from '@/composables/planciaKey'
 import { errorText } from '@/api/errors'
@@ -14,13 +28,16 @@ import { formatDateTime } from '@/api/format'
 import { useAccessStore } from '@/stores/access'
 import { confirmAction } from '@/composables/useConfirm'
 import { announce } from '@/composables/useAnnounce'
+import { Check } from 'lucide-vue-next'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
 import DateTime from '@/components/primitives/DateTime.vue'
 import { parseDiff, type DiffLine } from './historyDiff'
 
 const { t } = useI18n()
 
-const props = defineProps<{ path: string }>()
+// sha is a version asked from the panel of the versions (IMP-228), shaAt when:
+// it opens under its entry, again at each ask.
+const props = defineProps<{ path: string; sha?: string; shaAt?: number }>()
 
 const store = useWindowsStore()
 const openWindow = inject<(spec: OpenSpec) => string>('openWindow', (s) => store.open(s))
@@ -44,6 +61,23 @@ const restoreError = ref<string | null>(null)
 const commitNotice = ref<string | null>(null)
 let asked = 0
 
+// The named versions, with the valid one.
+const versions = ref<Versions | null>(null)
+const label = ref('')
+const changing = ref(false)
+const versionsError = ref<string | null>(null)
+const tagsOf = (sha: string): NoteTag[] => versions.value?.items.filter((x) => x.sha === sha) ?? []
+const isValid = (tag: NoteTag) => versions.value?.valid?.tag === tag.tag
+
+async function loadVersions() {
+  try {
+    versions.value = await getVersions(path.value)
+  } catch {
+    // Without them the history is still the history.
+    versions.value = null
+  }
+}
+
 const lines = computed<DiffLine[]>(() => parseDiff(version.value?.diff ?? ''))
 const canRestore = computed(
   () => !!version.value && version.value.content !== undefined && !version.value.same && access.canWrite(path.value),
@@ -55,7 +89,7 @@ async function load() {
   loading.value = !entries.value.length
   error.value = null
   try {
-    entries.value = await getHistory(path.value, 100)
+    ;[entries.value] = await Promise.all([getHistory(path.value, 100), loadVersions()])
   } catch (e) {
     error.value = errorText(e, t, t('history.load_failed'))
     entries.value = []
@@ -80,6 +114,8 @@ async function loadVersion(sha: string) {
 
 function toggle(e: HistoryEntry) {
   restoreError.value = null
+  versionsError.value = null
+  label.value = ''
   commitNotice.value = null
   showText.value = false
   version.value = null
@@ -121,6 +157,47 @@ async function restore() {
   }
 }
 
+/** One change of the named versions at a time: its error stays in the panel. */
+async function change(run: () => Promise<void>, failed: string) {
+  changing.value = true
+  versionsError.value = null
+  try {
+    await run()
+    await load()
+  } catch (e) {
+    versionsError.value = errorText(e, t, failed)
+  } finally {
+    changing.value = false
+  }
+}
+
+function nameVersion(sha: string) {
+  const name = label.value.trim()
+  if (!name) return
+  return change(async () => {
+    await tagVersion(path.value, name, sha)
+    label.value = ''
+    announce(t('history.tag_done', { label: name }))
+  }, t('history.tag_failed'))
+}
+
+async function makeValid(tag: NoteTag) {
+  const name = t('history.make_valid', { label: tag.label })
+  if (!(await confirmAction(t('history.confirm_valid', { label: tag.label }), { confirmLabel: name }))) return
+  await change(async () => {
+    await setValidVersion(path.value, tag.tag)
+    announce(t('history.valid_set', { label: tag.label }))
+  }, t('history.valid_failed'))
+}
+
+async function clearValid() {
+  if (!(await confirmAction(t('history.confirm_clear'), { confirmLabel: t('history.clear_valid') }))) return
+  await change(async () => {
+    await clearValidVersion(path.value)
+    announce(t('history.valid_cleared'))
+  }, t('history.valid_failed'))
+}
+
 /** "daniele <gosidian@localhost>" shows as daniele, the whole in the tooltip. */
 function authorName(author: string): string {
   return author.replace(/\s*<[^>]*>\s*$/, '') || author
@@ -158,7 +235,16 @@ function openNote() {
   })
 }
 
-onMounted(load)
+function showAsked() {
+  const e = entries.value.find((x) => x.sha === props.sha)
+  if (e && open.value !== e.sha) toggle(e)
+}
+
+onMounted(async () => {
+  await load()
+  showAsked()
+})
+watch(() => [props.sha, props.shaAt], showAsked)
 watch(path, () => {
   open.value = null
   version.value = null
@@ -212,6 +298,16 @@ watch(path, () => {
             <code class="font-mono text-accent">{{ e.short_sha }}</code>
             <DateTime class="text-text-muted" :value="e.date" />
             <span class="text-text-muted" :title="e.author">{{ authorName(e.author) }}</span>
+            <span
+              v-for="tag in tagsOf(e.sha)"
+              :key="tag.tag"
+              class="inline-flex items-center gap-1 rounded border border-accent px-1.5"
+              :title="tag.message || tag.tag"
+              data-tag
+            >
+              <Check v-if="isValid(tag)" class="h-3 w-3" aria-hidden="true" />
+              {{ tag.label }}<span v-if="isValid(tag)" class="sr-only"> ({{ t('history.tag_valid') }})</span>
+            </span>
           </span>
           <span class="block text-sm mt-1">{{ e.subject }}</span>
         </button>
@@ -273,6 +369,48 @@ watch(path, () => {
                   @click="restore"
                 >{{ t('history.restore') }}</button>
               </div>
+              <div
+                v-if="versions?.can_admin"
+                class="flex flex-wrap items-center gap-2"
+                data-version-admin
+              >
+                <template v-for="tag in tagsOf(e.sha)" :key="tag.tag">
+                  <button
+                    v-if="isValid(tag)"
+                    type="button"
+                    class="text-sm rounded border border-border px-3 py-1 hover:bg-surface-hover disabled:opacity-60"
+                    :disabled="changing"
+                    data-clear-valid
+                    @click="clearValid"
+                  >{{ t('history.clear_valid') }}</button>
+                  <button
+                    v-else
+                    type="button"
+                    class="text-sm rounded border border-border px-3 py-1 hover:bg-surface-hover disabled:opacity-60"
+                    :disabled="changing"
+                    data-make-valid
+                    @click="makeValid(tag)"
+                  >{{ t('history.make_valid', { label: tag.label }) }}</button>
+                </template>
+                <form class="flex items-center gap-2" @submit.prevent="nameVersion(e.sha)">
+                  <label class="sr-only" :for="`tag-${e.sha}`">{{ t('history.tag_label') }}</label>
+                  <input
+                    :id="`tag-${e.sha}`"
+                    v-model="label"
+                    class="w-24 rounded border border-border-input bg-bg px-2 py-1 text-sm"
+                    maxlength="64"
+                    placeholder="V3"
+                    data-tag-label
+                  >
+                  <button
+                    type="submit"
+                    class="text-sm rounded border border-border px-3 py-1 hover:bg-surface-hover disabled:opacity-60"
+                    :disabled="changing || !label.trim()"
+                    data-tag-version
+                  >{{ t('history.tag_action') }}</button>
+                </form>
+              </div>
+              <ErrorMessage v-if="versionsError" :text="versionsError" />
               <pre
                 v-if="showText"
                 :id="`text-${e.sha}`"

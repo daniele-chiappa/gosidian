@@ -1,0 +1,106 @@
+{
+  "admin": {
+    "audit": {
+      "table": "Entrées de l'audit",
+      "range": "{from}–{to} sur {total}",
+      "pages": "Pages de l'audit",
+      "previous": "Page précédente",
+      "next": "Page suivante",
+      "newest_first": "Les plus récentes d'abord",
+      "oldest_first": "Les plus anciennes d'abord",
+      "action_groups": {
+        "note": "Notes et fichiers",
+        "project": "Projets",
+        "access": "Droits d'accès et équipes",
+        "account": "Comptes",
+        "session": "Connexions",
+        "token": "Jetons MCP",
+        "pipeline": "Pipelines et plugins",
+        "server": "Serveur"
+      },
+      "actions": {
+        "note": {
+          "create": "note ou fichier créé",
+          "update": "note ou fichier modifié",
+          "append": "texte ajouté à une note",
+          "delete": "note ou fichier supprimé",
+          "rename": "note ou fichier renommé",
+          "restore": "note restaurée depuis une version",
+          "upload_attachment": "pièce jointe envoyée",
+          "delete_attachment": "pièce jointe supprimée",
+          "ingest_package": "paquet de notes importé",
+          "in_upload": "envoi dans IN terminé",
+          "in_upload_open": "envoi dans IN ouvert par un agent",
+          "export": "export zip téléchargé",
+          "mirror_sync": "copie locale synchronisée"
+        },
+        "project": {
+          "create_project": "projet créé",
+          "delete_project": "projet supprimé",
+          "rename_project": "projet renommé",
+          "project_flags_update": "options d'un projet modifiées",
+          "personal_project_create": "projet personnel créé"
+        },
+        "access": {
+          "project_member_set": "droit d'accès donné à un compte",
+          "project_member_remove": "droit d'accès retiré à un compte",
+          "project_team_set": "droit d'accès donné à une équipe, depuis le projet",
+          "project_team_remove": "droit d'accès retiré à une équipe, depuis le projet",
+          "team_create": "équipe créée",
+          "team_update": "équipe modifiée",
+          "team_delete": "équipe supprimée",
+          "team_user_add": "compte ajouté à une équipe",
+          "team_user_remove": "compte retiré d'une équipe",
+          "team_grant_set": "droit d'accès donné à une équipe, depuis l'équipe",
+          "team_grant_remove": "droit d'accès retiré à une équipe, depuis l'équipe"
+        },
+        "account": {
+          "user_create": "compte créé",
+          "user_update": "compte modifié",
+          "user_disable": "compte désactivé",
+          "user_archive": "compte archivé, son nom libéré",
+          "invite_create": "invitation créée",
+          "invite_revoke": "invitation révoquée",
+          "password_change": "mot de passe changé",
+          "password_reset": "mot de passe réinitialisé par l'admin",
+          "totp_enroll": "double authentification activée",
+          "totp_disenroll": "double authentification désactivée",
+          "totp_reset": "double authentification réinitialisée par l'admin",
+          "totp_recovery_used": "code de récupération utilisé",
+          "totp_recovery_regen": "codes de récupération régénérés"
+        },
+        "session": {
+          "spa_token_create": "connexion à l'interface web",
+          "spa_token_refresh": "session de l'interface web renouvelée",
+          "spa_token_revoke": "déconnexion de l'interface web",
+          "spa_login_failed": "échec de connexion",
+          "oauth_client_register": "client OAuth enregistré",
+          "oauth_grant": "autorisation OAuth accordée",
+          "oauth_refresh": "autorisation OAuth renouvelée",
+          "oauth_revoke": "autorisation OAuth révoquée"
+        },
+        "token": {
+          "token_create": "jeton MCP créé",
+          "token_update": "jeton MCP modifié",
+          "token_revoke": "jeton MCP révoqué"
+        },
+        "pipeline": {
+          "pipeline_run": "pipeline démarré",
+          "pipeline_resume": "pipeline repris",
+          "pipeline_cancel": "pipeline annulé",
+          "plugin_call": "outil d'un plugin appelé"
+        },
+        "server": {
+          "settings_update": "paramètres du serveur modifiés",
+          "git_token_set": "jeton git défini",
+          "git_token_unset": "jeton git retiré",
+          "note_tag": "version d’une note nommée",
+          "note_valid": "version valide d’une note modifiée",
+          "note_mcp_version": "version pour MCP d’une note modifiée",
+          "font_add": "police ajoutée au catalogue",
+          "font_delete": "police retirée du catalogue"
+        }
+      }
+    }
+  }
+}

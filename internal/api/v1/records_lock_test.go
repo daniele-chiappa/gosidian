@@ -4,12 +4,15 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/gosidian/gosidian/internal/audit"
+	"github.com/gosidian/gosidian/internal/projects"
 	"github.com/gosidian/gosidian/internal/trash"
 )
 
@@ -170,6 +173,57 @@ func TestAdminCreateUser_ReuseRecordedUnderTheLock(t *testing.T) {
 	}
 	if got, want := seen(), []string{"rename_project alma", "rename_project " + archived}; !slices.Equal(got, want) {
 		t.Fatalf("recorded %q, want %q", got, want)
+	}
+	if got := free(); len(got) > 0 {
+		t.Errorf("recorded with no lock held: %q", got)
+	}
+}
+
+// A project renamed from the web UI rewrites what names its files in the
+// notes its renamer may write, the project's own included, records an
+// update of each note outside the project while every lock is held, and
+// answers how many it rewrote and how many keep the old path, without
+// naming them (BUG-153). Before, it rewrote none.
+func TestProjects_RenameRewritesWhereTheUserWrites(t *testing.T) {
+	f := newNotesFixture(t)
+	m, bearer := f.memberUser(t, "carol")
+	f.seedNote(t, "alpha/x.md", "# X\nSee [[alpha/y]].")
+	f.seedNote(t, "alpha/y.md", "# Y")
+	f.seedNote(t, "beta/z.md", "See [[alpha/x]].")
+	f.seedNote(t, "gamma/w.md", "See [[alpha/x]].")
+	for project, lvl := range map[string]string{"alpha": projects.LevelAdmin, "beta": projects.LevelWrite, "gamma": projects.LevelRead} {
+		if err := f.projects.SetMember(project, m.ID, lvl); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seen, free := f.recordsUnderLock()
+	rec := f.request(http.MethodPut, "/api/v1/projects/alpha", `{"new_name":"delta"}`, map[string]string{"Authorization": "Bearer " + bearer})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rename = %d %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Name  string `json:"name"`
+		Links struct {
+			Rewritten    int `json:"rewritten"`
+			NotRewritten int `json:"not_rewritten"`
+		} `json:"links"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Name != "delta" || out.Links.Rewritten != 2 || out.Links.NotRewritten != 1 {
+		t.Errorf("answer = %+v, want delta, 2 rewritten and 1 not", out)
+	}
+	if strings.Contains(rec.Body.String(), "gamma") {
+		t.Errorf("the answer names a note the user may not write: %s", rec.Body.String())
+	}
+	for path, want := range map[string]string{"delta/x.md": "# X\nSee [[delta/y]].", "beta/z.md": "See [[delta/x]].", "gamma/w.md": "See [[alpha/x]]."} {
+		if raw, err := os.ReadFile(filepath.Join(f.vaultRoot, filepath.FromSlash(path))); err != nil || string(raw) != want {
+			t.Errorf("%s = %q (%v), want %q", path, raw, err, want)
+		}
+	}
+	if got, want := seen(), []string{"rename_project alpha", "rename_project delta", "update beta/z.md"}; !slices.Equal(got, want) {
+		t.Errorf("recorded %q, want %q", got, want)
 	}
 	if got := free(); len(got) > 0 {
 		t.Errorf("recorded with no lock held: %q", got)

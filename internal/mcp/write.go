@@ -107,6 +107,17 @@ type noteWrite struct {
 	// batched is a write of a pipeline step, which syncs the vault once
 	// at its end (vault.SaveBatched, IMP-185).
 	batched bool
+	// validVersion is the note's valid version to write, or "" to remove
+	// it (IMP-201): the only change it makes, the one a save does not take.
+	validVersion *string
+	// mcpVersion is the same for who calls over MCP (IMP-228).
+	mcpVersion *string
+	// draftGuard refuses a whole text without if_match over a note that
+	// gives who calls over MCP another version: it would be written over
+	// the draft, from a version that is not it.
+	draftGuard bool
+	// to is the audit entry's To.
+	to string
 }
 
 // noteWritten is a write's outcome.
@@ -151,6 +162,11 @@ func (s *Server) writeNote(ctx context.Context, tok *auth.Token, w noteWrite) (n
 			return noteWritten{}, &writeError{kind: writePrecondition, status: http.StatusPreconditionFailed, msg: callToolResultText(errRes)}
 		}
 	}
+	if w.draftGuard && w.ifMatch == "" && existing != nil {
+		if chosen := s.chosenForMCP(existing); chosen != nil {
+			return noteWritten{}, &writeError{kind: writePrecondition, status: http.StatusPreconditionFailed, msg: fmt.Sprintf("%q gives who calls over MCP its version %s, and this would replace the draft: read that with memory_get version:\"draft\" and pass its etag as if_match", w.rel, chosen.Label)}
+		}
+	}
 	content, err := w.content(existing)
 	if errors.Is(err, errSkipWrite) {
 		out := noteWritten{Path: w.rel, Skipped: true}
@@ -177,7 +193,15 @@ func (s *Server) writeNote(ctx context.Context, tok *auth.Token, w noteWrite) (n
 			return noteWritten{}, &writeError{kind: writeLimit, status: http.StatusRequestEntityTooLarge, msg: msg, wait: wait}
 		}
 	}
-	if err := s.saveAndIndex(w.rel, content, w.batched); err != nil {
+	switch {
+	case w.validVersion != nil:
+		err = s.setValidAndIndex(w.rel, *w.validVersion)
+	case w.mcpVersion != nil:
+		err = s.setMCPAndIndex(w.rel, *w.mcpVersion)
+	default:
+		err = s.saveAndIndex(w.rel, content, w.batched)
+	}
+	if err != nil {
 		return noteWritten{}, &writeError{kind: writeFailed, status: http.StatusInternalServerError, msg: "write failed: " + err.Error()}
 	}
 	created := existing == nil
@@ -197,7 +221,7 @@ func (s *Server) writeNote(ctx context.Context, tok *auth.Token, w noteWrite) (n
 			_ = s.audit.Write(audit.Entry{Source: source, Actor: actor, Action: action, Path: w.rel, Size: int64(len(content))})
 		}
 	} else {
-		s.auditWrite(ctx, action, w.rel, "", int64(len(content)))
+		s.auditWrite(ctx, action, w.rel, w.to, int64(len(content)))
 	}
 	if w.schemaCheck {
 		s.noteSchemaProblems(ctx, w.rel, content)

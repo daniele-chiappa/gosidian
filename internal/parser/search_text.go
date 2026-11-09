@@ -16,8 +16,10 @@ var searchLinkRe = regexp.MustCompile(`!?\[\[([^\]]+)\]\]`)
 // "services" found nearly every note that linked a page under them). A
 // block reference (#^id) is dropped. Fenced and inline code stay as
 // written. The links table keeps the full targets: backlinks, the graph and
-// resolution do not change.
+// resolution do not change. The comments that number a note's pieces are no
+// words of it.
 func SearchText(s string) string {
+	s = WithoutPieceMarks(s)
 	if !strings.Contains(s, "[[") {
 		return s
 	}

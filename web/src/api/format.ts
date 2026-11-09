@@ -30,6 +30,21 @@ export function formatDateTime(value?: string | number | Date | null): string {
   return cached(`dt:${l}`, () => new Intl.DateTimeFormat(l, { dateStyle: 'medium', timeStyle: 'short' })).format(d)
 }
 
+/**
+ * A field's date (IMP-220, F-23): a day as "3 nov 2026", the day written
+ * whatever the time zone; a date with its time as formatDateTime; anything
+ * else as it is.
+ */
+export function formatFieldDate(value: string): string {
+  const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (!day) return /^\d{4}-\d{2}-\d{2}T/.test(value) ? formatDateTime(value) : value
+  const [y, m, d] = [Number(day[1]), Number(day[2]), Number(day[3])]
+  const date = new Date(y, m - 1, d)
+  if (date.getFullYear() !== y || date.getMonth() !== m - 1 || date.getDate() !== d) return value
+  const l = locale()
+  return cached(`d:${l}`, () => new Intl.DateTimeFormat(l, { dateStyle: 'medium' })).format(date)
+}
+
 /** "512 B", "12 KB", "1,4 MB". */
 export function formatSize(bytes: number): string {
   // -1: a file of a source whose size is known only when it is read.

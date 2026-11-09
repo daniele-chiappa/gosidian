@@ -610,3 +610,25 @@ func TestService_Folders(t *testing.T) {
 		t.Errorf("handoff and dates: %v %v", c.args["handoff"], c.args["dates"])
 	}
 }
+
+// A folder or a project, as "path/", concerns the bots when one of them is
+// under it: a bot note there now (restored, renamed into it), or a bot the
+// service knows there (deleted, renamed away). Before, only a note's path
+// did (BUG-152).
+func TestService_ConcernsAFolder(t *testing.T) {
+	s, host, _, _, _ := newService(t)
+	for p, want := range map[string]bool{"p/": true, "p/bots/": true, "p/bot/": false, "p/other/": false, "q/": false} {
+		if got := s.concerns(p); got != want {
+			t.Errorf("before the bots are known, %q: %v, want %v", p, got, want)
+		}
+	}
+	s.Reconcile(context.Background())
+	host.mu.Lock()
+	delete(host.notes, "p/bots/assistente.md")
+	host.mu.Unlock()
+	for p, want := range map[string]bool{"p/": true, "p/bots/": true, "p/other/": false} {
+		if got := s.concerns(p); got != want {
+			t.Errorf("with the note gone, %q: %v, want %v", p, got, want)
+		}
+	}
+}

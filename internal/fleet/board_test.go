@@ -70,6 +70,10 @@ func TestParseBoardProblems(t *testing.T) {
 		"bad done":             "columns:\n" + ok + "done: robot\n",
 		"yaml":                 "columns: [\n",
 		"too many columns":     "columns:\n" + ok + manyColumns(maxColumns-1),
+		"stale negative":       "columns:\n" + ok + "stale: -1\n",
+		"stale a fraction":     "columns:\n" + ok + "stale: 1.5\n",
+		"stale too long":       "columns:\n" + ok + "stale: 366\n",
+		"stale not a number":   "columns:\n" + ok + "stale: soon\n",
 	}
 	for name, src := range cases {
 		if _, problems := ParseBoard(src, "fitness/board.md"); len(problems) == 0 {
@@ -243,7 +247,7 @@ func TestPlace(t *testing.T) {
 func TestCardRenderAndRead(t *testing.T) {
 	at := time.Date(2026, 10, 30, 21, 0, 0, 0, time.UTC)
 	n := NewTask{Title: "La board", Body: "Fai la board.", Board: "fitness/board.md", Column: "Idee", Status: Backlog, Rank: 1.5,
-		DoneBy: DonePerson, For: []string{"fitness/docs/improvements/IMP-1.md", "fitness/plans/piano.md"}}
+		DoneBy: DonePerson, For: []string{"fitness/docs/improvements/IMP-1.md", "fitness/plans/piano.md"}, Iteration: "fitness/iterations/1.md"}
 	p := TaskPath("fitness", n.Title, at)
 	content := n.Render("fitness", at)
 	fm := parser.ExtractFrontmatterRaw(content)
@@ -256,7 +260,7 @@ func TestCardRenderAndRead(t *testing.T) {
 	task := ReadTask(p, content)
 	if task.Board != "fitness/board.md" || task.Column != "Idee" || task.Status != Backlog || task.Rank != 1.5 || task.DoneBy != DonePerson ||
 		strings.Join(task.For, ",") != "fitness/docs/improvements/IMP-1.md,fitness/plans/piano.md" || task.ColumnSince != at.Format(time.RFC3339) ||
-		task.Team != "" || task.Assignee != "" {
+		task.Team != "" || task.Assignee != "" || task.Iteration != "fitness/iterations/1.md" || task.Started != "" || task.Finished != "" {
 		t.Fatalf("card: %+v\n%s", task, content)
 	}
 	if !strings.Contains(fm, `board: "[[fitness/board]]"`) || !strings.Contains(fm, `  - "[[fitness/plans/piano]]"`) {
@@ -323,6 +327,7 @@ func TestBoardSchema(t *testing.T) {
 		"team: {type: relation}\n", "assignee: {type: text}\n",
 		"board: {type: relation}\n", "column: {type: text}\n", "rank: {type: number}\n", "column_since: {type: date}\n",
 		"done_by: {type: select, options: [agent, person]}\n", "for: {type: relation}\n",
+		"started: {type: date}\n", "finished: {type: date}\n", "iteration: {type: relation}\n",
 		"row_views:\n  - title: Sub-tasks\n", "description: \"The tasks of the project's teams",
 	} {
 		if !strings.Contains(fm, want) {
@@ -331,7 +336,7 @@ func TestBoardSchema(t *testing.T) {
 	}
 	// What is not the fields stays as written, the body too.
 	if !strings.HasSuffix(string(out), string(db[strings.Index(string(db), "\n---\n"):])) ||
-		strings.Count(string(out), "\n") != strings.Count(string(db), "\n")+6 {
+		strings.Count(string(out), "\n") != strings.Count(string(db), "\n")+9 {
 		t.Fatalf("more than the fields changed:\n%s", out)
 	}
 	again, changed, err := BoardSchema(out)

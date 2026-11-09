@@ -1,4 +1,5 @@
 import client from './client'
+import type { ValidVersion } from './history'
 
 export interface NoteSummary {
   path: string
@@ -32,6 +33,8 @@ export interface Note {
   canvas?: CanvasData
   /** After a board's card moved: the column it took past its limit (IMP-216). */
   warning?: string
+  /** The version readers must see, on a read (IMP-201). */
+  valid?: ValidVersion
 }
 
 /**
@@ -94,11 +97,13 @@ export async function listNotes(
   return data
 }
 
-export async function getNote(path: string, opts?: { inline?: boolean }): Promise<Note> {
+export async function getNote(path: string, opts?: { inline?: boolean; version?: string }): Promise<Note> {
   // inline=1 returns the content with image references embedded as data: URIs
   // (self-contained download); the stored note keeps the lightweight reference.
+  // version reads it as the valid version ("valid"), or a tag, holds it.
+  const params = { ...(opts?.inline ? { inline: 1 } : {}), ...(opts?.version ? { version: opts.version } : {}) }
   const { data } = await client.get<Note>(`/notes/${encodeURIComponent(path)}`, {
-    params: opts?.inline ? { inline: 1 } : undefined,
+    params: Object.keys(params).length ? params : undefined,
   })
   return data
 }
@@ -162,6 +167,10 @@ export interface RowFields {
   /** Who created and last modified the note through gosidian (audit log). */
   created_by?: string
   modified_by?: string
+  /** The frontmatter's tags of a markdown note; null for any other (IMP-223). */
+  tags?: string[] | null
+  /** The project's declared tag vocabulary, with its vocabulary flag on. */
+  tag_vocabulary?: string[]
 }
 
 /** GET /api/v1/notes/{path}/fields — a row's fields, for the property panel. */

@@ -124,6 +124,7 @@ why a pipeline cannot run.
 | `run` | a run of a pipeline of the project ends with one of `status` (`done`, `failed`, `canceled`; default `[failed]`), its pipeline matching `pipelines` (a glob on the pipeline notes' paths, relative to the project: `pipelines/*`; default: all of them): one run per run that ended; a run it starts starts [none](#on-the-end-of-a-run) | `run` (the id of the run that ended), `pipeline` (its pipeline note), `project`, `status`, `error`, `failed_step` (the node that failed it; empty when none) |
 | `queue` | the project's queue of steps grows long: at least `queued` steps waiting (whose time has come), or the oldest waiting `waited` (`30m`), of every step or of one `resource` (`plugin:ocr`, `llm:default`, `res:gpu`); once each time it becomes long, [again](#when-the-queue-is-long) only after it was short | `project`, `resource`, `queued`, `running`, `limit` (of the resource; 0: none), `oldest_wait_seconds`, `threshold` (`queued`, `waited_seconds`) |
 | `task` | a task of a [team of agents](agents.md) is ready (`events: [ready]`, the default), an objective's sub-tasks closed (`children_done`), or a team spent its budget of the day (`budget`); `team` (a link to its note; none: every team of the project) and `roles` (or `coordinator: true` / `false`) choose the tasks. The trigger [takes the task](agents.md#the-pipelines-on-task) for the run as it starts it | `event`, `task`, `title`, `team`, `role`, `project`, `attempt`; `round` and `children` for `children_done`; `day`, `spent_usd`, `budget_usd` for `budget` |
+| `iteration` | the server closed an [iteration](board.md#iterations) of a board of the project at its end, writing its review in its note: one run per iteration | `event` (`closed`), `iteration` (its note), `board`, `project`, `goal`, `start`, `end`, `deferred` (the cards not done, which no longer link it), `review` (the text written; left out when it does not fit in the input) |
 
 Every file store counts as an arrival: `memory_ingest`,
 `memory_upload_attachment`, `memory_upload_resource`, the media and table
@@ -226,6 +227,26 @@ interactive, so that they go before the queue they tell about. The
 queue is the project's own: the queues across the projects are the
 gauges of `/metrics`, for the server's monitoring. The episodes live in
 memory: after a restart a queue still long starts the trigger again.
+
+#### When an iteration closes
+
+An `iteration` pipeline acts once the server closed an iteration of a
+board, which it does with the pipelines on or off: here a plugin's node
+sends the review on.
+
+```pipeline
+trigger: {on: iteration}
+nodes:
+  - id: tell
+    use: notify.send
+    with:
+      to: [team]
+      title: "{{ trigger.goal }}: closed"
+      text: "{{ trigger.review }}"
+```
+
+A run is keyed by the iteration and its last day: an iteration starts
+each `iteration` pipeline once.
 
 ### Nodes
 
@@ -391,10 +412,10 @@ it as text: `ratings: {"{{ trigger.turn }}": "{{ trigger.rating }}"}`
 
 | Type | `with` | Output |
 |---|---|---|
-| `note.read` | `path` (inside the project; relative to it), `media`: `keep` (default) or `inline`, the images as text ([below](#chunks-for-an-archive-of-vectors)), with `media_words` and `inline_max_side` | `path`, `title`, `frontmatter` (its values with their types, [below](#frontmatter-values)), `body`, `etag`; with `media: inline`, `media` (the images counted) |
+| `note.read` | `path` (inside the project; relative to it), `at` (a version, [below](#the-valid-version-of-a-note)), `media`: `keep` (default) or `inline`, the images as text ([below](#chunks-for-an-archive-of-vectors)), with `media_words` and `inline_max_side` | `path`, `title`, `frontmatter` (its values with their types, [below](#frontmatter-values)), `body`, `etag`; with `media: inline`, `media` (the images counted) |
 | `note.write` | `path`, `body`, `title`, `frontmatter` (a map), `mode`: `upsert` (default), `create`, `replace`, or `append` (adds `body` after the note's, a blank line between, and merges `frontmatter` into its own; a note it does not find it creates), `frontmatter_merge` (merges `frontmatter` into the note's instead of replacing it, and keeps its body unless `body` is given: a map merges into a map, `null` removes a key) | `path`, `etag`, `created` |
 | `note.list` | `folder` (inside the project, relative to it; empty: all of it), `recursive` (default yes), `where` (memory_query's conditions, `{field, op, value}`), `sort` (default `path`), `fields` (frontmatter fields to give, with their types as `note.read` gives them), `limit` (default 500, at most `[pipelines] max_list_items`, 5000), `cursor` | `notes` (`path`, `title`, `fields`), `count` (this page), `total` (all that match), `next` (the cursor of the next page; empty at the last) |
-| `note.sections` | `path`, `version` (ends each chunk's id after an `@`), `levels` (default `[section, paragraph]`; `[paragraph]` still cuts the sections, the paragraphs' parents and paths, but gives the paragraphs only), `max_chars` (default 6000; 200 to `max_output_bytes`), `context`: `heading` (default), `path`, `none`, `text` (default yes), `only` (bases, up to `max_list_items`), `meta` (added to each chunk's, up to `max_chunk_meta` bytes), `media`: `inline` (default) or `keep`, `media_words`, `inline_max_side`, `media_numbers`, `media_paragraphs`: `apart` (default) or `join`, `icon_descriptions`: `none` (default), `first` or `all` | `doc`, `title`, `version`, `sections`, `paragraphs`, `chunks` (as an archive's `upsert` takes them; with `media_numbers`, each with its `media`), `count`, `media` — see [below](#chunks-for-an-archive-of-vectors) |
+| `note.sections` | `path`, `at` (a version, [below](#the-valid-version-of-a-note)), `version` (ends each chunk's id after an `@`), `levels` (default `[section, paragraph]`; `[paragraph]` still cuts the sections, the paragraphs' parents and paths, but gives the paragraphs only), `max_chars` (default 6000; 200 to `max_output_bytes`), `context`: `heading` (default), `path`, `none`, `text` (default yes), `only` (bases, up to `max_list_items`), `meta` (added to each chunk's, up to `max_chunk_meta` bytes), `media`: `inline` (default) or `keep`, `media_words`, `inline_max_side`, `media_numbers`, `media_paragraphs`: `apart` (default) or `join`, `icon_descriptions`: `none` (default), `first` or `all` | `doc`, `title`, `version`, `sections`, `paragraphs`, `chunks` (as an archive's `upsert` takes them; with `media_numbers`, each with its `media`), `count`, `media` — see [below](#chunks-for-an-archive-of-vectors) |
 | `note.mark` | `path`, `set` (a name: `cut`, `review`), `marks` (each `base`, a chunk of `note.sections`, or `section`, the path of its headings, and `block`, its paragraph from 1; `color`: `blue`, `green`, `orange`, `red`, `cyan`, `grey`; `label`, `text`) | `path`, `set`, `count` — see [below](#marks-on-a-note) |
 | `wait.call` | `timeout` (default `24h`, at most `max_wait`) | the data the resume hands it |
 | `pipeline.run` | `pipeline` (a pipeline note of the project, relative to it), `input` (a map, the started run's `trigger`), `wait` (default yes), `timeout` (of the wait: default `24h`, at most `max_wait`), `key` | with `wait`: `run`, `pipeline`, `status`, `error`, `steps` (each node's status), `outputs` (each node's output, when they fit); without: `run`, `pipeline`, `status`, `existing` — see [below](#one-pipeline-starting-another) |
@@ -673,6 +694,23 @@ label already has the start of its description. A pipeline that cuts the
 sections again to answer (`only`) gives the same rule, or a long
 section's parts may differ from those of the archive. The cut view takes
 it too.
+
+### The valid version of a note
+
+A note can name the version readers must see, while it goes on changing as a
+draft ([the valid version](web-ui/editor.md#the-valid-version)). `note.read`
+and `note.sections` read the note as it is, the draft: a pipeline that reads
+and writes back would otherwise lose it. **`at: valid`** reads the valid
+version, and the note as it is when it has none or the version does not read,
+so a pipeline that cuts a folder for a bot sets it on every note and the bot
+answers from what was approved. `at` also takes a tag of the note's history;
+the `etag` of a version is no etag to write with. `version`, on
+`note.sections`, is something else: the mark at the end of each chunk's id.
+
+Choosing a valid version is a commit of the note, so a pipeline with a
+`commit` trigger cuts it again by itself. An edit of the draft is a commit too:
+with `at: valid` it gives the same chunks, and the hashes of `note.sections`
+say that nothing is to be stored.
 
 ### Marks on a note
 

@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -52,7 +53,14 @@ const (
 	ActionRename Action = "rename"
 	// ActionRestore: a note written back as a version of its history held
 	// it (IMP-222). Path is the note, To the version's commit.
-	ActionRestore          Action = "restore"
+	ActionRestore Action = "restore"
+	// ActionNoteTag: a version of a note named (IMP-201). Path is the note,
+	// To the tag's label. ActionNoteValid: the valid version of a note set,
+	// To its label, or removed, To empty. ActionNoteMCPVersion: the same for
+	// the version who calls over MCP reads (IMP-228).
+	ActionNoteTag          Action = "note_tag"
+	ActionNoteValid        Action = "note_valid"
+	ActionNoteMCPVersion   Action = "note_mcp_version"
 	ActionCreateProject    Action = "create_project"
 	ActionDeleteProject    Action = "delete_project"
 	ActionRenameProject    Action = "rename_project"
@@ -72,8 +80,12 @@ const (
 	// the bytes of its arguments.
 	ActionPluginCall       Action = "plugin_call"
 	ActionDeleteAttachment Action = "delete_attachment"
-	ActionTokenCreate      Action = "token_create"
-	ActionTokenRevoke      Action = "token_revoke"
+	// The catalog of fonts of the page-layout editor (IMP-226). Path is the
+	// font's id, To its family and style.
+	ActionFontAdd     Action = "font_add"
+	ActionFontDelete  Action = "font_delete"
+	ActionTokenCreate Action = "token_create"
+	ActionTokenRevoke Action = "token_revoke"
 	// IMP-051: partial update of an MCP token (today: self-improve opt-in
 	// toggle) via PATCH /api/v1/admin/tokens/{id}. Path = token id.
 	ActionTokenUpdate Action = "token_update"
@@ -138,7 +150,59 @@ const (
 	// A zip export was downloaded (IMP-099): Path = the project, "" for the
 	// whole vault; Size = bytes sent.
 	ActionExport Action = "export"
+
+	// The server's settings changed from /settings: Path is the config file.
+	ActionSettingsUpdate Action = "settings_update"
+	// An invite link was made or revoked: Path is the invite.
+	ActionInviteCreate Action = "invite_create"
+	ActionInviteRevoke Action = "invite_revoke"
+	// An account's personal project was provisioned (IMP-101): Path is it.
+	ActionPersonalProjectCreate Action = "personal_project_create"
+
+	// Grants on a project, from its access window: Path is
+	// <project>/<account or team id>, To the level set.
+	ActionProjectMemberSet    Action = "project_member_set"
+	ActionProjectMemberRemove Action = "project_member_remove"
+	ActionProjectTeamSet      Action = "project_team_set"
+	ActionProjectTeamRemove   Action = "project_team_remove"
+
+	// Teams, from their admin page: Path is the team's id (with
+	// /<account id> or /<project> for a member or a grant), To the name
+	// or the level.
+	ActionTeamCreate      Action = "team_create"
+	ActionTeamUpdate      Action = "team_update"
+	ActionTeamDelete      Action = "team_delete"
+	ActionTeamUserAdd     Action = "team_user_add"
+	ActionTeamUserRemove  Action = "team_user_remove"
+	ActionTeamGrantSet    Action = "team_grant_set"
+	ActionTeamGrantRemove Action = "team_grant_remove"
 )
+
+// Actions are all the actions the server writes, which the web UI names
+// in words (IMP-220): a new one goes here and in its catalogues.
+var Actions = []Action{
+	ActionCreate, ActionUpdate, ActionAppend, ActionDelete, ActionRename, ActionRestore,
+	ActionCreateProject, ActionDeleteProject, ActionRenameProject,
+	ActionUploadAttachment, ActionIngestPackage,
+	ActionPipelineRun, ActionPipelineResume, ActionPipelineCancel, ActionPluginCall,
+	ActionDeleteAttachment,
+	ActionNoteTag,
+	ActionNoteValid,
+	ActionNoteMCPVersion,
+	ActionFontAdd,
+	ActionFontDelete, ActionTokenCreate, ActionTokenRevoke, ActionTokenUpdate,
+	ActionProjectFlagsUpdate, ActionGitTokenSet, ActionGitTokenUnset,
+	ActionSpaTokenCreate, ActionSpaTokenRefresh, ActionSpaTokenRevoke, ActionSpaLoginFailed,
+	ActionUserCreate, ActionUserDisable, ActionUserUpdate, ActionUserArchive,
+	ActionTOTPEnroll, ActionTOTPDisenroll, ActionTOTPRecoveryUsed, ActionTOTPRecoveryRegen, ActionTOTPReset,
+	ActionPasswordChange, ActionPasswordReset,
+	ActionOAuthClientRegister, ActionOAuthGrant, ActionOAuthRefresh, ActionOAuthRevoke,
+	ActionMirrorSync, ActionINUpload, ActionINUploadOpen, ActionExport,
+	ActionSettingsUpdate, ActionInviteCreate, ActionInviteRevoke, ActionPersonalProjectCreate,
+	ActionProjectMemberSet, ActionProjectMemberRemove, ActionProjectTeamSet, ActionProjectTeamRemove,
+	ActionTeamCreate, ActionTeamUpdate, ActionTeamDelete, ActionTeamUserAdd, ActionTeamUserRemove,
+	ActionTeamGrantSet, ActionTeamGrantRemove,
+}
 
 // Entry is the on-disk shape. Keep field names short; this file may grow.
 type Entry struct {
@@ -314,6 +378,65 @@ func (l *Log) TailFiltered(opts TailOpts) ([]Entry, error) {
 		}
 	}
 	return matches, nil
+}
+
+// Page returns a page of the entries matching the filters, and how many
+// match in all: the admin's audit shows the newest first, in pages
+// (IMP-224, F-30). With newestFirst the offset counts from the newest match
+// and the page goes newest first; else from the oldest, oldest first.
+// opts.Limit is the page's size: 50 when <=0, at most 500. One read of the
+// log, as TailFiltered: it keeps where each match is, not the match, and
+// decodes the page's lines again.
+func (l *Log) Page(opts TailOpts, offset int, newestFirst bool) ([]Entry, int, error) {
+	if l == nil {
+		return nil, 0, nil
+	}
+	limit := opts.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	limit = min(limit, 500)
+	offset = max(offset, 0)
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	data, err := os.ReadFile(l.path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, 0, nil
+		}
+		return nil, 0, err
+	}
+	type span struct{ start, end int }
+	var matches []span
+	start := 0
+	for i := 0; i <= len(data); i++ {
+		if i == len(data) || data[i] == '\n' {
+			if i > start {
+				var e Entry
+				if err := json.Unmarshal(data[start:i], &e); err == nil && matchesOpts(e, opts) {
+					matches = append(matches, span{start, i})
+				}
+			}
+			start = i + 1
+		}
+	}
+	total := len(matches)
+	lo := min(offset, total)
+	hi := min(lo+limit, total)
+	if newestFirst {
+		lo, hi = total-hi, total-lo
+	}
+	out := make([]Entry, 0, hi-lo)
+	for _, s := range matches[lo:hi] {
+		var e Entry
+		if err := json.Unmarshal(data[s.start:s.end], &e); err == nil {
+			out = append(out, e)
+		}
+	}
+	if newestFirst {
+		slices.Reverse(out)
+	}
+	return out, total, nil
 }
 
 // matchesOpts returns true if the entry passes all non-zero filters.

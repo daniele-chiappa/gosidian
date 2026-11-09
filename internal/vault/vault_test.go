@@ -648,7 +648,7 @@ func TestUnreferenced_MatchesTheWaysALinkWritesIt(t *testing.T) {
 	write(t, v.Root, "p/a.md", "![](attachments/Shot.PNG) ![](attachments/caf%c3%a9.png) ![](attachments/my+plan.png)\n")
 	write(t, v.Root, "p/b.md", "![](attachments/naïve.png) 100% sure\n")
 	names := []string{"shot.png", "café.png", "my plan.png", "naïve.png", "lost.png"}
-	got, err := v.Unreferenced(names)
+	got, err := v.Unreferenced(names, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

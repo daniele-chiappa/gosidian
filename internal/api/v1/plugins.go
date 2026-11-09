@@ -51,6 +51,46 @@ func (r *Router) handlePlugins(w http.ResponseWriter, req *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"plugins": out})
 }
 
+// pluginAppView is an app of an accepted manifest (IMP-226), for the
+// window that opens it: origin is the one its messages must come from, the
+// origin of url or of the one of alt_urls the window opens.
+type pluginAppView struct {
+	Plugin      string   `json:"plugin"`
+	Name        string   `json:"name"`
+	Title       string   `json:"title"`
+	Description string   `json:"description,omitempty"`
+	URL         string   `json:"url"`
+	AltURLs     []string `json:"alt_urls,omitempty"`
+	Origin      string   `json:"origin"`
+	NoteType    string   `json:"note_type"`
+	Bridge      string   `json:"bridge"`
+	Engine      string   `json:"engine,omitempty"`
+	Status      string   `json:"status"`
+}
+
+// handlePluginApps answers GET /api/v1/plugins/apps: the apps of the
+// accepted manifests, to every signed-in account while the pipelines are
+// on. The page reaches the vault only through the window, with the
+// rights of whoever opened it.
+func (r *Router) handlePluginApps(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
+		return
+	}
+	if r.pipelinesOff(w) {
+		return
+	}
+	out := []pluginAppView{}
+	if r.deps.Plugins != nil {
+		for _, a := range r.deps.Plugins.Apps() {
+			st, _ := r.deps.Plugins.State(a.Plugin)
+			out = append(out, pluginAppView{Plugin: a.Plugin, Name: a.Spec.Name, Title: a.Spec.Title, Description: a.Spec.Description,
+				URL: a.Spec.URL, AltURLs: a.Spec.AltURLs, Origin: a.Spec.Origin(), NoteType: a.Spec.NoteType, Bridge: a.Spec.Bridge, Engine: a.Spec.Engine, Status: st.Status})
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"apps": out})
+}
+
 func short(sha string) string {
 	if len(sha) > 12 {
 		return sha[:12]

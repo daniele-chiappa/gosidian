@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import enUI from '@catalogs/ui.en.json'
+import itUI from '@catalogs/ui.it.json'
 import type { Team } from '@/api/teams'
 
 vi.mock('@/api/teams', () => ({
@@ -44,6 +45,20 @@ describe('AdminTeamsView', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(listTeams).mockResolvedValue([team()])
+  })
+
+  it("names a grant's level in the reader's language, the code in the tooltip (IMP-220, F-20)", async () => {
+    const i18n = createI18n({
+      legacy: false,
+      locale: 'it',
+      fallbackLocale: 'en',
+      messages: { it: itUI, en: enUI },
+    })
+    const w = mount(AdminTeamsView, { global: { plugins: [i18n] } })
+    await flushPromises()
+    const badge = w.find('[data-level]')
+    expect(badge.text()).toBe('lettura')
+    expect(badge.attributes('title')).toBe('read')
   })
 
   it('keeps the rename form, and what was typed, when the rename is refused', async () => {

@@ -16,6 +16,6 @@ const lines = computed(() => {
 <template>
   <p class="text-danger" role="alert">
     {{ lines.head }}
-    <span v-if="lines.detail" class="mt-0.5 block text-xs opacity-80">{{ lines.detail }}</span>
+    <span v-if="lines.detail" class="mt-0.5 block text-xs">{{ lines.detail }}</span>
   </p>
 </template>

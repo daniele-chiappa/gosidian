@@ -8,6 +8,7 @@ import (
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/chatbot"
 	"github.com/gosidian/gosidian/internal/fleet"
+	"github.com/gosidian/gosidian/internal/fonts"
 	"github.com/gosidian/gosidian/internal/gitsync"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/infolder"
@@ -56,6 +57,9 @@ type Deps struct {
 	// IN is the state of the projects' IN folders (IMP-172); nil in tests
 	// that need none.
 	IN *infolder.Service
+	// Fonts is the installation's catalog of fonts for the page-layout
+	// editor (IMP-226).
+	Fonts *fonts.Store
 	// Marks are the marks the pipelines put on notes (IMP-188); nil keeps
 	// none.
 	Marks *marks.Store
@@ -101,6 +105,14 @@ type WebLimits struct {
 	GraphMaxEdges     int
 	CutMaxChunks      int
 	PluginTimeout     time.Duration
+	// LayoutMaxBytes caps a page layout's package, all its entries
+	// unpacked; LayoutMaxDocumentBytes its document.json;
+	// LayoutMaxEntries its entries, LayoutMaxFontBytes a font added to the
+	// catalog (IMP-226).
+	LayoutMaxBytes         int64
+	LayoutMaxDocumentBytes int64
+	LayoutMaxEntries       int
+	LayoutMaxFontBytes     int
 }
 
 // withDefaults is l with a default for each cap left at zero.
@@ -108,13 +120,22 @@ func (l WebLimits) withDefaults() WebLimits {
 	for _, n := range []struct {
 		dst *int
 		def int
-	}{{&l.GraphDefaultNodes, 2000}, {&l.GraphMaxNodes, 5000}, {&l.GraphMaxEdges, 50000}, {&l.CutMaxChunks, 5000}} {
+	}{{&l.GraphDefaultNodes, 2000}, {&l.GraphMaxNodes, 5000}, {&l.GraphMaxEdges, 50000}, {&l.CutMaxChunks, 5000}, {&l.LayoutMaxEntries, 10000}} {
 		if *n.dst <= 0 {
 			*n.dst = n.def
 		}
 	}
 	if l.PluginTimeout <= 0 {
 		l.PluginTimeout = 2 * time.Minute
+	}
+	if l.LayoutMaxBytes <= 0 {
+		l.LayoutMaxBytes = 256 << 20
+	}
+	if l.LayoutMaxDocumentBytes <= 0 {
+		l.LayoutMaxDocumentBytes = 16 << 20
+	}
+	if l.LayoutMaxFontBytes <= 0 {
+		l.LayoutMaxFontBytes = 32 << 20
 	}
 	// A default over the most a graph may ask would never be honoured.
 	l.GraphDefaultNodes = min(l.GraphDefaultNodes, l.GraphMaxNodes)
@@ -154,7 +175,9 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	//                       (server-to-server, curl) and only rejects
 	//                       browser-shaped requests with a mismatch.
 	//   jsonHeaders      → Content-Type: application/json default.
-	h := securityHeadersMW(observe(originValidate(jsonHeaders(r.mux))))
+	//   gzipJSON         → a large JSON answer in gzip (IMP-225), inside
+	//                       jsonHeaders so a handler's own type wins.
+	h := securityHeadersMW(observe(originValidate(jsonHeaders(gzipJSON(r.mux)))))
 	h.ServeHTTP(w, req)
 }
 
@@ -244,6 +267,8 @@ func (r *Router) registerAuthed() {
 	r.mux.Handle("/api/v1/admin/invites", owner(r.handleAdminInvites))
 	r.mux.Handle("/api/v1/admin/invites/", owner(r.handleAdminInviteItem))
 	r.mux.Handle("/api/v1/admin/audit", owner(r.handleAdminAudit))
+	r.mux.Handle("/api/v1/admin/fonts", owner(r.handleAdminFonts))
+	r.mux.Handle("/api/v1/admin/fonts/", owner(r.handleAdminFontItem))
 	r.mux.Handle("/api/v1/admin/export.zip", owner(r.handleVaultExport))
 
 	r.mux.Handle("/api/v1/insights/pending", owner(r.handleInsightsPending))
@@ -253,6 +278,11 @@ func (r *Router) registerAuthed() {
 	// handlers authenticate themselves and fall back to authed.
 	r.mux.Handle("/api/v1/pipelines", authed(r.handlePipelines))
 	r.mux.Handle("/api/v1/plugins", authed(r.handlePlugins))
+	r.mux.Handle("/api/v1/plugins/apps", authed(r.handlePluginApps))
+	r.mux.Handle("/api/v1/layouts/", authed(r.handleLayouts))
+	r.mux.Handle("/api/v1/fonts", authed(r.handleFonts))
+	r.mux.Handle("/api/v1/fonts/", authed(r.handleFontFile))
+	r.mux.Handle("/api/v1/attachments", authed(r.handleAttachmentList))
 	r.mux.Handle("/api/v1/pipelines/", r.pipelineRoutes(authed))
 	r.mux.Handle("/api/v1/runs", authed(r.handleRuns))
 	r.mux.Handle("/api/v1/runs/", r.runRoutes(authed))

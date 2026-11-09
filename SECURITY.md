@@ -31,6 +31,23 @@ is already released; specific windows are negotiated case by case.
 Only the latest minor release on the `v2.x` line receives security
 fixes. Older versions are patched only when the fix is trivial.
 
+## How we watch the dependencies
+
+Every night, `scripts/nightly.sh` checks the lockfiles and the images we
+publish with [osv-scanner](https://github.com/google/osv-scanner), and
+the Go code with [govulncheck](https://go.dev/doc/tutorial/govulncheck),
+which also tells whether the code calls the vulnerable function. It
+tells us of what is new and serious: a CVSS score of 7 or more, an
+advisory in CISA's [Known Exploited
+Vulnerabilities](https://www.cisa.gov/known-exploited-vulnerabilities-catalog)
+catalogue, or Go code that calls it; and of a fix for one we already
+know. One in a package of an image's distribution with no fix yet is
+told when the distribution fixes it.
+
+An advisory we evaluated and keep open, because the code does not reach
+it or no fix exists yet, is in [`osv-scanner.toml`](osv-scanner.toml)
+with the reason and a date: after the date it is told again.
+
 ## Scope
 
 In scope:

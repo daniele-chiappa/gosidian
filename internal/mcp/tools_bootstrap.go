@@ -246,7 +246,7 @@ func (s *Server) buildCapabilities(readOnly bool) bootstrapCapabilities {
 		TableNotes: s.vault.TableNotesEnabled(),
 		Diagrams:   diagramCapability(),
 		Attachments: bootstrapAttachCapability{
-			MaxMiB:               attach.MaxBytes >> 20,
+			MaxMiB:               int(attach.MaxBytes() >> 20),
 			Extensions:           exts,
 			UploadEndpointHint:   "save a file with memory_ingest (routed by extension; sources: bridge_filename, source_path, url, or transfer:\"http\" for a single-use upload ticket), or POST it multipart (field 'file', bearer) to your MCP URL + /upload (drop a trailing /sse): the bytes skip the context",
 			DownloadEndpointHint: downloadEndpointHint,

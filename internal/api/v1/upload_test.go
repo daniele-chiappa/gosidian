@@ -193,7 +193,7 @@ func TestHistory_RequiresGitSync(t *testing.T) {
 // instead of being spooled to a temp file first (BUG-034).
 func TestUpload_OversizedBodyIs413(t *testing.T) {
 	f := newUploadFixture(t)
-	huge := bytes.Repeat([]byte("x"), int(attach.MaxBytes)+3<<20)
+	huge := bytes.Repeat([]byte("x"), int(attach.MaxBytes())+3<<20)
 	ct, raw := uploadFile(t, "huge.png", huge)
 	rec := f.doMultipart(t, http.MethodPost, "/api/v1/upload?project=proj", ct, raw)
 	if rec.code != http.StatusRequestEntityTooLarge {

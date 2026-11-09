@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -233,8 +234,19 @@ func TestWireGitWriters_AProjectsFlagsAskForACommit(t *testing.T) {
 	for time.Now().Before(deadline) && tracked() != "" {
 		time.Sleep(20 * time.Millisecond)
 	}
+	// git sync takes p out of the index before it commits: Flush waits for
+	// the commit on its way, or the TempDir cleanup races its git (the
+	// GitHub runner, v2.133.0; the family of BUG-028).
+	s.Flush()
 	if got := tracked(); got != "" {
 		t.Errorf("p still in git after its git sync went off: %q", got)
+	}
+	msg, err := exec.Command("git", "-C", dir, "log", "-1", "--format=%B").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(msg), "stop tracking p") {
+		t.Errorf("last commit = %q, want git sync's own, stop tracking p", msg)
 	}
 }
 

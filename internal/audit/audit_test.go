@@ -179,6 +179,48 @@ func TestTailFiltered_CombinedFilters(t *testing.T) {
 	}
 }
 
+// The admin's audit shows the newest entries first, in pages, with how
+// many match in all (IMP-224, F-30).
+func TestLog_Page(t *testing.T) {
+	l := seedFilterLog(t)
+	said := func(rows []Entry) string {
+		var s []string
+		for _, r := range rows {
+			s = append(s, string(r.Action)+" "+r.Path)
+		}
+		return strings.Join(s, ", ")
+	}
+	for _, c := range []struct {
+		name        string
+		opts        TailOpts
+		offset      int
+		newestFirst bool
+		want        string
+		total       int
+	}{
+		{"the newest first", TailOpts{Limit: 2}, 0, true, "create projA/q.md, delete projB/z.md", 5},
+		{"the next page", TailOpts{Limit: 2}, 2, true, "append projB/z.md, update projA/y.md", 5},
+		{"the last page, shorter", TailOpts{Limit: 2}, 4, true, "create projA/x.md", 5},
+		{"past the end", TailOpts{Limit: 2}, 5, true, "", 5},
+		{"the oldest first", TailOpts{Limit: 2}, 1, false, "update projA/y.md, append projB/z.md", 5},
+		{"oldest, past the end", TailOpts{Limit: 2}, 9, false, "", 5},
+		{"a filter counts what it keeps", TailOpts{Actor: "alice", Limit: 10}, 0, true, "delete projB/z.md, create projA/x.md", 2},
+		{"a negative offset is none", TailOpts{Limit: 1}, -3, true, "create projA/q.md", 5},
+	} {
+		rows, total, err := l.Page(c.opts, c.offset, c.newestFirst)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := said(rows); got != c.want || total != c.total {
+			t.Errorf("%s: %q of %d, want %q of %d", c.name, got, total, c.want, c.total)
+		}
+	}
+	var none *Log
+	if rows, total, err := none.Page(TailOpts{}, 0, true); rows != nil || total != 0 || err != nil {
+		t.Errorf("nil log: %v %d %v", rows, total, err)
+	}
+}
+
 // OnWrite hooks see every entry written, after it is on disk; Each reads
 // the log back, oldest first, skipping a malformed line.
 func TestLog_OnWriteAndEach(t *testing.T) {

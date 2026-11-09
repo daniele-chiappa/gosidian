@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/gosidian/gosidian/internal/clock"
+	"github.com/gosidian/gosidian/internal/dbschema"
 	"github.com/gosidian/gosidian/internal/fleet"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/parser"
@@ -24,6 +25,8 @@ type Data struct {
 	// limits (IMP-216): Groups are their names, then the closed cards
 	// without a column ("").
 	Lanes []fleet.Column `json:"lanes,omitempty"`
+	// Board is their board's flow and iteration (IMP-216 phase 2).
+	Board *BoardState `json:"board,omitempty"`
 	// Counts are the groups of a count view (as: count with group_by).
 	Counts []Count `json:"counts,omitempty"`
 	Rows   []Row   `json:"rows,omitempty"`
@@ -49,6 +52,19 @@ type Column struct {
 	Type     string   `json:"type,omitempty"`
 	Options  []string `json:"options,omitempty"`
 	Required bool     `json:"required,omitempty"`
+	// Label, Labels and OptionLabels name the field and its options in
+	// the web UI, as the schema declares them (IMP-220).
+	Label        string                       `json:"label,omitempty"`
+	Labels       map[string]string            `json:"labels,omitempty"`
+	OptionLabels map[string]map[string]string `json:"option_labels,omitempty"`
+}
+
+// FieldColumn is the column of a field the schema declares.
+func FieldColumn(f dbschema.Field) Column {
+	return Column{
+		Name: f.Name, Type: f.Type, Options: f.Options, Required: f.Required,
+		Label: f.Label, Labels: f.Labels, OptionLabels: f.OptionLabels,
+	}
 }
 
 // Row is a note a view lists. Fields holds the fields the view reads, as
@@ -99,7 +115,7 @@ func (r *Result) Data(c Context) Data {
 		for _, gr := range groups {
 			d.Groups = append(d.Groups, gr.Value)
 		}
-		d.Lanes = r.Spec.Lanes
+		d.Lanes, d.Board = r.Spec.Lanes, r.Board
 	}
 	d.Rows = make([]Row, 0, len(r.Hits))
 	for _, h := range r.Hits {
@@ -197,7 +213,7 @@ func (r *Result) column(name string) Column {
 		return col
 	}
 	if f, ok := r.Schema.Field(name); ok {
-		col.Type, col.Options, col.Required = f.Type, f.Options, f.Required
+		return FieldColumn(f)
 	}
 	return col
 }

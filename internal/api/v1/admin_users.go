@@ -557,7 +557,7 @@ func (r *Router) createInvite(w http.ResponseWriter, req *http.Request) {
 			Source: audit.SourceHTTP,
 			Actor:  user.Username,
 			UserID: user.ID,
-			Action: "invite_create",
+			Action: audit.ActionInviteCreate,
 			Path:   inv.Token,
 		})
 	}
@@ -593,7 +593,7 @@ func (r *Router) handleAdminInviteItem(w http.ResponseWriter, req *http.Request)
 			Source: audit.SourceHTTP,
 			Actor:  user.Username,
 			UserID: user.ID,
-			Action: "invite_revoke",
+			Action: audit.ActionInviteRevoke,
 			Path:   token,
 		})
 	}

@@ -28,9 +28,23 @@ export interface TreeResponse {
   root: TreeNode
 }
 
-export async function fetchTree(project?: string): Promise<TreeNode> {
-  const { data } = await client.get<TreeResponse>('/tree', {
+/** A tree and the ETag of what it holds. */
+export interface TreeAnswer {
+  root: TreeNode
+  etag: string
+}
+
+/**
+ * The tree of the vault, or of one project, as the account sees it. With
+ * the ETag of the tree held, an unchanged one answers 304 without a body,
+ * and this null (IMP-225).
+ */
+export async function fetchTree(project?: string, etag?: string): Promise<TreeAnswer | null> {
+  const res = await client.get<TreeResponse>('/tree', {
     params: project ? { project } : undefined,
+    headers: etag ? { 'If-None-Match': etag } : undefined,
+    validateStatus: (s) => (s >= 200 && s < 300) || s === 304,
   })
-  return data.root
+  if (res.status === 304) return null
+  return { root: res.data.root, etag: String(res.headers['etag'] ?? '') }
 }

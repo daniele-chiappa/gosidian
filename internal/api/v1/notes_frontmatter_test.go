@@ -314,7 +314,7 @@ func TestRowFields(t *testing.T) {
 	if l := r.Links["see"]; len(l) != 1 || l[0].Path != "p/docs/tasks/T-1.md" {
 		t.Errorf("links = %+v", r.Links)
 	}
-	if free := get("p/free.md", owner); free.Database != "" || len(free.Values) != 0 || free.Writable {
+	if free := get("p/free.md", owner); free.Database != "" || len(free.Values) != 0 || !free.Writable {
 		t.Errorf("a note outside a database: %+v", free)
 	}
 
@@ -328,5 +328,54 @@ func TestRowFields(t *testing.T) {
 	}
 	if rec := f.request(http.MethodGet, "/api/v1/notes/p/docs/tasks/missing.md/fields", "", owner); rec.Code != http.StatusNotFound {
 		t.Errorf("missing note: %d", rec.Code)
+	}
+}
+
+// Every markdown note the reader sees gives its tags to the web UI's tag
+// field, as the index reads them, and whether the reader may change them;
+// a project with the vocabulary flag gives its vocabulary too (IMP-223).
+func TestRowFields_Tags(t *testing.T) {
+	f := newFrontmatterFixture(t)
+	f.seedNote(t, "p/docs/tasks/T-2.md", "---\ntitle: Two\nid: T-2\nstatus: doing\ntags: [p, \"#topic:ui\"]\n---\n")
+	f.seedNote(t, "p/free.md", "---\ntitle: Free\ntags:\n  - alpha\n  - type:note\n---\nBody #inline\n")
+	f.seedNote(t, "p/bare.md", "No frontmatter\n")
+	f.seedNote(t, "p/memory/conventions.md", "---\ntitle: Conventions\ntag_vocabulary: [agile, \"area:*\", \"bad tag\"]\n---\n")
+	get := func(rel, bearer string) rowFieldsResponse {
+		t.Helper()
+		rec := f.request(http.MethodGet, "/api/v1/notes/"+rel+"/fields", "", map[string]string{"Authorization": "Bearer " + bearer})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s/fields = %d %s", rel, rec.Code, rec.Body.String())
+		}
+		var out rowFieldsResponse
+		if err := json.NewDecoder(rec.Body).Decode(&out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	if r := get("p/docs/tasks/T-2.md", f.bearer); strings.Join(r.Tags, ",") != "p,topic:ui" || !r.Writable {
+		t.Errorf("a row: tags %v, writable %v", r.Tags, r.Writable)
+	}
+	// The frontmatter's tags only: an inline #tag of the body is no chip.
+	free := get("p/free.md", f.bearer)
+	if strings.Join(free.Tags, ",") != "alpha,type:note" || !free.Writable || free.TagVocabulary != nil {
+		t.Errorf("a free note: %+v", free)
+	}
+	if bare := get("p/bare.md", f.bearer); bare.Tags == nil || len(bare.Tags) != 0 || !bare.Writable {
+		t.Errorf("a note without frontmatter: %+v", bare)
+	}
+
+	u, bearer := f.memberUser(t, "reader")
+	if err := f.projects.SetMember("p", u.ID, projects.LevelRead); err != nil {
+		t.Fatal(err)
+	}
+	if r := get("p/free.md", bearer); strings.Join(r.Tags, ",") != "alpha,type:note" || r.Writable {
+		t.Errorf("a reader: %+v", r)
+	}
+
+	if err := f.projects.Set("p", projects.Flags{UseTagVocabulary: true}); err != nil {
+		t.Fatal(err)
+	}
+	if v := get("p/free.md", f.bearer).TagVocabulary; strings.Join(v, ",") != "agile,area:*" {
+		t.Errorf("vocabulary = %v", v)
 	}
 }

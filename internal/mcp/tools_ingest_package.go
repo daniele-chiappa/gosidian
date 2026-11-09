@@ -171,8 +171,8 @@ func (s *Server) importPackage(ctx context.Context, in packageIntent, entries []
 			if _, _, err := attach.ValidateExt(ext); err != nil {
 				return "", errors.New("not a note, and not an accepted attachment type")
 			}
-			if len(data) > attach.MaxBytes {
-				return "", errors.New("attachment too large (max 10 MiB)")
+			if int64(len(data)) > attach.MaxBytes() {
+				return "", errors.New("attachment too large (max " + attach.MaxSize() + ")")
 			}
 			if _, err := attach.VerifyMIME(data, ext); err != nil {
 				return "", err

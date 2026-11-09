@@ -217,10 +217,14 @@ func addZipBytes(zw *zip.Writer, name string, info fs.FileInfo, data []byte) err
 // exportNote answers GET /notes/{path}?export=zip: a note that names
 // attachments comes as a zip, the note at its root with its references made
 // relative and the files under attachments/; one that names none comes as
-// the file it is. It is a read of the note and of its images, like ?inline,
-// not a bulk export: no export limit, no audit.
+// the file it is. A note's design stays behind (IMP-226). It is a read of
+// the note and of its images, like ?inline, not a bulk export: no export
+// limit, no audit.
 func (r *Router) exportNote(w http.ResponseWriter, req *http.Request, rel string, content []byte) {
 	format, ok := isExportNote(rel)
+	if format != "html" {
+		content = withoutDesign(content)
+	}
 	base := path.Base(rel)
 	h := w.Header()
 	attach.SetInertHeaders(h)

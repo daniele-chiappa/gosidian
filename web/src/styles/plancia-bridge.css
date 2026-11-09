@@ -39,6 +39,16 @@
 }
 
 /*
+ * plancia-diagrams lays its selected rows and tabs and its trigger pills on
+ * the accent at 16% over the surface, where the secondary text fell to 4.2:1
+ * in Latte: 10%, the tint of gosidian's chips (IMP-221). Its stylesheet comes
+ * with the lazy diagram chunk, after this one, hence :root for the weight.
+ */
+:root .plancia-diagram {
+  --pd-accent-soft: color-mix(in srgb, var(--pd-accent) 10%, var(--pd-surface));
+}
+
+/*
  * gosidian uses <PlanciaSidebar> as a pure slotted shell: it owns the width,
  * the edge border and the landmark, while gosidian's own <aside> (bg, menu,
  * tree, recents, full-width section borders) renders edge-to-edge inside the
@@ -51,5 +61,19 @@
   display: none;
 }
 .plancia-sidebar--inline[data-position='left'] > .plancia-sidebar__panel > .plancia-sidebar__body {
+  padding: 0;
+}
+
+/*
+ * On a narrow screen the sidebar is the drawer (IMP-221, F-15), and the bar's
+ * button opens it: the library's reveal tab, fixed at the top left, would sit
+ * over the bar. The same button opens it again on a wide screen, closed with
+ * it or Ctrl+\ (IMP-229): one way back, no tab. The drawer's body loses its
+ * padding as the inline one does.
+ */
+.plancia-sidebar[data-position='left'] > .plancia-sidebar__reveal {
+  display: none;
+}
+.plancia-sidebar[data-drawer][data-position='left'] > .plancia-sidebar__panel > .plancia-sidebar__body {
   padding: 0;
 }

@@ -1,6 +1,7 @@
 package dbschema
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -362,6 +363,57 @@ func TestParse_Rollup(t *testing.T) {
 		"  r:\n    type: rollup\n    where: [x = y]\n":               "has no `from`",
 		"  r:\n    type: rollup\n    from: p/plans\n    calc: avg\n": "calc \"avg\" is not one of count, sum, min, max",
 		"  r:\n    type: rollup\n    from: p/plans\n    calc: max\n": "calc max needs `of`",
+	} {
+		if _, err := Parse("p/x.md", "type: database\nsource: p/x\nfields:\n"+body); err == nil || !strings.Contains(err.Error(), msg) {
+			t.Errorf("%q: err = %v, want %q", body, err, msg)
+		}
+	}
+}
+
+// A field's name and its options' in the web UI (IMP-220, F-23): label in
+// every language or per language, option_labels per language. Out of the
+// bootstrap's JSON, and out of a rollup's spec.
+func TestParse_Labels(t *testing.T) {
+	fm := "type: database\nsource: p/x\nfields:\n" +
+		"  status:\n    type: select\n    options: [open, done]\n    label: {it: Stato, en: Status}\n" +
+		"    option_labels:\n      it: {open: aperta, done: fatta}\n      en: {open: Open}\n" +
+		"  due: {type: date, label: Scadenza}\n" +
+		"  plans:\n    type: rollup\n    from: p/plans\n    label: {it: Piani}\n"
+	s, err := Parse("p/x.md", fm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, _ := s.Field("status")
+	if status.Label != "" || status.Labels["it"] != "Stato" || status.Labels["en"] != "Status" {
+		t.Errorf("status labels = %q %v", status.Label, status.Labels)
+	}
+	if status.OptionLabels["it"]["done"] != "fatta" || status.OptionLabels["en"]["open"] != "Open" || len(status.OptionLabels["en"]) != 1 {
+		t.Errorf("status option labels = %v", status.OptionLabels)
+	}
+	if due, _ := s.Field("due"); due.Label != "Scadenza" || due.Labels != nil {
+		t.Errorf("due = %q %v", due.Label, due.Labels)
+	}
+	plans, _ := s.Field("plans")
+	if plans.Labels["it"] != "Piani" || strings.Contains(plans.Rollup.Spec, "label") || strings.Contains(plans.Rollup.Spec, "Piani") {
+		t.Errorf("plans = %v, spec %q", plans.Labels, plans.Rollup.Spec)
+	}
+	b, err := json.Marshal(s.Fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "Stato") || strings.Contains(string(b), "aperta") || strings.Contains(string(b), "Scadenza") {
+		t.Errorf("labels reached the bootstrap's JSON: %s", b)
+	}
+
+	for body, msg := range map[string]string{
+		"  s: {type: text, label: [a, b]}\n":                                     "`label` is a text, or a map",
+		"  s: {type: text, label: {italiano: Stato}}\n":                          `"italiano" is not a language code`,
+		"  s: {type: text, label: {it: [a]}}\n":                                  "label.it must be a text",
+		"  s: {type: text, option_labels: {it: {a: b}}}\n":                       "names the options of a select",
+		"  s: {type: select, options: [a], option_labels: [a]}\n":                "`option_labels` is a map of language",
+		"  s: {type: select, options: [a], option_labels: {it: {b: x}}}\n":       `names "b", which is not one of its options`,
+		"  s: {type: select, options: [a], option_labels: {it: {a: [x]}}}\n":     "option_labels.it.a must be a text",
+		"  s: {type: multi-select, options: [a], option_labels: {e1: {a: x}}}\n": `"e1" is not a language code`,
 	} {
 		if _, err := Parse("p/x.md", "type: database\nsource: p/x\nfields:\n"+body); err == nil || !strings.Contains(err.Error(), msg) {
 			t.Errorf("%q: err = %v, want %q", body, err, msg)

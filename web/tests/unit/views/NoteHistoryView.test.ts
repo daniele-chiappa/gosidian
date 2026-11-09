@@ -3,7 +3,15 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import enUI from '@catalogs/ui.en.json'
 
-vi.mock('@/api/history', () => ({ getHistory: vi.fn(), getVersion: vi.fn(), restoreVersion: vi.fn() }))
+vi.mock('@/api/history', () => ({
+  getHistory: vi.fn(),
+  getVersion: vi.fn(),
+  restoreVersion: vi.fn(),
+  getVersions: vi.fn(),
+  tagVersion: vi.fn(),
+  setValidVersion: vi.fn(),
+  clearValidVersion: vi.fn(),
+}))
 vi.mock('plancia', async (orig) => ({
   ...(await orig<typeof import('plancia')>()),
   useWindowsStore: () => ({ open: vi.fn() }),
@@ -13,7 +21,18 @@ vi.mock('@/stores/access', () => ({ useAccessStore: () => ({ canWrite: () => wri
 vi.mock('@/composables/useConfirm', () => ({ confirmAction: vi.fn() }))
 vi.mock('@/composables/useAnnounce', () => ({ announce: vi.fn() }))
 
-import { getHistory, getVersion, restoreVersion, type HistoryEntry, type Version } from '@/api/history'
+import {
+  clearValidVersion,
+  getHistory,
+  getVersion,
+  getVersions,
+  restoreVersion,
+  setValidVersion,
+  tagVersion,
+  type HistoryEntry,
+  type NoteTag,
+  type Version,
+} from '@/api/history'
 import { confirmAction } from '@/composables/useConfirm'
 import { announce } from '@/composables/useAnnounce'
 import NoteHistoryView from '@/views/NoteHistoryView.vue'
@@ -51,6 +70,20 @@ describe('NoteHistoryView (IMP-222)', () => {
     vi.clearAllMocks()
     writable = true
     vi.mocked(getHistory).mockResolvedValue([now, yesterday])
+    vi.mocked(getVersions).mockResolvedValue({ items: [], valid: null, can_admin: false })
+  })
+
+  it('opens the version the panel of the versions asked for (IMP-228)', async () => {
+    vi.mocked(getVersion).mockResolvedValue(version())
+    const w = mount(NoteHistoryView, {
+      props: { path: 'p/a.md', sha: yesterday.sha, shaAt: 1 },
+      global: { plugins: [i18n()] },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    expect(getVersion).toHaveBeenCalledWith('p/a.md', yesterday.sha)
+    expect(versionButtons(w)[1]!.attributes('aria-expanded')).toBe('true')
+    w.unmount()
   })
 
   it('opens a version on a click: the diff first, then its text', async () => {
@@ -169,5 +202,96 @@ describe('NoteHistoryView (IMP-222)', () => {
     await flushPromises()
     expect(w.text()).toContain('Named p/old.md then')
     w.unmount()
+  })
+})
+
+describe('NoteHistoryView, the named versions (IMP-201)', () => {
+  const v1: NoteTag = { tag: 'note/p/a.md/V1', label: 'V1', sha: yesterday.sha, short_sha: 'bbbbbbb', date: '2026-11-01T10:00:00Z', path: 'p/a.md' }
+  const valid = { tag: v1.tag, label: 'V1', sha: v1.sha, same: false }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(getHistory).mockResolvedValue([now, yesterday])
+    vi.mocked(getVersion).mockResolvedValue(version())
+    vi.mocked(confirmAction).mockResolvedValue(true)
+  })
+
+  async function open(entry: number) {
+    const w = mountView()
+    await flushPromises()
+    await versionButtons(w)[entry]!.trigger('click')
+    await flushPromises()
+    return w
+  }
+
+  it('shows the tags on their entries, and which one is valid', async () => {
+    vi.mocked(getVersions).mockResolvedValue({ items: [v1], valid, can_admin: false })
+    const w = mountView()
+    await flushPromises()
+    const tags = w.findAll('[data-tag]')
+    expect(tags).toHaveLength(1)
+    expect(tags[0]!.text()).toContain('V1')
+    expect(tags[0]!.text()).toContain('pinned version')
+    expect(versionButtons(w)[1]!.find('[data-tag]').exists()).toBe(true)
+    expect(versionButtons(w)[0]!.find('[data-tag]').exists()).toBe(false)
+  })
+
+  it('offers nothing to change to who is no admin of the project', async () => {
+    vi.mocked(getVersions).mockResolvedValue({ items: [v1], valid: null, can_admin: false })
+    const w = await open(1)
+    expect(w.find('[data-version-admin]').exists()).toBe(false)
+  })
+
+  it('names the version open, and reads the versions again', async () => {
+    vi.mocked(getVersions).mockResolvedValue({ items: [], valid: null, can_admin: true })
+    vi.mocked(tagVersion).mockResolvedValue(v1)
+    const w = await open(1)
+    expect(w.find('[data-tag-version]').attributes('disabled')).toBeDefined()
+    await w.find('[data-tag-label]').setValue(' V1 ')
+    await w.find('[data-tag-label]').element.closest('form')!.dispatchEvent(new Event('submit', { cancelable: true }))
+    await flushPromises()
+    expect(tagVersion).toHaveBeenCalledWith('p/a.md', 'V1', yesterday.sha)
+    expect(announce).toHaveBeenCalledWith('This version is now V1')
+    expect(vi.mocked(getVersions).mock.calls.length).toBeGreaterThan(1)
+  })
+
+  it('says why a label was refused, and keeps it', async () => {
+    vi.mocked(getVersions).mockResolvedValue({ items: [], valid: null, can_admin: true })
+    vi.mocked(tagVersion).mockRejectedValue(new Error('taken'))
+    const w = await open(1)
+    await w.find('[data-tag-label]').setValue('V1')
+    await w.find('[data-tag-label]').element.closest('form')!.dispatchEvent(new Event('submit', { cancelable: true }))
+    await flushPromises()
+    expect(w.text()).toContain('Could not name the version')
+    expect((w.find('[data-tag-label]').element as HTMLInputElement).value).toBe('V1')
+  })
+
+  it('makes a tag valid after a confirmation, and not without it', async () => {
+    vi.mocked(getVersions).mockResolvedValue({ items: [v1], valid: null, can_admin: true })
+    const w = await open(1)
+    vi.mocked(confirmAction).mockResolvedValueOnce(false)
+    await w.find('[data-make-valid]').trigger('click')
+    await flushPromises()
+    expect(setValidVersion).not.toHaveBeenCalled()
+    await w.find('[data-make-valid]').trigger('click')
+    await flushPromises()
+    expect(setValidVersion).toHaveBeenCalledWith('p/a.md', v1.tag)
+    expect(announce).toHaveBeenCalledWith('V1 is pinned')
+  })
+
+  it('removes the valid version from its entry', async () => {
+    vi.mocked(getVersions).mockResolvedValue({ items: [v1], valid, can_admin: true })
+    const w = await open(1)
+    expect(w.find('[data-make-valid]').exists()).toBe(false)
+    await w.find('[data-clear-valid]').trigger('click')
+    await flushPromises()
+    expect(clearValidVersion).toHaveBeenCalledWith('p/a.md')
+  })
+
+  it('keeps the history when the versions do not read', async () => {
+    vi.mocked(getVersions).mockRejectedValue(new Error('no'))
+    const w = mountView()
+    await flushPromises()
+    expect(versionButtons(w)).toHaveLength(2)
   })
 })

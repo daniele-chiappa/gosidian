@@ -1,0 +1,106 @@
+{
+  "admin": {
+    "audit": {
+      "table": "Audit-Einträge",
+      "range": "{from}–{to} von {total}",
+      "pages": "Seiten des Audits",
+      "previous": "Vorherige Seite",
+      "next": "Nächste Seite",
+      "newest_first": "Neueste zuerst",
+      "oldest_first": "Älteste zuerst",
+      "action_groups": {
+        "note": "Notizen und Dateien",
+        "project": "Projekte",
+        "access": "Freigaben und Teams",
+        "account": "Konten",
+        "session": "Anmeldungen",
+        "token": "MCP-Tokens",
+        "pipeline": "Pipelines und Plugins",
+        "server": "Server"
+      },
+      "actions": {
+        "note": {
+          "create": "Notiz oder Datei erstellt",
+          "update": "Notiz oder Datei geändert",
+          "append": "Text an eine Notiz angehängt",
+          "delete": "Notiz oder Datei gelöscht",
+          "rename": "Notiz oder Datei umbenannt",
+          "restore": "Notiz aus einer Version wiederhergestellt",
+          "upload_attachment": "Anhang hochgeladen",
+          "delete_attachment": "Anhang gelöscht",
+          "ingest_package": "Notizpaket importiert",
+          "in_upload": "Upload in IN abgeschlossen",
+          "in_upload_open": "Upload in IN von einem Agenten begonnen",
+          "export": "ZIP-Export heruntergeladen",
+          "mirror_sync": "lokale Kopie synchronisiert"
+        },
+        "project": {
+          "create_project": "Projekt erstellt",
+          "delete_project": "Projekt gelöscht",
+          "rename_project": "Projekt umbenannt",
+          "project_flags_update": "Projekt-Flags geändert",
+          "personal_project_create": "persönliches Projekt erstellt"
+        },
+        "access": {
+          "project_member_set": "Freigabe an ein Konto vergeben",
+          "project_member_remove": "Freigabe eines Kontos entfernt",
+          "project_team_set": "Freigabe an ein Team vergeben, im Projekt",
+          "project_team_remove": "Freigabe eines Teams entfernt, im Projekt",
+          "team_create": "Team erstellt",
+          "team_update": "Team geändert",
+          "team_delete": "Team gelöscht",
+          "team_user_add": "Konto zu einem Team hinzugefügt",
+          "team_user_remove": "Konto aus einem Team entfernt",
+          "team_grant_set": "Freigabe an ein Team vergeben, im Team",
+          "team_grant_remove": "Freigabe eines Teams entfernt, im Team"
+        },
+        "account": {
+          "user_create": "Konto erstellt",
+          "user_update": "Konto geändert",
+          "user_disable": "Konto deaktiviert",
+          "user_archive": "Konto archiviert, Name freigegeben",
+          "invite_create": "Einladung erstellt",
+          "invite_revoke": "Einladung widerrufen",
+          "password_change": "Passwort geändert",
+          "password_reset": "Passwort vom Admin zurückgesetzt",
+          "totp_enroll": "Zwei-Faktor-Authentifizierung eingeschaltet",
+          "totp_disenroll": "Zwei-Faktor-Authentifizierung ausgeschaltet",
+          "totp_reset": "Zwei-Faktor-Authentifizierung vom Admin zurückgesetzt",
+          "totp_recovery_used": "Wiederherstellungscode verwendet",
+          "totp_recovery_regen": "Wiederherstellungscodes neu erzeugt"
+        },
+        "session": {
+          "spa_token_create": "an der Weboberfläche angemeldet",
+          "spa_token_refresh": "Sitzung der Weboberfläche erneuert",
+          "spa_token_revoke": "von der Weboberfläche abgemeldet",
+          "spa_login_failed": "Anmeldung fehlgeschlagen",
+          "oauth_client_register": "OAuth-Client registriert",
+          "oauth_grant": "OAuth-Autorisierung erteilt",
+          "oauth_refresh": "OAuth-Autorisierung erneuert",
+          "oauth_revoke": "OAuth-Autorisierung widerrufen"
+        },
+        "token": {
+          "token_create": "MCP-Token erstellt",
+          "token_update": "MCP-Token geändert",
+          "token_revoke": "MCP-Token widerrufen"
+        },
+        "pipeline": {
+          "pipeline_run": "Pipeline gestartet",
+          "pipeline_resume": "Pipeline fortgesetzt",
+          "pipeline_cancel": "Pipeline abgebrochen",
+          "plugin_call": "Tool eines Plugins aufgerufen"
+        },
+        "server": {
+          "settings_update": "Servereinstellungen geändert",
+          "git_token_set": "Git-Token gesetzt",
+          "git_token_unset": "Git-Token entfernt",
+          "note_tag": "Version einer Notiz benannt",
+          "note_valid": "gültige Version einer Notiz geändert",
+          "note_mcp_version": "Version für MCP einer Notiz geändert",
+          "font_add": "Schrift zum Katalog hinzugefügt",
+          "font_delete": "Schrift aus dem Katalog entfernt"
+        }
+      }
+    }
+  }
+}

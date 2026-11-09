@@ -133,8 +133,9 @@ structured content or as JSON text:
 | `permissions.files` | the plugin reads the files a pipeline hands it (needed by `files`) |
 | `permissions.network` | the hosts the plugin itself calls; empty for none. Declared: whoever runs its container enforces it |
 | `sources` | the archives it reads, which the owner binds to IN folders (below): `name`, `kind`, `description`, `changes`, `move`. A manifest with sources may have no nodes |
-| `tools` | the tools it offers the agents ([below](#tools)): `name`, `description`, `access` (`read` or `write`), `input_schema`, `output_schema`. A manifest with tools may have no nodes |
+| `tools` | the tools it offers the agents ([below](#tools)): `name`, `description`, `access` (`read` or `write`), `input_schema`, `output_schema`; with `internal: true`, a tool of gosidian's own, which only its code calls and no agent is offered. A manifest with tools may have no nodes |
 | `graphs` | the graphs it offers the views of the graph ([below](#graphs)): `name`, `description`, `input_schema` |
+| `apps` | the pages it offers for a window of gosidian's own ([below](#apps)): `name`, `title`, `description`, `url`, `alt_urls`, `note_type`, `bridge`, `engine`. A manifest with apps may have no nodes |
 | `permissions.source_hosts` | the hosts the URLs of its sources' files may point at, besides the plugin's own: gosidian reads no file from another (a name or an address, with a port or not) |
 | `nodes[].contract` | the common contract the node keeps, a name and a version: `agent-run/1` for an agent ([below](#agent-nodes-agent-run1)), `command-run/1` for a command ([below](#command-nodes-command-run1)) |
 | `nodes[].mcp` | `true`: the node's setting `mcp` (`read` or `write`) gets, for the call, a token of gosidian's MCP ([below](#gosidians-mcp-for-a-call)) |
@@ -504,6 +505,52 @@ gosidian reads a graph with the tool `gosidian_graph`, the graph's name in
   serves it to the web UI, kept for 15 minutes (`refresh=1` asks again);
   `GET /api/v1/graph/sources?project=<p>` lists a project's sources. Each
   call is in the audit log as `plugin_call`.
+
+### Apps
+
+A plugin may offer **apps**: a page gosidian opens in a window of its own
+for the notes of a type, such as the page-layout editor (the plugin
+`layout`). The manifest lists them, at most 8:
+
+```json
+"apps": [
+  {"name": "layout", "title": "Impaginazione", "url": "https://layout.example.com/app/",
+   "note_type": "layout", "bridge": "layout/2", "engine": "designcraft v0.17.0",
+   "description": "Opens and saves a note's design, its pages and the images of the vault it places"}
+]
+```
+
+- `url` is the page's address, which the browser loads: absolute, `http`
+  or `https`, without credentials, query or fragment. Its origin goes in
+  the `frame-src` of the web UI's CSP once the manifest is accepted, and
+  not before. The page must let gosidian's origin frame it
+  (`frame-ancestors`).
+- `alt_urls`, at most 4, are the same page at other addresses, each like
+  `url`, for a gosidian reached more than one way: a name and the LAN, or
+  the LAN and an SSH tunnel. The window opens the address on the host
+  gosidian was opened at, else `url`. Their origins go in `frame-src` the
+  same way, and `plugin show` lists them.
+- `note_type` is the type of the notes it opens: one app a type in a
+  manifest. An app of the bridge `layout/2` also lays out the notes no app
+  claims, from **Lay out this note**.
+- `bridge` is the contract of the messages between the page and the
+  window (`postMessage`), a name and a version. The window takes a
+  message only from its frame and from the origin of the address it
+  opened, and writes
+  only to the note it opened, with the rights of whoever is logged in:
+  the page holds no credentials.
+- The window frames every app the same way: `sandbox="allow-scripts
+  allow-same-origin allow-downloads allow-popups"`, `allow="fullscreen;
+  clipboard-read; clipboard-write"`. A plugin does not choose them.
+- `GET /api/v1/plugins/apps` lists the apps of the accepted manifests to
+  every signed-in account, with each one's `origin` and the plugin's
+  `status`.
+- A page `about` beside `url` holds the project's references: with the
+  bridge `layout/2` the window's bar shows it in a frame that runs no
+  script, so it must let gosidian's origin frame it too.
+- The window that opens an app is `app:<note path>`, from **Open in the
+  editor** on a note of the app's type. A note's design, its window and
+  the API it uses are in [page layouts](vault/layouts.md).
 
 ### What gosidian does not do for a plugin
 

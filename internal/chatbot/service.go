@@ -14,6 +14,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -219,8 +220,9 @@ func (s *Service) save() error {
 	return os.Rename(tmp, s.file)
 }
 
-// Changed is told that a note was written, moved or deleted: a bot's note
-// is handed to its plugin again soon after.
+// Changed is told that a note was written, moved or deleted, or a folder
+// or a project, as its path with a trailing slash: a bot's note is handed
+// to its plugin again soon after.
 func (s *Service) Changed(path string) {
 	select {
 	case s.changed <- path:
@@ -344,8 +346,13 @@ func (s *Service) Lost(ctx context.Context) bool {
 }
 
 // concerns says whether a change of the note at p may change a bot: it
-// is a bot's note, or now holds a ```chat block.
+// is a bot's note, or now holds a ```chat block. A folder or a project
+// ("path/") concerns the bots with one under it, known to the service
+// (deleted, renamed away) or there now (restored, renamed into it).
 func (s *Service) concerns(p string) bool {
+	if strings.HasSuffix(p, "/") {
+		return s.botsUnder(p)
+	}
 	if !strings.HasSuffix(p, ".md") {
 		return false
 	}
@@ -359,6 +366,23 @@ func (s *Service) concerns(p string) bool {
 	s.mu.Unlock()
 	n, err := s.host.Note(p)
 	return err == nil && len(Find(n.Content)) > 0
+}
+
+// botsUnder says whether a bot's note is under the folder prefix.
+func (s *Service) botsUnder(prefix string) bool {
+	s.mu.Lock()
+	for _, st := range s.states {
+		if strings.HasPrefix(st.Note, prefix) {
+			s.mu.Unlock()
+			return true
+		}
+	}
+	s.mu.Unlock()
+	notes, err := s.host.ChatNotes()
+	if err != nil {
+		return false
+	}
+	return slices.ContainsFunc(notes, func(n Note) bool { return strings.HasPrefix(n.Path, prefix) })
 }
 
 // Reconcile hands every bot to its plugin, takes out of the plugins the

@@ -173,7 +173,7 @@ func (r *Router) handleProjectTeams(w http.ResponseWriter, req *http.Request, pr
 			WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
 			return
 		}
-		r.auditAccess(user, "project_team_set", project+"/"+team.ID, body.Level)
+		r.auditAccess(user, audit.ActionProjectTeamSet, project+"/"+team.ID, body.Level)
 		r.publishSidebarEvent("update", project)
 		WriteJSON(w, http.StatusCreated, projectTeamView{TeamID: team.ID, Name: team.Name, Level: body.Level})
 	case http.MethodDelete:
@@ -189,7 +189,7 @@ func (r *Router) handleProjectTeams(w http.ResponseWriter, req *http.Request, pr
 			WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
 			return
 		}
-		r.auditAccess(user, "project_team_remove", project+"/"+teamID, "")
+		r.auditAccess(user, audit.ActionProjectTeamRemove, project+"/"+teamID, "")
 		r.publishSidebarEvent("update", project)
 		w.WriteHeader(http.StatusNoContent)
 	default:

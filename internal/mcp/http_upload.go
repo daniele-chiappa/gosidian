@@ -56,8 +56,8 @@ func (s *Server) handleHTTPUpload(w http.ResponseWriter, r *http.Request) {
 	// The cap must sit on the body itself: ParseMultipartForm's argument only
 	// bounds in-memory buffering, everything beyond it is spooled to disk
 	// before any size check downstream could run.
-	r.Body = http.MaxBytesReader(w, r.Body, multipartBodyCap)
-	if err := r.ParseMultipartForm(multipartBodyCap); err != nil {
+	r.Body = http.MaxBytesReader(w, r.Body, multipartBodyCap())
+	if err := r.ParseMultipartForm(multipartBodyCap()); err != nil {
 		writeMultipartError(w, err)
 		return
 	}
@@ -68,17 +68,17 @@ func (s *Server) handleHTTPUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	data, err := io.ReadAll(io.LimitReader(file, attach.MaxBytes+1))
+	data, err := io.ReadAll(io.LimitReader(file, attach.MaxBytes()+1))
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, "read upload: "+err.Error())
 		return
 	}
-	if len(data) > attach.MaxBytes {
-		writeJSONError(w, http.StatusRequestEntityTooLarge, "file too large (max 10 MiB)")
+	if int64(len(data)) > attach.MaxBytes() {
+		writeJSONError(w, http.StatusRequestEntityTooLarge, attach.TooLarge())
 		return
 	}
 	// The write rate only: the note size limit is not an attachment's, which
-	// has its 10 MiB cap above (BUG-104; bridge and source_path did so).
+	// has its size cap above (BUG-104; bridge and source_path did so).
 	if msg, wait := s.writeLimitViolation(r.Context(), tok, 0); msg != "" {
 		writeRateLimited(w, http.StatusTooManyRequests, msg, wait)
 		return
@@ -89,7 +89,7 @@ func (s *Server) handleHTTPUpload(w http.ResponseWriter, r *http.Request) {
 		writeRateLimited(w, http.StatusRequestEntityTooLarge, refusal.Error(), refusal.Wait)
 		return
 	}
-	// attach.Store validates the extension, magic-bytes MIME, and the 10 MiB
+	// attach.Store validates the extension, magic-bytes MIME, and the size
 	// cap. The file stays locked until the record: git sync leaves it for
 	// the commit after it (BUG-148).
 	held := attach.Hold(s.vault, s.vault)
@@ -138,14 +138,14 @@ func writeJSONError(w http.ResponseWriter, code int, msg string) {
 
 // multipartBodyCap bounds a multipart upload body: the attachment cap plus
 // room for the multipart framing and a small metadata field or two.
-const multipartBodyCap = attach.MaxBytes + (1 << 20)
+func multipartBodyCap() int64 { return attach.MaxBytes() + (1 << 20) }
 
 // writeMultipartError maps a ParseMultipartForm failure to a status: a body
 // that tripped MaxBytesReader is 413, anything else is a malformed request.
 func writeMultipartError(w http.ResponseWriter, err error) {
 	var tooBig *http.MaxBytesError
 	if errors.As(err, &tooBig) {
-		writeJSONError(w, http.StatusRequestEntityTooLarge, "request body too large (max 10 MiB file)")
+		writeJSONError(w, http.StatusRequestEntityTooLarge, "request body too large (max "+attach.MaxSize()+" file)")
 		return
 	}
 	writeJSONError(w, http.StatusBadRequest, "bad multipart body: "+err.Error())

@@ -77,9 +77,11 @@ for the full behaviour.
   aggregates instead of a flood
 
 The top-level folder structure is a configuration choice, not a
-limitation of the tool. Refactor freely: `memory_rename_project` and
-`memory_move_note` keep wiki-links from breaking, in the notes the token
-may write.
+limitation of the tool. Refactor freely: `memory_move_note` and
+`memory_rename_project` keep wiki-links from breaking, and a project
+renamed keeps the links to its attachments and its image and table notes
+too, in the notes the token may write. Views and databases name a
+project in their `from:` as text: update those by hand.
 
 ## Project discovery / creation
 
@@ -93,7 +95,24 @@ may write.
   it as it was; otherwise it is removed from disk. MCP tokens scoped to
   it alone are revoked, and tokens that also list other projects lose
   it.
-- **Rename** (admin token): `memory_rename_project(from, to)`
+- **Rename** (admin token): `memory_rename_project(from, to)`, or
+  *Rename* in the web UI's Projects window (an admin grant). Its notes
+  move under the new name, with its access and the MCP tokens scoped to
+  it, and what names its files follows it, in the notes the renamer may
+  write, the project's own included:
+  - wiki-links and embeds with the project's path, `[[old/x]]`,
+    `[[old/x#heading|alias]]`, in the body and in the frontmatter;
+  - links to its attachments, `![](/vault-files/old/attachments/a.png)`;
+  - the `media:` pointer of its image and table notes.
+
+  A reference to a file that is not there stays as it is, and so do
+  links by name (`[[x]]`), which keep resolving. Notes of projects the
+  renamer may not write keep the old path: the answer counts them
+  (`not_rewritten`, `links.not_rewritten` in the web UI's), without
+  naming them. With git sync on, each note rewritten outside the project
+  is committed as an `update` in the renamer's name. The `from:` of
+  views, databases and boards, inline queries and canvases are not
+  rewritten.
 - **Scaffold** the Karpathy-Wiki layout:
   `memory_project_scaffold(project, template="karpathy-wiki")`
 

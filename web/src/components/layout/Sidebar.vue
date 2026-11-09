@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useTreeStore } from '@/stores/tree'
+import { eventProject, useTreeStore } from '@/stores/tree'
 import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
 import { useSSE } from '@/composables/useSSE'
 import type { OpenSpec } from 'plancia'
@@ -102,9 +102,10 @@ function openRecent(path: string, title: string) {
 onMounted(() => {
   void treeStore.load()
   void access.load()
-  sse.on('tree', () => {
-    // In place: the tree keeps its scroll and focus (BUG-117, S7-11).
-    treeStore.refresh()
+  sse.on('tree', (payload) => {
+    // In place: the tree keeps its scroll and focus (BUG-117, S7-11);
+    // the project the event names alone (IMP-225).
+    treeStore.refresh(eventProject(payload))
     // A project may have appeared or gone: refresh the per-project levels
     // that gate the + buttons and draw the visibility cues.
     void access.load()

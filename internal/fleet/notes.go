@@ -73,22 +73,32 @@ columns: [title, assignee, cost_usd]
 }
 
 // boardFields are the fields a board's cards add to the database of the
-// tasks, in the order BoardSchema writes them.
-var boardFields = []struct{ name, def string }{
-	{"board", "{type: relation}"},
-	{KeyColumn, "{type: text}"},
-	{KeyRank, "{type: number}"},
-	{KeyColumnSince, "{type: date}"},
-	{"done_by", "{type: select, options: [" + DoneAgent + ", " + DonePerson + "]}"},
-	{"for", "{type: relation}"},
+// tasks, in the order BoardSchema writes them. The later ones (phase 2)
+// the server adds with a card's next move, so a database written before
+// them still holds cards.
+var boardFields = []struct {
+	name, def string
+	later     bool
+}{
+	{"board", "{type: relation}", false},
+	{KeyColumn, "{type: text}", false},
+	{KeyRank, "{type: number}", false},
+	{KeyColumnSince, "{type: date}", false},
+	{"done_by", "{type: select, options: [" + DoneAgent + ", " + DonePerson + "]}", false},
+	{"for", "{type: relation}", false},
+	{KeyStarted, "{type: date}", true},
+	{KeyFinished, "{type: date}", true},
+	{KeyIteration, "{type: relation}", true},
 }
 
-// CardFields are the fields a board's cards add to the database of the
-// tasks.
+// CardFields are the fields a board's cards need in the database of the
+// tasks; the server adds the others (boardFields) as they move.
 func CardFields() []string {
-	out := make([]string, len(boardFields))
-	for i, f := range boardFields {
-		out[i] = f.name
+	var out []string
+	for _, f := range boardFields {
+		if !f.later {
+			out = append(out, f.name)
+		}
 	}
 	return out
 }

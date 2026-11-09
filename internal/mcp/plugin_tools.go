@@ -370,11 +370,14 @@ func resultSize(res *mcp.CallToolResult) int {
 	return n
 }
 
-// pluginToolNames lists the names of a plugin's tools, sorted.
+// pluginToolNames lists the names of the tools a plugin offers the agents,
+// sorted.
 func pluginToolNames(m plugins.Manifest) []string {
 	out := make([]string, 0, len(m.Tools))
 	for _, t := range m.Tools {
-		out = append(out, plugins.ToolName(m.Name, t.Name))
+		if !t.Internal {
+			out = append(out, plugins.ToolName(m.Name, t.Name))
+		}
 	}
 	sort.Strings(out)
 	return out

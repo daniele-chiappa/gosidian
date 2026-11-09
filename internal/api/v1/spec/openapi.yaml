@@ -795,6 +795,181 @@ paths:
         "503":
           description: Git sync off.
 
+  /api/v1/notes/{path}/versions:
+    get:
+      tags: [history]
+      summary: The note's tags and its valid version (IMP-201).
+      description: >-
+        The tags on the commits of the note's history, newest first, those
+        that name the note and those that name no note, as a pipeline's. Tags
+        on versions in a project the reader cannot see are left out.
+        `can_admin` says the reader may change them.
+      parameters:
+        - in: path
+          name: path
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: The tags, `valid`, `mcp` and `can_admin`.
+        "404":
+          description: No such note, or not readable.
+        "503":
+          description: Git sync is off.
+    post:
+      tags: [history]
+      summary: Name a version of the note (IMP-201).
+      description: >-
+        An annotated tag `note/<path>/<label>` on a commit of the note's
+        history, in the name of who asked, or on the note as it is, after
+        committing what is pending. For the project's admin. The same label
+        on the same version is the tag already there.
+      parameters:
+        - in: path
+          name: path
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [label]
+              properties:
+                label: {type: string, description: "What people call the version: V3."}
+                sha: {type: string, description: The version; none for the note as it is.}
+                message: {type: string, description: What the tag says.}
+      responses:
+        "201":
+          description: The tag, and whether the push went.
+        "403":
+          description: Not the project's admin.
+        "404":
+          description: The version is not one of the note.
+        "409":
+          description: The label is on another version; a tag never moves.
+        "422":
+          description: No tag can have that label.
+        "503":
+          description: Git sync is off.
+  /api/v1/notes/{path}/valid:
+    put:
+      tags: [history]
+      summary: Choose the version readers must see (IMP-201).
+      description: >-
+        Writes `valid_version` in the note's frontmatter, the one way to
+        change it: any other write leaves it as it was. The note as it is
+        stays the draft, and `GET /notes/{path}` gives it with `valid`, or
+        the version with `?version=valid`. Committed at once in the admin's
+        name. For the project's admin.
+      parameters:
+        - in: path
+          name: path
+          required: true
+          schema: {type: string}
+        - in: header
+          name: If-Match
+          required: false
+          schema: {type: string}
+          description: The note's etag; if_match in the body does the same.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tag]
+              properties:
+                tag: {type: string, description: "A tag of the note, whole or by its label."}
+                if_match: {type: string, description: The etag of the note as the client read it.}
+      responses:
+        "200":
+          description: The note, with `valid`.
+        "403":
+          description: Not the project's admin.
+        "404":
+          description: No such tag on the note's versions.
+        "412":
+          description: The note changed since it was read.
+        "422":
+          description: The note cannot hold the key, as a frontmatter not closed.
+        "503":
+          description: Git sync is off.
+    delete:
+      tags: [history]
+      summary: Remove the valid version (IMP-201).
+      description: Every reader sees the note as it is again. For the project's admin.
+      parameters:
+        - in: path
+          name: path
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: The note.
+        "403":
+          description: Not the project's admin.
+        "503":
+          description: Git sync is off.
+  /api/v1/notes/{path}/mcp-version:
+    put:
+      tags: [history]
+      summary: Choose the version who calls over MCP reads (IMP-228).
+      description: >-
+        Writes `mcp_version` in the note's frontmatter, the one way to change
+        it. Without the key they read the note as it is. Every write goes on
+        to the note as it is. Committed at once in the admin's name. For the
+        project's admin.
+      parameters:
+        - in: path
+          name: path
+          required: true
+          schema: {type: string}
+        - in: header
+          name: If-Match
+          required: false
+          schema: {type: string}
+          description: The note's etag; if_match in the body does the same.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tag]
+              properties:
+                tag: {type: string, description: "A tag of the note, whole or by its label, or `valid` to follow the valid version."}
+                if_match: {type: string, description: The etag of the note as the client read it.}
+      responses:
+        "200":
+          description: The note, with `mcp`.
+        "403":
+          description: Not the project's admin.
+        "404":
+          description: No such tag on the note's versions.
+        "412":
+          description: The note changed since it was read.
+        "422":
+          description: The note cannot hold the key, as a frontmatter not closed.
+        "503":
+          description: Git sync is off.
+    delete:
+      tags: [history]
+      summary: Remove the choice (IMP-228).
+      description: Who calls over MCP reads the note as it is again. For the project's admin.
+      parameters:
+        - in: path
+          name: path
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: The note.
+        "403":
+          description: Not the project's admin.
+        "503":
+          description: Git sync is off.
   /api/v1/notes/{path}/restore:
     post:
       tags: [history]
@@ -1347,6 +1522,215 @@ paths:
           description: "`{ok: true}`, or `{ok: false, problem}`"
         "413":
           description: The block is larger than 256 KiB.
+
+  /api/v1/attachments:
+    get:
+      tags: [notes]
+      summary: The attachments of a project, for a picker.
+      description: "To who may read the project, newest first; `kind=image` keeps the images. A page layout's window picks the pictures it places among them (docs/vault/layouts.md)."
+      parameters:
+        - {name: project, in: query, required: true, schema: {type: string}}
+        - {name: kind, in: query, required: false, schema: {type: string, enum: [image]}}
+      responses:
+        "200":
+          description: "`{attachments: [{path, size, modified, image}]}`"
+        "400":
+          description: No project.
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/layouts/{path}:
+    parameters:
+      - name: path
+        in: path
+        required: true
+        schema: {type: string}
+        description: "The vault path of a markdown note."
+    get:
+      tags: [notes]
+      summary: The design of a note, as the editor's package.
+      description: |
+        docs/vault/layouts.md. Each asset has the bytes of its link when the
+        reader may read it; the others are named in `Gosidian-Layout-Missing`.
+      responses:
+        "200":
+          description: "The package, `application/vnd.designcraft+zip`, with the design's `ETag`."
+        "204":
+          description: |
+            The note has no design yet. `Gosidian-Layout-Page` and
+            `Gosidian-Layout-Template`, path-escaped, say what its frontmatter
+            names for the design to start from: a page (`A5`, `148x210mm`) and
+            another layout note (IMP-232).
+        "400":
+          description: The path is no markdown note.
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          description: The file `layout_file` names does not read.
+    put:
+      tags: [notes]
+      summary: Save the editor's package into attachments the note names.
+      description: "`If-Match` the design's etag, from `GET`. The body is the package."
+      responses:
+        "200":
+          description: "`{path, etag: the design's, file, assets: {<id>: <attachment>}, preview}`"
+        "400":
+          description: Not a package, an entry it should not have, a document that does not read.
+        "412":
+          description: The design was saved since it was opened.
+        "413":
+          description: Past `[web] layout_max_bytes`.
+        "422":
+          description: A file the attachments do not take.
+
+  /api/v1/layouts/{path}/pieces:
+    parameters:
+      - name: path
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      tags: [notes]
+      summary: The pieces of a note's text, which its design places.
+      responses:
+        "200":
+          description: "`{path, etag, pieces: [{n, kind, text, hash, line, blocks, excluded?, duplicate?, image?}]}`"
+        "400":
+          description: The path is no markdown note.
+        "404":
+          $ref: "#/components/responses/NotFound"
+    post:
+      tags: [notes]
+      summary: Add a piece to the note, a text or an image, after a piece, before them all or at its end.
+      description: "The body is `{after?, text}` or `{after?, image, alt?}`: `after` is the piece it follows, -1 before every piece, 0 or none at the end."
+      responses:
+        "200":
+          description: "`{path, etag, pieces, added}`"
+        "400":
+          description: Neither or both, or an image that is no attachment the reader may read.
+
+  /api/v1/layouts/{path}/pieces/number:
+    parameters:
+      - name: path
+        in: path
+        required: true
+        schema: {type: string}
+    post:
+      tags: [notes]
+      summary: Number the blocks without a comment, every one or those of a piece.
+      description: "`If-Match` the note's etag. The body is `{}` or `{n: <a piece>}`."
+      responses:
+        "200":
+          description: "`{path, etag, pieces}`, as they are now."
+        "400":
+          description: A body that does not read, or a number below 0.
+        "412":
+          description: The note changed since it was read.
+
+  /api/v1/layouts/{path}/pieces/edit:
+    parameters:
+      - name: path
+        in: path
+        required: true
+        schema: {type: string}
+    post:
+      tags: [notes]
+      summary: Write a new text for a piece of the note (IMP-228).
+      description: >-
+        The body is `{n, hash, text}`: its number, its hash as it was read, its
+        new markdown. Only that stretch of the note changes. An image among
+        other blocks comes apart from them, each its own piece, the first
+        keeping the number.
+      responses:
+        "200":
+          description: "`{path, etag, pieces}`, as they are now."
+        "400":
+          description: A body that does not read.
+        "403":
+          description: Who cannot write the project.
+        "409":
+          description: The piece changed since it was read, or left the note.
+        "422":
+          description: No text.
+
+  /api/v1/layouts/{path}/pieces/reorder:
+    parameters:
+      - name: path
+        in: path
+        required: true
+        schema: {type: string}
+    post:
+      tags: [notes]
+      summary: Write the numbered pieces of the note in another order (IMP-231).
+      description: >-
+        The body is `{"order": [{n, hash}, …]}`: each numbered piece of the
+        note once, with its hash as it was read. Each piece moves with its
+        comment and its blocks, and keeps its number, so the frames that show
+        it still do. What stands before the first comment stays first; a
+        number written again follows the first piece that has it.
+      responses:
+        "200":
+          description: "`{path, etag, pieces}`, as they are now."
+        "400":
+          description: A body that does not read, or an order that does not name each numbered piece once.
+        "403":
+          description: Who cannot write the project.
+        "409":
+          description: A piece changed since it was read, or left the note.
+
+  /api/v1/layouts/{path}/export:
+    parameters:
+      - name: path
+        in: path
+        required: true
+        schema: {type: string}
+      - name: name
+        in: query
+        required: true
+        schema: {type: string}
+        description: The exported file's name, a .pdf.
+      - name: version
+        in: query
+        required: false
+        schema: {type: string}
+        description: >-
+          A tag of the note (`note/<path>/V3`): the PDF of that version, kept
+          by its label beside the others. Without it, the draft's, which takes
+          the place of the draft's before.
+    post:
+      tags: [notes]
+      summary: Keep a PDF an app wants beside the note, named in layout_pdfs.
+      description: >-
+        The note lists its PDFs in `layout_pdfs`, each item `label: path`
+        (`V3: …`, `draft: …`); an older `layout_pdf` goes into the list as
+        the draft's. Write on the note's project, as a save of the design.
+      responses:
+        "200":
+          description: "`{path, label, note, etag}`"
+        "400":
+          description: No name, not a .pdf, or `version=valid`, which is no tag.
+        "404":
+          description: A version the note does not have.
+        "422":
+          description: Bytes that are no PDF, or past an attachment's 10 MiB.
+        "503":
+          description: A version asked while git sync is off.
+
+  /api/v1/plugins/apps:
+    get:
+      tags: [pipelines]
+      summary: The apps of the accepted manifests, for the windows that open them.
+      description: |
+        Every signed-in account while the pipelines are on (docs/plugins.md, Apps).
+        An app is a page gosidian frames for the notes of a type; `origin` is
+        the one its messages must come from. `alt_urls`, when present, are the
+        same page at other addresses: a client opens the one on the host it
+        reached gosidian at, and takes messages from that one's origin.
+      responses:
+        "200":
+          description: "`{apps: [{plugin, name, title, description, url, alt_urls, origin, note_type, bridge, engine, status}]}`"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /api/v1/plugins:
     get:

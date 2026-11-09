@@ -47,11 +47,15 @@ const mediaStatsSchema = `{"type": "object", "description": "The images put as t
 	  "images": {"type": "integer"}, "icons": {"type": "integer"}, "described": {"type": "integer"},
 	  "missing": {"type": "integer", "description": "Without a label or a description"}, "word_alt": {"type": "integer", "description": "Alt texts Word wrote, left out"}}}`
 
+// atSchema is with.at of the nodes that read a note.
+const atSchema = `{"type": "string", "description": "valid: the note's valid version, the note as it is when it has none; or a tag of its history. Empty: the note as it is, the draft"}`
+
 // baseSchemas, in the order of the docs.
 var baseSchemas = []NodeSchema{
 	{Type: "note.read", Description: "Reads a note of the project",
 		Input: json.RawMessage(`{"type": "object", "required": ["path"], "properties": {
-	"path": {"type": "string", "format": "path", "description": "The note, inside the project (relative to it)"},` + mediaSettings + `}}`),
+	"path": {"type": "string", "format": "path", "description": "The note, inside the project (relative to it)"},
+	"at": ` + atSchema + `,` + mediaSettings + `}}`),
 		Output: json.RawMessage(`{"type": "object", "properties": {
 	"path": {"type": "string"}, "title": {"type": "string"},
 	"frontmatter": {"type": "object", "description": "The frontmatter's values with their types: a bool, a number, a list, a map; title and dates as text"},
@@ -88,6 +92,7 @@ var baseSchemas = []NodeSchema{
 	{Type: "note.sections", Description: "Cuts a note by its headings into sections and paragraphs, the chunks of an archive of vectors",
 		Input: json.RawMessage(`{"type": "object", "required": ["path"], "properties": {
 	"path": {"type": "string", "format": "path", "description": "The note, inside the project (relative to it)"},
+	"at": ` + atSchema + `,
 	"version": {"type": "string", "description": "Ends each chunk's id after an @ (a commit), so the chunks of two versions live side by side"},
 	"levels": {"type": "array", "items": {"type": "string", "enum": ["section", "paragraph"]}, "default": ["section", "paragraph"]},
 	"max_chars": {"type": "integer", "default": 6000, "description": "A longer section is cut in parts at its paragraphs"},

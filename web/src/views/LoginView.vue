@@ -149,7 +149,7 @@ async function handleSubmit() {
             autocomplete="username"
             required
             autofocus
-            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
+            class="mt-1 w-full rounded bg-bg-elevated border border-border-input px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
           />
         </label>
         <label class="block text-sm">
@@ -160,7 +160,7 @@ async function handleSubmit() {
             autocomplete="new-password"
             required
             data-signup-password
-            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
+            class="mt-1 w-full rounded bg-bg-elevated border border-border-input px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
           />
         </label>
         <label class="block text-sm">
@@ -171,7 +171,7 @@ async function handleSubmit() {
             autocomplete="new-password"
             required
             data-signup-confirm
-            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
+            class="mt-1 w-full rounded bg-bg-elevated border border-border-input px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
           />
         </label>
 
@@ -215,7 +215,7 @@ async function handleSubmit() {
             autocomplete="username"
             required
             autofocus
-            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
+            class="mt-1 w-full rounded bg-bg-elevated border border-border-input px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
           />
         </label>
 
@@ -226,14 +226,14 @@ async function handleSubmit() {
             type="password"
             autocomplete="current-password"
             required
-            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
+            class="mt-1 w-full rounded bg-bg-elevated border border-border-input px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
           />
         </label>
 
         <label v-if="showTotp" class="block text-sm">
           <span class="text-text-muted">
             {{ t('login.totp') }}
-            <span class="opacity-60">{{ t('login.totp_hint') }}</span>
+            <span class="text-xs">{{ t('login.totp_hint') }}</span>
           </span>
           <!-- inputmode "text", not "numeric": recovery codes carry letters. -->
           <input
@@ -243,7 +243,7 @@ async function handleSubmit() {
             autocomplete="one-time-code"
             autocapitalize="characters"
             :placeholder="t('login.totp_placeholder')"
-            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
+            class="mt-1 w-full rounded bg-bg-elevated border border-border-input px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
           />
         </label>
 

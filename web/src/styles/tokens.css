@@ -12,6 +12,16 @@
  * Tailwind can compose alpha modifiers via `rgb(var(--color-x) / <alpha-value>)`.
  */
 
+/* Contrast (IMP-221): in every preset each text colour (text, text-muted,
+ * accent, accent-hover, danger, warning, success, info) reaches 4.5:1 on bg,
+ * bg-elevated, surface and surface-hover, and accent-fg on accent and
+ * accent-hover. Where the original palette fell short, the colour keeps its
+ * hue and saturation and only its lightness moves; text moves too when
+ * needed to stay 1.5:1 apart from text-muted. border-input, the border of
+ * fields, selects and checkboxes, reaches 3:1 on bg, bg-elevated and surface
+ * (WCAG 1.4.11); border stays for separators. tests/unit/styles/contrast.test.ts
+ * computes every pair. */
+
 /* --- Shared by every preset (IMP-154) -------------------------------- */
 /* Focus: the accent unless a preset says otherwise. Control heights: a
    control (input, select, button) and the denser one of window toolbars. */
@@ -28,18 +38,19 @@
   --color-bg-elevated: 24 24 37;   /* mantle */
   --color-surface: 49 50 68;       /* surface0 */
   --color-surface-hover: 69 71 90; /* surface1 */
-  --color-text: 205 214 244;       /* text */
-  --color-text-muted: 166 173 200; /* subtext0 */
+  --color-text: 218 224 247;       /* text, lighter */
+  --color-text-muted: 178 184 207; /* subtext0, lighter */
   --color-text-inverse: 17 17 27;  /* crust */
-  --color-accent: 137 180 250;     /* blue */
+  --color-accent: 146 186 250;     /* blue, lighter */
   --color-accent-hover: 116 199 236; /* sapphire */
   --color-accent-fg: 17 17 27;
-  --color-danger: 243 139 168;     /* red */
+  --color-danger: 245 160 184;     /* red, lighter */
   --color-warning: 250 179 135;    /* peach */
   --color-success: 166 227 161;    /* green */
   --color-info: 137 220 235;       /* sky */
   --color-border: 69 71 90;        /* surface1 */
   --color-border-strong: 88 91 112;
+  --color-border-input: 121 125 150;
   --color-overlay: 17 17 27;
 
   --shadow-sm: 0 1px 2px 0 rgb(17 17 27 / 0.4);
@@ -59,18 +70,19 @@
   --color-bg-elevated: 230 233 239;
   --color-surface: 220 224 232;
   --color-surface-hover: 204 208 218;
-  --color-text: 76 79 105;
-  --color-text-muted: 108 111 133;
+  --color-text: 58 61 81;
+  --color-text-muted: 85 87 105;
   --color-text-inverse: 239 241 245;
-  --color-accent: 30 102 245;
-  --color-accent-hover: 32 159 181;
+  --color-accent: 9 76 208;
+  --color-accent-hover: 19 96 109;
   --color-accent-fg: 239 241 245;
-  --color-danger: 210 15 57;
-  --color-warning: 254 100 11;
-  --color-success: 64 160 43;
-  --color-info: 4 165 229;
+  --color-danger: 176 13 48;
+  --color-warning: 153 57 1;
+  --color-success: 40 100 27;
+  --color-info: 2 94 131;
   --color-border: 204 208 218;
   --color-border-strong: 188 192 204;
+  --color-border-input: 116 125 150;
   --color-overlay: 76 79 105;
 
   color-scheme: light;
@@ -83,18 +95,19 @@
   --color-bg-elevated: 22 22 30;
   --color-surface: 36 40 59;
   --color-surface-hover: 65 72 104;
-  --color-text: 192 202 245;
-  --color-text-muted: 154 165 206;
+  --color-text: 221 227 250;
+  --color-text-muted: 177 186 217;
   --color-text-inverse: 22 22 30;
-  --color-accent: 122 162 247;
+  --color-accent: 157 186 249;
   --color-accent-hover: 125 207 255;
   --color-accent-fg: 22 22 30;
-  --color-danger: 247 118 142;
-  --color-warning: 224 175 104;
+  --color-danger: 250 162 178;
+  --color-warning: 225 179 111;
   --color-success: 158 206 106;
   --color-info: 125 207 255;
   --color-border: 65 72 104;
   --color-border-strong: 86 95 137;
+  --color-border-input: 104 114 160;
   --color-overlay: 13 14 20;
 
   color-scheme: dark;
@@ -107,18 +120,19 @@
   --color-bg-elevated: 238 232 213;
   --color-surface: 238 232 213;
   --color-surface-hover: 220 215 196;
-  --color-text: 88 110 117;
-  --color-text-muted: 147 161 161;
+  --color-text: 55 68 73;
+  --color-text-muted: 82 95 95;
   --color-text-inverse: 253 246 227;
-  --color-accent: 38 139 210;
-  --color-accent-hover: 42 161 152;
+  --color-accent: 26 96 146;
+  --color-accent-hover: 27 103 97;
   --color-accent-fg: 253 246 227;
-  --color-danger: 220 50 47;
-  --color-warning: 203 75 22;
-  --color-success: 133 153 0;
-  --color-info: 42 161 152;
+  --color-danger: 179 33 30;
+  --color-warning: 161 59 17;
+  --color-success: 86 98 0;
+  --color-info: 27 103 97;
   --color-border: 220 215 196;
   --color-border-strong: 203 199 184;
+  --color-border-input: 138 131 101;
   --color-overlay: 88 110 117;
 
   color-scheme: light;

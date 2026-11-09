@@ -56,6 +56,16 @@ export const READY_IDS = [
 
 export function useDiagramLabels() {
   const { t } = useI18n()
+  // What a screen reader says on a node, a group and a link of a drawing
+  // (IMP-220, F-20; BUG-157).
+  const a11y = () => ({
+    nodeHelp: t('diagram.node_help'),
+    edgeHelp: t('diagram.edge_help'),
+    nodeRole: t('diagram.node_role'),
+    groupRole: t('diagram.group_role'),
+    edgeRole: t('diagram.edge_role'),
+    edgeName: (from: string, to: string) => t('diagram.edge_name', { from, to }),
+  })
   const view = computed(() => ({
     problems: t('diagram.problems'),
     line: t('diagram.line'),
@@ -67,6 +77,7 @@ export function useDiagramLabels() {
     zoomOut: t('diagram.zoom_out'),
     fit: t('diagram.fit'),
     open: t('diagram.open'),
+    ...a11y(),
   }))
   const editor = computed(() => ({
     ...view.value,
@@ -274,6 +285,7 @@ export function useDiagramLabels() {
     const map = (keys: readonly string[], ns: string) =>
       Object.fromEntries(keys.map((x) => [x, t(`pipeline_editor.${ns}.${x}`)]))
     return {
+      ...a11y(),
       trigger: k('trigger'),
       triggers: map(TRIGGERS, 'triggers') as Record<(typeof TRIGGERS)[number], string>,
       statuses: map(RUN_STATUSES, 'statuses') as Record<(typeof RUN_STATUSES)[number], string>,

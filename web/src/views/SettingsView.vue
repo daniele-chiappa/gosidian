@@ -281,7 +281,7 @@ onMounted(load)
         <select
           v-model="draft.totp_mode"
           :disabled="saving || fromEnv('totp_mode')"
-          class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
+          class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border-input px-3 focus:outline-none focus:ring-2 focus:ring-focus"
           @change="saveToggle({ totp_mode: draft.totp_mode })"
         >
           <option value="off">{{ t('settings_view.totp_off') }}</option>
@@ -318,7 +318,8 @@ onMounted(load)
                 inputmode="numeric"
                 autocomplete="one-time-code"
                 placeholder="123 456"
-                class="h-control py-0 w-40 rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
+                :aria-label="t('totp.code_label')"
+                class="h-control py-0 w-40 rounded bg-bg-elevated border border-border-input px-3 focus:outline-none focus:ring-2 focus:ring-focus"
                 @keyup.enter="regenerate"
               />
               <button
@@ -348,14 +349,14 @@ onMounted(load)
               v-model="disablePassword"
               type="password"
               autocomplete="current-password"
-              class="h-control py-0 mt-1 w-56 rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
+              class="h-control py-0 mt-1 w-56 rounded bg-bg-elevated border border-border-input px-3 focus:outline-none focus:ring-2 focus:ring-focus"
               @keyup.enter="disableTotp"
             />
           </label>
           <button
             type="button"
             :disabled="!disablePassword"
-            class="h-control rounded bg-danger text-white px-3 text-sm disabled:opacity-60"
+            class="h-control rounded bg-danger text-bg px-3 text-sm disabled:opacity-60"
             @click="disableTotp"
           >{{ t('settings_view.totp_disable') }}</button>
           <button
@@ -376,7 +377,7 @@ onMounted(load)
         <select
           v-model="draft.default_visibility"
           :disabled="saving"
-          class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
+          class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border-input px-3 focus:outline-none focus:ring-2 focus:ring-focus"
           @change="saveToggle({ default_visibility: draft.default_visibility })"
         >
           <option value="private">{{ visibilityLabel('private') }}</option>
@@ -416,7 +417,7 @@ onMounted(load)
         <span class="text-text-muted">{{ t('settings_view.theme') }}</span>
         <select
           :value="ui.preset"
-          class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3"
+          class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border-input px-3"
           @change="ui.setPreset(($event.target as HTMLSelectElement).value as ThemePreset)"
         >
           <option v-for="p in presetOptions" :key="p.value" :value="p.value">
@@ -428,7 +429,7 @@ onMounted(load)
         <span class="text-text-muted">{{ t('settings_view.language') }}</span>
         <select
           :value="ui.locale"
-          class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3"
+          class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border-input px-3"
           @change="ui.setLocale(($event.target as HTMLSelectElement).value as LocaleCode)"
         >
           <option v-for="l in enabledLocaleOptions" :key="l.value" :value="l.value">
@@ -468,7 +469,7 @@ onMounted(load)
           <input
             v-model.trim="draft.git.remote"
             :disabled="!auth.isOwner || fromEnv('git.remote')"
-            class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3"
+            class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border-input px-3"
           />
         </label>
         <div class="grid grid-cols-2 gap-3">
@@ -477,7 +478,7 @@ onMounted(load)
             <input
               v-model.trim="draft.git.branch"
               :disabled="!auth.isOwner || fromEnv('git.branch')"
-              class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3"
+              class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border-input px-3"
             />
           </label>
           <label class="block text-sm">
@@ -487,7 +488,7 @@ onMounted(load)
               :disabled="!auth.isOwner || fromEnv('git.debounce_ms')"
               type="number"
               min="1000"
-              class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3"
+              class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border-input px-3"
             />
           </label>
           <label class="block text-sm">
@@ -497,7 +498,7 @@ onMounted(load)
               :disabled="!auth.isOwner || fromEnv('git.max_wait_ms')"
               type="number"
               min="0"
-              class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3"
+              class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border-input px-3"
             />
           </label>
         </div>
@@ -515,7 +516,7 @@ onMounted(load)
             v-model.trim="draft.git.token_env"
             :disabled="!auth.isOwner || fromEnv('git.token_env')"
             placeholder="GITEA_TOKEN"
-            class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3 font-mono"
+            class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border-input px-3 font-mono"
           />
         </label>
       </fieldset>
@@ -537,7 +538,7 @@ onMounted(load)
             :disabled="!auth.isOwner || fromEnv('trash.retention_ms')"
             type="number"
             min="0"
-            class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3"
+            class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border-input px-3"
           />
         </label>
       </fieldset>
@@ -563,7 +564,7 @@ onMounted(load)
           <select
             v-model="draft.i18n.default_lang"
             :disabled="!auth.isOwner || fromEnv('i18n.default_lang')"
-            class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3"
+            class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border-input px-3"
           >
             <option v-for="l in defaultLangOptions" :key="l.value" :value="l.value">
               {{ l.label }}

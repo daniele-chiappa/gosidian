@@ -4,7 +4,9 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -159,11 +161,11 @@ func (r *Router) readAttachUpload(w http.ResponseWriter, req *http.Request) (dat
 	// Cap the body itself before parsing: ParseMultipartForm's argument only
 	// bounds in-memory buffering and spools the rest to disk, so without
 	// MaxBytesReader the size check below runs after the whole upload landed.
-	req.Body = http.MaxBytesReader(w, req.Body, attach.MaxBytes+(1<<20))
-	if err := req.ParseMultipartForm(attach.MaxBytes + (1 << 20)); err != nil {
+	req.Body = http.MaxBytesReader(w, req.Body, attach.MaxBytes()+(1<<20))
+	if err := req.ParseMultipartForm(attach.MaxBytes() + (1 << 20)); err != nil {
 		var tooBig *http.MaxBytesError
 		if errors.As(err, &tooBig) {
-			return nil, nil, http.StatusRequestEntityTooLarge, "request body too large (max 10 MiB file)"
+			return nil, nil, http.StatusRequestEntityTooLarge, "request body too large (max " + attach.MaxSize() + " file)"
 		}
 		return nil, nil, http.StatusBadRequest, "bad multipart: " + err.Error()
 	}
@@ -173,13 +175,13 @@ func (r *Router) readAttachUpload(w http.ResponseWriter, req *http.Request) (dat
 	}
 	defer file.Close()
 
-	limited := io.LimitReader(file, attach.MaxBytes+1)
+	limited := io.LimitReader(file, attach.MaxBytes()+1)
 	read, err := io.ReadAll(limited)
 	if err != nil {
 		return nil, nil, http.StatusInternalServerError, "read: " + err.Error()
 	}
-	if int64(len(read)) > attach.MaxBytes {
-		return nil, nil, http.StatusRequestEntityTooLarge, "file too large (max 10 MiB)"
+	if int64(len(read)) > attach.MaxBytes() {
+		return nil, nil, http.StatusRequestEntityTooLarge, attach.TooLarge()
 	}
 	ext := strings.ToLower(filepath.Ext(h.Filename))
 	mime, isImage, err := attach.ValidateExt(ext)
@@ -220,4 +222,48 @@ func (r *Router) reserveUpload(w http.ResponseWriter, req *http.Request, n int) 
 		WriteError(w, http.StatusRequestEntityTooLarge, CodeValidationFormat, refusal.Error())
 	}
 	return nil, false
+}
+
+// attachmentView is an attachment of a project, for a picker.
+type attachmentView struct {
+	Path     string    `json:"path"`
+	Size     int64     `json:"size"`
+	Modified time.Time `json:"modified"`
+	Image    bool      `json:"image"`
+}
+
+// handleAttachmentList answers GET /api/v1/attachments?project=<p>: the
+// attachments of a project the caller may read, newest first, the images
+// only with kind=image. The picture a page layout places is chosen among
+// them (IMP-226).
+func (r *Router) handleAttachmentList(w http.ResponseWriter, req *http.Request) {
+	if req.Method != http.MethodGet {
+		WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
+		return
+	}
+	project := req.URL.Query().Get("project")
+	if project == "" || strings.Contains(project, "/") {
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "project: the project whose attachments to list")
+		return
+	}
+	if !r.canSeeProject(req, project) {
+		WriteError(w, http.StatusNotFound, CodeNotFound, "project not found")
+		return
+	}
+	infos, err := r.deps.Vault.ListAttachments(project, attach.ExtSet())
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, CodeServerInternal, "list: "+err.Error())
+		return
+	}
+	images := req.URL.Query().Get("kind") == "image"
+	out := []attachmentView{}
+	for _, a := range infos {
+		_, isImage, err := attach.ValidateExt(strings.ToLower(path.Ext(a.Path)))
+		if err != nil || (images && !isImage) {
+			continue
+		}
+		out = append(out, attachmentView{Path: a.Path, Size: a.Size, Modified: a.ModTime, Image: isImage})
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Modified.After(out[j].Modified) })
+	writeJSON(w, http.StatusOK, map[string]any{"attachments": out})
 }

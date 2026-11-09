@@ -20,7 +20,7 @@ func TestDocs_ToolCount(t *testing.T) {
 		"docs/mcp/client-setup.md": regexp.MustCompile(`should see (\d+) tools`),
 		"docs/README.md":           regexp.MustCompile(`all (\d+) typed tools`),
 		"README.md":                regexp.MustCompile(`(\d+) typed tools`),
-		"server.json":              regexp.MustCompile(`a (\d+)-tool MCP server`),
+		"server.json":              regexp.MustCompile(`an? (\d+)-tool MCP server`),
 	}
 	for file, re := range files {
 		b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(file)))

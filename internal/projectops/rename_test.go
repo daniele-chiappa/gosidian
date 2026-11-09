@@ -186,6 +186,45 @@ func TestRename_TellsTheHook(t *testing.T) {
 	}
 }
 
+// A rename rewrites the references to the project's files in the notes it
+// is given, the project's own under the new name, and says which; the
+// others keep them (BUG-153). Rename gives none.
+func TestRenameRewriting_TheNotesGiven(t *testing.T) {
+	f := newFixture(t)
+	write := func(path, body string) {
+		t.Helper()
+		if err := f.v.Save(path, []byte(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("alpha/a.md", "See [[alpha/b]].")
+	write("alpha/b.md", "# B")
+	write("beta/c.md", "See [[alpha/a]].")
+	write("gamma/d.md", "See [[alpha/a]].")
+	if err := f.v.ScanInto(f.idx); err != nil {
+		t.Fatal(err)
+	}
+	_, rewritten, err := RenameRewriting(f.v, f.idx, f.ps, f.tokens, "alpha", "delta", []string{"alpha/a.md", "beta/c.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(rewritten)
+	if want := []string{"beta/c.md", "delta/a.md"}; !slices.Equal(rewritten, want) {
+		t.Errorf("rewritten = %q, want %q", rewritten, want)
+	}
+	for path, want := range map[string]string{"delta/a.md": "See [[delta/b]].", "beta/c.md": "See [[delta/a]].", "gamma/d.md": "See [[alpha/a]]."} {
+		if b, err := os.ReadFile(filepath.Join(f.v.Root, path)); err != nil || string(b) != want {
+			t.Errorf("%s = %q (%v), want %q", path, b, err, want)
+		}
+	}
+	if _, err := Rename(f.v, f.idx, f.ps, f.tokens, "delta", "alpha"); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(filepath.Join(f.v.Root, "beta/c.md")); string(b) != "See [[delta/a]]." {
+		t.Errorf("Rename rewrote beta/c.md: %q", b)
+	}
+}
+
 // The delete hook hears of a project deleted, not of a refused delete
 // (BUG-119: the state of the IN folders and the bound sources go).
 func TestDelete_TellsTheHook(t *testing.T) {

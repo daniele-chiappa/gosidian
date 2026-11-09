@@ -47,7 +47,7 @@ import { useSSE } from '@/composables/useSSE'
 import { planciaKey } from '@/composables/planciaKey'
 import { useAccessStore } from '@/stores/access'
 import { useUIStore } from '@/stores/ui'
-import { useTreeStore } from '@/stores/tree'
+import { projectOfPath, useTreeStore } from '@/stores/tree'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
 import UploadJobCard from '@/components/domain/UploadJobCard.vue'
 import { cancelUpload, listUploads, type UploadInfo } from '@/api/inUpload'
@@ -195,7 +195,7 @@ async function act(fn: () => Promise<string | void>) {
     const msg = await fn()
     if (msg) message.value = msg
     await load()
-    treeStore.refresh()
+    treeStore.refresh(props.project)
   } catch (e) {
     error.value = errorText(e, t, t('in.action_failed'))
   }
@@ -374,17 +374,17 @@ function downloadFolder(path: string) {
 }
 
 const sourceClass: Record<INSource['status'], string> = {
-  ok: 'bg-success/15 text-success',
-  checking: 'bg-info/15 text-info',
-  error: 'bg-danger/15 text-danger',
+  ok: 'bg-success/10 text-success',
+  checking: 'bg-info/10 text-info',
+  error: 'bg-danger/10 text-danger',
   off: 'bg-surface-hover text-text-muted',
 }
 
 const statusClass: Record<INStatus, string> = {
-  new: 'bg-info/15 text-info',
-  working: 'bg-warning/15 text-warning',
-  done: 'bg-success/15 text-success',
-  error: 'bg-danger/15 text-danger',
+  new: 'bg-info/10 text-info',
+  working: 'bg-warning/10 text-warning',
+  done: 'bg-success/10 text-success',
+  error: 'bg-danger/10 text-danger',
   ignored: 'bg-surface-hover text-text-muted',
 }
 
@@ -583,12 +583,17 @@ onMounted(() => {
         <input
           v-model.trim="search"
           type="search"
-          class="h-control-sm text-xs pl-7 pr-2 rounded border border-border bg-surface w-56"
+          class="h-control-sm text-xs pl-7 pr-2 rounded border border-border-input bg-surface w-56"
           :placeholder="t('in.search_placeholder')"
           data-in-search
         />
       </label>
-      <select v-model="status" class="h-control-sm text-xs rounded border border-border bg-surface" data-in-status-filter>
+      <select
+        v-model="status"
+        :aria-label="t('in.status_label')"
+        class="h-control-sm text-xs rounded border border-border-input bg-surface"
+        data-in-status-filter
+      >
         <option value="">{{ t('in.any_status') }}</option>
         <option v-for="s in IN_STATUSES" :key="s" :value="s">{{ t(`in.status.${s}`) }}</option>
       </select>
@@ -609,7 +614,7 @@ onMounted(() => {
         <input
           v-model="moveTo"
           type="text"
-          class="h-control-sm text-xs px-2 rounded border border-border bg-surface w-40 font-mono"
+          class="h-control-sm text-xs px-2 rounded border border-border-input bg-surface w-40 font-mono"
           :placeholder="t('in.move_placeholder')"
           data-in-move-target
           @keydown.enter="move"
@@ -636,7 +641,12 @@ onMounted(() => {
         @click="mark('ignored')"
       ><EyeOff class="w-3 h-3" /> {{ t('in.mark_ignored') }}</button>
       <template v-if="pipelines.length">
-        <select v-model="pipeline" class="h-control-sm text-xs rounded border border-border bg-surface max-w-56" data-in-pipeline>
+        <select
+          v-model="pipeline"
+          :aria-label="t('in.pipeline_label')"
+          class="h-control-sm text-xs rounded border border-border-input bg-surface max-w-56"
+          data-in-pipeline
+        >
           <option value="">{{ t('in.choose_pipeline') }}</option>
           <option v-for="p in pipelines" :key="p.path" :value="p.path">{{ p.title || p.path }}</option>
         </select>
@@ -700,7 +710,7 @@ onMounted(() => {
           <td class="py-1 text-right text-text-muted">{{ formatSize(f.bytes) }}</td>
           <td class="py-1 text-text-muted">{{ t('in.files_count', { count: f.files }, f.files) }}</td>
           <td class="py-1">
-            <span v-if="f.new" class="rounded px-1.5 py-0.5 bg-info/15 text-info">{{ t('in.count_new', { count: f.new }) }}</span>
+            <span v-if="f.new" class="rounded px-1.5 py-0.5 bg-info/10 text-info">{{ t('in.count_new', { count: f.new }) }}</span>
           </td>
           <td class="py-1 text-right whitespace-nowrap">
             <button

@@ -3,12 +3,14 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { AxiosError, AxiosHeaders } from 'axios'
 import enUI from '@catalogs/ui.en.json'
+import itUI from '@catalogs/ui.it.json'
 import type { ViewData } from '@/api/preview'
 
 vi.mock('@/api/notes', () => ({
   patchFrontmatter: vi.fn(),
   getNewRow: vi.fn().mockResolvedValue({ name: '', source: 'p', columns: [] }),
   createRow: vi.fn(),
+  createNote: vi.fn(),
 }))
 vi.mock('@/composables/useAnnounce', () => ({ announce: vi.fn() }))
 import { patchFrontmatter } from '@/api/notes'
@@ -60,7 +62,7 @@ const column = (w: ReturnType<typeof mountBoard>, value: string) =>
 
 async function moveWithMenu(w: ReturnType<typeof mountBoard>, path: string, to: string) {
   await w.find(`li[data-card="${path}"] button`).trigger('click')
-  await w.find(`li[data-card="${path}"] select`).setValue(to)
+  await w.find(`li[data-card="${path}"] [data-move-to="${to}"]`).trigger('click')
   await flushPromises()
 }
 
@@ -79,8 +81,8 @@ describe('ViewBoard', () => {
     expect(column(w, 'todo').findAll('li[data-card]')).toHaveLength(2)
     expect(column(w, 'doing').text()).toContain('No notes')
     // A card shows its fields but the group_by one.
-    expect(w.find('li[data-card="p/T-1.md"]').text()).toContain('priority:')
-    expect(w.find('li[data-card="p/T-1.md"]').text()).not.toContain('status:')
+    expect(w.find('li[data-card="p/T-1.md"]').text()).toContain('Priority:')
+    expect(w.find('li[data-card="p/T-1.md"]').text()).not.toContain('Status:')
   })
 
   it('draws the columns as the items of a list, not as regions (IMP-217, F-35)', () => {
@@ -236,6 +238,26 @@ const titles = (w: ReturnType<typeof mountBoard>, value: string) =>
   column(w, value)
     .findAll('li[data-card]')
     .map((li) => li.find('a').text())
+
+describe("ViewBoard in the reader's language (IMP-220, F-23)", () => {
+  it('names its columns by the values and its cards\' fields by their names', () => {
+    const i18n = createI18n({ legacy: false, locale: 'it', fallbackLocale: 'en', messages: { en: enUI, it: itUI } })
+    const v = board({
+      group: { name: 'status', type: 'select', options: ['submitted', 'working'] },
+      groups: ['submitted', 'working', ''],
+      rows: [{ path: 'p/T-1.md', title: 'One', modified: '', fields: { status: 'submitted', priority: 'high' }, writable: true }],
+    })
+    v.columns = [{ name: 'title' }, { name: 'priority', type: 'select', options: ['low', 'high'] }]
+    const w = mount(ViewBoard, { props: { view: v }, global: { plugins: [i18n], provide: { openWindow: vi.fn() } } })
+    const lanes = w.findAll('[role="list"] > [role="listitem"]')
+    expect(lanes.map((c) => c.attributes('aria-label'))).toEqual(['inviato', 'in lavorazione', 'vuoto'])
+    // The column's value stays the code: it is what a move writes.
+    expect(lanes[0]!.attributes('data-group')).toBe('submitted')
+    const card = w.find('li[data-card="p/T-1.md"]')
+    expect(card.find('dt').text()).toBe('Priorità:')
+    expect(card.find('dd').text()).toBe('alta')
+  })
+})
 
 describe('ViewBoard of a board block', () => {
   beforeEach(() => {
@@ -416,6 +438,157 @@ describe('ViewBoard, the focus on the card moved (IMP-217, F-04)', () => {
     const w = mountBoard(board(), document.body)
     await moveWithMenu(w, 'p/T-1.md', 'doing')
     expect(document.activeElement).toBe(w.find('[data-group="doing"] li[data-card="p/T-1.md"] button').element)
+    w.unmount()
+  })
+})
+
+describe('ViewBoard, the menu of "Move to…" (IMP-216, F-12)', () => {
+  beforeEach(() => {
+    patch.mockReset().mockResolvedValue({} as never)
+  })
+
+  it('opens on the card\'s column; the arrows choose without moving, Esc closes', async () => {
+    const w = mountBoard(cards(), document.body)
+    await w.find('li[data-card="p/tasks/a.md"] button').trigger('click')
+    const menu = w.find('li[data-card="p/tasks/a.md"] [data-move-menu]')
+    expect(menu.attributes('role')).toBe('menu')
+    expect(document.activeElement).toBe(menu.find('[data-move-to="Pronto"]').element)
+    await menu.trigger('keydown', { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(menu.find('[data-move-to="Analisi"]').element)
+    await menu.trigger('keydown', { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(menu.find('[data-move-to="Idee"]').element)
+    await menu.trigger('keydown', { key: 'ArrowUp' })
+    expect(patch).not.toHaveBeenCalled()
+    await menu.trigger('keydown', { key: 'Escape' })
+    await flushPromises()
+    expect(w.find('[data-move-menu]').exists()).toBe(false)
+    expect(patch).not.toHaveBeenCalled()
+    expect(document.activeElement).toBe(w.find('li[data-card="p/tasks/a.md"] button').element)
+    w.unmount()
+  })
+
+  it('moves the card with the item chosen', async () => {
+    const w = mountBoard(cards(), document.body)
+    await moveWithMenu(w, 'p/tasks/a.md', 'Idee')
+    expect(patch).toHaveBeenCalledWith('p/tasks/a.md', { set: { column: 'Idee' }, expect: { column: 'Pronto' } })
+    expect(titles(w, 'Idee')).toEqual(['A'])
+    w.unmount()
+  })
+})
+
+// The state of a board (IMP-216 phase 2): its head, its stale cards, the
+// cards of its iteration.
+function withState(): ViewData {
+  const v = cards()
+  v.rows![0]!.fields.iteration = '[[p/iterations/1]]'
+  v.rows![2]!.fields.iteration = '[[p/iterations/1]]'
+  v.board = {
+    flow: {
+      cycle_days: { p50: 2.5, p85: 4, n: 5 },
+      closed_per_week: [3, 5, 2, 4],
+      stale: [{ path: 'p/tasks/c.md', title: 'C', column: 'Analisi', days: 5 }],
+    },
+    stale_days: 3,
+    iteration: {
+      path: 'p/iterations/1.md',
+      title: 'Iterazione 1',
+      board: 'p/board.md',
+      goal: 'Il login',
+      start: '2026-11-09',
+      end: '2026-11-22',
+      days_left: 4,
+      cards: { done: 1, total: 2 },
+    },
+    retro: [{ path: 'p/iterations/0.md', title: 'Iterazione 0', board: 'p/board.md', start: '2026-10-26', end: '2026-11-08' }],
+  }
+  return v
+}
+
+// The board's catalogue is a chunk of its own, loaded at the first board.
+async function headReady(w: ReturnType<typeof mountBoard>) {
+  await vi.waitFor(() => expect(w.find('[data-board-head]').exists()).toBe(true))
+}
+
+describe('ViewBoard, the head and the stale cards (IMP-216 phase 2)', () => {
+  it('shows the iteration, the retrospective to write and the three measures', async () => {
+    const w = mountBoard(withState())
+    await headReady(w)
+    const head = w.find('[data-board-head]')
+    expect(head.find('[data-iteration]').text()).toContain('Il login')
+    expect(head.find('[data-iteration]').text()).toContain('4 days left')
+    expect(head.find('[data-iteration]').text()).toContain('1 of 2 done')
+    expect(head.find('[data-retro]').text()).toContain('Iterazione 0')
+    expect(head.find('[data-cycle]').text()).toBe('Cycle time: 2.5 d (85%: 4 d)')
+    expect(head.find('[data-closed]').text()).toBe('Closed: 3 · 5 · 2 · 4 a week')
+    expect(head.find('[data-stale-count]').text()).toBe('Stale: 1')
+  })
+
+  it('marks a stale card, and says it in its name', async () => {
+    const w = mountBoard(withState())
+    await headReady(w)
+    const card = w.find('li[data-card="p/tasks/c.md"]')
+    expect(card.find('[data-stale]').text()).toBe('stale for 5 d')
+    expect(card.find('[data-stale]').attributes('aria-hidden')).toBe('true')
+    expect(card.find('a').text()).toContain('stale for 5 days')
+    expect(w.find('li[data-card="p/tasks/a.md"] [data-stale]').exists()).toBe(false)
+  })
+
+  it('leaves only the cards of the iteration on request', async () => {
+    const w = mountBoard(withState())
+    await headReady(w)
+    await w.find('[data-only-iteration]').trigger('click')
+    expect(w.find('[data-only-iteration]').attributes('aria-pressed')).toBe('true')
+    expect(titles(w, 'Pronto')).toEqual(['A'])
+    expect(titles(w, 'Analisi')).toEqual(['C, stale for 5 days'])
+    // The limits count every card.
+    expect(column(w, 'Pronto').find('[data-wip]').text()).toBe('2')
+    await w.find('[data-only-iteration]').trigger('click')
+    expect(titles(w, 'Pronto')).toEqual(['A', 'B'])
+  })
+
+  it('makes a new iteration of the board when none is in progress', async () => {
+    const { createNote } = await import('@/api/notes')
+    vi.mocked(createNote).mockResolvedValue({ path: 'p/iterations/sprint-1.md' } as never)
+    const v = withState()
+    delete v.board!.iteration
+    const w = mountBoard(v)
+    await headReady(w)
+    await w.find('[data-new-iteration]').trigger('click')
+    const form = w.find('[data-iteration-form]')
+    await form.find('input[type="text"]').setValue('Sprint 1')
+    await form.find('[data-goal]').setValue('Il login: con le passkey')
+    await form.trigger('submit')
+    await flushPromises()
+    const [path, content] = vi.mocked(createNote).mock.calls[0]!
+    expect(path).toBe('p/iterations/sprint-1.md')
+    expect(content).toContain('type: iteration\nboard: "[[p/board]]"\ngoal: "Il login: con le passkey"\nstart: ')
+    expect(w.find('[data-iteration-form]').exists()).toBe(false)
+  })
+
+  it('shows no head on the board of a view', async () => {
+    const w = mountBoard(board())
+    await flushPromises()
+    expect(w.find('[data-board-head]').exists()).toBe(false)
+  })
+})
+
+describe('ViewBoard, the columns out of view (IMP-216, F-28)', () => {
+  it('shows a shadow and an arrow at the edge that hides some, and how many show', async () => {
+    const w = mountBoard(cards(), document.body)
+    await flushPromises()
+    expect(w.find('[data-columns-shown]').exists()).toBe(false)
+    const el = w.find('[role="list"]').element as HTMLElement
+    Object.defineProperty(el, 'scrollWidth', { configurable: true, value: 720 })
+    Object.defineProperty(el, 'clientWidth', { configurable: true, value: 480 })
+    const lanes = [...el.children] as HTMLElement[]
+    lanes.forEach((lane, i) => {
+      Object.defineProperty(lane, 'offsetLeft', { configurable: true, value: i * 240 })
+      Object.defineProperty(lane, 'offsetWidth', { configurable: true, value: 224 })
+    })
+    await w.find('[role="list"]').trigger('scroll')
+    await vi.waitFor(() => expect(w.find('[data-columns-shown]').text()).toBe('2 of 3 columns'))
+    expect(w.find('[data-scroll-next]').attributes('aria-label')).toBe('Next column')
+    expect(w.find('[data-scroll-prev]').exists()).toBe(false)
     w.unmount()
   })
 })

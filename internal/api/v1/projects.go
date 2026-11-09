@@ -18,6 +18,11 @@ import (
 // Flags are flattened into the top level so the SPA reads them
 // without a second request.
 type projectView struct {
+	// Links, in the answer of a rename only, counts the notes whose
+	// references to the project's files it rewrote, and those the renamer
+	// may not write, which keep the old path (BUG-153).
+	Links *renameLinks `json:"links,omitempty"`
+
 	Name          string `json:"name"`
 	NoteCount     int    `json:"note_count"`
 	HiddenFromMCP bool   `json:"hidden_from_mcp"`
@@ -412,6 +417,7 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 	}
 
 	finalName := name
+	var links *renameLinks
 	if body.NewName != nil {
 		newName := strings.TrimSpace(*body.NewName)
 		if newName == "" {
@@ -419,11 +425,14 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 			return
 		}
 		if newName != name {
-			// Both names stay locked until the record, and to the end of
-			// the answer: git sync leaves out the files under a name a
-			// writer holds (BUG-147).
-			defer r.deps.Vault.LockPaths(name, newName)()
-			_, err := projectops.Rename(r.deps.Vault, r.deps.Index, r.deps.Projects, r.mcpTokens(), name, newName)
+			// The notes naming the project's files that the user may write
+			// are rewritten (BUG-153). Both names and those notes stay
+			// locked until the records, and to the end of the answer: git
+			// sync leaves out the files under a name a writer holds
+			// (BUG-147, BUG-148).
+			mine, others := r.projectReferrers(princ, name)
+			defer r.deps.Vault.LockPaths(append([]string{name, newName}, mine...)...)()
+			_, rewritten, err := projectops.RenameRewriting(r.deps.Vault, r.deps.Index, r.deps.Projects, r.mcpTokens(), name, newName, mine)
 			switch {
 			case errors.Is(err, projectops.ErrInvalid):
 				WriteError(w, http.StatusBadRequest, CodeValidationFormat, "rename: "+err.Error())
@@ -433,6 +442,8 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 				return
 			}
 			r.auditNote(req, audit.ActionRenameProject, user, name, newName, 0)
+			r.recordRewritten(req, user, newName, rewritten)
+			links = &renameLinks{Rewritten: len(rewritten), NotRewritten: others}
 			if err != nil {
 				// The rename stands, audited and announced, but something
 				// did not follow: say so rather than answer 200.
@@ -459,7 +470,50 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 			break
 		}
 	}
-	WriteJSON(w, http.StatusOK, r.projectViewFor(finalName, r.levelOf(princ, finalName), count))
+	view := r.projectViewFor(finalName, r.levelOf(princ, finalName), count)
+	view.Links = links
+	WriteJSON(w, http.StatusOK, view)
+}
+
+// renameLinks is what a project rename did to the references to its files.
+type renameLinks struct {
+	Rewritten    int `json:"rewritten"`
+	NotRewritten int `json:"not_rewritten"`
+}
+
+// projectReferrers finds the notes naming a file of project
+// (vault.ProjectReferrers): those p may write, and how many others, as a
+// rename through MCP sorts them (BUG-153).
+func (r *Router) projectReferrers(p authz.Principal, project string) (mine []string, others int) {
+	refs, err := r.deps.Vault.ProjectReferrers(project)
+	if err != nil {
+		return nil, 0
+	}
+	for _, rel := range refs {
+		if r.canWriteProject(p, projectOf(rel)) {
+			mine = append(mine, rel)
+		} else {
+			others++
+		}
+	}
+	return mine, others
+}
+
+// recordRewritten records an update of each note a rename of a project to
+// to rewrote outside it, in the renamer's name, and announces it: the
+// project's own go with its rename (BUG-148, BUG-153).
+func (r *Router) recordRewritten(req *http.Request, user *RequestUser, to string, rewritten []string) {
+	for _, p := range rewritten {
+		if strings.HasPrefix(p, to+"/") {
+			continue
+		}
+		r.auditNote(req, audit.ActionUpdate, user, p, "", 0)
+		fresh, err := r.deps.Vault.Load(p)
+		if err != nil {
+			fresh = nil
+		}
+		r.publishNoteEvent(events.TopicNote, p, "update", fresh)
+	}
 }
 
 func (r *Router) deleteProject(w http.ResponseWriter, req *http.Request, name string) {

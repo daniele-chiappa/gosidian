@@ -174,8 +174,8 @@ func (s *Server) handleIngestTicketRedeem(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, multipartBodyCap)
-	if err := r.ParseMultipartForm(multipartBodyCap); err != nil {
+	r.Body = http.MaxBytesReader(w, r.Body, multipartBodyCap())
+	if err := r.ParseMultipartForm(multipartBodyCap()); err != nil {
 		writeMultipartError(w, err)
 		return
 	}
@@ -185,13 +185,13 @@ func (s *Server) handleIngestTicketRedeem(w http.ResponseWriter, r *http.Request
 		return
 	}
 	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(file, attach.MaxBytes+1))
+	data, err := io.ReadAll(io.LimitReader(file, attach.MaxBytes()+1))
 	if err != nil {
 		writeJSONError(w, http.StatusBadRequest, "read upload: "+err.Error())
 		return
 	}
-	if len(data) > attach.MaxBytes {
-		writeJSONError(w, http.StatusRequestEntityTooLarge, "file too large (max 10 MiB)")
+	if int64(len(data)) > attach.MaxBytes() {
+		writeJSONError(w, http.StatusRequestEntityTooLarge, attach.TooLarge())
 		return
 	}
 	// No size limit on the upload itself: a note is checked against the

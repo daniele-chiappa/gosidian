@@ -2,6 +2,7 @@ package vault
 
 import (
 	"bytes"
+	"fmt"
 	"io/fs"
 	"os"
 	"path"
@@ -17,7 +18,9 @@ import (
 // never linked.
 
 // referenceExts are the files that may name an attachment: notes, HTML
-// notes (whatever the flag), canvases and bases.
+// notes (whatever the flag), canvases and bases. The .json among the
+// attachments too (referencesAttachments): a note's page layout, which names
+// its images (IMP-226).
 var referenceExts = map[string]bool{".md": true, ".html": true, ".htm": true, ".canvas": true, ".base": true}
 
 // ProjectAttachments lists every attachment of project: each file with an
@@ -70,7 +73,11 @@ func (v *Vault) ProjectAttachments(project string, allowedExt map[string]bool) (
 // %20 or +, the hex digits in either case), in either Unicode form, in any
 // case. Read as written only, a link to Image.PNG, to %c3%a9 or to an é
 // typed on a Mac kept no file, and the collection removed it (IMP-163).
-func (v *Vault) Unreferenced(names []string) (map[string]bool, error) {
+//
+// A note with a valid version needs what that version names too (IMP-201):
+// versions gives those texts, and its error stops the search, as a file
+// wrongly found unreferenced is gone. It may be nil.
+func (v *Vault) Unreferenced(names []string, versions func(rel, tag string) ([][]byte, error)) (map[string]bool, error) {
 	m := newRefMatcher(names)
 	scan := func(root string, skipHidden bool) error {
 		if _, err := os.Stat(root); err != nil {
@@ -89,16 +96,25 @@ func (v *Vault) Unreferenced(names []string) (map[string]bool, error) {
 				}
 				return nil
 			}
-			if !referenceExts[strings.ToLower(filepath.Ext(d.Name()))] || !d.Type().IsRegular() {
+			if !referencesAttachments(p, d.Name()) || !d.Type().IsRegular() {
 				return nil
 			}
 			b, err := os.ReadFile(p)
 			if err != nil {
 				return nil
 			}
-			m.match(foldRef(string(b)))
-			if bytes.IndexByte(b, '%') >= 0 {
-				m.match(foldRef(percentDecode(string(b))))
+			m.scan(b)
+			if rel, err := filepath.Rel(v.Root, p); err == nil && versions != nil {
+				rel = filepath.ToSlash(rel)
+				for _, tag := range chosenTags(rel, b) {
+					texts, err := versions(rel, tag)
+					if err != nil {
+						return fmt.Errorf("the version of %s: %w", rel, err)
+					}
+					for _, t := range texts {
+						m.scan(t)
+					}
+				}
 			}
 			return nil
 		})
@@ -110,6 +126,28 @@ func (v *Vault) Unreferenced(names []string) (map[string]bool, error) {
 		return nil, err
 	}
 	return m.left, nil
+}
+
+// NamedIn gives, of names, those the texts name, read as Unreferenced reads
+// them.
+func NamedIn(names []string, texts [][]byte) []string {
+	m := newRefMatcher(names)
+	for _, t := range texts {
+		m.scan(t)
+	}
+	var out []string
+	for _, n := range names {
+		if !m.left[n] {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// referencesAttachments reports whether the file at p may name attachments.
+func referencesAttachments(p, name string) bool {
+	ext := strings.ToLower(filepath.Ext(name))
+	return referenceExts[ext] || ext == ".json" && strings.Contains(filepath.ToSlash(p), "/attachments/")
 }
 
 // refMatcher finds which of a set of attachment names some texts name, as
@@ -152,6 +190,14 @@ func newRefMatcher(names []string) *refMatcher {
 		m.exts = append(m.exts, e)
 	}
 	return m
+}
+
+// scan takes the names b names out of left, as written or URL-escaped.
+func (m *refMatcher) scan(b []byte) {
+	m.match(foldRef(string(b)))
+	if bytes.IndexByte(b, '%') >= 0 {
+		m.match(foldRef(percentDecode(string(b))))
+	}
 }
 
 // match takes the names a folded text names out of left.

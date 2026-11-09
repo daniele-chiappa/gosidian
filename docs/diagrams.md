@@ -52,7 +52,11 @@ it again.
   from the dot of one onto the other, delete what is selected with Delete;
   a panel sets a node's label, shape, class, link (with the notes found as
   you type) and group, and an edge's label and line; **Lay out again**
-  empties `layout:`.
+  empties `layout:`. From the keyboard Tab reaches the edges and the
+  nodes, each named in your language (*from Start to Check, edge*),
+  Enter or Space selects one as a click does, and Delete removes it;
+  moving a node is the YAML tab's (`layout:`). The pipeline editor works
+  the same way.
 - A **tree**, a **mind map** and a **fishbone** are edited as indented
   lines beside their drawing: Enter adds a branch after, Tab and Shift+Tab
   change its level, Alt+↑ and Alt+↓ move it, Backspace on an empty line

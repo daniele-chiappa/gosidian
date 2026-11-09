@@ -284,7 +284,7 @@ func noteRead(_ context.Context, env *Env, with map[string]any) (any, error) {
 	if media != "" && media != "keep" && media != "inline" {
 		return nil, fmt.Errorf("with.media %q: keep or inline", media)
 	}
-	note, err := env.Engine.host.ReadNote(env.Project, rel)
+	note, err := readNoteAt(env, rel, with)
 	if err != nil {
 		return note, err
 	}
@@ -307,6 +307,29 @@ func noteRead(_ context.Context, env *Env, with map[string]any) (any, error) {
 	}
 	note.Body, note.Media = body, &st
 	return note, nil
+}
+
+// VersionReader is a host that reads a note as a version holds it (IMP-201).
+type VersionReader interface {
+	// ReadNoteAt reads the note as at holds it: a tag of its history, or
+	// "valid", its valid version, which is the note as it is when it has
+	// none. The etag is no etag to write the note with.
+	ReadNoteAt(project, path, at string) (NoteData, error)
+}
+
+// readNoteAt reads the note a node asks for: as it is, the draft, unless
+// with.at says a version. A node that reads and writes back must not get
+// another text than the note's without asking.
+func readNoteAt(env *Env, rel string, with map[string]any) (NoteData, error) {
+	at := str(with, "at")
+	if at == "" {
+		return env.Engine.host.ReadNote(env.Project, rel)
+	}
+	reader, ok := env.Engine.host.(VersionReader)
+	if !ok {
+		return NoteData{}, errors.New("this server does not read the versions of a note: without with.at")
+	}
+	return reader.ReadNoteAt(env.Project, rel, at)
 }
 
 // typedFrontmatter is the frontmatter of a note the host read, with the

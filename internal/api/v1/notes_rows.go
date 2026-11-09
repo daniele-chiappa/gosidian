@@ -109,7 +109,7 @@ func (r *Router) readNewRow(w http.ResponseWriter, req *http.Request, rel string
 	}
 	resp := newRowResponse{Name: dbschema.NextName(r.rowNames(schema)), Source: schema.Source, Template: schema.Template}
 	for _, f := range schema.Fields {
-		resp.Columns = append(resp.Columns, views.Column{Name: f.Name, Type: f.Type, Options: f.Options, Required: f.Required})
+		resp.Columns = append(resp.Columns, views.FieldColumn(f))
 	}
 	if schema.Template != "" {
 		if tpl, err := r.deps.Vault.Load(schema.Template); err == nil {

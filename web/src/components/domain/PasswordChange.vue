@@ -58,7 +58,7 @@ async function submit() {
         type="password"
         autocomplete="current-password"
         name="current-password"
-        class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
+        class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border-input px-3 focus:outline-none focus:ring-2 focus:ring-focus"
       />
     </label>
     <label class="block text-sm">
@@ -68,7 +68,7 @@ async function submit() {
         type="password"
         autocomplete="new-password"
         name="new-password"
-        class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
+        class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border-input px-3 focus:outline-none focus:ring-2 focus:ring-focus"
       />
     </label>
     <label class="block text-sm">
@@ -78,7 +78,7 @@ async function submit() {
         type="password"
         autocomplete="new-password"
         name="confirm-password"
-        class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
+        class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border-input px-3 focus:outline-none focus:ring-2 focus:ring-focus"
       />
     </label>
     <p v-if="problem" class="text-xs text-warning">

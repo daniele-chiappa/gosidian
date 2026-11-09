@@ -51,6 +51,13 @@ type Field struct {
 	Required bool     `json:"required,omitempty"`
 	// Rollup defines a field of type rollup, computed when the row is read.
 	Rollup *Rollup `json:"rollup,omitempty"`
+	// Label names the field in the web UI in every language, Labels in
+	// one; OptionLabels names a select's options, by language then option
+	// (IMP-220). Left out of the JSON, so of the bootstrap: agents read and
+	// write the codes.
+	Label        string                       `json:"-"`
+	Labels       map[string]string            `json:"-"`
+	OptionLabels map[string]map[string]string `json:"-"`
 }
 
 // Rollup is a field computed when a row is read, never written to it (IMP-127
@@ -180,6 +187,9 @@ func Parse(notePath, frontmatter string) (*Schema, error) {
 		if (f.Type == "select" || f.Type == "multi-select") && len(f.Options) == 0 {
 			return nil, fmt.Errorf("field %q: a %s needs options", name, f.Type)
 		}
+		if err := labels(&f, def); err != nil {
+			return nil, err
+		}
 		if f.Type == "rollup" {
 			r, err := rollup(name, def)
 			if err != nil {
@@ -258,7 +268,7 @@ func rollup(name string, def *yaml.Node) (*Rollup, error) {
 	spec := &yaml.Node{Kind: yaml.MappingNode}
 	for k := 0; k+1 < len(def.Content); k += 2 {
 		switch def.Content[k].Value {
-		case "type", "calc", "of", "required", "options":
+		case "type", "calc", "of", "required", "options", "label", "option_labels":
 		default:
 			spec.Content = append(spec.Content, def.Content[k], def.Content[k+1])
 		}
@@ -269,6 +279,87 @@ func rollup(name string, def *yaml.Node) (*Rollup, error) {
 	}
 	r.Spec = string(b)
 	return r, nil
+}
+
+// langCode is a language as the web UI names it: it, en, pt-BR.
+var langCode = regexp.MustCompile(`^[a-z]{2,3}(-[A-Za-z0-9]{2,8})?$`)
+
+// labels reads a field's label and option_labels (IMP-220): a text, or a
+// map of language to text; option_labels a map of language to {option:
+// text}, for the options the field declares.
+func labels(f *Field, def *yaml.Node) error {
+	text := func(n *yaml.Node, where string) (string, error) {
+		if n.Kind != yaml.ScalarNode || strings.TrimSpace(n.Value) == "" {
+			return "", fmt.Errorf("field %q: %s must be a text", f.Name, where)
+		}
+		return strings.TrimSpace(n.Value), nil
+	}
+	lang := func(code string) error {
+		if !langCode.MatchString(code) {
+			return fmt.Errorf("field %q: %q is not a language code such as it or en", f.Name, code)
+		}
+		return nil
+	}
+	if n := valueOf(def, "label"); n != nil {
+		switch n.Kind {
+		case yaml.ScalarNode:
+			l, err := text(n, "label")
+			if err != nil {
+				return err
+			}
+			f.Label = l
+		case yaml.MappingNode:
+			f.Labels = map[string]string{}
+			for i := 0; i+1 < len(n.Content); i += 2 {
+				code := n.Content[i].Value
+				if err := lang(code); err != nil {
+					return err
+				}
+				l, err := text(n.Content[i+1], "label."+code)
+				if err != nil {
+					return err
+				}
+				f.Labels[code] = l
+			}
+		default:
+			return fmt.Errorf("field %q: `label` is a text, or a map of language to text such as {it: Stato, en: Status}", f.Name)
+		}
+	}
+	n := valueOf(def, "option_labels")
+	if n == nil {
+		return nil
+	}
+	if f.Type != "select" && f.Type != "multi-select" {
+		return fmt.Errorf("field %q: option_labels names the options of a select or multi-select, and this is a %s", f.Name, f.Type)
+	}
+	const shape = "`option_labels` is a map of language to {option: text}, such as {it: {open: aperta}}"
+	if n.Kind != yaml.MappingNode {
+		return fmt.Errorf("field %q: %s", f.Name, shape)
+	}
+	f.OptionLabels = map[string]map[string]string{}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		code, opts := n.Content[i].Value, n.Content[i+1]
+		if err := lang(code); err != nil {
+			return err
+		}
+		if opts.Kind != yaml.MappingNode {
+			return fmt.Errorf("field %q: %s", f.Name, shape)
+		}
+		named := map[string]string{}
+		for k := 0; k+1 < len(opts.Content); k += 2 {
+			opt := opts.Content[k].Value
+			if !slices.Contains(f.Options, opt) {
+				return fmt.Errorf("field %q: option_labels.%s names %q, which is not one of its options (%s)", f.Name, code, opt, strings.Join(f.Options, ", "))
+			}
+			l, err := text(opts.Content[k+1], "option_labels."+code+"."+opt)
+			if err != nil {
+				return err
+			}
+			named[opt] = l
+		}
+		f.OptionLabels[code] = named
+	}
+	return nil
 }
 
 // templatePath reads the template key: a vault path or a [[wikilink]] to a

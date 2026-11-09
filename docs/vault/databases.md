@@ -130,6 +130,43 @@ and queries (a field of that name is never read there), and `created_by`,
 field of that name hides. A folder of the filesystem is better named
 `folder` or `dir`. Lint and the write that declares one warn about it.
 
+### Names in the web UI
+
+The web UI names a field and a select's values in the reader's language
+(IMP-220): the properties panel, the tables, the boards and the forms. A
+field may say how:
+
+```yaml
+fields:
+  status:
+    type: select
+    options: [open, done]
+    label: {it: Stato, en: Status}
+    option_labels:
+      it: {open: aperta, done: fatta}
+      en: {open: Open, done: Done}
+  due:
+    type: date
+    label: Scadenza
+```
+
+- `label` is a text, for every language, or a map of language code (`it`,
+  `en`, `pt-BR`) to text;
+- `option_labels` is a map of language code to `{option: text}`, for a
+  `select` or a `multi-select`, naming options the field declares.
+
+Without them, the fields of gosidian's own databases (tasks, boards,
+plans, backlogs: `status`, `priority`, `claimed_by`, `due`…) and their
+values (`open`, `in-progress`, `submitted`…) take the names of the web
+UI's catalogue, in Italian and English; any other field reads as its key
+in words (`open_bugs` is *Open bugs*). The codes stay in the tooltips,
+and they are what the notes, the views' filters, the queries and the
+agents read and write: the labels change only what a person sees. Dates
+read as the reader writes them, the ISO form in the tooltip. A label with
+the wrong shape, or naming an option the field does not declare, is an
+error of the schema. The labels stay out of the bootstrap's
+`databases[]`.
+
 ### Relations
 
 A `relation` field holds `[[wikilinks]]`, quoted in the frontmatter
@@ -352,8 +389,14 @@ instance the open entries in `hot.md`.
   checkbox toggles at once. Values with `[[wikilinks]]` show as links.
 - **In a row's own note** — a property panel above the body lists the
   fields of the schema, with the same editors, and the note's other
-  fields, read-only. The `id` is shown, not edited: it is the file name.
-  `GET /api/v1/notes/<path>/fields` serves it.
+  fields, read-only, by the names [above](#names-in-the-web-ui). The
+  fields with a value come first, the empty ones after, in the order the
+  note opened with. The `id` is shown, not edited: it is the file name.
+  `GET /api/v1/notes/<path>/fields` serves it, each column with its
+  `label`, `labels` and `option_labels`. It serves every markdown note's
+  `tags` too, whether the reader may write it, and, for a project with
+  the vocabulary flag, its `tag_vocabulary`: the tag field of the web UI
+  reads them.
 
 Both save one field at a time with the call below, checking the value
 shown when the editor opened: if someone changed that field since,

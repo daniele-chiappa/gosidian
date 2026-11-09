@@ -34,6 +34,7 @@ export default {
         info: tokenColor('info'),
         border: tokenColor('border'),
         'border-strong': tokenColor('border-strong'),
+        'border-input': tokenColor('border-input'),
         overlay: tokenColor('overlay'),
         focus: tokenColor('focus'),
       },
@@ -68,6 +69,9 @@ export default {
       typography: {
         DEFAULT: {
           css: {
+            // A word longer than the line, as a link with its path, breaks
+            // instead of leaving the window on a narrow screen (IMP-221).
+            overflowWrap: 'break-word',
             '--tw-prose-body': 'rgb(var(--color-text))',
             '--tw-prose-headings': 'rgb(var(--color-text))',
             '--tw-prose-lead': 'rgb(var(--color-text-muted))',

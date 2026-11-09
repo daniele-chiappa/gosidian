@@ -1,7 +1,39 @@
 {
-  "_stub": "Scaffolding v1.10 — minimal stub, most keys fall back to EN catalog. Contribute translations: see CONTRIBUTING.md Translating gosidian section.",
+  "tokens": {
+    "name_required": "le nom est obligatoire",
+    "scope_required": "au moins une permission est obligatoire (read ou write)",
+    "ttl_invalid": "TTL non valide",
+    "unknown_action": "action inconnue",
+    "id_required": "l'id est obligatoire",
+    "revoke_not_found": "révocation : jeton introuvable",
+    "revoke_not_owner": "révocation : impossible de révoquer les jetons d'autres utilisateurs",
+    "create_prefix": "création : %s",
+    "revoke_prefix": "révocation : %s",
+    "created_success": "Jeton créé. Copiez le texte en clair maintenant : il ne sera plus affiché.",
+    "revoked_success": "Jeton révoqué : %s"
+  },
+  "users": {
+    "forbidden": "accès refusé : rôle admin requis",
+    "auth_disabled": "authentification désactivée : rien à administrer",
+    "unknown_action": "action inconnue",
+    "token_required": "le jeton est obligatoire",
+    "id_required": "l'id est obligatoire",
+    "invite_created": "Invitation créée. Copiez le lien maintenant : il ne sera plus affiché.",
+    "invite_revoked": "Invitation révoquée.",
+    "user_disabled": "Utilisateur désactivé. Ses jetons MCP ont été révoqués.",
+    "create_invite_prefix": "création de l'invitation : %s",
+    "revoke_invite_prefix": "révocation de l'invitation : %s",
+    "disable_prefix": "désactivation : %s"
+  },
   "login": {
     "bad_credentials": "Identifiants non valides.",
-    "rate_limited": "Trop d'échecs, réessayez plus tard."
+    "rate_limited": "Trop de tentatives échouées, réessayez plus tard."
+  },
+  "signup": {
+    "username_required": "Le nom d'utilisateur est obligatoire.",
+    "password_too_short": "Le mot de passe doit comporter au moins 8 caractères.",
+    "password_mismatch": "Les mots de passe ne correspondent pas.",
+    "invite_invalid": "Invitation non valide ou expirée.",
+    "signup_failed_prefix": "Échec de l'inscription : %s"
   }
 }

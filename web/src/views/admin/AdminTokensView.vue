@@ -12,11 +12,14 @@ import {
   type MCPTokenCreated,
 } from '@/api/admin'
 import { errorText } from '@/api/errors'
+import ScrollRegion from '@/components/primitives/ScrollRegion.vue'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
 import DateTime from '@/components/primitives/DateTime.vue'
 import { confirmAction } from '@/composables/useConfirm'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
+// A scope in words, the code in its tooltip (IMP-220, F-20).
+const scopeName = (s: string) => (te(`members.level_name.${s}`) ? t(`members.level_name.${s}`) : s)
 
 const tokens = ref<MCPToken[]>([])
 const users = ref<Map<string, AdminUser>>(new Map())
@@ -148,37 +151,47 @@ onMounted(load)
     class="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-3 mb-6"
     @submit.prevent="create"
   >
-    <input
-      v-model.trim="draft.name"
-      type="text"
-      :placeholder="t('admin.tokens.name_placeholder')"
-      class="h-control py-0 rounded bg-bg-elevated border border-border px-3"
-    />
-    <input
-      v-model.trim="draft.project"
-      type="text"
-      :placeholder="t('search.project_placeholder')"
-      class="h-control py-0 rounded bg-bg-elevated border border-border px-3"
-    />
-    <input
-      v-model.trim="draft.scopes"
-      type="text"
-      :placeholder="t('admin.tokens.scopes_placeholder')"
-      class="h-control py-0 rounded bg-bg-elevated border border-border px-3"
-    />
-    <input
-      v-model="draft.password"
-      type="password"
-      autocomplete="current-password"
-      :placeholder="t('admin.tokens.password_placeholder')"
-      :aria-label="t('password.confirm_action')"
-      data-token-password
-      class="h-control py-0 rounded bg-bg-elevated border border-border px-3"
-    />
+    <label class="flex flex-col gap-1">
+      <span class="text-xs text-text-muted">{{ t('admin.col.name') }}</span>
+      <input
+        v-model.trim="draft.name"
+        type="text"
+        :placeholder="t('admin.tokens.name_placeholder')"
+        class="h-control py-0 rounded bg-bg-elevated border border-border-input px-3"
+      />
+    </label>
+    <label class="flex flex-col gap-1">
+      <span class="text-xs text-text-muted">{{ t('admin.col.project') }}</span>
+      <input
+        v-model.trim="draft.project"
+        type="text"
+        :placeholder="t('search.project_placeholder')"
+        class="h-control py-0 rounded bg-bg-elevated border border-border-input px-3"
+      />
+    </label>
+    <label class="flex flex-col gap-1">
+      <span class="text-xs text-text-muted">{{ t('admin.col.scopes') }}</span>
+      <input
+        v-model.trim="draft.scopes"
+        type="text"
+        :placeholder="t('admin.tokens.scopes_placeholder')"
+        class="h-control py-0 rounded bg-bg-elevated border border-border-input px-3"
+      />
+    </label>
+    <label class="flex flex-col gap-1">
+      <span class="text-xs text-text-muted">{{ t('password.confirm_action') }}</span>
+      <input
+        v-model="draft.password"
+        type="password"
+        autocomplete="current-password"
+        data-token-password
+        class="h-control py-0 rounded bg-bg-elevated border border-border-input px-3"
+      />
+    </label>
     <button
       type="submit"
       :disabled="creating"
-      class="h-control px-3 rounded bg-accent text-accent-fg hover:bg-accent-hover disabled:opacity-60"
+      class="self-end h-control px-3 rounded bg-accent text-accent-fg hover:bg-accent-hover disabled:opacity-60"
     >{{ t('common.create') }}</button>
   </form>
 
@@ -186,8 +199,7 @@ onMounted(load)
   <p v-if="loading && !loaded" class="text-text-muted">{{ t('common.loading') }}</p>
   <ErrorMessage v-else-if="error && !loaded" :text="error" />
 
-  <div v-else class="overflow-x-auto">
-    <!-- Scrolls inside its box in a narrow window (IMP-156, M7). -->
+  <ScrollRegion v-else :label="t('admin.tab.tokens')">
 
     <table class="w-full text-sm">
       <thead class="text-text-muted text-xs [&_th]:font-medium">
@@ -220,7 +232,9 @@ onMounted(load)
               v-for="s in tok.scopes"
               :key="s"
               class="text-xs px-1.5 py-0.5 rounded border border-border mr-1"
-            >{{ s }}</span>
+              :title="s"
+              data-scope
+            >{{ scopeName(s) }}</span>
           </td>
           <td class="py-2 px-3 text-xs whitespace-nowrap"><DateTime :value="tok.created_at" /></td>
           <td class="py-2 px-3 text-xs whitespace-nowrap">
@@ -253,5 +267,5 @@ onMounted(load)
       </tbody>
     </table>
 
-  </div>
+  </ScrollRegion>
 </template>

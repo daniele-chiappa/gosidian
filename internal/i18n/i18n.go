@@ -4,7 +4,8 @@
 // "<scope>.<lang>.json" (e.g. "ui.it.json", "errors.en.json"). Scopes are
 // logical buckets that let contributors translate one surface at a time
 // without navigating the whole catalogue. /api/v1/i18n serves the files as
-// they are; the Go side does no lookups of its own.
+// they are. The Go side looks up only the texts the server writes in the
+// notes itself, in the instance's language (Text).
 package i18n
 
 import (

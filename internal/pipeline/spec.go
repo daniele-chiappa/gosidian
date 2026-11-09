@@ -60,12 +60,15 @@ const (
 	// sub-tasks closed, or a team spent its budget (IMP-195,
 	// tasktrigger.go).
 	TriggerTask = "task"
+	// TriggerIteration: the server closed an iteration of a board at its
+	// end, with its review (IMP-216 phase 2).
+	TriggerIteration = "iteration"
 )
 
 // Triggers are the triggers a pipeline declares, in the order of the docs:
 // the web UI's editor offers them (GET /api/v1/pipeline-nodes, IMP-207).
 // TriggerPipeline is no trigger a pipeline declares.
-var Triggers = []string{TriggerManual, TriggerExternal, TriggerChat, TriggerIngest, TriggerSchedule, TriggerIN, TriggerCommit, TriggerRun, TriggerQueue, TriggerTask}
+var Triggers = []string{TriggerManual, TriggerExternal, TriggerChat, TriggerIngest, TriggerSchedule, TriggerIN, TriggerCommit, TriggerRun, TriggerQueue, TriggerTask, TriggerIteration}
 
 // roleName is how a role of a team is named (fleet).
 var roleName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
@@ -309,7 +312,7 @@ func Parse(src string, types Types) (*Spec, error) {
 		s.Trigger.On = TriggerManual
 	}
 	switch s.Trigger.On {
-	case TriggerManual, TriggerExternal, TriggerChat:
+	case TriggerManual, TriggerExternal, TriggerChat, TriggerIteration:
 	case TriggerIngest:
 		if len(s.Trigger.Kinds) == 0 {
 			return nil, fmt.Errorf("trigger ingest: kinds lists the file extensions it takes (kinds: [pdf, docx])")

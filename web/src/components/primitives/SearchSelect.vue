@@ -16,6 +16,8 @@
  *     dropdown row.
  *   - `modelValue`: the committed string. Two-way bound; the parent
  *     persists it to URL / Pinia / wherever.
+ *   - `accessibleName`: the field's name for a screen reader, when its visible
+ *     label is not a <label> of it (IMP-220).
  *   - `placeholder`, `limit`: cosmetic.
  *
  * Behaviour:
@@ -46,11 +48,13 @@ interface Props<U> {
   valueKey: (item: U) => string
   label: (item: U) => string
   secondary?: (item: U) => string
+  accessibleName?: string
   placeholder?: string
   limit?: number
 }
 const props = withDefaults(defineProps<Props<T>>(), {
   secondary: undefined,
+  accessibleName: undefined,
   placeholder: '',
   limit: 15,
 })
@@ -172,13 +176,14 @@ function commitAndClose() {
         v-model="query"
         type="text"
         :placeholder="placeholder"
+        :aria-label="accessibleName"
         autocomplete="off"
         role="combobox"
         aria-autocomplete="list"
         :aria-expanded="open && filtered.length > 0"
         :aria-controls="listId"
         :aria-activedescendant="open && active >= 0 ? optionId(active) : undefined"
-        class="h-control py-0 w-full rounded bg-bg border border-border pl-2 pr-7 text-sm"
+        class="h-control py-0 w-full rounded bg-bg border border-border-input pl-2 pr-7 text-sm"
         @focus="open = true"
         @input="onInput"
         @keydown="onKeydown"

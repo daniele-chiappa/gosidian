@@ -7,6 +7,32 @@ one, newest first, and do what each one says. MCP clients keep the tool list
 they read when they connected, so reconnect them after an upgrade to see new
 tools and arguments. The full notes of every release are in `CHANGELOG.md`.
 
+## 2.158.0 — Cards with dates, boards with iterations
+
+- A [board](board.md)'s cards get `started` and `finished`, which the
+  server writes as they move; the next move of a card rewrites the
+  `fields` of its project's `tasks.md` once, as the server, to add them
+  and `iteration`. A `PATCH` of a card's frontmatter that sets or unsets
+  `started` or `finished` now answers 400. The measures of a board count
+  only the cards with the dates: they start from this release.
+- The server closes an iteration (a note `type: iteration`) when its last
+  day is over, with the pipelines on or off: it writes the review in the
+  note and takes the iteration away from its cards not done.
+
+## 2.134.0 — A project renamed takes its links along
+
+- Renaming a project, from the web UI, with `memory_rename_project` or
+  by archiving a disabled account's personal project, now rewrites the
+  references to its files in the notes the renamer may write: the
+  wiki-links with its path, the links to its attachments and the
+  `media:` pointers. With git sync on, a project linked from elsewhere
+  makes an `update` commit, in the renamer's name, for each project it
+  rewrote notes in. The notes the renamer may not write keep the old
+  path; `memory_rename_project` counts them in `not_rewritten`. A script
+  that renamed a project and fixed the links itself after can stop.
+- Views, databases and boards name a project in their `from:` as text:
+  after a rename, update them by hand, as before.
+
 ## 2.133.0 — Every write names its files
 
 - With git sync on, the writes that still went into the history as

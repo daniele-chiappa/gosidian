@@ -145,6 +145,18 @@ describe('SearchView, a text handed to it (IMP-218, F-06)', () => {
     expect(input.element.value).toBe('second')
     expect(search).toHaveBeenLastCalledWith(expect.objectContaining({ q: 'second' }))
   })
+
+  it('searches again the text already in its field, asked again (BUG-159)', async () => {
+    vi.mocked(search).mockResolvedValue([hit('a.md')])
+    const w = mount(SearchView, { props: { q: 'same', qAt: 1 }, global: { plugins: [i18n()] } })
+    await flushPromises()
+    expect(search).toHaveBeenCalledTimes(1)
+    // A note written since may hold the text: the list is asked again.
+    await w.setProps({ q: 'same', qAt: 2 })
+    await flushPromises()
+    expect(search).toHaveBeenCalledTimes(2)
+    expect(search).toHaveBeenLastCalledWith(expect.objectContaining({ q: 'same' }))
+  })
 })
 
 describe('SearchView, what a search found (IMP-218, F-26)', () => {

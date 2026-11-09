@@ -23,11 +23,7 @@ func (i *Index) NotesByName(q string, projects []string, limit int) ([]RecentNot
 	if limit <= 0 {
 		limit = 50
 	}
-	// A comparison, not min(): CodeQL reads only this as the bound of the
-	// allocation below (go/uncontrolled-allocation-size, #93).
-	if limit > 500 {
-		limit = 500
-	}
+	limit = min(limit, 500)
 	scope, args := scopeClause(projects, nil)
 	query := `SELECT n.path, n.title, n.mtime FROM notes n WHERE 1=1` + scope
 	// SQLite's LIKE folds ASCII only: an ASCII q narrows the rows in the
@@ -73,7 +69,10 @@ func (i *Index) NotesByName(q string, projects []string, limit int) ([]RecentNot
 	slices.SortFunc(found, func(a, b named) int {
 		return cmp.Or(cmp.Compare(a.rank, b.rank), cmp.Compare(a.key, b.key), cmp.Compare(a.note.Path, b.note.Path))
 	})
-	out := make([]RecentNote, 0, min(len(found), limit))
+	// The result grows by append: CodeQL takes a capacity made from limit
+	// for one the caller sizes, capped or not (go/uncontrolled-allocation-size,
+	// #93, still open after a cap written as a comparison).
+	out := []RecentNote{}
 	for _, f := range found[:min(len(found), limit)] {
 		out = append(out, f.note)
 	}

@@ -206,8 +206,8 @@ func (s *Server) handleVaultFile(w http.ResponseWriter, r *http.Request) {
 	// are content-addressed and immutable, so the data: URI is permanently
 	// cacheable — the browser keeps it and never regenerates the base64.
 	if r.URL.Query().Has("inline") {
-		data, rerr := io.ReadAll(io.LimitReader(f, attach.MaxBytes+1))
-		if rerr != nil || len(data) > attach.MaxBytes {
+		data, rerr := io.ReadAll(io.LimitReader(f, attach.MaxBytes()+1))
+		if rerr != nil || int64(len(data)) > attach.MaxBytes() {
 			http.NotFound(w, r)
 			return
 		}

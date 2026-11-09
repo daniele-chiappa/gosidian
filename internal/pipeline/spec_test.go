@@ -103,7 +103,7 @@ func TestParse_Refusals(t *testing.T) {
 // An unknown trigger is refused naming the triggers the editor offers too.
 func TestParse_UnknownTriggerNamesTheTriggers(t *testing.T) {
 	_, err := Parse("trigger: {on: webhook}\nnodes: [{id: a, use: note.read}]", testTypes)
-	if err == nil || !strings.Contains(err.Error(), "manual, external, chat, ingest, schedule, in, commit, run, queue or task") {
+	if err == nil || !strings.Contains(err.Error(), "manual, external, chat, ingest, schedule, in, commit, run, queue, task or iteration") {
 		t.Fatalf("err = %v", err)
 	}
 }

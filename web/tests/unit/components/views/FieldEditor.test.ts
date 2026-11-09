@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import enUI from '@catalogs/ui.en.json'
+import itUI from '@catalogs/ui.it.json'
 import type { ViewColumn } from '@/api/preview'
 
 vi.mock('@/api/noteTitles', () => ({ suggestNoteTitles: vi.fn(async () => []) }))
@@ -69,5 +70,19 @@ describe('FieldEditor (BUG-117)', () => {
     label.dispatchEvent(ev)
     expect(ev.defaultPrevented).toBe(true)
     w.unmount()
+  })
+})
+
+describe('FieldEditor in the reader\'s language (IMP-220, F-23)', () => {
+  it('names the options of a select and a multi-select, their values the codes', () => {
+    const i18n = createI18n({ legacy: false, locale: 'it', fallbackLocale: 'en', messages: { en: enUI, it: itUI } })
+    const status = col('select', { options: ['submitted', 'mine'], required: true })
+    const w = mount(FieldEditor, { props: { column: status, value: 'submitted', label: 'f' }, global: { plugins: [i18n] } })
+    const opts = w.findAll('option')
+    expect(opts.map((o) => o.text())).toEqual(['inviato', 'mine'])
+    expect(opts.map((o) => o.attributes('value'))).toEqual(['submitted', 'mine'])
+    const tags = col('multi-select', { options: ['low', 'high'], option_labels: { it: { low: 'poca' } } })
+    const m = mount(FieldEditor, { props: { column: tags, value: [], label: 'f' }, global: { plugins: [i18n] } })
+    expect(m.findAll('label').map((l) => l.text())).toEqual(['poca', 'alta'])
   })
 })

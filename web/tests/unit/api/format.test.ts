@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { i18n } from '@/locales'
-import { formatDateTime, formatSize } from '@/api/format'
+import { formatDateTime, formatFieldDate, formatSize } from '@/api/format'
 
 describe('format (IMP-155, m1)', () => {
   afterEach(() => {
@@ -28,5 +28,16 @@ describe('format (IMP-155, m1)', () => {
     expect(formatSize(1468006)).toBe('1.4 MB')
     i18n.global.locale.value = 'it'
     expect(formatSize(1468006)).toBe('1,4 MB')
+  })
+
+  it("writes a field's date as a day, or with its time when it has one (IMP-220, F-23)", () => {
+    i18n.global.locale.value = 'it'
+    // A day is the day written, in any time zone.
+    expect(formatFieldDate('2026-11-03')).toBe('3 nov 2026')
+    expect(formatFieldDate('2026-10-31T00:41:54+01:00')).toBe(formatDateTime('2026-10-31T00:41:54+01:00'))
+    i18n.global.locale.value = 'en'
+    expect(formatFieldDate('2026-11-03')).toBe('Nov 3, 2026')
+    expect(formatFieldDate('next week')).toBe('next week')
+    expect(formatFieldDate('2026-13-45')).toBe('2026-13-45')
   })
 })

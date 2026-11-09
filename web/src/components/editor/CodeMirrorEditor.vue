@@ -53,11 +53,14 @@ interface Props {
   placeholder?: string
   project?: string
   readonly?: boolean
+  // The text field's name for a screen reader, such as "Text of <note>" (IMP-220, F-11).
+  label?: string
 }
 const props = withDefaults(defineProps<Props>(), {
   placeholder: 'Markdown…',
   project: undefined,
   readonly: false,
+  label: undefined,
 })
 const emit = defineEmits<{
   (e: 'update:modelValue', value: string): void
@@ -68,6 +71,8 @@ let view: EditorView | null = null
 const themeCompartment = new Compartment()
 const readonlyCompartment = new Compartment()
 const readonlyExt = (on: boolean) => EditorState.readOnly.of(on)
+const labelCompartment = new Compartment()
+const labelExt = (label?: string) => EditorView.contentAttributes.of(label ? { 'aria-label': label } : {})
 
 const cmTheme = EditorView.theme(editorThemeSpec, { dark: false })
 
@@ -114,6 +119,7 @@ function buildState(initial: string): EditorState {
       ]),
       themeCompartment.of(cmTheme),
       readonlyCompartment.of(readonlyExt(props.readonly)),
+      labelCompartment.of(labelExt(props.label)),
     ],
   })
 }
@@ -216,8 +222,20 @@ watch(
   (on) => view?.dispatch({ effects: readonlyCompartment.reconfigure(readonlyExt(on)) }),
 )
 
+watch(
+  () => props.label,
+  (label) => view?.dispatch({ effects: labelCompartment.reconfigure(labelExt(label)) }),
+)
+
 defineExpose({
   focus: () => view?.focus(),
+  /** Puts the cursor at the start of a line, from 1, in view. */
+  goToLine(line: number) {
+    if (!view) return
+    const { from } = view.state.doc.line(Math.min(Math.max(line, 1), view.state.doc.lines))
+    view.dispatch({ selection: { anchor: from }, scrollIntoView: true })
+    view.focus()
+  },
 })
 </script>
 

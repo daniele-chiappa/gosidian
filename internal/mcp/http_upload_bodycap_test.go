@@ -23,7 +23,7 @@ func oversizedMultipart(t *testing.T, field string) (*bytes.Buffer, string) {
 		t.Fatal(err)
 	}
 	chunk := bytes.Repeat([]byte("x"), 1<<20)
-	for i := 0; i < int(attach.MaxBytes>>20)+3; i++ {
+	for i := 0; i < int(attach.MaxBytes()>>20)+3; i++ {
 		if _, err := fw.Write(chunk); err != nil {
 			t.Fatal(err)
 		}
@@ -49,7 +49,7 @@ func TestIngestTicketRedeem_OversizedBodyIs413(t *testing.T) {
 	s, ctx := newScopedServer(t, "proj", []string{auth.ScopeRead, auth.ScopeWrite})
 	out := ingestOut(t, s, ctx, map[string]any{"project": "proj", "transfer": "http"})
 	endpoint, _ := out["endpoint"].(string)
-	huge := bytes.Repeat([]byte("x"), int(attach.MaxBytes)+3<<20)
+	huge := bytes.Repeat([]byte("x"), int(attach.MaxBytes())+3<<20)
 	code, body := postTicket(t, s.Handler(""), endpoint, "huge.bin", huge)
 	if code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status=%d body=%s", code, body)

@@ -5,10 +5,10 @@
  * against gosidian's semantic tokens with a neutral fallback.
  */
 export const WINDOW_TONES: Record<string, string> = {
-  accent: 'bg-accent/15 text-accent',
-  info: 'bg-info/15 text-info',
-  warning: 'bg-warning/15 text-warning',
-  danger: 'bg-danger/15 text-danger',
+  accent: 'bg-accent/10 text-accent',
+  info: 'bg-info/10 text-info',
+  warning: 'bg-warning/10 text-warning',
+  danger: 'bg-danger/10 text-danger',
 }
 
 export const windowTone = (tone: string | undefined): string =>

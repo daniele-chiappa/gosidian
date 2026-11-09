@@ -79,6 +79,8 @@ func TestFrontmatterPatch_ACardsPlace(t *testing.T) {
 		"no column":          `{"unset":["column"]}`,
 		"a column not text":  `{"set":{"column":3}}`,
 		"a place below zero": `{"at":-1}`,
+		"its start":          `{"set":{"started":"2026-11-09T10:00:00Z"}}`,
+		"its end taken away": `{"unset":["finished"]}`,
 	} {
 		if r = f.doAuthRecorder(http.MethodPatch, cardURL, body, nil); r.code != http.StatusBadRequest {
 			t.Errorf("%s: %d %s", name, r.code, r.body)

@@ -70,7 +70,7 @@
     {
       "name": "Tools, full",
       "metric": "surface.tools_full",
-      "ref": 65
+      "ref": 66
     },
     {
       "name": "Tools, core",
@@ -80,13 +80,13 @@
     {
       "name": "tools/list, full (bytes)",
       "metric": "surface.tools_list_bytes_full",
-      "ref": 79128,
+      "ref": 81691,
       "target": 80000
     },
     {
       "name": "tools/list, core (bytes)",
       "metric": "surface.tools_list_bytes_core",
-      "ref": 37788
+      "ref": 38145
     },
     {
       "name": "Bootstrap of the project (bytes)",
@@ -228,7 +228,7 @@
     {
       "name": "Web UI, first load (bytes sent)",
       "metric": "spa.bytes",
-      "ref": 163493,
+      "ref": 153892,
       "target": 200000
     },
     {
@@ -240,7 +240,7 @@
     {
       "name": "Memory, peak (bytes)",
       "metric": "resources.peak",
-      "ref": 34537472,
+      "ref": 30740480,
       "pct": 10
     },
     {
@@ -258,13 +258,13 @@
     {
       "name": "Image (bytes)",
       "metric": "sizes.image",
-      "ref": 125770208.5,
+      "ref": 102149899,
       "pct": 2
     },
     {
       "name": "Binary (bytes)",
       "metric": "sizes.binary",
-      "ref": 70510752,
+      "ref": 50970784,
       "pct": 2
     }
   ],
@@ -456,6 +456,288 @@
       "metrics": [
         "surface.tools_list_bytes_full",
         "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-03",
+      "why": "v2.134.0: the description of memory_rename_project says what follows a project renamed (wiki-links with its path, links to its attachments, media pointers), in the notes the token may write, and what does not (views), taking tools/list from 79,128 bytes to 79,425 (its core unchanged); the Projects window's two strings of what a rename rewrote, in the first load's languages, take it from 163,493 bytes sent to 163,623 (BUG-153); a cost the user accepted on 2026-11-03",
+      "from": [
+        "base-2026-11-03-v2.134.0.json"
+      ],
+      "metrics": [
+        "surface.tools_list_bytes_full",
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-03",
+      "why": "v2.135.0, IMP-221: every preset's text reaches 4.5:1 on every background and a field's border 3:1; the new token --color-border-input in the four presets, the base rule of the bare checkboxes and radios, and the bridge's 10% tint of plancia-diagrams' selection take the first load from 163,623 bytes sent to 163,675, a cost the user accepted on 2026-11-03",
+      "from": [
+        "base-2026-11-03-v2.135.0.json"
+      ],
+      "metrics": [
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-03",
+      "why": "v2.136.0, IMP-221 F-15: on a narrow screen the sidebar is a drawer the bar's button opens, one window takes the width and the bar's account commands go in a menu; the focus border of a field takes the theme's colour. The four new strings in the English and Italian catalogues of the first load, the shell's narrow-screen code, the bridge's drawer rules and the base focus rule take it from 163,675 bytes sent to 163,810, a cost the user accepted on 2026-11-03",
+      "from": [
+        "base-2026-11-03-v2.136.0.json"
+      ],
+      "metrics": [
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-03",
+      "why": "v2.137.0, IMP-220, the names: the note's editor, every field and select, an editable cell named by what it shows and a name already taken said under its field. The new strings in the English and Italian catalogues of the first load (about 200 bytes compressed in each) and a little code take it from 163,810 bytes sent to 164,243, a cost the user accepted on 2026-11-03",
+      "from": [
+        "base-2026-11-03-v2.137.0.json"
+      ],
+      "metrics": [
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-03",
+      "why": "v2.138.0, IMP-220, the words: the names of the fields of gosidian's own databases and of their values, the project flags in words, the note toolbar's words, Members and teams. The new strings in the English and Italian catalogues of the first load (locales +1,355) and a little code (+9) take it from 164,243 bytes sent to 165,607; the 60 phrases of the audit's actions, about 1.6 KB, went to a catalogue of their own that only the audit's page loads. A cost the user accepted on 2026-11-03, choosing that split",
+      "from": [
+        "base-2026-11-03-v2.138.0.json"
+      ],
+      "metrics": [
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-03",
+      "why": "v2.138.1, BUG-154: the address's codec learns the access and new note windows, a few lines in the chunk that holds it, and the first load's compression comes out one byte smaller, from 165,607 bytes sent to 165,606. Moved because the guard reads bytes without noise, not for a gain",
+      "from": [
+        "base-2026-11-03-v2.138.1.json"
+      ],
+      "metrics": [
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-04",
+      "why": "v2.139.0, IMP-220 F-20: German, Spanish and French, whole now, load only when chosen, so the first load keeps Italian and English alone, and the 195 texts the web UI no longer showed are gone from every catalogue; BUG-155, 156 and 157 add a little. From 165,606 bytes sent to 148,591",
+      "from": [
+        "base-2026-11-04-v2.139.0.json"
+      ],
+      "metrics": [
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-04",
+      "why": "v2.140.0, IMP-223: the texts of the tag field and of the editor's tag warning in the Italian and English catalogues, which the first load carries, take it from 148,591 bytes sent to 148,959 (+368); the field's code comes with the note's window. A cost the user accepted on 2026-11-04",
+      "from": [
+        "base-2026-11-04-v2.140.0.json"
+      ],
+      "metrics": [
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-04",
+      "why": "The reference of 34.5 MB was older than the measures: the median of the three peaks has stayed between 30.7 and 31.6 MB in every release since 2026-11-02, and this run's 30.7 crossed the band by chance; nothing in v2.140.0 changes the server's memory. Moved with the user's ok, so that the band stands on what is measured",
+      "from": [
+        "base-2026-11-04-v2.140.0.json"
+      ],
+      "metrics": [
+        "resources.peak"
+      ]
+    },
+    {
+      "set": "2026-11-04",
+      "why": "v2.141.0, IMP-225: the tree store reloads a write's project alone, with its ETag, and the sidebar carries it in the first load, which goes from 148,959 bytes sent to 148,964 (+5); in exchange a write costs the open web UI about 0.7 KB of tree instead of 287 KB, and the first tree goes in gzip. A cost the user accepted on 2026-11-04",
+      "from": [
+        "base-2026-11-04-v2.141.0.json"
+      ],
+      "metrics": [
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-04",
+      "why": "v2.142.0: the web UI is built without its source maps, which the binary embedded: 20.8 of its 71.8 MB. The binary goes from 71.83 MB to 50.97, the image from 127.5 to 102.1, and the first load from 148,964 bytes sent to 148,610, its scripts without the sourceMappingURL comment. The audit's new texts (IMP-224) came with its own catalogue, out of the first load",
+      "from": [
+        "base-2026-11-04-v2.142.0.json"
+      ],
+      "metrics": [
+        "spa.bytes",
+        "sizes.image",
+        "sizes.binary"
+      ]
+    },
+    {
+      "set": "2026-11-04",
+      "why": "v2.143.0, IMP-224 F-29 and BUG-158: plancia 0.5.0 and the graph's p=* change only chunks loaded after the first load; the names of those chunks in the first load's scripts take it from 148,610 bytes sent to 148,612 (+2). A cost the user accepted on 2026-11-04",
+      "from": [
+        "base-2026-11-04-v2.143.0.json"
+      ],
+      "metrics": [
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-04",
+      "why": "v2.144.0, IMP-224 F-32: the graph and the canvas said as text. Their new texts in the Italian and English catalogues of the first load (locales +515) and the stylesheet's new classes (+47) take it from 148,612 bytes sent to 149,172; the description of memory_get saying its graphs takes tools/list from 79,425 bytes to 79,534 and its core from 37,788 to 37,897. Costs the user accepted on 2026-11-04",
+      "from": [
+        "base-2026-11-04-v2.144.0.json"
+      ],
+      "metrics": [
+        "surface.tools_list_bytes_full",
+        "surface.tools_list_bytes_core",
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-04",
+      "why": "v2.144.1, BUG-159 and BUG-160: the palette hands Projects the project chosen, with when it was chosen, and Projects gives the focus to its name; the first load goes from 149,172 bytes sent to 149,173. A cost the user accepted on 2026-11-04",
+      "from": [
+        "base-2026-11-04-v2.144.1.json"
+      ],
+      "metrics": [
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-05",
+      "why": "v2.145.0, IMP-226 part 1: the page-layout editor in a window of its own. The first load goes from 149,173 to 150,268 bytes sent: about 930 of the 1,095 bytes are the new strings, since Italian and English are always in the first load, and the rest is the palette asking which apps a plugin offers. A cost the user accepted on 2026-11-05",
+      "from": [
+        "base-2026-11-05-v2.145.0.json"
+      ],
+      "metrics": [
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-05",
+      "why": "v2.146.0, IMP-226: the layout window's own bar, with Save, Place image, Export and the references. The first load goes from 150,268 to 150,396 bytes sent: about 93 of the 128 bytes are the five new strings, since Italian and English are always in the first load, and the rest is the slot added to OverflowMenu. A cost the user accepted.",
+      "from": [
+        "base-2026-11-05-v2.146.0.json"
+      ],
+      "metrics": [
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-05",
+      "why": "v2.147.0: a design moved from a designcraft block in the note to a file named by the frontmatter. The preview's code for that block went, and the catalogs always in the first load shrank: 41 raw bytes in English, 47 in Italian.",
+      "from": [
+        "base-2026-11-05-v2.147.0.json"
+      ],
+      "metrics": [
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-06",
+      "why": "v2.148.0, IMP-226 part 3: the twenty strings of the Fonts tab in the English and Italian catalogues, which the first load carries. It goes from 150,354 to 150,936 bytes sent, under the objective of 200,000.",
+      "from": [
+        "base-2026-11-06-v2.148.0.json"
+      ],
+      "metrics": [
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-06",
+      "why": "v2.149.0, IMP-201: memory_versions, the one more tool of the full profile, the version parameter of memory_get, and the strings of the valid version in the English and Italian catalogues. tools/list goes past its objective of 80000 bytes, by 1345: accepted by the user on 2026-11-06, to be brought back with the same functions in a work of its own.",
+      "from": [
+        "base-2026-11-06-v2.149.0.json"
+      ],
+      "metrics": [
+        "surface.tools_full",
+        "surface.tools_list_bytes_full",
+        "surface.tools_list_bytes_core",
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-07",
+      "why": "v2.151.0, IMP-228: the action mcp of memory_versions and version \"draft\" in the descriptions of memory_get and layout_open; the notice of a page older than the server and the strings of the version button in the first load",
+      "from": [
+        "base-2026-11-07-v2.151.0.json"
+      ],
+      "metrics": [
+        "surface.tools_list_bytes_full",
+        "surface.tools_list_bytes_core",
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-07",
+      "why": "v2.152.0: the plancia starts on the tabs, the choice remembered as the user's in the UI store, and keepMounted keeps the app windows of the plugins in the page behind the other tabs (plancia 0.6.0). The first load goes from 152,534 to 152,551 bytes sent (+17). A cost the user accepted on 2026-11-07",
+      "from": [
+        "base-2026-11-07-v2.152.0.json"
+      ],
+      "metrics": [
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-07",
+      "why": "v2.153.0, IMP-230: the eight strings of the words changed in a frame (the notice after a save, the two versions in the piece editor) in the English and Italian catalogues, which the first load carries: 1,304 raw bytes. The first load goes from 152,551 to 152,949 bytes sent (+398); the code comes with the layout window. A cost the user accepted on 2026-11-07",
+      "from": [
+        "base-2026-11-07-v2.153.0.json"
+      ],
+      "metrics": [
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-08",
+      "why": "v2.154.0, IMP-229: full screen (plancia 0.7.0) and the sidebar that closes in the shell, and the strings of full screen and of the PDF in the vault in the English and Italian catalogues, which the first load carries. It goes from 152,949 to 153,171 bytes sent (+222). A cost the user accepted on 2026-11-08",
+      "from": [
+        "base-2026-11-08-v2.154.0.json"
+      ],
+      "metrics": [
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-08",
+      "why": "v2.155.0, IMP-231: the pieces of a note in another order. The message of an order changed meanwhile, in the Italian and English catalogues of the first load, takes it from 153,171 to 153,241 bytes sent (+70). A cost the user accepted on 2026-11-08",
+      "from": [
+        "base-2026-11-08-v2.155.0.json"
+      ],
+      "metrics": [
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-08",
+      "why": "v2.156.0, IMP-232: the page size, the page layout to start from and the message of a template that does not read, in the Italian and English catalogues of the first load, take it from 153,241 to 153,543 bytes sent (+302). A cost the user accepted on 2026-11-08",
+      "from": [
+        "base-2026-11-08-v2.156.0.json"
+      ],
+      "metrics": [
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-09",
+      "why": "v2.157.1: vue-i18n 11.4.16, the first load from 153,543 to 153,717 bytes sent (+174). A cost the user accepted on 2026-11-08",
+      "from": [
+        "base-2026-11-09-v2.157.1.json"
+      ],
+      "metrics": [
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-09",
+      "why": "v2.158.0, IMP-216 phase 2: the three new field names (started, finished, iteration) in the Italian and English catalogues of the first load take it from 153,717 to 153,892 bytes sent (+175), a cost the user accepted on 2026-11-08; the task tools' shorter descriptions take tools/list from 81,696 to 81,691 bytes (full) and from 38,150 to 38,145 (core)",
+      "from": [
+        "base-2026-11-09-v2.158.0.json"
+      ],
+      "metrics": [
+        "spa.bytes",
+        "surface.tools_list_bytes_full",
+        "surface.tools_list_bytes_core"
       ]
     }
   ]

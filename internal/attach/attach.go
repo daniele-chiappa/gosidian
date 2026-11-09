@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 )
 
 // DataURI builds an RFC 2397 data: URI for the given bytes, using the MIME of
@@ -42,8 +43,41 @@ func SetInertHeaders(h http.Header) {
 	h.Set("Referrer-Policy", "no-referrer")
 }
 
-// MaxBytes is the largest raw attachment the system accepts (10 MiB).
-const MaxBytes = 10 << 20
+// DefaultMaxBytes is the largest raw attachment a server accepts unless
+// its config says otherwise ([uploads] max_attachment_bytes, IMP-226).
+const DefaultMaxBytes = 10 << 20
+
+var maxBytes atomic.Int64
+
+func init() { maxBytes.Store(DefaultMaxBytes) }
+
+// MaxBytes is the largest raw attachment the server accepts: every way in
+// (the web UI, the MCP uploads, the ingest, the page layouts) holds it.
+func MaxBytes() int64 { return maxBytes.Load() }
+
+// SetMaxBytes sets MaxBytes, once at start, from the config; n <= 0 is
+// the default.
+func SetMaxBytes(n int64) {
+	if n <= 0 {
+		n = DefaultMaxBytes
+	}
+	maxBytes.Store(n)
+}
+
+// MaxSize is MaxBytes for a person: "10 MiB", "512 KiB", "1000 bytes".
+func MaxSize() string {
+	n := MaxBytes()
+	switch {
+	case n%(1<<20) == 0:
+		return fmt.Sprintf("%d MiB", n>>20)
+	case n%(1<<10) == 0:
+		return fmt.Sprintf("%d KiB", n>>10)
+	}
+	return fmt.Sprintf("%d bytes", n)
+}
+
+// TooLarge is the error of a file past MaxBytes.
+func TooLarge() string { return "file too large (max " + MaxSize() + ")" }
 
 // ExtInfo describes an allowed attachment extension.
 type ExtInfo struct {
@@ -89,6 +123,19 @@ func ValidateExt(ext string) (mime string, isImage bool, err error) {
 		return "", false, fmt.Errorf("unsupported file type: %s", ext)
 	}
 	return info.MIME, info.IsImage, nil
+}
+
+// Check is Store's check of a file, before anything is written: its type,
+// its size, and bytes that are what its extension says.
+func Check(data []byte, ext string) error {
+	if _, _, err := ValidateExt(ext); err != nil {
+		return err
+	}
+	if int64(len(data)) > MaxBytes() {
+		return fmt.Errorf("larger than an attachment's %s", MaxSize())
+	}
+	_, err := VerifyMIME(data, ext)
+	return err
 }
 
 // VerifyMIME inspects the first 512 bytes of content and confirms the
@@ -343,8 +390,8 @@ func Store(v Saver, data []byte, origFilename, project string) (*Result, error) 
 	if err != nil {
 		return nil, err
 	}
-	if len(data) > MaxBytes {
-		return nil, errors.New("file too large (max 10 MiB)")
+	if int64(len(data)) > MaxBytes() {
+		return nil, errors.New(TooLarge())
 	}
 	// Magic-bytes verification: catch MIME spoof (declared png, content JS).
 	if _, err := VerifyMIME(data, ext); err != nil {

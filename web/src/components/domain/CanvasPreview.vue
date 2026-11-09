@@ -4,16 +4,18 @@
  * the file puts them, groups behind, connections as SVG curves with their
  * arrows and labels. Drag the background to move around, the wheel scrolls
  * the plane (or a card whose text overflows), Ctrl + wheel or a pinch zooms
- * around the pointer; the buttons zoom and fit the whole canvas.
+ * around the pointer; the buttons zoom and fit the whole canvas. With the
+ * focus on the plane the arrows move it, + and − zoom, 0 fits; «List» says
+ * the cards by group and the connections (IMP-224, F-32).
  *
  * The server resolved the cards for the reader: a text card's markdown
  * comes as HTML, shown by MarkdownPreview (sanitized, its links opening
  * windows); a file card names the note it opens, with the start of it, or
  * the image it shows; a card the reader may not see is its path alone.
  */
-import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Maximize, Minus, Plus } from 'lucide-vue-next'
+import { List, Maximize, Minus, Plus } from 'lucide-vue-next'
 import { useWindowsStore, type OpenSpec } from 'plancia'
 import type { CanvasCard, CanvasData } from '@/api/notes'
 import { planciaKey, base } from '@/composables/planciaKey'
@@ -62,6 +64,42 @@ function box(n: CanvasCard) {
       : {}),
   }
 }
+
+// The canvas in words: the cards by the group that holds them, then the
+// connections, each card named as the server's canvas.Markdown names it.
+const showList = ref(false)
+function cardName(c: CanvasCard | undefined): string {
+  if (!c) return ''
+  switch (c.type) {
+    case 'group':
+      return t('canvas.group', { name: c.label || t('canvas.untitled') })
+    case 'text': {
+      const first = (c.text ?? '').trim().split('\n')[0]!.trim().replace(/^#+\s*/, '')
+      return first ? (first.length > 60 ? `${first.slice(0, 59)}…` : first) : c.id
+    }
+    case 'file':
+      return `${c.title || c.path || c.file || c.id}${c.subpath ? ` ${c.subpath}` : ''}`
+    case 'link':
+      return c.url ?? c.id
+  }
+  return c.id
+}
+const listed = computed(() => {
+  const inGroup = (id?: string) => cards.value.filter((c) => (c.parent || undefined) === id).map(cardName)
+  const parts = groups.value.map((g) => ({ id: g.id, name: cardName(g), cards: inGroup(g.id) }))
+  const outside = inGroup(undefined)
+  if (outside.length) parts.push({ id: '', name: t('canvas.outside'), cards: outside })
+  return parts
+})
+const connections = computed(() =>
+  props.canvas.edges.map((e) => {
+    const from = e.fromEnd === 'arrow'
+    const to = e.toEnd !== 'none'
+    const arrow = from && to ? '↔' : from ? '←' : to ? '→' : '—'
+    const label = e.label?.trim() ? `: ${e.label.trim().replace(/\n/g, ' ')}` : ''
+    return { id: e.id, text: `${cardName(byId.value.get(e.fromNode))} ${arrow} ${cardName(byId.value.get(e.toNode))}${label}` }
+  }),
+)
 
 function openNote(c: CanvasCard) {
   if (!c.path) return
@@ -152,6 +190,31 @@ function onPointerUp(e: PointerEvent) {
   }
 }
 
+// The keys of the plane, when it holds the focus (not a card of it): the
+// arrows move it (Shift: four steps), + and − zoom, 0 fits (WCAG 2.5.7).
+const STEP = 50
+const helpId = useId()
+function onKeydown(e: KeyboardEvent) {
+  if (e.target !== viewport.value || showList.value) return
+  const step = e.shiftKey ? STEP * 4 : STEP
+  const pan: Record<string, [number, number]> = {
+    ArrowLeft: [step, 0],
+    ArrowRight: [-step, 0],
+    ArrowUp: [0, step],
+    ArrowDown: [0, -step],
+  }
+  const by = pan[e.key]
+  if (by) {
+    moved = true
+    whole = false
+    view.value = { ...view.value, tx: view.value.tx + by[0], ty: view.value.ty + by[1] }
+  } else if (e.key === '+' || e.key === '=') zoomBy(1.25)
+  else if (e.key === '-') zoomBy(1 / 1.25)
+  else if (e.key === '0') refit()
+  else return
+  e.preventDefault()
+}
+
 let observer: ResizeObserver | null = null
 onMounted(() => {
   fitView()
@@ -175,8 +238,13 @@ watch(plane, fitView)
 <template>
   <div
     ref="viewport"
-    class="relative h-full min-h-80 w-full overflow-hidden bg-bg select-none touch-none cursor-grab active:cursor-grabbing"
+    class="relative h-full min-h-80 w-full overflow-hidden bg-bg select-none touch-none cursor-grab active:cursor-grabbing focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus"
     data-canvas
+    tabindex="0"
+    role="region"
+    :aria-label="t('canvas.label')"
+    :aria-describedby="helpId"
+    @keydown="onKeydown"
     @pointerdown="onPointerDown"
     @pointermove="onPointerMove"
     @pointerup="onPointerUp"
@@ -185,11 +253,46 @@ watch(plane, fitView)
     <p v-if="canvas.error" class="p-6 text-danger text-sm" data-canvas-error>
       {{ t('canvas.error', { msg: canvas.error }) }}
     </p>
-    <p v-else-if="!canvas.nodes.length" class="p-6 text-text-muted text-sm">
+    <p :id="helpId" class="sr-only">
+      {{ t('canvas.help') }}
+    </p>
+    <p v-if="!canvas.error && !canvas.nodes.length" class="p-6 text-text-muted text-sm">
       {{ t('canvas.empty') }}
     </p>
     <div
-      v-else
+      v-else-if="!canvas.error && showList"
+      class="absolute inset-0 overflow-auto p-6 text-sm select-text cursor-auto"
+      data-canvas-list
+    >
+      <p class="text-text-muted">
+        {{ t('canvas.summary', { cards: cards.length, groups: groups.length, edges: canvas.edges.length }) }}
+      </p>
+      <h2 class="mt-4 font-semibold">
+        {{ t('canvas.cards') }}
+      </h2>
+      <ul class="mt-1 space-y-2">
+        <li v-for="g in listed" :key="g.id" data-canvas-list-group>
+          {{ g.name }}
+          <ul class="ml-5 list-disc">
+            <li v-for="(c, i) in g.cards" :key="i">
+              {{ c }}
+            </li>
+          </ul>
+        </li>
+      </ul>
+      <template v-if="connections.length">
+        <h2 class="mt-4 font-semibold">
+          {{ t('canvas.connections') }}
+        </h2>
+        <ul class="mt-1 ml-5 list-disc">
+          <li v-for="c in connections" :key="c.id" data-canvas-list-edge>
+            {{ c.text }}
+          </li>
+        </ul>
+      </template>
+    </div>
+    <div
+      v-else-if="!canvas.error"
       class="absolute left-0 top-0 origin-top-left"
       :style="{ transform, width: `${plane.width}px`, height: `${plane.height}px` }"
     >
@@ -300,6 +403,20 @@ watch(plane, fitView)
       data-canvas-controls
     >
       <button
+        v-if="canvas.nodes.length && !canvas.error"
+        type="button"
+        class="p-1.5 hover:bg-surface-hover hover:text-text"
+        :class="showList && 'bg-surface-hover text-text'"
+        :title="t('canvas.list')"
+        :aria-label="t('canvas.list')"
+        :aria-pressed="showList"
+        data-canvas-list-toggle
+        @click="showList = !showList"
+      >
+        <List class="h-4 w-4" />
+      </button>
+      <template v-if="!showList">
+      <button
         type="button"
         class="p-1.5 hover:bg-surface-hover hover:text-text"
         :title="t('canvas.zoom_out')"
@@ -327,6 +444,7 @@ watch(plane, fitView)
       >
         <Plus class="h-4 w-4" />
       </button>
+      </template>
     </div>
   </div>
 </template>

@@ -2,7 +2,7 @@
 import { useI18n } from 'vue-i18n'
 import { onMounted, ref } from 'vue'
 import { listTrash, restoreTrash, purgeTrash, type TrashItem } from '@/api/trash'
-import { useTreeStore } from '@/stores/tree'
+import { projectOfPath, useTreeStore } from '@/stores/tree'
 import { Folder, FileText, RotateCcw, Trash2 } from 'lucide-vue-next'
 import { errorText } from '@/api/errors'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
@@ -33,7 +33,7 @@ async function restore(item: TrashItem) {
   try {
     const res = await restoreTrash(item.id)
     message.value = t('trash.restored', { path: res.restored })
-    treeStore.refresh()
+    treeStore.refresh(projectOfPath(res.restored))
     await load()
   } catch (e) {
     // The server says why: a folder or a note recreated meanwhile, a

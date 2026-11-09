@@ -355,7 +355,7 @@ func (r *Router) putSettings(w http.ResponseWriter, req *http.Request) {
 			Source: audit.SourceHTTP,
 			Actor:  user.Username,
 			UserID: user.ID,
-			Action: "settings_update",
+			Action: audit.ActionSettingsUpdate,
 			Path:   r.deps.ConfigPath,
 		})
 	}

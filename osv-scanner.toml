@@ -1,0 +1,51 @@
+# Advisories we evaluated and keep open until a date, in osv-scanner's
+# format: `osv-scanner --config osv-scanner.toml …` gives the same view.
+# The nightly run's stage vuln (scripts/vuln) does not tell them again
+# until ignoreUntil, and leaves out an entry with no ignoreUntil or no
+# reason. Keep the date within three months, and the reason fit for the
+# public repository: why the code does not reach it, or what we wait for.
+#
+# [[IgnoredVulns]]
+# id = "GHSA-xxxx-xxxx-xxxx"  # or its CVE, GO-, ALPINE-…: the aliases count
+# ignoreUntil = 2027-02-01
+# reason = "Only the development server uses it; no request reaches it."
+
+# mcp-go's HTTP client follows redirects with its headers and tokens.
+[[IgnoredVulns]]
+id = "GO-2026-6911"
+ignoreUntil = 2027-02-08
+reason = "gosidian's one MCP client, to its plugins, passes its own http.Client, whose CheckRedirect refuses every redirect (internal/plugins/registry.go), so no Location header is followed; the plugins do not use the client. Until mcp-go has a fix."
+
+# Alpine's zlib, in every Alpine image.
+[[IgnoredVulns]]
+id = "CVE-2026-4738"
+ignoreUntil = 2026-11-21
+reason = "The flaw is in GDAL's bundled copy of zlib's contrib/infback9 (inftree9.c), which Alpine's libz does not build, and nothing in the images uses infback9. Alpine's zlib 1.4-r0 (2026-11-06) comes with the images built once it is two weeks old."
+
+# zip 3.0.0, in the crates of the page-layout editor that read EPUB, IDML
+# and its own files.
+[[IgnoredVulns]]
+id = "GHSA-m665-v7pm-7grj"
+ignoreUntil = 2026-12-08
+reason = "The page-layout editor and its engine read archives in memory (ZipArchive::new, by_name) and never extract them to disk, where these advisories lie. Upstream already uses zip 9.1.1, which comes with the next update of the editor."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0369"
+ignoreUntil = 2026-12-08
+reason = "Only ZipArchive::extract and ZipStreamReader::extract apply the permissions, and the page-layout editor calls neither: it reads archives in memory. Upstream already uses zip 9.1.1, which comes with the next update of the editor."
+
+[[IgnoredVulns]]
+id = "GHSA-q7v9-x93c-xqv3"
+ignoreUntil = 2026-12-08
+reason = "Only ZipArchive::extract aborts, and the page-layout editor never calls it: it reads archives in memory. Upstream already uses zip 9.1.1, which comes with the next update of the editor."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0367"
+ignoreUntil = 2026-12-08
+reason = "SUID and SGID bits matter only to an extraction to disk, which the page-layout editor never does: it reads archives in memory. Upstream already uses zip 9.1.1, which comes with the next update of the editor."
+
+# filelock 3.32.3 in the docling plugin's image.
+[[IgnoredVulns]]
+id = "GHSA-v4x8-3wr5-3wq8"
+ignoreUntil = 2027-02-08
+reason = "Only filelock's ReadWriteLock (SQLite) is affected; in the docling plugin's image huggingface_hub, transformers and torch use FileLock. 4.x is a major release, taken when it is tested for another reason."

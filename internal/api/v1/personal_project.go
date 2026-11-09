@@ -15,10 +15,6 @@ import (
 	"github.com/gosidian/gosidian/internal/webauth"
 )
 
-// ActionPersonalProjectCreate is the audit action recorded when an account's
-// personal project is provisioned.
-const ActionPersonalProjectCreate audit.Action = "personal_project_create"
-
 // ProvisionPersonalProject creates the account's personal project (IMP-101
 // phase 3): a private project named after the account where it holds the
 // admin grant, so a new account has a place to work before anyone grants it
@@ -50,7 +46,7 @@ func ProvisionPersonalProject(v *vault.Vault, ps *projects.Store, tokens *auth.S
 		return "", fmt.Errorf("create project %q: %w", u.Username, err)
 	}
 	if al != nil {
-		_ = al.Write(audit.Entry{Source: audit.SourceHTTP, Actor: u.Username, UserID: u.ID, Action: ActionPersonalProjectCreate, Path: name})
+		_ = al.Write(audit.Entry{Source: audit.SourceHTTP, Actor: u.Username, UserID: u.ID, Action: audit.ActionPersonalProjectCreate, Path: name})
 	}
 	return name, nil
 }
@@ -143,14 +139,21 @@ func (r *Router) personalProjectKept(archived webauth.User, name string) string 
 }
 
 // archiveProject renames project from to to, with its grants and the MCP
-// tokens scoped to it, and records it in actor's name, an incomplete
-// rename too: it stands. Both names stay locked until the record: git sync
-// leaves out the files under a name a writer holds (BUG-147).
+// tokens scoped to it, and the references to its files in the notes actor
+// may write (BUG-153), and records it in actor's name, an incomplete
+// rename too: it stands. Both names and those notes stay locked until the
+// records: git sync leaves out the files under a name a writer holds
+// (BUG-147, BUG-148).
 func (r *Router) archiveProject(req *http.Request, actor *RequestUser, from, to string) error {
-	defer r.deps.Vault.LockPaths(from, to)()
-	_, err := projectops.Rename(r.deps.Vault, r.deps.Index, r.deps.Projects, r.mcpTokens(), from, to)
+	var mine []string
+	if actor != nil {
+		mine, _ = r.projectReferrers(actor.principal(), from)
+	}
+	defer r.deps.Vault.LockPaths(append([]string{from, to}, mine...)...)()
+	_, rewritten, err := projectops.RenameRewriting(r.deps.Vault, r.deps.Index, r.deps.Projects, r.mcpTokens(), from, to, mine)
 	if actor != nil && (err == nil || errors.Is(err, projectops.ErrIncomplete)) {
 		r.auditNote(req, audit.ActionRenameProject, actor, from, to, 0)
+		r.recordRewritten(req, actor, to, rewritten)
 	}
 	return err
 }
@@ -159,7 +162,7 @@ func (r *Router) archiveProject(req *http.Request, actor *RequestUser, from, to 
 // personal project provisioned for the account userID, with no project of
 // that name renamed away or deleted since.
 func stillProvisionedFor(al *audit.Log, userID, project string) bool {
-	created, err := al.TailFiltered(audit.TailOpts{UserID: userID, Action: ActionPersonalProjectCreate, Limit: 500})
+	created, err := al.TailFiltered(audit.TailOpts{UserID: userID, Action: audit.ActionPersonalProjectCreate, Limit: 500})
 	if err != nil {
 		return false
 	}

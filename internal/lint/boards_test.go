@@ -82,3 +82,52 @@ func TestLint_BoardInvalidDatabase(t *testing.T) {
 		t.Fatalf("a project without cards: %+v", issues)
 	}
 }
+
+// The iterations of a board and the dates of its cards (phase 2).
+func TestLint_BoardInvalidIterations(t *testing.T) {
+	l, v, idx := newTestLinter(t)
+	db, _, err := fleet.BoardSchema(fleet.DatabaseNote("p"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	iteration := func(board, start, end string) string {
+		return "---\ntitle: Iterazione\ntype: iteration\nboard: \"" + board + "\"\nstart: " + start + "\nend: " + end + "\n---\n"
+	}
+	card := func(extra string) string {
+		return strings.Replace(lintCard("In corso", "working"), "---\n\n#", extra+"---\n\n#", 1)
+	}
+	seed(t, v, idx, "p/tasks.md", string(db))
+	seed(t, v, idx, "p/board.md", lintBoard)
+	seed(t, v, idx, "p/iterations/1.md", iteration("[[p/board]]", "2026-11-09", "2026-11-22"))
+	seed(t, v, idx, "p/iterations/2.md", iteration("[[p/board]]", "2026-11-23", "2026-12-06"))
+	seed(t, v, idx, "p/iterations/clash.md", iteration("[[p/board]]", "2026-12-06", "2026-12-10"))
+	seed(t, v, idx, "p/iterations/back.md", iteration("[[p/board]]", "2027-01-10", "2027-01-01"))
+	seed(t, v, idx, "p/iterations/noboard.md", iteration("[[p/nessuna]]", "2027-02-01", "2027-02-10"))
+	seed(t, v, idx, "p/tasks/ok.md", card("iteration: \"[[p/iterations/1]]\"\nstarted: 2026-11-09T10:00:00+01:00\n"))
+	seed(t, v, idx, "p/tasks/noit.md", card("iteration: \"[[p/docs/x]]\"\n"))
+	seed(t, v, idx, "p/tasks/open.md", card("finished: 2026-11-10T10:00:00+01:00\n"))
+	seed(t, v, idx, "p/tasks/notime.md", card("started: ieri\n"))
+	issues, err := l.Run(context.Background(), "p", []string{"board-invalid"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, is := range issues {
+		got[is.File] += is.Message + "\n"
+	}
+	for file, want := range map[string]string{
+		"p/iterations/clash.md":   "meet those of p/iterations/2.md",
+		"p/iterations/back.md":    "before its start",
+		"p/iterations/noboard.md": "p/nessuna.md is no board",
+		"p/tasks/noit.md":         "p/docs/x.md is no iteration",
+		"p/tasks/open.md":         "working and has finished",
+		"p/tasks/notime.md":       `started "ieri" is no time`,
+	} {
+		if !strings.Contains(got[file], want) {
+			t.Errorf("%s: %q, want %q", file, got[file], want)
+		}
+	}
+	if len(got) != 6 {
+		t.Errorf("issues: %+v", issues)
+	}
+}

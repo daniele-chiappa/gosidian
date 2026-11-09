@@ -2,6 +2,8 @@ package v1
 
 import (
 	"net/http"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,12 +25,16 @@ type auditEntryView struct {
 	Size   int64  `json:"size,omitempty"`
 }
 
-// handleAdminAudit returns the most recent audit entries matching
-// the supplied filters. All filters are optional; calling without
-// any returns the latest `limit` entries.
+// handleAdminAudit returns a page of the audit entries matching the
+// supplied filters, and in `total` how many match in all. All filters are
+// optional; calling without any returns the latest `limit` entries.
 //
 // Query params:
 //   - limit       1-500, default 50
+//   - order       "desc": the newest first; "asc": the oldest first;
+//     absent: the newest `limit`, oldest first, as before IMP-224
+//   - offset      entries skipped, from the newest (desc, or absent) or the
+//     oldest (asc); default 0
 //   - actor       exact match
 //   - user_id     exact match
 //   - action      exact match (e.g. "spa_token_create")
@@ -48,6 +54,20 @@ func (r *Router) handleAdminAudit(w http.ResponseWriter, req *http.Request) {
 
 	q := req.URL.Query()
 	limit := limitParam(req, 50, 500)
+	order := strings.TrimSpace(q.Get("order"))
+	if order != "" && order != "asc" && order != "desc" {
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "order must be asc or desc")
+		return
+	}
+	offset := 0
+	if v := strings.TrimSpace(q.Get("offset")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			WriteError(w, http.StatusBadRequest, CodeValidationFormat, "offset must be a number from 0")
+			return
+		}
+		offset = n
+	}
 
 	opts := audit.TailOpts{
 		Actor:      strings.TrimSpace(q.Get("actor")),
@@ -74,10 +94,13 @@ func (r *Router) handleAdminAudit(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	entries, err := r.deps.Audit.TailFiltered(opts)
+	entries, total, err := r.deps.Audit.Page(opts, offset, order != "asc")
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
 		return
+	}
+	if order == "" {
+		slices.Reverse(entries)
 	}
 	out := make([]auditEntryView, 0, len(entries))
 	for _, e := range entries {
@@ -94,8 +117,9 @@ func (r *Router) handleAdminAudit(w http.ResponseWriter, req *http.Request) {
 		})
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{
-		"items": out,
-		"total": len(out),
-		"limit": limit,
+		"items":  out,
+		"total":  total,
+		"limit":  limit,
+		"offset": offset,
 	})
 }

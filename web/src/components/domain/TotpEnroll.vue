@@ -89,7 +89,8 @@ async function confirm() {
         inputmode="numeric"
         autocomplete="one-time-code"
         :placeholder="t('totp.code_placeholder')"
-        class="h-control py-0 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
+        :aria-label="t('totp.code_label')"
+        class="h-control py-0 w-full rounded bg-bg-elevated border border-border-input px-3 focus:outline-none focus:ring-2 focus:ring-focus"
         @keyup.enter="confirm"
       />
       <button

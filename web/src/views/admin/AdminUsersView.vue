@@ -17,6 +17,7 @@ import {
 } from '@/api/admin'
 import { getUserAccess, visibilityLabel, roleLabel, type AccessProject } from '@/api/access'
 import { errorText } from '@/api/errors'
+import ScrollRegion from '@/components/primitives/ScrollRegion.vue'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
 import DateTime from '@/components/primitives/DateTime.vue'
 import { formatDateTime } from '@/api/format'
@@ -103,9 +104,9 @@ function accessSummary(u: AdminUser): string {
 
 function levelClass(level: string): string {
   return level === 'admin'
-    ? 'bg-accent/20 text-accent'
+    ? 'bg-accent/10 text-accent'
     : level === 'write'
-      ? 'bg-success/20 text-success'
+      ? 'bg-success/10 text-success'
       : 'border border-border text-text-muted'
 }
 
@@ -349,7 +350,7 @@ onMounted(load)
             type="text"
             autocomplete="off"
             required
-            class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
+            class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border-input px-3 focus:outline-none focus:ring-2 focus:ring-focus"
           />
         </label>
 
@@ -361,7 +362,7 @@ onMounted(load)
               :type="showPassword ? 'text' : 'password'"
               autocomplete="new-password"
               required
-              class="h-control py-0 w-full rounded bg-bg-elevated border border-border px-3 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-focus"
+              class="h-control py-0 w-full rounded bg-bg-elevated border border-border-input px-3 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-focus"
             />
             <button
               type="button"
@@ -391,7 +392,7 @@ onMounted(load)
           <span class="text-text-muted text-xs">{{ t('admin.users.role') }}</span>
           <select
             v-model="newUser.role"
-            class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
+            class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border-input px-3 focus:outline-none focus:ring-2 focus:ring-focus"
           >
             <option value="member">{{ roleLabel('member') }} — {{ t('admin.users.member_hint') }}</option>
             <option value="guest">{{ roleLabel('guest') }} — {{ t('admin.users.guest_hint') }}</option>
@@ -402,7 +403,7 @@ onMounted(load)
           <span class="text-text-muted text-xs">{{ t('admin.users.totp_policy') }}</span>
           <select
             v-model="newUser.totp_policy"
-            class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
+            class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border-input px-3 focus:outline-none focus:ring-2 focus:ring-focus"
           >
             <option value="">{{ t('admin.users.totp_inherit') }}</option>
             <option value="enabled">{{ t('admin.users.totp_required') }}</option>
@@ -443,8 +444,7 @@ onMounted(load)
     <p v-if="loading && !loaded" class="text-text-muted">{{ t('common.loading') }}</p>
     <ErrorMessage v-else-if="error && !loaded" :text="error" />
 
-    <div v-else class="overflow-x-auto">
-      <!-- Scrolls inside its box in a narrow window (IMP-156, M7). -->
+    <ScrollRegion v-else :label="t('admin.tab.users')">
 
       <table class="w-full text-sm">
         <thead class="text-text-muted text-xs [&_th]:font-medium">
@@ -466,11 +466,12 @@ onMounted(load)
               <span
                 v-if="u.role === 'owner' || u.disabled_at"
                 class="h-control-sm text-xs px-2 rounded"
-                :class="u.role === 'owner' ? 'bg-accent/20 text-accent' : 'border border-border'"
+                :class="u.role === 'owner' ? 'bg-accent/10 text-accent' : 'border border-border'"
               >{{ roleLabel(u.role) }}</span>
               <select
                 v-else
-                class="h-control-sm py-0 text-xs rounded bg-bg-elevated border border-border px-2 focus:outline-none focus:ring-1 focus:ring-focus"
+                :aria-label="t('admin.users.role_of', { name: u.username })"
+                class="h-control-sm py-0 text-xs rounded bg-bg-elevated border border-border-input px-2 focus:outline-none focus:ring-1 focus:ring-focus"
                 :value="u.role"
                 @change="changeRole(u, ($event.target as HTMLSelectElement).value, $event.target as HTMLSelectElement)"
               >
@@ -482,8 +483,9 @@ onMounted(load)
               <div class="flex items-center gap-2">
                 <select
                   v-if="u.role !== 'owner' && !u.disabled_at"
-                  class="h-control-sm py-0 text-xs rounded bg-bg-elevated border border-border px-2 focus:outline-none focus:ring-1 focus:ring-focus"
+                  class="h-control-sm py-0 text-xs rounded bg-bg-elevated border border-border-input px-2 focus:outline-none focus:ring-1 focus:ring-focus"
                   :value="u.totp_policy || ''"
+                  :aria-label="t('admin.users.totp_policy_of', { name: u.username })"
                   @change="changeTotpPolicy(u, ($event.target as HTMLSelectElement).value)"
                 >
                   <option value="">{{ t('admin.users.totp_inherit') }}</option>
@@ -595,7 +597,7 @@ onMounted(load)
                       type="text"
                       autocomplete="off"
                       name="temporary-password"
-                      class="h-control py-0 w-56 rounded bg-bg-elevated border border-border px-2 font-mono"
+                      class="h-control py-0 w-56 rounded bg-bg-elevated border border-border-input px-2 font-mono"
                     />
                     <button
                       type="button"
@@ -613,7 +615,7 @@ onMounted(load)
                     type="password"
                     autocomplete="current-password"
                     name="owner-password"
-                    class="h-control py-0 mt-1 w-56 rounded bg-bg-elevated border border-border px-2"
+                    class="h-control py-0 mt-1 w-56 rounded bg-bg-elevated border border-border-input px-2"
                   />
                 </label>
                 <button
@@ -650,6 +652,6 @@ onMounted(load)
         </tbody>
       </table>
 
-    </div>
+    </ScrollRegion>
   </div>
 </template>

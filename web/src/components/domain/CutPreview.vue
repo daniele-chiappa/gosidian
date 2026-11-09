@@ -109,12 +109,12 @@ const MARK_BAR: Record<MarkColor, string> = {
   grey: 'border-r-text-muted',
 }
 const MARK_CHIP: Record<MarkColor, string> = {
-  blue: 'bg-accent/15 text-accent',
-  green: 'bg-success/15 text-success',
-  orange: 'bg-warning/15 text-warning',
-  red: 'bg-danger/15 text-danger',
-  cyan: 'bg-info/15 text-info',
-  grey: 'bg-text-muted/15 text-text-muted',
+  blue: 'bg-accent/10 text-accent',
+  green: 'bg-success/10 text-success',
+  orange: 'bg-warning/10 text-warning',
+  red: 'bg-danger/10 text-danger',
+  cyan: 'bg-info/10 text-info',
+  grey: 'bg-text-muted/10 text-text-muted',
 }
 function markBar(b: CutBlock): string {
   const m = marksOf(b)[0]

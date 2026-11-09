@@ -3,7 +3,7 @@ import { createPinia } from 'pinia'
 import piniaPersist from 'pinia-plugin-persistedstate'
 import App from './App.vue'
 import { router } from './router'
-import { i18n } from './locales'
+import { i18n, loadLocale } from './locales'
 import { useAuthStore } from './stores/auth'
 import { getVersion } from './api/version'
 import './styles/tokens.css'
@@ -44,7 +44,20 @@ async function boot() {
     if (v?.open_mode) auth.setAnonymous()
     else if (auth.user?.id === 'anonymous') auth.clear()
   }
+  // The stored language's catalogue before the first paint (IMP-220,
+  // F-20): German, Spanish and French are chunks of their own.
+  await loadLocale(storedLocale()).catch(() => {})
   app.mount('#app')
+}
+
+/** The language the UI store persisted, read before Pinia restores it. */
+function storedLocale(): string {
+  try {
+    const locale: unknown = JSON.parse(window.localStorage.getItem('gosidian.ui') ?? '{}').locale
+    return typeof locale === 'string' ? locale : ''
+  } catch {
+    return ''
+  }
 }
 
 void boot()

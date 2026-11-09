@@ -109,6 +109,16 @@ export interface AuditQuery {
   since?: string
   until?: string
   limit?: number
+  /** desc: the newest first; asc: the oldest first (IMP-224). */
+  order?: 'asc' | 'desc'
+  /** Entries skipped, from the newest (desc) or the oldest (asc). */
+  offset?: number
+}
+
+/** A page of the audit, and how many entries match the filters in all. */
+export interface AuditPage {
+  items: AuditEntry[]
+  total: number
 }
 
 interface ListResp<T> {
@@ -241,7 +251,7 @@ export async function deleteInvite(token: string): Promise<void> {
 
 // Audit
 
-export async function tailAudit(query: AuditQuery = {}): Promise<AuditEntry[]> {
+export async function tailAudit(query: AuditQuery = {}): Promise<AuditPage> {
   const params: Record<string, string | number> = {}
   if (query.actor) params.actor = query.actor
   if (query.user_id) params.user_id = query.user_id
@@ -251,8 +261,10 @@ export async function tailAudit(query: AuditQuery = {}): Promise<AuditEntry[]> {
   if (query.since) params.since = query.since
   if (query.until) params.until = query.until
   if (query.limit) params.limit = query.limit
+  if (query.order) params.order = query.order
+  if (query.offset) params.offset = query.offset
   const { data } = await client.get<ListResp<AuditEntry>>('/admin/audit', { params })
-  return data.items
+  return { items: data.items, total: data.total }
 }
 
 /** Saves a zip of the whole vault (owner only, IMP-099). */

@@ -42,6 +42,8 @@ type noteResponse struct {
 	ETag    string      `json:"etag"`
 	Size    int64       `json:"size"`
 	ModTime string      `json:"mod_time"`
+	// Valid is the note's valid version, on a read: the one to show.
+	Valid *validView `json:"valid,omitempty"`
 }
 
 type createNoteRequest struct {
@@ -130,11 +132,12 @@ func (r *Router) handleNoteByPath(w http.ResponseWriter, req *http.Request) {
 
 // noteSubroutes lists the suffixes routed off /notes/{path}/: read-only
 // GETs, PATCH /frontmatter, POST /rows (a new row of a database note),
-// POST /snapshot (the note frozen beside it) and POST /restore (a version
-// of its history written back). Order matters only for documentation; the
+// POST /snapshot (the note frozen beside it), POST /restore (a version of
+// its history written back), and /versions, /valid and /mcp-version (its tags and the
+// valid version). Order matters only for documentation; the
 // loop matches by suffix regardless. New entries get a handler in
 // dispatchNoteSubroute below.
-var noteSubroutes = []string{"backlinks", "excerpt", "history", "frontmatter", "fields", "new-row", "rows", "row-views", "snapshot", "restore"}
+var noteSubroutes = []string{"backlinks", "excerpt", "history", "frontmatter", "fields", "new-row", "rows", "row-views", "snapshot", "restore", "versions", "valid", "mcp-version"}
 
 func (r *Router) dispatchNoteSubroute(w http.ResponseWriter, req *http.Request, notePath, sub string) {
 	switch sub {
@@ -165,6 +168,15 @@ func (r *Router) dispatchNoteSubroute(w http.ResponseWriter, req *http.Request, 
 			return
 		}
 		r.restoreNote(w, req, notePath)
+		return
+	case "versions":
+		r.handleVersions(w, req, notePath)
+		return
+	case "valid":
+		r.handleValid(w, req, notePath)
+		return
+	case "mcp-version":
+		r.handleMCPVersion(w, req, notePath)
 		return
 	}
 	if req.Method != http.MethodGet {
@@ -342,6 +354,15 @@ func (r *Router) readNote(w http.ResponseWriter, req *http.Request, rel string) 
 		writeLoadError(w, err)
 		return
 	}
+	p := principalFromContext(req)
+	valid := r.validOf(rel, note.Content)
+	// ?version= reads the note as the valid version, or as a tag, holds it.
+	if want := req.URL.Query().Get("version"); want != "" {
+		if note, err = r.noteAt(p, note, valid, want); err != nil {
+			writeGitError(w, err)
+			return
+		}
+	}
 	// ?export=zip is the download of the note with its attachments (IMP-204).
 	if req.URL.Query().Get("export") == "zip" {
 		r.exportNote(w, req, rel, note.Content)
@@ -353,7 +374,8 @@ func (r *Router) readNote(w http.ResponseWriter, req *http.Request, rel string) 
 	// the inlined body differs from the bare note the etag stamps.
 	if req.URL.Query().Has("inline") {
 		resp := r.toNoteResponse(note)
-		resp.Content = r.inlineImages(resp.Content, resp.Format, principalFromContext(req))
+		resp.Content = r.inlineImages(resp.Content, resp.Format, p)
+		resp.Valid = valid
 		WriteJSON(w, http.StatusOK, resp)
 		return
 	}
@@ -365,7 +387,9 @@ func (r *Router) readNote(w http.ResponseWriter, req *http.Request, rel string) 
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-	WriteJSON(w, http.StatusOK, r.toNoteResponse(note))
+	resp := r.toNoteResponse(note)
+	resp.Valid = valid
+	WriteJSON(w, http.StatusOK, resp)
 }
 
 // readBase serves an Obsidian base as a read-only note: its views
@@ -464,7 +488,9 @@ func (r *Router) updateNote(w http.ResponseWriter, req *http.Request, rel string
 	r.publishNoteEvent(events.TopicNote, rel, "update", fresh)
 
 	w.Header().Set("ETag", quoteETag(fresh.ETag()))
-	WriteJSON(w, http.StatusOK, r.toNoteResponse(fresh))
+	resp := r.toNoteResponse(fresh)
+	resp.Valid = r.validOf(rel, fresh.Content)
+	WriteJSON(w, http.StatusOK, resp)
 }
 
 // deleteNote routes through trash when configured (soft delete) and

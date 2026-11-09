@@ -3,8 +3,13 @@
 A ```` ```graph ```` block saves a view of the graph: its **source**, its
 filters, how its nodes are coloured, 2D or 3D. The web UI draws it in the
 note, with **Open in the Graph** to open the same view in the Graph
-window, and **Code** to see the block. A note `type: graph` is a saved
-view: it holds one block.
+window, **Code** to see the block, and **List** to read the graph as
+text: a table of its nodes, the most linked first, each with the nodes
+it links to and the ones it is linked from (IMP-224, F-32). The Graph
+window has the same List beside 2D and 3D, and the drawing is named by
+its counts for a screen reader. `memory_get` says each block in words
+for an agent, in `graphs`. A note `type: graph` is a saved view: it
+holds one block.
 
 ````markdown
 ---

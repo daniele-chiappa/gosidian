@@ -1,0 +1,46 @@
+{
+  "board": {
+    "head": {
+      "label": "Iteración y flujo del tablero",
+      "iteration": "Iteración",
+      "days_left": "último día | quedan {n} días",
+      "cards_done": "{done} de {total} hechas",
+      "only_iteration": "Solo la iteración",
+      "new_iteration": "Nueva iteración",
+      "retro_pending": "Retrospectiva por escribir",
+      "cycle": "Ciclo: {p50} d (85 %: {p85} d)",
+      "cycle_few": "Ciclo: pocos datos",
+      "cycle_title": "Mediana y percentil 85 de los días desde la primera columna de trabajo hasta hecho, tarjetas cerradas en los últimos 28 días",
+      "closed": "Cerradas: {weeks} por semana",
+      "closed_title": "Tarjetas completadas en cada una de las últimas 4 semanas, la más antigua primero",
+      "stale": "Paradas: {n}",
+      "stale_title": "Tarjetas en una columna de trabajo, espera o revisión desde hace más de {days} días",
+      "stale_card": "parada hace {n} d",
+      "stale_card_long": "parada desde hace un día | parada desde hace {n} días",
+      "columns_shown": "{shown} de {total} columnas",
+      "prev_column": "Columna anterior",
+      "next_column": "Columna siguiente",
+      "goal": "Objetivo",
+      "start": "Primer día",
+      "end": "Último día",
+      "create_failed": "La iteración no se creó: {reason}"
+    },
+    "review": {
+      "title": "Revisión",
+      "closed_on": "Cerrada el {date}.",
+      "goal": "Objetivo",
+      "done": "Hechas",
+      "deferred": "Aplazadas, en su columna",
+      "dropped": "Fallidas o canceladas",
+      "none": "ninguna",
+      "cycle": "Tiempo de ciclo",
+      "cycle_value": "mediana {p50} días, percentil 85 {p85} días, sobre {n} tarjetas",
+      "cycle_few": "pocos datos ({n} tarjetas, hacen falta 3)",
+      "closed_week": "Cerradas por semana",
+      "stale": "Paradas al cierre",
+      "retro": "Retrospectiva",
+      "went_well": "¿Qué salió bien?",
+      "change": "¿Qué cambiamos?"
+    }
+  }
+}

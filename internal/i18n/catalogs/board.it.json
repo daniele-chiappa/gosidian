@@ -1,0 +1,46 @@
+{
+  "board": {
+    "head": {
+      "label": "Iterazione e flusso della bacheca",
+      "iteration": "Iterazione",
+      "days_left": "ultimo giorno | mancano {n} giorni",
+      "cards_done": "{done} su {total} fatte",
+      "only_iteration": "Solo l'iterazione",
+      "new_iteration": "Nuova iterazione",
+      "retro_pending": "Retrospettiva da scrivere",
+      "cycle": "Attraversamento: {p50} g (85%: {p85} g)",
+      "cycle_few": "Attraversamento: pochi dati",
+      "cycle_title": "Mediana e 85° percentile dei giorni dalla prima colonna di lavoro a fatto, schede chiuse negli ultimi 28 giorni",
+      "closed": "Chiuse: {weeks} a settimana",
+      "closed_title": "Schede completate in ciascuna delle ultime 4 settimane, dalla più vecchia",
+      "stale": "Ferme: {n}",
+      "stale_title": "Schede in una colonna di lavoro, attesa o revisione da più di {days} giorni",
+      "stale_card": "ferma da {n} g",
+      "stale_card_long": "ferma da un giorno | ferma da {n} giorni",
+      "columns_shown": "{shown} di {total} colonne",
+      "prev_column": "Colonna precedente",
+      "next_column": "Colonna successiva",
+      "goal": "Obiettivo",
+      "start": "Primo giorno",
+      "end": "Ultimo giorno",
+      "create_failed": "Iterazione non creata: {reason}"
+    },
+    "review": {
+      "title": "Revisione",
+      "closed_on": "Chiusa il {date}.",
+      "goal": "Obiettivo",
+      "done": "Fatte",
+      "deferred": "Rimandate, nella loro colonna",
+      "dropped": "Fallite o annullate",
+      "none": "nessuna",
+      "cycle": "Tempo di attraversamento",
+      "cycle_value": "mediana {p50} giorni, 85° percentile {p85} giorni, su {n} schede",
+      "cycle_few": "pochi dati ({n} schede, ne servono 3)",
+      "closed_week": "Chiuse per settimana",
+      "stale": "Ferme alla chiusura",
+      "retro": "Retrospettiva",
+      "went_well": "Cosa è andato bene?",
+      "change": "Cosa cambiare?"
+    }
+  }
+}

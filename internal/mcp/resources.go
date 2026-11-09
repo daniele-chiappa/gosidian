@@ -53,6 +53,7 @@ func (s *Server) readNoteResource(ctx context.Context, req mcp.ReadResourceReque
 	if err != nil {
 		return nil, err
 	}
+	note, _ = s.forMCP(note)
 	return []mcp.ResourceContents{
 		mcp.TextResourceContents{
 			URI:      uri,

@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gosidian/gosidian/internal/dbschema"
 	"github.com/gosidian/gosidian/internal/fleet"
@@ -91,7 +92,8 @@ func TestBoardBlock(t *testing.T) {
 	if want := "Idee=Per IMP-1,Pronto=Prima+Seconda+Senza rango,Analisi=Al lavoro,Fatto=,=Fallita"; strings.Join(got, ",") != want {
 		t.Fatalf("groups %v\nwant %s", got, want)
 	}
-	want := "**Idee** (1)\n\n- [[p/tasks/g\\|Per IMP-1]] · for: [[p/docs/IMP-1]]\n" +
+	want := "_Flow: cycle time too few cards (0); closed per week 0 · 0 · 0 · 0; stale 0 (over 3 days)._\n\n" +
+		"**Idee** (1)\n\n- [[p/tasks/g\\|Per IMP-1]] · for: [[p/docs/IMP-1]]\n" +
 		"\n**Pronto** (3)\n\n- [[p/tasks/b\\|Prima]]\n- [[p/tasks/a\\|Seconda]]\n- [[p/tasks/c\\|Senza rango]]\n" +
 		"\n**Analisi** (1, wip 1)\n\n- [[p/tasks/d\\|Al lavoro]] · claimed_by: claude@1\n" +
 		"\n**(closed)** (1)\n\n- [[p/tasks/e\\|Fallita]]\n"
@@ -136,5 +138,54 @@ func TestBoardBlockInANote(t *testing.T) {
 	}
 	if n := len(FindBlocks([]byte(body))); n != 2 {
 		t.Fatalf("FindBlocks: %d", n)
+	}
+}
+
+// A board's state: its flow from its cards' dates, its iteration in
+// progress, the iterations whose retrospective waits; for agents, lines
+// above the columns.
+func TestBoardBlockFlow(t *testing.T) {
+	idx, c := boardIndex(t)
+	now := time.Now()
+	c.Today = now
+	at := func(d time.Duration) string { return now.Add(-d).Format(time.RFC3339) }
+	day := func(d int) string { return now.AddDate(0, 0, d).Format(time.DateOnly) }
+	for p, body := range map[string]string{
+		"p/tasks/h.md": "---\ntitle: Ferma\ntype: task\nstatus: working\nboard: \"[[p/board]]\"\ncolumn: Analisi\ncolumn_since: " + at(100*time.Hour) +
+			"\niteration: \"[[p/iterations/1]]\"\n---\n",
+		"p/tasks/i.md": "---\ntitle: Chiusa\ntype: task\nstatus: completed\nboard: \"[[p/board]]\"\ncolumn: Fatto\nstarted: " + at(50*time.Hour) +
+			"\nfinished: " + at(2*time.Hour) + "\niteration: \"[[p/iterations/1]]\"\n---\n",
+		"p/iterations/1.md": "---\ntitle: Iterazione 1\ntype: iteration\nboard: \"[[p/board]]\"\ngoal: Il primo passo\nstart: " + day(-3) + "\nend: " + day(4) + "\n---\n",
+		"p/iterations/0.md": "---\ntitle: Iterazione 0\ntype: iteration\nboard: \"[[p/board]]\"\nstart: " + day(-20) + "\nend: " + day(-4) +
+			"\nreviewed: " + at(72*time.Hour) + "\nretro: pending\n---\n",
+	} {
+		if err := idx.Upsert(index.NoteDoc{Path: p, Title: strings.TrimSuffix(filepath.Base(p), ".md"), Body: body, ModTime: 1, Size: int64(len(body))}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r, err := computeBlock(testBoardBlock, true, c, idx.Query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := r.Data(c).Board
+	if st == nil || st.StaleDays != fleet.DefaultStale || len(st.Flow.Stale) != 1 || st.Flow.Stale[0].Path != "p/tasks/h.md" || st.Flow.Stale[0].Days != 4 ||
+		st.Flow.Cycle.N != 1 || st.Flow.Closed[2]+st.Flow.Closed[3] != 1 {
+		t.Fatalf("flow: %+v", st)
+	}
+	if it := st.Iteration; it == nil || it.Path != "p/iterations/1.md" || it.Goal != "Il primo passo" || it.Cards.Total != 2 || it.Cards.Done != 1 || it.DaysLeft != 5 {
+		t.Fatalf("iteration: %+v", st.Iteration)
+	}
+	if len(st.Retro) != 1 || st.Retro[0].Path != "p/iterations/0.md" {
+		t.Fatalf("retro: %+v", st.Retro)
+	}
+	md := r.Markdown()
+	for _, want := range []string{
+		"_Flow: cycle time too few cards (1); closed per week ", "; stale 1 (over 3 days)._\n",
+		"_Iteration [[p/iterations/1\\|Iterazione 1]]: Il primo passo, " + day(-3) + " to " + day(4) + ", 5 days left, 1 of 2 cards done._\n",
+		"_Retrospective to write: [[p/iterations/0\\|Iterazione 0]] (retro: done once written)._\n\n**Idee**",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("markdown lacks %q:\n%s", want, md)
+		}
 	}
 }

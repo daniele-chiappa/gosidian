@@ -37,6 +37,7 @@ import {
   Rows2,
   Eye,
   Scissors,
+  LayoutTemplate,
 } from 'lucide-vue-next'
 import OverflowMenu, { type OverflowItem } from '@/components/primitives/OverflowMenu.vue'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
@@ -59,6 +60,8 @@ import { isConcurrencyConflict, onApiEvent, onSessionExpired, type ConcurrencyCo
 import { errorText } from '@/api/errors'
 import { formatSize } from '@/api/format'
 import { useSSE } from '@/composables/useSSE'
+import LayoutCard from '@/components/domain/LayoutCard.vue'
+import NoteVersionButton from '@/components/domain/NoteVersionButton.vue'
 import MarkdownPreview from '@/components/domain/MarkdownPreview.vue'
 import CutPreview from '@/components/domain/CutPreview.vue'
 import { listMarks, type MarkSet } from '@/api/marks'
@@ -72,13 +75,18 @@ import CanvasPreview from '@/components/domain/CanvasPreview.vue'
 import { convertCanvas } from '@/components/domain/canvasConvert'
 import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
 import { planciaKey, base } from '@/composables/planciaKey'
+import { appForType } from '@/composables/pluginApps'
+import { noteField, notePdfs, noteTypeOf } from '@/composables/layoutBridge'
+import { numberPieces, type PluginApp } from '@/api/layouts'
+import type { NoteTag } from '@/api/history'
 import { useAccessStore } from '@/stores/access'
 import { useAuthStore } from '@/stores/auth'
-import { useTreeStore } from '@/stores/tree'
+import { projectOfPath, useTreeStore } from '@/stores/tree'
 import { useUIStore } from '@/stores/ui'
 import { useWindowsStore, type OpenSpec } from 'plancia'
 import { confirmAction } from '@/composables/useConfirm'
 import { CUT_STORAGE_PREFIX } from '@/composables/useSessionReset'
+import { tagProblems, type TagProblems } from './tagProblems'
 
 const CodeMirrorEditor = defineAsyncComponent(
   () => import('@/components/editor/CodeMirrorEditor.vue'),
@@ -87,10 +95,11 @@ const CodeMirrorEditor = defineAsyncComponent(
 type Mode = 'view' | 'edit'
 type EditorLayout = 'editor' | 'split' | 'stacked' | 'preview'
 
-// anchor is the heading a link pointed at (IMP-140), anchorAt when it was
+// line is where the design's panel asked to open the note (IMP-226), lineAt
+// when. anchor is the heading a link pointed at (IMP-140), anchorAt when it was
 // clicked: the window scrolls to the heading, again on every new click.
 // editorFocus: a note just made, whose editor takes the focus (IMP-217, F-04).
-const props = defineProps<{ path: string; mode?: Mode; anchor?: string; anchorAt?: number; editorFocus?: boolean }>()
+const props = defineProps<{ path: string; mode?: Mode; line?: number; lineAt?: number; anchor?: string; anchorAt?: number; editorFocus?: boolean }>()
 const emit = defineEmits<{ title: [string]; dirty: [boolean]; close: [] }>()
 
 const { t } = useI18n()
@@ -104,6 +113,35 @@ const rootEl = ref<HTMLElement | null>(null)
 const articleEl = ref<HTMLElement | null>(null)
 const note = ref<Note | null>(null)
 const draft = ref<string>('')
+// The version readers must see, when the note has one that differs from the
+// note as it is, which is then the draft (IMP-201): what the window shows
+// reading, with a way to the draft. Editing is always on the draft.
+const versionNote = ref<Note | null>(null)
+const showDraft = ref(false)
+const valid = computed(() => note.value?.valid)
+const hasDraft = computed(() => !!valid.value && !valid.value.same && !valid.value.missing)
+const readingValid = computed(() => hasDraft.value && !showDraft.value && mode.value === 'view' && !!versionNote.value)
+const readText = computed(() => (readingValid.value ? versionNote.value?.content : note.value?.content) ?? '')
+const validBanner = computed(() => {
+  const v = valid.value
+  if (!v) return ''
+  if (v.missing) return t('note.valid_missing', { label: v.label })
+  if (mode.value === 'edit') return t('note.valid_editing', { label: v.label })
+  if (v.same) return t('note.valid_is', { label: v.label })
+  if (showDraft.value) return t('note.valid_seeing_draft', { label: v.label })
+  return `${t('note.valid_is', { label: v.label })} · ${t('note.valid_has_draft')}`
+})
+
+async function validVersionOf(n: Note): Promise<Note | null> {
+  if (!n.valid || n.valid.same || n.valid.missing) return null
+  try {
+    return await getNote(n.path, { version: 'valid' })
+  } catch {
+    return null
+  }
+}
+// The editor's name for a screen reader, by the note's title as its heading (IMP-220, F-11).
+const editorLabel = computed(() => t('editor.label', { name: note.value?.title || base(props.path) }))
 const previewHTML = ref<string>('')
 // The note's views as data, for the editors of ViewTable (IMP-127 phase 5).
 const previewViews = ref<ViewData[]>([])
@@ -223,6 +261,30 @@ async function toDiagram() {
 // A note the server would not take back from the web UI (noteSize.ts):
 // its text, read-only, with no preview.
 const tooLarge = computed(() => !!note.value && !isReadOnlyFile.value && tooLargeToSend(note.value.content))
+
+// The tags of the frontmatter checked as they are written (IMP-223, F-13):
+// a comma out of place saved a wrong tag unseen. A pause in the typing
+// reads them again; nothing stops the save.
+const TAG_CHECK_MS = 300
+const tagCheck = ref<TagProblems | null>(null)
+let tagTimer: ReturnType<typeof setTimeout> | undefined
+watch([draft, mode], () => {
+  clearTimeout(tagTimer)
+  if (mode.value !== 'edit' || isHtml.value) {
+    tagCheck.value = null
+    return
+  }
+  tagTimer = setTimeout(() => (tagCheck.value = tagProblems(draft.value)), TAG_CHECK_MS)
+})
+const tagWarning = computed(() => {
+  const p = tagCheck.value
+  if (mode.value !== 'edit' || !p || (!p.empty && !p.spaced.length)) return ''
+  const problems = [
+    ...(p.empty ? [t('note.tags_empty', { n: p.empty }, p.empty)] : []),
+    ...p.spaced.map((tag) => t('note.tags_spaced', { tag })),
+  ]
+  return t('note.tags_check', { problems: problems.join('; ') })
+})
 const canEdit = computed(() => access.canWrite(props.path) && !isReadOnlyFile.value && !tooLarge.value)
 const project = computed(() => {
   const parts = path.value.split('/')
@@ -234,13 +296,16 @@ const layout = ref<EditorLayout>(loadLayout())
 function loadLayout(): EditorLayout {
   try {
     const v = localStorage.getItem(STORAGE_LAYOUT)
-    if (v === 'editor' || v === 'split' || v === 'stacked' || v === 'preview') return v
+    if (v === 'editor' || v === 'split' || v === 'stacked') return v
   } catch {
     /* ignore */
   }
   return 'split'
 }
+// The preview is for a look, not to be remembered: the next Edit would show
+// no text to edit.
 watch(layout, (m) => {
+  if (m === 'preview') return
   try {
     localStorage.setItem(STORAGE_LAYOUT, m)
   } catch {
@@ -495,8 +560,10 @@ async function load() {
   loading.value = note.value?.path !== path.value
   error.value = null
   notFound.value = false
+  if (note.value?.path !== path.value) showDraft.value = false
   try {
     const fetched = await getNote(path.value)
+    versionNote.value = await validVersionOf(fetched)
     remoteChanged.value = false
     note.value = fetched
     draft.value = fetched.content
@@ -514,7 +581,7 @@ async function load() {
       if (tooLarge.value) mode.value = 'view'
     } else {
       try {
-        await renderInto(fetched.content, fetched.path)
+        await renderInto(readText.value, fetched.path)
         void scrollToAnchor()
       } catch (e) {
         previewFailed(e)
@@ -559,7 +626,7 @@ const refreshViews = useDebounceFn(
   async () => {
     if (!note.value || isHtml.value) return
     try {
-      const src = mode.value === 'edit' ? draft.value : note.value.content
+      const src = mode.value === 'edit' ? draft.value : readText.value
       await renderInto(src, path.value)
     } catch {
       /* keep the last render */
@@ -655,7 +722,7 @@ const draftOfferText = computed(() => {
 })
 // The banner's buttons go with it: the focus moves on to the editor, or to
 // the toolbar, so that typing and Ctrl+S carry on in this window.
-const editorEl = ref<{ focus: () => void } | null>(null)
+const editorEl = ref<{ focus: () => void; goToLine: (line: number) => void } | null>(null)
 let focusEditor = false
 watch(
   editorEl,
@@ -724,8 +791,33 @@ watch(
 
 function enterEdit() {
   if (!canEdit.value) return
+  const shown = readText.value
   mode.value = 'edit'
+  // Whoever edits sees the text, and beside it the draft: reading, the pane
+  // held the valid version, or the note as saved.
+  if (layout.value === 'preview') layout.value = loadLayout()
+  if (!isHtml.value && shown !== draft.value) void refreshPreview()
 }
+
+// The editor loads at its first use: the line waits for it, once. Asked again
+// when the editor comes back, it would take the reader out of View.
+let lineToShow = 0
+function showLine() {
+  if (!lineToShow || !editorEl.value) return
+  editorEl.value.goToLine(lineToShow)
+  lineToShow = 0
+}
+watch(
+  [() => props.line, () => props.lineAt],
+  ([line]) => {
+    if (!line) return
+    lineToShow = line
+    enterEdit()
+    showLine()
+  },
+  { immediate: true },
+)
+watch(editorEl, showLine)
 async function enterView() {
   mode.value = 'view'
   // View shows the saved content; the draft stays in memory for re-editing.
@@ -737,8 +829,19 @@ async function enterView() {
     void refreshCut()
   }
   void loadMarks()
+  versionNote.value = await validVersionOf(note.value)
   try {
-    await renderInto(note.value.content, note.value.path)
+    await renderInto(readText.value, note.value.path)
+  } catch (e) {
+    previewFailed(e)
+  }
+}
+
+async function toggleDraft() {
+  showDraft.value = !showDraft.value
+  if (!note.value) return
+  try {
+    await renderInto(readText.value, note.value.path)
   } catch (e) {
     previewFailed(e)
   }
@@ -824,7 +927,7 @@ async function destroy() {
   try {
     await deleteNote(note.value.path)
     forgetDraft()
-    treeStore.refresh()
+    treeStore.refresh(projectOfPath(note.value.path))
     emit('close')
   } catch (e) {
     error.value = errorText(e, t, t('note.delete_failed'))
@@ -835,7 +938,7 @@ async function destroy() {
 // `draft` always holds the current source: the saved content in view mode and
 // the live edits in edit mode.
 async function copySource() {
-  const text = isReadOnlyFile.value ? (note.value?.source ?? '') : draft.value
+  const text = isReadOnlyFile.value ? (note.value?.source ?? '') : readingValid.value ? readText.value : draft.value
   try {
     await navigator.clipboard.writeText(text)
   } catch {
@@ -883,7 +986,8 @@ function printNote() {
 async function downloadOriginal() {
   if (!note.value) return
   try {
-    await downloadNote(note.value.path, note.value)
+    if (readingValid.value && versionNote.value) await downloadNote(note.value.path, versionNote.value, 'valid')
+    else await downloadNote(note.value.path, note.value)
   } catch (e) {
     error.value = errorText(e, t, t('note.download_failed'))
   }
@@ -935,23 +1039,101 @@ function createHere() {
   })
 }
 
-function openHistory() {
+// The app a plugin offers for the note's type (IMP-226), and the page-layout
+// editor, which lays out any markdown note. The frontmatter says when a note
+// has its design.
+const noteApp = ref<PluginApp | null>(null)
+const layoutApp = ref<PluginApp | null>(null)
+const designFile = computed(() => (note.value ? noteField(readText.value, 'layout_file') : ''))
+const designPreview = computed(() => (note.value ? noteField(readText.value, 'layout_preview') : ''))
+// The PDFs are listed by the note as it is: one of a version is kept after
+// the version was named (IMP-229).
+const designPdfs = computed(() => (note.value ? notePdfs(note.value.content) : []))
+// Reading the valid version, the design is that version's, to read. Who can
+// edit works on the draft, as Edit does (IMP-228): the panel of the versions
+// opens any version.
+const designVersion = computed(() => (readingValid.value && !canEdit.value ? valid.value?.tag : undefined))
+const canLayOut = computed(
+  () => /\.md$/i.test(props.path) && canEdit.value && !isHtml.value && !isMedia.value && !isTable.value,
+)
+watch(
+  () => (note.value ? noteTypeOf(note.value.content) : null),
+  async (type) => {
+    if (type === null) return
+    noteApp.value = await appForType(type)
+    layoutApp.value = await appForType('layout')
+  },
+)
+
+function openInApp() {
+  openDesign(designVersion.value)
+}
+
+function openDesign(version?: string) {
   if (!note.value) return
   openWindow({
-    type: 'history',
-    key: planciaKey('history', note.value.path),
-    title: `${t('history.title')} · ${note.value.title || note.value.path}`,
-    props: { path: note.value.path },
+    type: 'app',
+    key: planciaKey('app', version ? `${note.value.path}@${version}` : note.value.path),
+    title: t('plugin_app.window_title', { name: base(note.value.path) }),
+    props: version ? { path: note.value.path, version } : { path: note.value.path },
   })
+}
+
+// The first numbering of the note's pieces, each block its own, then the
+// editor: the panel there places them by number.
+async function layOut() {
+  if (!note.value) return
+  previewError.value = null
+  try {
+    await numberPieces(note.value.path, note.value.etag)
+  } catch (e) {
+    previewError.value = errorText(e, t)
+    return
+  }
+  openInApp()
+}
+
+function openHistory(sha?: string) {
+  if (!note.value) return
+  const key = planciaKey('history', note.value.path)
+  const at = sha ? { path: note.value.path, sha, shaAt: Date.now() } : { path: note.value.path }
+  const id = openWindow({
+    type: 'history',
+    key,
+    title: `${t('history.title')} · ${note.value.title || note.value.path}`,
+    props: at,
+  })
+  if (sha) store.identify(id, key, at)
+}
+
+// The versions (IMP-228): a markdown note has them, whatever else it is not.
+const canVersion = computed(
+  () => /\.md$/i.test(props.path) && !isMedia.value && !isTable.value && !isBase.value && !isCanvas.value,
+)
+// Whatever is unsaved goes first, so that what is pinned is what shows.
+async function saveForVersion() {
+  await save()
+  return !dirty.value
+}
+/** A version asked from the panel: its design when the note has one, or its text. */
+function openVersion(tag: NoteTag) {
+  if (designFile.value) openDesign(tag.tag)
+  else openHistory(tag.sha)
 }
 
 // The window's toolbar (IMP-156, M5): below these widths the secondary
 // actions go into the ⋯ menu. Editing adds the layouts, Save and Delete;
 // with the layouts as icons it all fits a default window of ~575 px.
-const COMPACT_BELOW = { edit: 560, view: 360 }
+const COMPACT_BELOW = { edit: 560, view: 460 }
+// From these widths each action says its name next to its icon (IMP-220,
+// F-25). Measured in the lab, the Italian bar needs 851 px reading and 926
+// editing, with the time of the last save and the button of the versions; the
+// rest is for languages with longer words, German's Speichern and Bearbeiten.
+const LABELLED_FROM = { edit: 1000, view: 920 }
 const headerEl = ref<HTMLElement | null>(null)
 const { width: headerWidth } = useElementSize(headerEl)
 const compact = computed(() => headerWidth.value > 0 && headerWidth.value < COMPACT_BELOW[mode.value])
+const labelled = computed(() => headerWidth.value >= LABELLED_FROM[mode.value])
 
 const LAYOUTS: { key: EditorLayout; icon: typeof Eye }[] = [
   { key: 'editor', icon: SquarePen },
@@ -963,18 +1145,49 @@ const LAYOUTS: { key: EditorLayout; icon: typeof Eye }[] = [
 const actions = computed<OverflowItem[]>(() => {
   const out: OverflowItem[] = []
   if (note.value && mode.value === 'view' && !isHtml.value && !isMedia.value && !isCanvas.value && !tooLarge.value)
-    out.push({ key: 'print', label: t('note.print'), icon: Printer, run: printNote })
-  out.push({ key: 'download', label: t('note.download'), icon: Download, disabled: !note.value, run: downloadOriginal })
+    out.push({ key: 'print', label: t('note.print'), short: t('note.print_short'), icon: Printer, run: printNote })
+  out.push({
+    key: 'download',
+    label: t('note.download'),
+    short: t('note.download_short'),
+    icon: Download,
+    disabled: !note.value,
+    run: downloadOriginal,
+  })
   out.push({
     key: 'copy',
     label: copied.value ? t('note.copied') : t('note.copy'),
+    short: copied.value ? t('note.copied') : t('note.copy_short'),
     icon: copied.value ? Check : Copy,
     disabled: !note.value,
     run: copySource,
   })
   if (note.value && !isHtml.value && !isMedia.value && !isReadOnlyFile.value && access.canWrite(props.path))
-    out.push({ key: 'snapshot', label: t('note.snapshot'), icon: Camera, disabled: snapshotting.value, run: snapshot })
-  out.push({ key: 'history', label: t('note.history'), icon: GitBranch, run: openHistory })
+    out.push({
+      key: 'snapshot',
+      label: t('note.snapshot'),
+      short: t('note.snapshot_short'),
+      icon: Camera,
+      disabled: snapshotting.value,
+      run: snapshot,
+    })
+  out.push({ key: 'history', label: t('note.history'), short: t('note.history'), icon: GitBranch, run: () => openHistory() })
+  if (note.value && (noteApp.value || (layoutApp.value && designFile.value)))
+    out.unshift({
+      key: 'app',
+      label: t('plugin_app.open_in_editor'),
+      short: t('plugin_app.open_in_editor_short'),
+      icon: LayoutTemplate,
+      run: openInApp,
+    })
+  else if (note.value && layoutApp.value && canLayOut.value)
+    out.unshift({
+      key: 'app',
+      label: t('plugin_app.lay_out'),
+      short: t('plugin_app.lay_out_short'),
+      icon: LayoutTemplate,
+      run: layOut,
+    })
   return out
 })
 
@@ -1004,6 +1217,7 @@ onBeforeUnmount(() => {
   unsub?.()
   unsubSession?.()
   if (copiedTimer) clearTimeout(copiedTimer)
+  clearTimeout(tagTimer)
 })
 </script>
 
@@ -1055,6 +1269,19 @@ onBeforeUnmount(() => {
         {{ t('note.saved_at', { time: lastSavedAt }) }}
       </span>
       <span class="flex-1" />
+
+      <!-- What readers see, and the way to change it (IMP-228) -->
+      <NoteVersionButton
+        v-if="note && canVersion"
+        :path="note.path"
+        :valid="note.valid"
+        :dirty="dirty"
+        :save="saveForVersion"
+        :compact="compact"
+        @changed="load"
+        @open="openVersion"
+        @history="openHistory()"
+      />
 
       <!-- View / Edit toggle, only where the note can be edited: alone, the
            View button of a canvas, a base or a reader's note chose nothing. -->
@@ -1154,19 +1381,26 @@ onBeforeUnmount(() => {
       <!-- The secondary actions: in a row, or in the ⋯ menu when the window
            is narrow (IMP-156, M5). -->
       <template v-if="note && !compact">
+        <!-- Wide, the word shown is the name read, the tooltip the whole;
+             icons alone are named by the whole. -->
         <button
           v-for="a in actions"
           :key="a.key"
           type="button"
-          class="shrink-0 rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text disabled:opacity-50"
-          :class="{ 'text-success': a.key === 'copy' && copied }"
+          class="inline-flex shrink-0 items-center gap-1 rounded text-text-muted hover:bg-surface-hover hover:text-text disabled:opacity-50"
+          :class="[labelled ? 'px-1.5 py-1 text-xs' : 'p-1', { 'text-success': a.key === 'copy' && copied }]"
           :disabled="a.disabled"
           :title="a.label"
-          :aria-label="a.label"
+          :aria-label="labelled ? undefined : a.label"
           :data-snapshot="a.key === 'snapshot' ? '' : undefined"
           @click="a.run"
         >
-          <component :is="a.icon" class="h-3.5 w-3.5" />
+          <component
+            :is="a.icon"
+            class="h-3.5 w-3.5"
+            aria-hidden="true"
+          />
+          <span v-if="labelled">{{ a.short }}</span>
         </button>
       </template>
       <OverflowMenu v-else-if="note" class="shrink-0" :items="actions" :label="t('note.more_actions')" />
@@ -1227,12 +1461,40 @@ onBeforeUnmount(() => {
     </div>
 
     <div
+      v-if="validBanner"
+      class="flex flex-wrap items-center gap-2 border-b px-4 py-2 text-xs"
+      :class="valid?.missing ? 'border-warning/40 bg-warning/10 text-warning' : 'border-border bg-surface'"
+      role="status"
+      data-valid-version
+    >
+      <span>{{ validBanner }}</span>
+      <div class="flex-1" />
+      <button
+        v-if="hasDraft && mode === 'view'"
+        type="button"
+        class="h-control-sm rounded px-2 hover:bg-surface-hover"
+        data-valid-toggle
+        @click="toggleDraft"
+      >
+        {{ showDraft ? t('note.valid_back') : t('note.valid_see_draft') }}
+      </button>
+    </div>
+
+    <div
       v-if="tooLarge"
       class="border-b border-warning/40 bg-warning/10 px-4 py-2 text-xs text-warning"
       role="status"
       data-note-too-large
     >
       {{ t('note.too_large') }}
+    </div>
+    <div
+      v-if="tagWarning"
+      class="border-b border-warning/40 bg-warning/10 px-4 py-2 text-xs text-warning"
+      role="status"
+      data-tag-warning
+    >
+      {{ tagWarning }}
     </div>
 
     <!-- A save, delete or download that failed: a banner above the editor,
@@ -1329,7 +1591,12 @@ onBeforeUnmount(() => {
       />
       <!-- A note too large to preview or save here: its text, read-only -->
       <div v-else-if="tooLarge && note" class="h-full min-h-0" data-note-text>
-        <CodeMirrorEditor :model-value="note.content" :project="project" readonly />
+        <CodeMirrorEditor
+          :model-value="note.content"
+          :project="project"
+          :label="editorLabel"
+          readonly
+        />
       </div>
       <!-- Markdown note: prose-rendered preview -->
       <article v-else ref="articleEl" class="p-6 max-w-3xl mx-auto">
@@ -1344,7 +1611,7 @@ onBeforeUnmount(() => {
               <div class="flex flex-col gap-1">
                 <label class="flex flex-col gap-1">
                   {{ t('cut.collection') }}
-                  <select v-model="cutSettings.collection" class="h-control-sm rounded border border-border bg-bg px-1" data-cut-collection>
+                  <select v-model="cutSettings.collection" class="h-control-sm rounded border border-border-input bg-bg px-1" data-cut-collection>
                     <option value="">{{ t('cut.no_collection') }}</option>
                     <option v-if="cutCollectionUnlisted" :value="cutSettings.collection">
                       {{ cutSettings.collection }}
@@ -1364,7 +1631,7 @@ onBeforeUnmount(() => {
               </div>
               <label class="flex flex-col gap-1">
                 {{ t('cut.context') }}
-                <select v-model="cutSettings.context" class="h-control-sm rounded border border-border bg-bg px-1">
+                <select v-model="cutSettings.context" class="h-control-sm rounded border border-border-input bg-bg px-1">
                   <option value="heading">{{ t('cut.context_heading') }}</option>
                   <option value="path">{{ t('cut.context_path') }}</option>
                   <option value="none">{{ t('cut.context_none') }}</option>
@@ -1372,17 +1639,17 @@ onBeforeUnmount(() => {
               </label>
               <label class="flex flex-col gap-1">
                 {{ t('cut.word_icon') }}
-                <input v-model="cutSettings.icon" class="h-control-sm rounded border border-border bg-bg px-1" placeholder="icon" />
+                <input v-model="cutSettings.icon" class="h-control-sm rounded border border-border-input bg-bg px-1" placeholder="icon" />
               </label>
               <label class="flex flex-col gap-1">
                 {{ t('cut.word_image') }}
-                <input v-model="cutSettings.image" class="h-control-sm rounded border border-border bg-bg px-1" placeholder="image" />
+                <input v-model="cutSettings.image" class="h-control-sm rounded border border-border-input bg-bg px-1" placeholder="image" />
               </label>
               <label class="flex flex-col gap-1" :title="t('cut.media_paragraphs_hint')">
                 {{ t('cut.media_paragraphs') }}
                 <select
                   v-model="cutSettings.media_paragraphs"
-                  class="h-control-sm rounded border border-border bg-bg px-1"
+                  class="h-control-sm rounded border border-border-input bg-bg px-1"
                   data-cut-media-paragraphs
                 >
                   <option value="apart">{{ t('cut.media_paragraphs_apart') }}</option>
@@ -1393,7 +1660,7 @@ onBeforeUnmount(() => {
                 {{ t('cut.icon_descriptions') }}
                 <select
                   v-model="cutSettings.icon_descriptions"
-                  class="h-control-sm rounded border border-border bg-bg px-1"
+                  class="h-control-sm rounded border border-border-input bg-bg px-1"
                   data-cut-icon-descriptions
                 >
                   <option value="none">{{ t('cut.icon_descriptions_none') }}</option>
@@ -1409,7 +1676,7 @@ onBeforeUnmount(() => {
                   :min="CUT_NUMBERS.max_chars.min"
                   :max="CUT_NUMBERS.max_chars.max"
                   step="100"
-                  class="h-control-sm rounded border border-border bg-bg px-1"
+                  class="h-control-sm rounded border border-border-input bg-bg px-1"
                   data-cut-max-chars
                   @change="setCutNumber('max_chars', $event)"
                 />
@@ -1422,7 +1689,7 @@ onBeforeUnmount(() => {
                   :min="CUT_NUMBERS.inline_max_side.min"
                   :max="CUT_NUMBERS.inline_max_side.max"
                   step="16"
-                  class="h-control-sm rounded border border-border bg-bg px-1"
+                  class="h-control-sm rounded border border-border-input bg-bg px-1"
                   data-cut-inline-max-side
                   @change="setCutNumber('inline_max_side', $event)"
                 />
@@ -1435,9 +1702,19 @@ onBeforeUnmount(() => {
           <CutPreview v-if="cutView && !cutError" :view="cutView" :marks="markSets" :note-path="note?.path" compact />
         </template>
         <template v-else>
-          <!-- A row of a database: its fields, editable (IMP-127 phase 5) -->
+          <!-- A row of a database: its fields, editable (IMP-127 phase 5);
+               any markdown note: its tags (IMP-223) -->
           <PropertiesPanel v-if="note && !isBase" :path="note.path" :etag="note.etag" />
           <ErrorMessage v-if="previewError" :text="previewError" class="mb-4 text-sm" data-preview-error />
+          <LayoutCard
+            v-if="note && designFile"
+            :path="note.path"
+            :preview="designPreview"
+            :version="designVersion"
+            :pdfs="designPdfs"
+            :pinned="valid && !valid.missing ? valid.label : ''"
+            :can-edit="canEdit"
+          />
           <MarkdownPreview
             :html="previewHTML"
             :views="previewViews"
@@ -1476,7 +1753,13 @@ onBeforeUnmount(() => {
           'border-b border-border': layout === 'stacked',
         }"
       >
-        <CodeMirrorEditor ref="editorEl" v-model="draft" :project="project" placeholder="Markdown…" />
+        <CodeMirrorEditor
+          ref="editorEl"
+          v-model="draft"
+          :project="project"
+          :label="editorLabel"
+          placeholder="Markdown…"
+        />
       </div>
       <div v-if="layout !== 'editor'" class="overflow-auto p-4 max-w-none">
         <HTMLPreview v-if="isHtml" :html="draft" :path="note.path" />

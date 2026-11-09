@@ -1,0 +1,46 @@
+{
+  "board": {
+    "head": {
+      "label": "The board's iteration and flow",
+      "iteration": "Iteration",
+      "days_left": "last day | {n} days left",
+      "cards_done": "{done} of {total} done",
+      "only_iteration": "Only the iteration",
+      "new_iteration": "New iteration",
+      "retro_pending": "Retrospective to write",
+      "cycle": "Cycle time: {p50} d (85%: {p85} d)",
+      "cycle_few": "Cycle time: too few cards",
+      "cycle_title": "Median and 85th percentile of the days from the first column of work to done, cards closed in the last 28 days",
+      "closed": "Closed: {weeks} a week",
+      "closed_title": "Cards completed in each of the last 4 weeks, the oldest first",
+      "stale": "Stale: {n}",
+      "stale_title": "Cards in a column of work, waiting or review for more than {days} days",
+      "stale_card": "stale for {n} d",
+      "stale_card_long": "stale for one day | stale for {n} days",
+      "columns_shown": "{shown} of {total} columns",
+      "prev_column": "Previous column",
+      "next_column": "Next column",
+      "goal": "Goal",
+      "start": "First day",
+      "end": "Last day",
+      "create_failed": "The iteration was not created: {reason}"
+    },
+    "review": {
+      "title": "Review",
+      "closed_on": "Closed on {date}.",
+      "goal": "Goal",
+      "done": "Done",
+      "deferred": "Deferred, in their column",
+      "dropped": "Failed or canceled",
+      "none": "none",
+      "cycle": "Cycle time",
+      "cycle_value": "median {p50} days, 85th percentile {p85} days, over {n} cards",
+      "cycle_few": "too few cards ({n}): it takes 3",
+      "closed_week": "Closed per week",
+      "stale": "Stale at the close",
+      "retro": "Retrospective",
+      "went_well": "What went well?",
+      "change": "What do we change?"
+    }
+  }
+}

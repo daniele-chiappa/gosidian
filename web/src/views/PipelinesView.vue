@@ -218,20 +218,20 @@ function openNote(path: string) {
 
 const STATUS_CLASS: Record<RunStatus, string> = {
   pending: 'text-text-muted border border-border',
-  queued: 'text-info bg-info/15',
-  running: 'text-info bg-info/15',
-  waiting: 'text-warning bg-warning/15',
-  done: 'text-success bg-success/15',
-  failed: 'text-danger bg-danger/15',
+  queued: 'text-info bg-info/10',
+  running: 'text-info bg-info/10',
+  waiting: 'text-warning bg-warning/10',
+  done: 'text-success bg-success/10',
+  failed: 'text-danger bg-danger/10',
   skipped: 'text-text-muted border border-border',
   canceled: 'text-text-muted border border-border',
 }
 
 const PLUGIN_CLASS: Record<PluginStatus, string> = {
-  ok: 'text-success bg-success/15',
-  unaccepted: 'text-warning bg-warning/15',
-  changed: 'text-warning bg-warning/15',
-  down: 'text-danger bg-danger/15',
+  ok: 'text-success bg-success/10',
+  unaccepted: 'text-warning bg-warning/10',
+  changed: 'text-warning bg-warning/10',
+  down: 'text-danger bg-danger/10',
   unknown: 'text-text-muted border border-border',
 }
 
@@ -324,7 +324,7 @@ onMounted(() => {
     <div class="flex items-center gap-2 mb-4 flex-wrap">
       <select
         v-model="project"
-        class="h-control-sm py-0 text-xs rounded bg-bg-elevated border border-border px-2 focus:outline-none focus:ring-2 focus:ring-focus"
+        class="h-control-sm py-0 text-xs rounded bg-bg-elevated border border-border-input px-2 focus:outline-none focus:ring-2 focus:ring-focus"
         :aria-label="t('runs.project')"
         @change="load"
       >
@@ -333,7 +333,7 @@ onMounted(() => {
       </select>
       <select
         v-model="status"
-        class="h-control-sm py-0 text-xs rounded bg-bg-elevated border border-border px-2 focus:outline-none focus:ring-2 focus:ring-focus"
+        class="h-control-sm py-0 text-xs rounded bg-bg-elevated border border-border-input px-2 focus:outline-none focus:ring-2 focus:ring-focus"
         :aria-label="t('runs.status')"
         @change="load"
       >

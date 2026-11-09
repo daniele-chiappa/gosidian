@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
-import { onMounted, ref, inject } from 'vue'
+import { nextTick, onMounted, ref, inject, watch } from 'vue'
 import {
   listProjects,
   createProject,
@@ -16,12 +16,16 @@ import { useAuthStore } from '@/stores/auth'
 import { useAccessStore } from '@/stores/access'
 import { useUIStore } from '@/stores/ui'
 import { useWindowsStore, type OpenSpec } from 'plancia'
-import { Lock, Globe, Users, UsersRound } from 'lucide-vue-next'
+import { Lock, Globe, Users } from 'lucide-vue-next'
 import { errorText } from '@/api/errors'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
 import { askText, confirmAction } from '@/composables/useConfirm'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
+
+// A project chosen in the palette, with when it was chosen: the palette
+// opened the whole list, from its top (BUG-160).
+const props = defineProps<{ project?: string; projectAt?: number }>()
 
 const projects = ref<Project[]>([])
 const loading = ref(false)
@@ -29,6 +33,8 @@ const loading = ref(false)
 // an action took the whole list down and back, focus and scroll with it.
 const loaded = ref(false)
 const error = ref<string | null>(null)
+// What the last rename did to the references to the project's files.
+const notice = ref<string | null>(null)
 const newName = ref('')
 const treeStore = useTreeStore()
 const auth = useAuthStore()
@@ -145,7 +151,7 @@ function inGitTitle(p: Project): string {
 async function toggleINGit(p: Project) {
   if (!p.track_in_git && !(await confirmAction(t('projects.flag.in_git_confirm', { name: p.name }), { confirmLabel: t('projects.flag.in_git_confirm_ok') })))
     return
-  await apply(p, { track_in_git: !p.track_in_git }, 'IN git')
+  await apply(p, { track_in_git: !p.track_in_git }, flagWord('IN git'))
 }
 
 function accessTitle(p: Project): string {
@@ -168,13 +174,25 @@ async function loadMasters() {
 async function rename(p: Project) {
   const newSlug = (await askText(t('projects.rename_prompt', { name: p.name }), p.name, { confirmLabel: t('projects.rename') }))?.trim()
   if (!newSlug || newSlug === p.name) return
+  notice.value = null
   try {
-    await updateProject(p.name, { new_name: newSlug })
+    notice.value = renameNotice(await updateProject(p.name, { new_name: newSlug }))
     await refresh()
     treeStore.refresh()
   } catch (e) {
     error.value = errorText(e, t, t('projects.rename_failed'))
   }
+}
+
+/** What a rename did to the references to the project's files (BUG-153):
+ *  the notes it rewrote, and those that keep the old name, in projects the
+ *  user may not write. Nothing when no note named the project. */
+function renameNotice(p: Project): string | null {
+  const l = p.links
+  const parts: string[] = []
+  if (l && l.rewritten > 0) parts.push(t('projects.renamed_links', { count: l.rewritten, name: p.name }))
+  if (l && l.not_rewritten > 0) parts.push(t('projects.renamed_links_left', { count: l.not_rewritten }))
+  return parts.length ? parts.join(' ') : null
 }
 
 /** Name of the project whose zip is being prepared (the button waits). */
@@ -206,15 +224,40 @@ async function destroy(p: Project) {
 
 /** The flag chips, in the order of the row, for the legend. */
 const FLAG_NAMES = ['skip-git', 'hidden', 'globals', 'anchors', 'tag-vocab', 'lean-read', 'mirror', 'pipelines', 'git tags', 'IN', 'IN git'] as const
+type FlagName = (typeof FLAG_NAMES)[number]
+
+// A flag is said in words; its code, which the docs and the API use, stays
+// in the tooltip and the legend (IMP-220, F-25).
+const flagKey = (f: FlagName) => f.replace(/[- ]/g, '_')
+const flagWord = (f: FlagName) => t(`projects.flag_name.${flagKey(f)}`)
+const flagTitle = (f: FlagName, text: string) => `${f} — ${text}`
+// The reader's level in words, the code in its tooltip (IMP-220, F-20).
+const levelName = (l: string) => (te(`members.level_name.${l}`) ? t(`members.level_name.${l}`) : l)
 
 onMounted(() => {
   load()
   loadMasters()
 })
+
+// The project chosen takes the focus on its name, and so comes into view,
+// once the list is there and at each choice after (BUG-160).
+const root = ref<HTMLElement | null>(null)
+watch(
+  () => [props.project, props.projectAt, loaded.value],
+  async () => {
+    if (!props.project || !loaded.value) return
+    await nextTick()
+    const names = Array.from(root.value?.querySelectorAll<HTMLElement>('[data-project-name]') ?? [])
+    names.find((b) => b.dataset.projectName === props.project)?.focus()
+  },
+)
 </script>
 
 <template>
-  <div class="p-8 max-w-4xl mx-auto">
+  <div
+    ref="root"
+    class="p-8 max-w-4xl mx-auto"
+  >
     <!-- The window's title bar names the view, the heading is for screen
          readers; the flags' meaning is in the legend and in each chip's
          tooltip. -->
@@ -233,8 +276,11 @@ onMounted(() => {
         <summary class="cursor-pointer text-text-muted hover:text-text">{{ t('projects.legend.title') }}</summary>
         <dl class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-text-muted">
           <template v-for="f in FLAG_NAMES" :key="f">
-            <dt class="font-mono text-xs text-text">{{ f }}</dt>
-            <dd>{{ t(`projects.legend.${f.replace(/[- ]/g, '_')}`) }}</dd>
+            <dt class="text-text">
+              {{ flagWord(f) }}
+              <code class="text-xs text-text-muted">{{ f }}</code>
+            </dt>
+            <dd>{{ t(`projects.legend.${flagKey(f)}`) }}</dd>
           </template>
         </dl>
       </details>
@@ -249,7 +295,8 @@ onMounted(() => {
         v-model.trim="newName"
         type="text"
         :placeholder="t('projects.new_placeholder')"
-        class="h-control py-0 flex-1 rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
+        :aria-label="t('projects.new_label')"
+        class="h-control py-0 flex-1 rounded bg-bg-elevated border border-border-input px-3 focus:outline-none focus:ring-2 focus:ring-focus"
       />
       <button
         type="submit"
@@ -259,6 +306,13 @@ onMounted(() => {
 
     <p v-if="loading && !loaded" class="text-text-muted">{{ t('common.loading') }}</p>
     <ErrorMessage v-if="error" :text="error" class="mb-3" />
+    <p
+      v-if="notice"
+      role="status"
+      class="text-sm text-text-muted mb-3"
+    >
+      {{ notice }}
+    </p>
 
     <ul v-if="loaded" class="space-y-2">
       <li
@@ -279,6 +333,7 @@ onMounted(() => {
           type="button"
           class="font-medium hover:text-accent flex-1 text-left min-w-[8rem]"
           :title="t('projects.open_graph')"
+          :data-project-name="p.name"
           @click="openProjectGraph(p.name)"
         >{{ p.name }}</button>
         <span class="text-xs text-text-muted">{{ t('projects.notes', { n: p.note_count }, p.note_count) }}</span>
@@ -286,16 +341,18 @@ onMounted(() => {
         <!-- Your own level -->
         <span
           class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded"
-          :class="p.access === 'admin' ? 'bg-accent/20 text-accent' : p.access === 'write' ? 'bg-success/20 text-success' : 'border border-border text-text-muted'"
-          :title="t('projects.your_level', { level: p.access })"
-        >{{ p.access }}</span>
+          :class="p.access === 'admin' ? 'bg-accent/10 text-accent' : p.access === 'write' ? 'bg-success/10 text-success' : 'border border-border text-text-muted'"
+          :title="`${p.access} — ${t('projects.your_level', { level: levelName(p.access) })}`"
+          data-level
+        >{{ levelName(p.access) }}</span>
 
         <!-- Visibility: a selector for project admins, a badge for everyone else -->
         <select
           v-if="p.access === 'admin'"
-          class="h-control-sm py-0 text-xs rounded bg-bg-elevated border border-border px-2"
+          class="h-control-sm py-0 text-xs rounded bg-bg-elevated border border-border-input px-2"
           :value="p.visibility"
           :title="visibilityHelp(p.visibility)"
+          :aria-label="t('projects.visibility_of', { name: p.name })"
           @change="changeVisibility(p, ($event.target as HTMLSelectElement).value)"
         >
           <option
@@ -311,18 +368,20 @@ onMounted(() => {
           :title="visibilityHelp(p.visibility)"
         >{{ visibilityLabel(p.visibility).toLowerCase() }}</span>
 
-        <!-- Grants: accounts + teams; opens the Access window -->
+        <!-- Grants: accounts + teams, said in words (IMP-220, F-25); opens
+             the Access window -->
         <button
           type="button"
           class="h-control-sm text-xs px-2 rounded border border-border inline-flex items-center gap-1 hover:bg-surface-hover"
           :title="accessTitle(p)"
+          data-grants
           @click="openProjectAccess(p.name)"
         >
-          <Users class="w-3 h-3" />
-          <span>{{ p.members_count }}</span>
-          <span class="text-text-muted">·</span>
-          <UsersRound class="w-3 h-3" />
-          <span>{{ p.teams_count }}</span>
+          <Users
+            class="w-3 h-3"
+            aria-hidden="true"
+          />
+          <span>{{ t('projects.grants_short', { accounts: p.members_count, teams: p.teams_count }) }}</span>
         </button>
 
         <button
@@ -338,105 +397,108 @@ onMounted(() => {
           <button
             type="button"
             class="h-control-sm text-xs px-2 rounded"
-            :class="p.skip_git_sync ? 'bg-warning/20 text-warning' : 'border border-border'"
-            :title="p.skip_git_sync ? t('projects.flag.git_on') : t('projects.flag.git_off')"
+            :class="p.skip_git_sync ? 'bg-warning/10 text-warning' : 'border border-border'"
+            :title="flagTitle('skip-git', p.skip_git_sync ? t('projects.flag.git_on') : t('projects.flag.git_off'))"
             :aria-pressed="!!p.skip_git_sync"
-            @click="apply(p, { skip_git_sync: !p.skip_git_sync }, 'skip-git')"
-          >skip-git</button>
+            @click="apply(p, { skip_git_sync: !p.skip_git_sync }, flagWord('skip-git'))"
+          >{{ flagWord('skip-git') }}</button>
           <button
             type="button"
             class="h-control-sm text-xs px-2 rounded"
-            :class="p.hidden_from_mcp ? 'bg-warning/20 text-warning' : 'border border-border'"
-            :title="p.hidden_from_mcp ? t('projects.flag.hidden_on') : t('projects.flag.hidden_off')"
+            :class="p.hidden_from_mcp ? 'bg-warning/10 text-warning' : 'border border-border'"
+            :title="flagTitle('hidden', p.hidden_from_mcp ? t('projects.flag.hidden_on') : t('projects.flag.hidden_off'))"
             :aria-pressed="!!p.hidden_from_mcp"
-            @click="apply(p, { hidden_from_mcp: !p.hidden_from_mcp }, 'hidden')"
-          >hidden</button>
+            @click="apply(p, { hidden_from_mcp: !p.hidden_from_mcp }, flagWord('hidden'))"
+          >{{ flagWord('hidden') }}</button>
+          <!-- A flag whose switch in Settings is off has no effect: a dashed
+               outline says so, at full contrast, where a faded label fell
+               under 4.5:1 (IMP-221). -->
           <button
             type="button"
             class="h-control-sm text-xs px-2 rounded"
             :class="[
-              p.use_globals ? 'bg-accent/20 text-accent' : 'border border-border',
-              globalsMaster ? '' : 'opacity-50',
+              p.use_globals ? 'bg-accent/10 text-accent' : '',
+              globalsMaster ? (p.use_globals ? '' : 'border border-border') : 'border border-dashed border-current',
             ]"
-            :title="globalsTitle(p)"
+            :title="flagTitle('globals', globalsTitle(p))"
             :aria-pressed="!!p.use_globals"
-            @click="apply(p, { use_globals: !p.use_globals }, 'globals')"
-          >globals</button>
+            @click="apply(p, { use_globals: !p.use_globals }, flagWord('globals'))"
+          >{{ flagWord('globals') }}</button>
           <button
             type="button"
             class="h-control-sm text-xs px-2 rounded"
             :class="[
-              p.use_anchors ? 'bg-accent/20 text-accent' : 'border border-border',
-              anchorsMaster ? '' : 'opacity-50',
+              p.use_anchors ? 'bg-accent/10 text-accent' : '',
+              anchorsMaster ? (p.use_anchors ? '' : 'border border-border') : 'border border-dashed border-current',
             ]"
-            :title="anchorsTitle(p)"
+            :title="flagTitle('anchors', anchorsTitle(p))"
             :aria-pressed="!!p.use_anchors"
-            @click="apply(p, { use_anchors: !p.use_anchors }, 'anchors')"
-          >anchors</button>
+            @click="apply(p, { use_anchors: !p.use_anchors }, flagWord('anchors'))"
+          >{{ flagWord('anchors') }}</button>
           <button
             type="button"
             class="h-control-sm text-xs px-2 rounded"
-            :class="p.use_tag_vocabulary ? 'bg-accent/20 text-accent' : 'border border-border'"
-            :title="p.use_tag_vocabulary ? t('projects.flag.vocab_on') : t('projects.flag.vocab_off')"
+            :class="p.use_tag_vocabulary ? 'bg-accent/10 text-accent' : 'border border-border'"
+            :title="flagTitle('tag-vocab', p.use_tag_vocabulary ? t('projects.flag.vocab_on') : t('projects.flag.vocab_off'))"
             :aria-pressed="!!p.use_tag_vocabulary"
-            @click="apply(p, { use_tag_vocabulary: !p.use_tag_vocabulary }, 'tag-vocab')"
-          >tag-vocab</button>
+            @click="apply(p, { use_tag_vocabulary: !p.use_tag_vocabulary }, flagWord('tag-vocab'))"
+          >{{ flagWord('tag-vocab') }}</button>
           <button
             type="button"
             class="h-control-sm text-xs px-2 rounded"
-            :class="p.lean_read_bootstrap ? 'bg-accent/20 text-accent' : 'border border-border'"
-            :title="p.lean_read_bootstrap ? t('projects.flag.lean_on') : t('projects.flag.lean_off')"
+            :class="p.lean_read_bootstrap ? 'bg-accent/10 text-accent' : 'border border-border'"
+            :title="flagTitle('lean-read', p.lean_read_bootstrap ? t('projects.flag.lean_on') : t('projects.flag.lean_off'))"
             :aria-pressed="!!p.lean_read_bootstrap"
-            @click="apply(p, { lean_read_bootstrap: !p.lean_read_bootstrap }, 'lean-read')"
-          >lean-read</button>
+            @click="apply(p, { lean_read_bootstrap: !p.lean_read_bootstrap }, flagWord('lean-read'))"
+          >{{ flagWord('lean-read') }}</button>
           <button
             type="button"
             class="h-control-sm text-xs px-2 rounded"
-            :class="p.allow_local_mirror ? 'bg-accent/20 text-accent' : 'border border-border'"
-            :title="p.allow_local_mirror ? t('projects.flag.mirror_on') : t('projects.flag.mirror_off')"
+            :class="p.allow_local_mirror ? 'bg-accent/10 text-accent' : 'border border-border'"
+            :title="flagTitle('mirror', p.allow_local_mirror ? t('projects.flag.mirror_on') : t('projects.flag.mirror_off'))"
             :aria-pressed="!!p.allow_local_mirror"
-            @click="apply(p, { allow_local_mirror: !p.allow_local_mirror }, 'mirror')"
-          >mirror</button>
+            @click="apply(p, { allow_local_mirror: !p.allow_local_mirror }, flagWord('mirror'))"
+          >{{ flagWord('mirror') }}</button>
           <button
             type="button"
             class="h-control-sm text-xs px-2 rounded"
             :class="[
-              p.use_pipelines ? 'bg-accent/20 text-accent' : 'border border-border',
-              ui.pipelinesEnabled ? '' : 'opacity-50',
+              p.use_pipelines ? 'bg-accent/10 text-accent' : '',
+              ui.pipelinesEnabled ? (p.use_pipelines ? '' : 'border border-border') : 'border border-dashed border-current',
             ]"
-            :title="pipelinesTitle(p)"
+            :title="flagTitle('pipelines', pipelinesTitle(p))"
             :aria-pressed="!!p.use_pipelines"
-            @click="apply(p, { use_pipelines: !p.use_pipelines }, 'pipelines')"
-          >pipelines</button>
+            @click="apply(p, { use_pipelines: !p.use_pipelines }, flagWord('pipelines'))"
+          >{{ flagWord('pipelines') }}</button>
           <button
             v-if="p.use_pipelines"
             type="button"
             class="h-control-sm text-xs px-2 rounded"
-            :class="p.pipeline_tags ? 'bg-accent/20 text-accent' : 'border border-border'"
-            :title="tagsTitle(p)"
+            :class="p.pipeline_tags ? 'bg-accent/10 text-accent' : 'border border-border'"
+            :title="flagTitle('git tags', tagsTitle(p))"
             :aria-pressed="!!p.pipeline_tags"
             data-flag="pipeline_tags"
-            @click="apply(p, { pipeline_tags: !p.pipeline_tags }, 'git tags')"
-          >git tags</button>
+            @click="apply(p, { pipeline_tags: !p.pipeline_tags }, flagWord('git tags'))"
+          >{{ flagWord('git tags') }}</button>
           <button
             type="button"
             class="h-control-sm text-xs px-2 rounded"
-            :class="p.use_in ? 'bg-accent/20 text-accent' : 'border border-border'"
-            :title="inTitle(p)"
+            :class="p.use_in ? 'bg-accent/10 text-accent' : 'border border-border'"
+            :title="flagTitle('IN', inTitle(p))"
             :aria-pressed="!!p.use_in"
             data-flag="use_in"
-            @click="apply(p, { use_in: !p.use_in }, 'IN')"
-          >IN</button>
+            @click="apply(p, { use_in: !p.use_in }, flagWord('IN'))"
+          >{{ flagWord('IN') }}</button>
           <button
             v-if="p.use_in"
             type="button"
             class="h-control-sm text-xs px-2 rounded"
-            :class="p.track_in_git ? 'bg-accent/20 text-accent' : 'border border-border'"
-            :title="inGitTitle(p)"
+            :class="p.track_in_git ? 'bg-accent/10 text-accent' : 'border border-border'"
+            :title="flagTitle('IN git', inGitTitle(p))"
             :aria-pressed="!!p.track_in_git"
             data-flag="track_in_git"
             @click="toggleINGit(p)"
-          >IN git</button>
+          >{{ flagWord('IN git') }}</button>
           <button
             type="button"
             class="h-control-sm text-xs px-2 rounded hover:bg-surface-hover"

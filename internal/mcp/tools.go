@@ -150,13 +150,14 @@ func (s *Server) registerTools() {
 	), s.handleNotesByTag)
 
 	s.impl.AddTool(mcp.NewTool("memory_get",
-		mcp.WithDescription("Read a note by its vault-relative path (e.g. 'project/note.md'). Oversize guard: when the body exceeds 24 KiB (raw not set) the response is truncated: frontmatter, heading outline and the first chunk, with truncated:true, the full size and the note's real etag (if_match still works). Fetch just the section you need via memory_get_section, or pass raw:true only when you really need the whole body. To get a large note onto your own disk without spending context tokens, GET the HTTP /download endpoint instead (your MCP base URL plus /download?path=<path>, bearer token), or pass transfer:\"http\" for a single-use URL that needs no bearer (see bootstrap capabilities). An Obsidian base ('project/books.base') reads as a note too, read-only: kind \"base\", its views translated into ```view blocks (render_views computes them), what has no equivalent in a warning, and its YAML in source. A note with ```diagram blocks (YAML, kind flow, tree, mindmap, fishbone, venn, matrix or gantt; bootstrap capabilities.diagrams) also returns diagrams, each said in words, with its problems."),
+		mcp.WithDescription("Read a note by its vault-relative path (e.g. 'project/note.md'). Oversize guard: when the body exceeds 24 KiB (raw not set) the response is truncated: frontmatter, heading outline and the first chunk, with truncated:true, the full size and the note's real etag (if_match still works). Fetch just the section you need via memory_get_section, or pass raw:true only when you really need the whole body. To get a large note onto your own disk without spending context tokens, GET the HTTP /download endpoint instead (your MCP base URL plus /download?path=<path>, bearer token), or pass transfer:\"http\" for a single-use URL that needs no bearer (see bootstrap capabilities). An Obsidian base ('project/books.base') reads as a note too, read-only: kind \"base\", its views translated into ```view blocks (render_views computes them), what has no equivalent in a warning, and its YAML in source. A note with ```diagram blocks (YAML, kind flow, tree, mindmap, fishbone, venn, matrix or gantt; bootstrap capabilities.diagrams) also returns diagrams, each said in words, with its problems; one with ```graph blocks, graphs: each view's notes and links counted among those you read, its most linked."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative path to the .md file; an Obsidian .base or .canvas reads too, read-only, with kind base or canvas.")),
 		mcp.WithBoolean("raw", mcp.Description("Bypass the oversize guard: the full body whatever its size; for a .canvas, also its JSON in source.")),
 		mcp.WithNumber("max_bytes", mcp.Description("Body cap in bytes, which truncates even below the default threshold. Ignored with raw:true.")),
 		mcp.WithBoolean("render_views", mcp.Description("Also compute the note's ```view blocks: each block stays, its result after it between gosidian:view-result markers. Off by default, so a note read to be edited comes back as it is on disk (the hint then says how many blocks were left uncomputed); never write the computed result back.")),
 		mcp.WithString("transfer", mcp.Description("\"http\": instead of the body, a single-use URL (5 min) to GET the note's raw bytes with no Authorization header, plus its etag and size: a body on your own disk without context tokens when you cannot read your bearer for /download (a cautious client blocks reading it from its config).")),
 		mcp.WithString("media", mcp.Description("\"inline\": the note's images as text, from their image notes (in <note>_img/, described by a pipeline): [icon: label] inside a sentence, [image: label] description on a line of their own; media_inline counts them. To read a document whole, as a model would; never write it back.")),
+		mcp.WithString("version", mcp.Description("\"valid\" or a tag: the note as that version holds it, instead of as it is (memory_versions); \"draft\": as it is, when the note gives you a version of its own. The etag of a version is no etag to write with.")),
 	), s.handleGet)
 
 	s.impl.AddTool(mcp.NewTool("memory_get_section",
@@ -248,7 +249,7 @@ func (s *Server) registerTools() {
 	), s.handleDeleteProject)
 
 	s.impl.AddTool(mcp.NewTool("memory_rename_project",
-		mcp.WithDescription("Rename a project (top-level folder). All note paths under the project are reindexed under the new prefix. Admin tokens only."),
+		mcp.WithDescription("Rename a project (top-level folder). All note paths under the project are reindexed under the new prefix, and what names its files follows it in the notes this token may write: wiki-links with the project's path ([[old/x]]), links to its attachments (/vault-files/old/...) and media: pointers. Notes it may not write keep the old path, counted in not_rewritten. Views (from: old/...) are not rewritten. Admin tokens only."),
 		mcp.WithString("from", mcp.Required(), mcp.Description("Current project name.")),
 		mcp.WithString("to", mcp.Required(), mcp.Description("New project name.")),
 	), s.handleRenameProject)
@@ -292,6 +293,8 @@ func (s *Server) registerTools() {
 	s.registerGlobalCheckTool()
 	s.registerWaitTool()
 	s.registerSnapshotTool()
+	s.registerVersionsTool()
+	s.registerLayoutTools()
 	s.registerAutomationTool()
 	s.registerPipelineTools()
 }
@@ -618,9 +621,15 @@ type noteContent struct {
 	// Diagrams says the note's ```diagram blocks in words, with their
 	// problems (ADR-036), from the whole note even when the body is cut.
 	Diagrams []diagram.Summary `json:"diagrams,omitempty"`
+	// Graphs says the note's ```graph blocks in words (IMP-224, F-32).
+	Graphs []graphWords `json:"graphs,omitempty"`
 	// MediaInline counts the images put as text (media: inline, IMP-170):
 	// Content is then not the file as stored.
 	MediaInline *pipeline.MediaStats `json:"media_inline,omitempty"`
+	// Valid is the note's valid version, when it has one (IMP-201).
+	Valid *noteValid `json:"valid_version,omitempty"`
+	// Version is the version read, when the note gave it (IMP-228).
+	Version string `json:"version,omitempty"`
 }
 
 // getBodySoftCap is the memory_get oversize threshold: a larger body comes
@@ -663,14 +672,28 @@ func (s *Server) handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	if err != nil {
 		return readNoteError(path, err), nil
 	}
+	version := req.GetString("version", "")
 	if req.GetString("transfer", "") == "http" {
+		if version != "" && version != versionDraft {
+			return mcp.NewToolResultError("transfer gives the note as it is: without version"), nil
+		}
+		if chosen := s.chosenForMCP(note); chosen != nil && version == "" {
+			return mcp.NewToolResultErrorf("transfer gives the note as it is, and %q gives you its version %s: pass version:\"draft\" to take the draft", note.Path, chosen.Label), nil
+		}
 		return s.mintDownloadTicket(ctx, tok, note.Path, note.ETag(), len(note.Content)), nil
+	}
+	valid := s.validOf(note.Path, note.Content)
+	note, chosen, errRes := s.noteAtVersion(tok, note, valid, version)
+	if errRes != nil {
+		return errRes, nil
 	}
 	nc := noteContent{
 		Path:    note.Path,
 		Title:   note.DisplayTitle(),
 		Content: string(note.Content),
 		ETag:    note.ETag(),
+		Valid:   valid,
+		Version: chosen,
 	}
 	if ref, kind := s.vault.MediaRefForNote(note.Path, note.Content); kind != "" {
 		nc.Kind = kind
@@ -678,6 +701,7 @@ func (s *Server) handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	}
 	if strings.HasSuffix(strings.ToLower(note.Path), ".md") {
 		nc.Diagrams = diagram.Summaries(note.Content)
+		nc.Graphs = s.graphSummaries(tok, note.Content)
 	}
 	media := req.GetString("media", "")
 	if media != "" && media != "keep" && media != "inline" {
@@ -746,12 +770,10 @@ func (s *Server) handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 			nc.Hint += fmt.Sprintf("; outline capped to %d of %d headings (first %d + most recent)", len(nc.Headings), nc.OutlineTotal, getTruncHeadHeadings)
 		}
 	}
-	if viewsNote != "" {
-		if nc.Hint != "" {
-			nc.Hint += "; "
-		}
-		nc.Hint += viewsNote
+	if chosen != "" {
+		version = chosen
 	}
+	nc.Hint = joinHints(joinHints(nc.Hint, viewsNote), validHint(valid, version), chosenHint(chosen))
 	return mcp.NewToolResultJSON(nc)
 }
 
@@ -799,6 +821,7 @@ func (s *Server) handleGetSection(ctx context.Context, req mcp.CallToolRequest) 
 	if err != nil {
 		return readNoteError(path, err), nil
 	}
+	note, chosen := s.forMCP(note)
 	content := note.Content
 	rendered := req.GetBool("render_views", false)
 	// The heading itself, or the one that starts with it, an ID alone such
@@ -853,7 +876,7 @@ func (s *Server) handleGetSection(ctx context.Context, req mcp.CallToolRequest) 
 			out["hint"] = hint
 		}
 	}
-	return mcp.NewToolResultJSON(out)
+	return mcp.NewToolResultJSON(withChosen(out, chosen))
 }
 
 // joinHints joins the non-empty hints with "; ".
@@ -925,7 +948,7 @@ func (s *Server) handleUpdate(ctx context.Context, req mcp.CallToolRequest) (*mc
 	res, werr := s.writeNote(ctx, tok, noteWrite{
 		rel: rel, mode: writeReplace, ifMatch: req.GetString("if_match", ""),
 		content: fixedContent([]byte(content)), action: audit.ActionUpdate, schemaCheck: true,
-		shrinkGuard: !req.GetBool("allow_shrink", false),
+		shrinkGuard: !req.GetBool("allow_shrink", false), draftGuard: true,
 	})
 	if werr != nil {
 		return werr.result(), nil
@@ -1365,15 +1388,20 @@ func (s *Server) handleRenameProject(ctx context.Context, req mcp.CallToolReques
 	if errRes := s.checkWriteLimits(ctx, tok, 0); errRes != nil {
 		return errRes, nil
 	}
-	// Both names stay locked until the record: git sync leaves out the
-	// files under a name a writer holds (BUG-147). An incomplete rename
-	// still stands: audited and announced, with a note on what did not
-	// follow.
+	// The notes naming the project's files that the token may write are
+	// rewritten (BUG-153, BUG-150). Both names and those notes stay locked
+	// until the records: git sync leaves out the files under a name a
+	// writer holds (BUG-147, BUG-148). An incomplete rename still stands:
+	// audited and announced, with a note on what did not follow.
+	mine, others := s.projectReferrers(tok, from)
 	var moved int
-	err = s.underLock([]string{from, to}, func() (err error) {
-		moved, err = projectops.Rename(s.vault, s.index, s.projects, s.tokens, from, to)
+	var rewritten, outside []string
+	err = s.underLock(append([]string{from, to}, mine...), func() (err error) {
+		moved, rewritten, err = projectops.RenameRewriting(s.vault, s.index, s.projects, s.tokens, from, to, mine)
 		if err == nil || errors.Is(err, projectops.ErrIncomplete) {
 			s.auditWrite(ctx, audit.ActionRenameProject, from, to, 0)
+			outside = slices.DeleteFunc(slices.Clone(rewritten), func(p string) bool { return strings.HasPrefix(p, to+"/") })
+			s.auditRewritten(ctx, from, to, outside)
 		}
 		return err
 	})
@@ -1382,11 +1410,63 @@ func (s *Server) handleRenameProject(ctx context.Context, req mcp.CallToolReques
 	}
 	s.publishTreeChange("rename_project", from, map[string]any{"to": to})
 	s.publishSidebar("update", to)
-	res, jerr := mcp.NewToolResultJSON(map[string]any{"from": from, "to": to, "tokens_moved": moved})
+	for _, p := range outside {
+		s.publishNoteChange("update", p, "", false)
+	}
+	res, jerr := renameProjectResult(from, to, moved, rewritten, others)
 	if err != nil && jerr == nil {
 		appendNotice(res, "Note: "+err.Error())
 	}
 	return res, jerr
+}
+
+// projectReferrers finds the notes naming a file of project
+// (vault.ProjectReferrers): those tok may write, and how many others.
+func (s *Server) projectReferrers(tok *auth.Token, project string) (mine []string, others int) {
+	refs, err := s.vault.ProjectReferrers(project)
+	if err != nil {
+		return nil, 0
+	}
+	for _, p := range refs {
+		if s.mayWrite(tok, p) {
+			mine = append(mine, p)
+		} else {
+			others++
+		}
+	}
+	return mine, others
+}
+
+// renamedShown caps the notes a project rename lists as rewritten: a
+// project linked from everywhere would fill the answer.
+const renamedShown = 50
+
+// renameProjectResult is the answer of a project rename: the notes whose
+// references it rewrote, the first renamedShown of them by path, and how
+// many keep the old path, in notes the token may not write.
+func renameProjectResult(from, to string, moved int, rewritten []string, others int) (*mcp.CallToolResult, error) {
+	shown := slices.Sorted(slices.Values(rewritten))
+	if shown == nil {
+		shown = []string{}
+	}
+	if len(shown) > renamedShown {
+		shown = shown[:renamedShown]
+	}
+	out := map[string]any{"from": from, "to": to, "tokens_moved": moved, "rewritten": shown, "rewritten_count": len(rewritten)}
+	if others > 0 {
+		out["not_rewritten"] = others
+	}
+	res, err := mcp.NewToolResultJSON(out)
+	if err != nil {
+		return res, err
+	}
+	if len(rewritten) > renamedShown {
+		appendNotice(res, fmt.Sprintf("rewritten lists the first %d of the %d notes rewritten.", renamedShown, len(rewritten)))
+	}
+	if others > 0 {
+		appendNotice(res, fmt.Sprintf("%d note(s) naming this project's files are in projects this token may not write: they keep the old path.", others))
+	}
+	return res, nil
 }
 
 func (s *Server) handleDeleteProject(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1579,6 +1659,8 @@ type batchGetEntry struct {
 	Truncated   bool             `json:"truncated,omitempty"`
 	Hint        string           `json:"hint,omitempty"`
 	Error       string           `json:"error,omitempty"`
+	// Version is the version the note gives who calls over MCP (IMP-228).
+	Version string `json:"version,omitempty"`
 }
 
 func (s *Server) handleBatchGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1619,6 +1701,7 @@ func (s *Server) handleBatchGet(ctx context.Context, req mcp.CallToolRequest) (*
 			out = append(out, entry)
 			continue
 		}
+		note, entry.Version = s.forMCP(note)
 		entry.Title = note.DisplayTitle()
 		entry.ETag = note.ETag()
 		switch mode {
@@ -1646,7 +1729,7 @@ func (s *Server) handleBatchGet(ctx context.Context, req mcp.CallToolRequest) (*
 				rowHint = s.rowViewsHint(tok, p, note.Content, "read it with memory_get and render_views:true")
 			}
 			entry.Hint = joinHints(joinHints(viewsHint(note.Content, "read it with memory_get and render_views:true"),
-				s.embedsHint(tok, p, note.Content, "read it with memory_get and render_views:true")), rowHint)
+				s.embedsHint(tok, p, note.Content, "read it with memory_get and render_views:true")), rowHint, chosenHint(entry.Version))
 		}
 		out = append(out, entry)
 	}
@@ -1720,14 +1803,15 @@ func (s *Server) handleGetFrontmatter(ctx context.Context, req mcp.CallToolReque
 	if err != nil {
 		return readNoteError(path, err), nil
 	}
+	note, chosen := s.forMCP(note)
 	raw := parser.FrontmatterRawForPath(path, note.Content)
 	parsed := parser.ParseFrontmatterFields(raw)
-	return mcp.NewToolResultJSON(map[string]any{
+	return mcp.NewToolResultJSON(withChosen(map[string]any{
 		"path":   path,
 		"raw":    raw,
 		"parsed": parsed,
 		"etag":   note.ETag(),
-	})
+	}, chosen))
 }
 
 type outlineHeading struct {
@@ -1758,11 +1842,12 @@ func (s *Server) handleGetOutline(ctx context.Context, req mcp.CallToolRequest) 
 	if err != nil {
 		return readNoteError(path, err), nil
 	}
-	return mcp.NewToolResultJSON(map[string]any{
+	note, chosen := s.forMCP(note)
+	return mcp.NewToolResultJSON(withChosen(map[string]any{
 		"path":     path,
 		"headings": outline(note.Content),
 		"etag":     note.ETag(),
-	})
+	}, chosen))
 }
 
 // writeAndIndex persists the note and upserts it into the index synchronously
@@ -1786,6 +1871,28 @@ func (s *Server) saveAndIndex(rel string, content []byte, batched bool) error {
 	if err := save(rel, content); err != nil {
 		return err
 	}
+	return s.indexNote(rel)
+}
+
+// setValidAndIndex writes the note's valid version, and indexes the note.
+func (s *Server) setValidAndIndex(rel, tag string) error {
+	if err := s.vault.SetValidVersion(rel, tag); err != nil {
+		return err
+	}
+	return s.indexNote(rel)
+}
+
+// setMCPAndIndex writes what the note chooses for who calls over MCP, and
+// indexes the note: its frontmatter changed.
+func (s *Server) setMCPAndIndex(rel, tag string) error {
+	if err := s.vault.SetMCPVersion(rel, tag); err != nil {
+		return err
+	}
+	return s.indexNote(rel)
+}
+
+// indexNote indexes the note as it is on disk.
+func (s *Server) indexNote(rel string) error {
 	note, err := s.vault.Load(rel)
 	if err != nil {
 		return fmt.Errorf("reload: %w", err)

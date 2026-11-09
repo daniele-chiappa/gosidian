@@ -1,0 +1,106 @@
+{
+  "admin": {
+    "audit": {
+      "table": "Audit entries",
+      "range": "{from}–{to} of {total}",
+      "pages": "Pages of the audit",
+      "previous": "Previous page",
+      "next": "Next page",
+      "newest_first": "Newest first",
+      "oldest_first": "Oldest first",
+      "action_groups": {
+        "note": "Notes and files",
+        "project": "Projects",
+        "access": "Grants and teams",
+        "account": "Accounts",
+        "session": "Sign-ins",
+        "token": "MCP tokens",
+        "pipeline": "Pipelines and plugins",
+        "server": "Server"
+      },
+      "actions": {
+        "note": {
+          "create": "note or file created",
+          "update": "note or file changed",
+          "append": "text appended to a note",
+          "delete": "note or file deleted",
+          "rename": "note or file renamed",
+          "restore": "note restored from a version",
+          "upload_attachment": "attachment uploaded",
+          "delete_attachment": "attachment deleted",
+          "ingest_package": "package of notes ingested",
+          "in_upload": "upload into IN ended",
+          "in_upload_open": "upload into IN opened by an agent",
+          "export": "zip export downloaded",
+          "mirror_sync": "local copy synced"
+        },
+        "project": {
+          "create_project": "project created",
+          "delete_project": "project deleted",
+          "rename_project": "project renamed",
+          "project_flags_update": "project flags changed",
+          "personal_project_create": "personal project created"
+        },
+        "access": {
+          "project_member_set": "grant given to an account",
+          "project_member_remove": "grant removed from an account",
+          "project_team_set": "grant given to a team, from the project",
+          "project_team_remove": "grant removed from a team, from the project",
+          "team_create": "team created",
+          "team_update": "team changed",
+          "team_delete": "team deleted",
+          "team_user_add": "account added to a team",
+          "team_user_remove": "account removed from a team",
+          "team_grant_set": "grant given to a team, from the team",
+          "team_grant_remove": "grant removed from a team, from the team"
+        },
+        "account": {
+          "user_create": "account created",
+          "user_update": "account changed",
+          "user_disable": "account disabled",
+          "user_archive": "account archived, its name freed",
+          "invite_create": "invite created",
+          "invite_revoke": "invite revoked",
+          "password_change": "password changed",
+          "password_reset": "password reset by the owner",
+          "totp_enroll": "two-step verification turned on",
+          "totp_disenroll": "two-step verification turned off",
+          "totp_reset": "two-step verification reset by the owner",
+          "totp_recovery_used": "recovery code used",
+          "totp_recovery_regen": "recovery codes regenerated"
+        },
+        "session": {
+          "spa_token_create": "signed in to the web UI",
+          "spa_token_refresh": "web UI session renewed",
+          "spa_token_revoke": "signed out of the web UI",
+          "spa_login_failed": "sign-in failed",
+          "oauth_client_register": "OAuth client registered",
+          "oauth_grant": "OAuth authorization given",
+          "oauth_refresh": "OAuth authorization renewed",
+          "oauth_revoke": "OAuth authorization revoked"
+        },
+        "token": {
+          "token_create": "MCP token created",
+          "token_update": "MCP token changed",
+          "token_revoke": "MCP token revoked"
+        },
+        "pipeline": {
+          "pipeline_run": "pipeline started",
+          "pipeline_resume": "pipeline resumed",
+          "pipeline_cancel": "pipeline canceled",
+          "plugin_call": "plugin tool called"
+        },
+        "server": {
+          "settings_update": "server settings changed",
+          "git_token_set": "git token set",
+          "git_token_unset": "git token removed",
+          "note_tag": "version of a note named",
+          "note_valid": "valid version of a note changed",
+          "note_mcp_version": "version for MCP of a note changed",
+          "font_add": "font added to the catalog",
+          "font_delete": "font removed from the catalog"
+        }
+      }
+    }
+  }
+}

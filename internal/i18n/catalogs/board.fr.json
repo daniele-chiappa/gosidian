@@ -1,0 +1,46 @@
+{
+  "board": {
+    "head": {
+      "label": "Itération et flux du tableau",
+      "iteration": "Itération",
+      "days_left": "dernier jour | encore {n} jours",
+      "cards_done": "{done} sur {total} faites",
+      "only_iteration": "Seulement l'itération",
+      "new_iteration": "Nouvelle itération",
+      "retro_pending": "Rétrospective à écrire",
+      "cycle": "Cycle : {p50} j (85 % : {p85} j)",
+      "cycle_few": "Cycle : trop peu de cartes",
+      "cycle_title": "Médiane et 85e centile des jours de la première colonne de travail à fait, cartes fermées ces 28 derniers jours",
+      "closed": "Fermées : {weeks} par semaine",
+      "closed_title": "Cartes terminées dans chacune des 4 dernières semaines, la plus ancienne d'abord",
+      "stale": "Bloquées : {n}",
+      "stale_title": "Cartes dans une colonne de travail, d'attente ou de revue depuis plus de {days} jours",
+      "stale_card": "bloquée depuis {n} j",
+      "stale_card_long": "bloquée depuis un jour | bloquée depuis {n} jours",
+      "columns_shown": "{shown} sur {total} colonnes",
+      "prev_column": "Colonne précédente",
+      "next_column": "Colonne suivante",
+      "goal": "Objectif",
+      "start": "Premier jour",
+      "end": "Dernier jour",
+      "create_failed": "L'itération n'a pas été créée : {reason}"
+    },
+    "review": {
+      "title": "Revue",
+      "closed_on": "Close le {date}.",
+      "goal": "Objectif",
+      "done": "Faites",
+      "deferred": "Reportées, dans leur colonne",
+      "dropped": "Échouées ou annulées",
+      "none": "aucune",
+      "cycle": "Temps de cycle",
+      "cycle_value": "médiane {p50} jours, 85e centile {p85} jours, sur {n} cartes",
+      "cycle_few": "trop peu de cartes ({n}, il en faut 3)",
+      "closed_week": "Fermées par semaine",
+      "stale": "Bloquées à la clôture",
+      "retro": "Rétrospective",
+      "went_well": "Qu'est-ce qui a bien marché ?",
+      "change": "Que changer ?"
+    }
+  }
+}

@@ -373,6 +373,8 @@ type Result struct {
 	Spec  *Spec
 	Hits  []index.QueryHit
 	Total int
+	// Board is the state of a ```board block's board, nil for a view.
+	Board *BoardState
 	// Schema is the database the view lists, when it lists the rows of one
 	// (Context.Schema), or nil.
 	Schema *dbschema.Schema
@@ -629,7 +631,11 @@ func (r *Result) Markdown() string {
 			listItem(h)
 		}
 	case "board":
-		// Agents read a board as a list per column; empty columns are left out.
+		// Agents read a board as a list per column; empty columns are left
+		// out. A board's state comes first.
+		if r.Board != nil {
+			b.WriteString(r.Board.markdown() + "\n")
+		}
 		groups, _ := r.Groups()
 		for i, g := range groups {
 			if len(g.Hits) == 0 {

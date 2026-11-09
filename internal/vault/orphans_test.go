@@ -1,6 +1,7 @@
 package vault
 
 import (
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"net/url"
@@ -97,6 +98,31 @@ func TestRefMatcher_SameAsContains(t *testing.T) {
 	}
 }
 
+// A page layout's document is a .json attachment and names its images (IMP-226):
+// they are no orphans, while any other .json of the vault names nothing.
+func TestUnreferenced_LayoutDocument(t *testing.T) {
+	v := New(t.TempDir())
+	for rel, body := range map[string]string{
+		"p/attachments/design.json": `{"assets": {"1": {"link": "aaaaaaaaaaaaaaaa.png"}}}`,
+		"p/data/other.json":         `{"link": "bbbbbbbbbbbbbbbb.png"}`,
+	} {
+		abs := filepath.Join(v.Root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(abs, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	left, err := v.Unreferenced([]string{"aaaaaaaaaaaaaaaa.png", "bbbbbbbbbbbbbbbb.png"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if left["aaaaaaaaaaaaaaaa.png"] || !left["bbbbbbbbbbbbbbbb.png"] {
+		t.Errorf("left %v", left)
+	}
+}
+
 // 2,000 notes naming 10,000 of 20,000 attachments: well under a second where
 // Contains took minutes (BUG-122).
 func TestUnreferenced_Large(t *testing.T) {
@@ -119,7 +145,7 @@ func TestUnreferenced_Large(t *testing.T) {
 		}
 	}
 	start := time.Now()
-	left, err := v.Unreferenced(names)
+	left, err := v.Unreferenced(names, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,5 +154,35 @@ func TestUnreferenced_Large(t *testing.T) {
 	}
 	if d := time.Since(start); d > 10*time.Second {
 		t.Errorf("took %s", d)
+	}
+}
+
+// A note with a valid version keeps what that version names, which its
+// draft may no longer name; a failure to read that version stops the search
+// (IMP-201).
+func TestVault_UnreferencedKeepsTheValidVersion(t *testing.T) {
+	v := newTestVault(t)
+	write(t, v.Root, "p/a.md", "---\nvalid_version: note/p/a.md/V1\n---\nnow.png\n")
+	write(t, v.Root, "p/b.md", "plain\n")
+	names := []string{"now.png", "then.png", "design.json", "free.png"}
+	asked := ""
+	got, err := v.Unreferenced(names, func(rel, tag string) ([][]byte, error) {
+		asked += rel + " " + tag
+		return [][]byte{[]byte("then.png"), []byte("design.json")}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if asked != "p/a.md note/p/a.md/V1" {
+		t.Errorf("asked %q", asked)
+	}
+	if len(got) != 1 || !got["free.png"] {
+		t.Errorf("unreferenced %v", got)
+	}
+	if _, err := v.Unreferenced(names, func(string, string) ([][]byte, error) { return nil, os.ErrInvalid }); !errors.Is(err, os.ErrInvalid) {
+		t.Errorf("a failed version: %v", err)
+	}
+	if got := NamedIn(names, [][]byte{[]byte("See Now.PNG"), []byte("then%2Epng")}); strings.Join(got, " ") != "now.png then.png" {
+		t.Errorf("named %q", got)
 	}
 }

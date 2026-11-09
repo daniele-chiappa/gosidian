@@ -3,6 +3,7 @@ import { useI18n } from 'vue-i18n'
 import { onMounted, ref } from 'vue'
 import { listInvites, createInvite, deleteInvite, type Invite } from '@/api/admin'
 import { errorText } from '@/api/errors'
+import ScrollRegion from '@/components/primitives/ScrollRegion.vue'
 import DateTime from '@/components/primitives/DateTime.vue'
 import { formatDateTime } from '@/api/format'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
@@ -91,7 +92,7 @@ onMounted(load)
         v-model.number="ttlHours"
         type="number"
         min="1"
-        class="h-control py-0 rounded bg-bg-elevated border border-border px-3 w-32"
+        class="h-control py-0 rounded bg-bg-elevated border border-border-input px-3 w-32"
       />
     </label>
     <button
@@ -107,8 +108,7 @@ onMounted(load)
 
   <p v-else-if="!invites.length" class="text-text-muted text-sm">{{ t('admin.invites.empty') }}</p>
 
-  <div v-else class="overflow-x-auto">
-    <!-- Scrolls inside its box in a narrow window (IMP-156, M7). -->
+  <ScrollRegion v-else :label="t('admin.tab.invites')">
 
     <table class="w-full text-sm">
       <thead class="text-text-muted text-xs [&_th]:font-medium">
@@ -157,5 +157,5 @@ onMounted(load)
       </tbody>
     </table>
 
-  </div>
+  </ScrollRegion>
 </template>

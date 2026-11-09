@@ -34,6 +34,7 @@ func (f *notesFixture) withGit(t *testing.T) *gitsync.Sync {
 	// vault's locks the writes on their way (BUG-147).
 	f.auditLog.OnWrite(func(e audit.Entry) { s.RecordWrite(string(e.Action), e.Path, e.To, e.Actor) })
 	s.SetBusy(f.router.deps.Vault.PathBusy)
+	f.idx.SetSearchText(s.ValidText)
 	return s
 }
 

@@ -21,6 +21,18 @@ Each preset overrides the same set of CSS variables on
 `<html data-preset="…">`, so switching theme is a single class change.
 Selecting `custom` falls back to the Mocha palette as a base.
 
+Every preset is readable at WCAG AA. Each text colour (the body text,
+the secondary text, the accent, and the danger, warning, success and
+info colours) reaches 4.5:1 on the page, the panels, the fields and a
+row under the pointer; a button's label reaches 4.5:1 on the accent; a
+chip's text reaches it on its colour's tint, which is 10%; a field's
+border (`--color-border-input`) reaches 3:1. Where the original palette
+fell short, the colour keeps its hue and only its lightness moves, so
+Latte and Solarized Light are darker than their upstream palettes and
+Mocha and Tokyo Night slightly lighter. `web/tests/unit/styles/contrast.test.ts`
+computes every pair, so a preset changed below these ratios fails the
+SPA's unit tests. The colours you pick for `custom` are yours: nothing checks them.
+
 The choice is stored **in the browser** (Pinia `ui` store, localStorage
 key `gosidian.ui`), not in `config.toml`.
 
@@ -29,10 +41,11 @@ key `gosidian.ui`), not in `config.toml`.
 The language selector lives in **Settings** and offers the languages the
 operator enables, out of five:
 
-- **IT** (Italian) — complete
-- **EN** (English) — reference
-- **ES / FR / DE** — about three quarters translated; the missing
-  strings (two-factor setup among them) show in English
+- **IT** (Italian) and **EN** (English, the reference), in the first load
+- **ES / FR / DE** (Spanish, French, German), whole too, each loaded the
+  first time it is chosen: the page switches, and takes its `lang`, once
+  the language is in. They were translated with an AI model; corrections
+  are welcome (see *Translating gosidian* in `CONTRIBUTING.md`)
 
 The choice is a pure client-side preference: it persists in
 **localStorage** (Pinia `ui` store, key `gosidian.ui`) and switches the
@@ -86,9 +99,9 @@ was done to which note (`update notes/plan.md`, `rename a.md -> b.md`,
 `delete project old`, `restore notes/old from the trash`,
 `upload notes/attachments/1a2b.png`); one writer of several notes of a
 project makes one commit, whose subject names the first and how many
-more and whose body has a line per note. A rename or a move also
-commits, as an `update` in the renamer's name, each note whose links it
-rewrote. Two writers, or one writer in two projects, in the same
+more and whose body has a line per note. A rename or a move of a note,
+or a rename of a project, also commits, as an `update` in the renamer's
+name, each note whose links it rewrote. Two writers, or one writer in two projects, in the same
 debounce window make a commit each: a commit names the notes of one
 project, so the history of a note never names a note of a project its
 reader cannot see. What git sync changes itself, the block of

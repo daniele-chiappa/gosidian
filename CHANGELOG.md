@@ -10,6 +10,288 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.158.0] — 2026-11-09 — "page layouts and iterations"
+
+The releases from 2.134.0 to 2.158.0 in one: notes laid out as pages in
+the app of a plugin, a note's valid version that readers, search and the
+agents see while the draft goes on, iterations and the flow of a board,
+a web UI in five whole languages that fits a phone and reaches 4.5:1 in
+every theme, and a project renamed that takes its links along. Pull the
+image and restart: the first start re-indexes the vault once, so that
+search reads the valid version of a note. A project renamed now rewrites
+the links to its files, and a board's cards get dates the server writes:
+the next move of a card adds `started`, `finished` and `iteration` to
+the fields of its project's `tasks.md`, and a `PATCH` that sets
+`started` or `finished` by hand answers 400. The page-layout editor comes
+with the `layout` plugin, not published yet: without it no note shows
+its buttons. Coming from 2.133.0, read the entries 2.134.0 and 2.158.0
+of [docs/upgrading.md](docs/upgrading.md).
+
+### Added
+- **Notes laid out as pages** ([docs/vault/layouts.md](docs/vault/layouts.md)):
+  any markdown note can have a page layout and stays a normal markdown.
+  A comment no reader sees numbers each block of the note, `<!-- 3 -->`,
+  or keeps it out of the design, and a frame on a page shows the piece of
+  its number, so the note keeps its order whatever the pages do. The
+  design the editor saves is kept as attachments the note names in
+  `layout_file`, its document as a `.json` and its images one file for
+  the same bytes, put back together when it opens (`GET`/`PUT
+  /api/v1/layouts/{path}`, capped by `[web] layout_max_bytes`,
+  `layout_max_document_bytes` and `layout_max_entries`). A note with a
+  design shows a card with its first page; any other has **Lay out this
+  note**, and **New note** and the palette make a page layout from a page
+  size or a layout to start from. The editor opens in a window of its
+  own, with Save, Place image (from the project's attachments or your
+  computer), Export, and **PDF in the vault**, which keeps a PDF for each
+  version beside the note (`layout_pdfs`). A design saved over a newer
+  one offers Reload or Save anyway. Downloading a note leaves its design
+  behind, its images are no orphans for the GC, and renaming a project
+  keeps it.
+- **The pieces of a note, from the design**
+  ([docs/vault/layouts.md](docs/vault/layouts.md#the-pieces-of-a-note)):
+  the editor's Pieces panel lists them in the order of the note, with a
+  search and filters by status, for booklets of hundreds of pieces. A
+  piece dragged by its handle, or moved with `Alt+↑` / `Alt+↓`, moves in
+  the note with its number; **Sort the note as the pages** lists the
+  moves and applies them. **Add text** asks the kind and places the piece
+  at once, below the one before it or on a page added when there is no
+  room. **Edit** changes a stretch of the note over its design, and the
+  frames that show it catch up. Words changed in a frame are no longer
+  lost: the panel says a piece changed in the design, or on both sides,
+  and **Bring to the note** writes the frame's words in the piece's text,
+  headings, links and tables kept, while Update leaves such a frame
+  alone. `GET`, `POST /api/v1/layouts/{path}/pieces` with `/edit` and
+  `/reorder`, each checked with the piece's hash.
+- **An agent composes a note and its design**
+  ([docs/vault/layouts.md](docs/vault/layouts.md#an-agents-session)): nine
+  `layout_*` tools, shown where the owner exposed the plugin with its
+  engine, add the note's pieces, open its design in a session, run the
+  engine's commands, show a page as an image and save, against the etag
+  of the opening. The engine runs in the plugin, one process a session
+  that reaches only its folder; gosidian brings it the design with the
+  token's rights.
+- **A plugin may offer apps** ([docs/plugins.md](docs/plugins.md#apps)):
+  a page gosidian opens in a window of its own for the notes of a type,
+  such as the page-layout editor for `type: layout`. The manifest lists
+  them in `apps`, with an address, the notes type and the contract of
+  its messages, and may give `alt_urls`, the same page at other
+  addresses, of which the window opens the one on the host gosidian was
+  opened at. Once the owner accepts the manifest, the apps' origins enter
+  the `frame-src` of the web UI's CSP, and `GET /api/v1/plugins/apps`
+  lists them. Every app runs in a sandboxed frame. A manifest's tool with
+  `internal: true` is called by gosidian alone and offered to no agent.
+- **The installation's fonts**
+  ([docs/vault/layouts.md](docs/vault/layouts.md#fonts)): the owner adds
+  them in Admin → Fonts or with `POST /api/v1/admin/fonts`, up to `[web]
+  layout_max_font_bytes`, outside the vault; the editor gets them before
+  a document opens, each cached by its hash.
+- **The largest attachment is a setting**
+  ([docs/configuration.md](docs/configuration.md)): `[uploads]
+  max_attachment_bytes` (`GOSIDIAN_UPLOAD_MAX_ATTACHMENT_BYTES`), 10 MiB
+  as before unless it says otherwise, for the web UI, the MCP uploads and
+  ingest, the page layouts' images and PDFs. The errors say the cap in
+  use, and `memory_bootstrap` gives it to the agents.
+- **The valid version of a note**
+  ([docs/web-ui/editor.md](docs/web-ui/editor.md#the-valid-version)): a
+  note can name the version readers must see while it goes on changing
+  as a draft. The project's admin names versions and pins one, from the
+  version button in the bar of a note or of its design, from the
+  history, or with the new `memory_versions`, which also brings a note's
+  history to MCP (`GET`/`POST /notes/{path}/versions`, `PUT`/`DELETE
+  /notes/{path}/valid`). Search reads the valid version, so a word only
+  in the draft is found nowhere, while the title, tags and frontmatter
+  stay the note's as it is; the GC keeps its attachments; a design opens
+  at a version to read. `note.read` and `note.sections` take `at: valid`
+  or a tag, so a pipeline that cuts notes for a bot reads what was
+  approved ([docs/pipelines.md](docs/pipelines.md#the-valid-version-of-a-note)).
+  Any other write leaves `valid_version` as it was.
+- **A note chooses what MCP callers read**
+  ([docs/mcp/tools.md](docs/mcp/tools.md#what-a-note-gives-mcp-callers)):
+  the latest change, the same as readers, or a named version, from the
+  version button, `memory_versions` with `action: mcp` or `PUT
+  /notes/{path}/mcp-version`. The tools that read a note give that
+  version and say so, `version: "draft"` reads the draft, and writes go
+  there: a `memory_update` without `if_match` is refused on such a note.
+  Without a choice nothing changes.
+- **Iterations and the flow of a board**
+  ([docs/board.md](docs/board.md#flow)): a card gets `started` and
+  `finished`, which the server writes as it moves, and a board measures
+  its flow at each read: the cycle time (median and 85th percentile of
+  the last 28 days, from 3 cards), the cards closed in each of the last
+  4 weeks, and the cards stale in a column of work, waiting or review
+  past the block's new `stale` (3 days by default, 0 for never). An
+  iteration is a note `type: iteration` with its board, goal, first and
+  last day, and its cards link it with `iteration`. When its last day is
+  over the server closes it, with the pipelines on or off: it writes in
+  the note a review (the cards done, those left with their column, the
+  times, the stale ones) and an empty retrospective, in the instance's
+  language, sets `retro: pending` until someone writes it, and takes the
+  iteration away from the cards not done, which stay in their column; a
+  pipeline `on: iteration` starts then. `memory_tasks` with `board`
+  answers with the `flow`, the `iteration` in progress and the `retro`
+  to write, and `memory_task_create` and `memory_task_update` take an
+  `iteration`. The web UI shows above the board its iteration, with
+  *Only the iteration* or a form for a new one, the retrospectives to
+  write and the three measures, and marks a stale card with its days.
+  The lint reports iterations that do not read or overlap, a card's
+  iteration of another board, and dates not written by the server.
+- **A note's tags as chips**
+  ([docs/web-ui/editor.md](docs/web-ui/editor.md#tags)): every markdown
+  note shows its tags above its text; a × takes one away, and a field
+  adds one with Enter, a comma or a space, suggesting the project's tags
+  and its declared vocabulary. Each change is saved at once, checked
+  against the tags the note had; in the editor a line says which tags of
+  the frontmatter are empty or have a space. `GET
+  /api/v1/notes/{path}/fields` gives the `tags`, whether the reader may
+  write them, and the `tag_vocabulary`.
+- **A database names its fields and options in each language**
+  ([docs/vault/databases.md](docs/vault/databases.md#names-in-the-web-ui)):
+  a field of the schema takes `label`, a text or a map such as
+  `{it: Stato, en: Status}`, and a select its `option_labels`. The web UI
+  shows them in the properties panel, the tables, the boards and the
+  forms, else the names of gosidian's own fields, else the key as words,
+  with the codes in the tooltips and dates as *Nov 3, 2026*; the values
+  written stay the codes.
+- **`memory_get` says a note's graph views in words**
+  ([docs/mcp/tools.md](docs/mcp/tools.md)): a note with ```` ```graph ````
+  blocks returns `graphs`, each view's notes and links counted among the
+  notes the token reads, with its ten most linked.
+- **Full screen for a window, and a sidebar that closes**
+  ([docs/web-ui/overview.md](docs/web-ui/overview.md)): a button in the
+  bar of every window makes it cover the page, with the browser full
+  screen too, until `Esc`, the button again or its close. The button at
+  the left of the bar, or `Ctrl+\`, closes the sidebar on a wide screen
+  and opens it again, and the browser keeps the choice.
+
+### Changed
+- **The web UI starts on the tabs**
+  ([docs/web-ui/overview.md](docs/web-ui/overview.md)): one window at a
+  time, each with its tab. The bar's *Strip* puts the windows side by
+  side, and the browser keeps the view picked from now on; a strip saved
+  before, which could not be told apart from the old default, gives way
+  to the tabs once. In the tabs a window put aside keeps what it had,
+  and a plugin's app stays in the page, hidden, instead of reloading.
+- **The browser's Back closes the last window opened**: each window
+  opened is a step of the history; Back closes it, Forward opens it
+  again, its × goes back the same step, and Back asks before it closes
+  unsaved edits.
+- **The web UI fits a narrow screen** (WCAG 1.4.10,
+  [docs/web-ui/overview.md](docs/web-ui/overview.md#the-plancia-window-manager)):
+  at 640 px and under, a phone or a desktop zoomed to 400%, the sidebar
+  is a drawer and one window takes the width; the bar keeps the search
+  and the badges and puts the account in a ⋯ menu, and a long word in a
+  note breaks instead of leaving the window.
+- **Every theme's text reaches 4.5:1** (WCAG 1.4.3 and 1.4.11,
+  [docs/web-ui/settings.md](docs/web-ui/settings.md#theme)): in the four
+  presets each text colour reaches 4.5:1 on the page, the panels, the
+  fields and a hovered row, and a button's label on the accent; a colour
+  keeps its hue and only its lightness moves. Chips take a 10% tint,
+  hints keep their colour at a smaller size instead of fading, a field's
+  border reaches 3:1 (`--color-border-input`) and takes the theme's
+  focus colour. Tests compute every pair from `tokens.css`.
+- **The admin's audit shows the newest entries first, in pages**
+  ([docs/web-ui/overview.md](docs/web-ui/overview.md#admin-audit)):
+  *1–100 of 1,234* with *Previous page* and *Next page*, *When* sorting
+  from the oldest, and the filter, the order and the page in the
+  window's address; the Action filter is a menu of the actions, each
+  said in words. `GET /api/v1/admin/audit` takes `order` and `offset`,
+  and its `total` counts the entries the filters keep.
+- **A write reloads the tree of its project alone**
+  ([docs/web-ui/overview.md](docs/web-ui/overview.md#sidebar-tree)): every
+  open web UI downloaded the whole tree at each write; the sidebar now
+  asks for the project the write is in, with its ETag, so an edit that
+  leaves the tree as it was costs a 304. `GET /api/v1/tree` carries an
+  `ETag` and answers 304 to `If-None-Match`.
+- **The API sends a large JSON answer in gzip**: 8 KB or more, to a
+  client that takes it (`Accept-Encoding`), with `Vary: Accept-Encoding`;
+  the events stream, downloads and files go as they are. A tree of
+  287 KB goes out as 26.
+- **The binary and the image are about 20 MB smaller**: the web UI they
+  embed came with its source maps, 20.8 of the binary's 71.8 MB. The
+  build leaves them out.
+
+### Fixed
+- **A project renamed takes its links and its images along**
+  ([docs/vault/multi-project.md](docs/vault/multi-project.md#project-discovery--creation)):
+  a rename moved the notes and rewrote nothing, though the documentation
+  said the wiki-links followed, so `[[old/x]]`, an image under
+  `/vault-files/old/…` and the `media:` of the project's image and table
+  notes led nowhere. In the notes the renamer may write, the project's
+  own included, the wiki-links and embeds with its path, in the body and
+  the frontmatter, the links to its attachments and the `media:`
+  pointers now follow. The notes of projects the renamer may not write
+  keep the old path and are counted (`not_rewritten` in the MCP answer,
+  `links` in the REST one). Views, databases and boards name a project
+  in their `from:` as text, and keep it.
+- **German, Spanish and French say every text** (WCAG 3.1.2,
+  [docs/web-ui/settings.md](docs/web-ui/settings.md#language)): they held
+  327 of the web UI's texts, and the rest showed in English. All three
+  are whole now, translated with an AI model and not yet read by a
+  native speaker; they load the first time they are chosen, while the
+  first load holds Italian and English only. Levels, roles and token
+  scopes are words in every language, the code in the tooltip; the
+  windows already open change language with the page.
+- **The web UI's fields and labels say what they are** (WCAG 4.1.2,
+  3.3.2, 2.4.6): the note's editor is *Text of <note>*, a select in a row
+  says whose it is, an editable cell starts with what it shows, a label
+  sits over the fields that had a placeholder alone, the project flags
+  and a window's buttons are words, and a note's toolbar says a word next
+  to each icon when wide enough. Tests walk every template for a name.
+- **A diagram's nodes and edges work from the keyboard** (WCAG 2.1.1,
+  [docs/diagrams.md](docs/diagrams.md)): each is named in your language
+  (*from Start to Check, edge*), shows the focus, and Enter or Space
+  selects it, so its panel opens and Delete removes it. With
+  plancia-diagrams 0.8.0.
+- **A graph and a canvas say themselves as text** (WCAG 1.1.1 and 2.5.7):
+  a **List** beside 2D and 3D gives the graph as a table of its nodes and
+  links ([docs/vault/graphs.md](docs/vault/graphs.md)); a canvas lists its
+  cards by group and its connections, and moves and zooms from the
+  keyboard
+  ([docs/vault/obsidian-compat.md](docs/vault/obsidian-compat.md#obsidian-canvases)).
+- **"Move to…" moves a card only with Enter**
+  ([docs/board.md](docs/board.md#the-web-ui)): its list moved the card at
+  the first arrow key. It is a menu now: the arrows choose, Enter or a
+  click moves, Esc closes without a move. A board says its columns out
+  of view, with an arrow at the edge and a line such as *2 of 5 columns*.
+- **The admin from the keyboard** (WCAG 2.1.1 and 1.3.1): a table that
+  scrolls sideways is a region the Tab reaches, and the open section
+  carries `aria-current="page"`, in the window's address and title.
+- **Windows that survive a reload**: a project's access window and a new
+  note's window, rebuilt from the address, kept neither their project
+  nor their folder; they do now, and a history window says
+  *History · <name>*.
+- **A filter taken out of the query or the graph stays out**: it stayed
+  in the window's address, so a reload brought it back. A graph of every
+  project says so in the address (`p=*`).
+- **The palette**: the same text asked again searches again, and a
+  project chosen opens Projects with the focus on it.
+- **A bot follows its note restored, or its folder or project moved**
+  ([docs/chat.md](docs/chat.md#what-gosidian-does)): within a couple of
+  seconds, as a note saved does, instead of the next round up to five
+  minutes later.
+- **Edit shows the text of the note**: after the Preview layout the next
+  Edit had no text, and the pane beside it showed the note as saved
+  until the first keystroke.
+- **A page older than the server says so**: a tab left open across a
+  release showed empty windows with no word of why; a notice offers the
+  reload.
+- **A select's word no longer runs under its arrow.**
+- **A code-scanning alert on the notes' names is closed**
+  (`go/uncontrolled-allocation-size`): the result grows by append, at
+  most the cap of names, so no allocation depends on the caller's limit.
+  The 2.133.0 notes called it closed too early. Nothing changes for a
+  caller.
+
+### Security
+- **vue-i18n 11.4.16 and follow-redirects 1.16.2**: vue-i18n's advisory
+  (GHSA-83rm-6c8r-g728, through `v-html` and `escapeParameter`) and
+  follow-redirects' (GHSA-mrwp-f3q8-3g9p, in axios' adapter for Node,
+  not in the web UI) do not reach gosidian. We now check the lockfiles,
+  the images and the Go code every night
+  ([SECURITY.md](SECURITY.md#how-we-watch-the-dependencies)), and
+  [`osv-scanner.toml`](osv-scanner.toml) keeps open, each with its reason
+  and a date, the advisories we evaluated that do not reach us.
+
 ## [2.133.0] — 2026-11-03 — "the history of a note"
 
 The releases from 2.131.0 to 2.133.0 in one: a note's history that opens,
@@ -149,10 +431,6 @@ Coming from 2.130.0, read the entries from 2.131.0 to 2.133.0 of
   deleted or restored through the web UI, or a project whose git sync
   went off or on waited for the next save of a note, off the remote
   meanwhile. Each now asks for its commit.
-- **A code-scanning alert on the notes' names is closed**
-  (`go/uncontrolled-allocation-size`): the cap of 500 names a lookup
-  returns is the same, written as a comparison the analyzer reads.
-  Nothing changes for a caller.
 
 ### Security
 - **A rename writes only where its token may write**

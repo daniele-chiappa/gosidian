@@ -78,3 +78,21 @@ describe('SearchSelect clear', () => {
     expect(w.emitted('update:modelValue')?.at(-1)).toEqual([''])
   })
 })
+
+describe('SearchSelect, its name (IMP-220, F-21)', () => {
+  it('names its field by accessibleName, not by the placeholder alone', () => {
+    const i18n = createI18n({ legacy: false, locale: 'en', messages: { en: enUI } })
+    const w = mount(SearchSelect, {
+      props: {
+        modelValue: '',
+        items,
+        valueKey: (s: unknown) => String(s),
+        label: (s: unknown) => String(s),
+        accessibleName: 'Project',
+        placeholder: '(all) — type to search',
+      },
+      global: { plugins: [i18n] },
+    })
+    expect(w.find('input').attributes('aria-label')).toBe('Project')
+  })
+})

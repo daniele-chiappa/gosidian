@@ -105,7 +105,7 @@ func (r *Router) setProjectMember(w http.ResponseWriter, req *http.Request, acto
 		return
 	}
 	if r.deps.Audit != nil {
-		_ = r.deps.Audit.Write(audit.Entry{Source: audit.SourceHTTP, Actor: actor.Username, UserID: actor.ID, Action: "project_member_set", Path: project + "/" + body.UserID})
+		_ = r.deps.Audit.Write(audit.Entry{Source: audit.SourceHTTP, Actor: actor.Username, UserID: actor.ID, Action: audit.ActionProjectMemberSet, Path: project + "/" + body.UserID})
 	}
 	r.publishSidebarEvent("update", project)
 	WriteJSON(w, http.StatusCreated, projectMemberView{UserID: target.ID, Username: target.Username, Level: body.Level})
@@ -117,7 +117,7 @@ func (r *Router) removeProjectMember(w http.ResponseWriter, req *http.Request, a
 		return
 	}
 	if r.deps.Audit != nil {
-		_ = r.deps.Audit.Write(audit.Entry{Source: audit.SourceHTTP, Actor: actor.Username, UserID: actor.ID, Action: "project_member_remove", Path: project + "/" + userID})
+		_ = r.deps.Audit.Write(audit.Entry{Source: audit.SourceHTTP, Actor: actor.Username, UserID: actor.ID, Action: audit.ActionProjectMemberRemove, Path: project + "/" + userID})
 	}
 	r.publishSidebarEvent("update", project)
 	w.WriteHeader(http.StatusNoContent)

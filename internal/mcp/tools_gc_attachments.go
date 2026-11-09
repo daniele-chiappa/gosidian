@@ -62,9 +62,10 @@ func (s *Server) handleGCAttachments(ctx context.Context, req mcp.CallToolReques
 		names = append(names, path.Base(a.Path))
 	}
 	// References come from the whole vault, whatever the token's scope: a
-	// note of another project naming the file keeps it. Only this project's
-	// files are listed, so nothing outside the scope is named.
-	unref, err := s.vault.Unreferenced(names)
+	// note of another project naming the file keeps it, as does the valid
+	// version of a note. Only this project's files are listed, so nothing
+	// outside the scope is named.
+	unref, err := s.vault.Unreferenced(names, s.git.ValidTexts)
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("scan references", err), nil
 	}

@@ -68,6 +68,11 @@ const (
 	KeyColumn      = "column"
 	KeyRank        = "rank"
 	KeyColumnSince = "column_since"
+	// And, for the board's flow (phase 2), when it first entered a column
+	// of working and when it closed; its iteration, a note type: iteration.
+	KeyStarted   = "started"
+	KeyFinished  = "finished"
+	KeyIteration = "iteration"
 )
 
 // Task is a task as its note's frontmatter says it.
@@ -104,6 +109,9 @@ type Task struct {
 	DoneBy      string   `json:"done_by,omitempty"`
 	For         []string `json:"for,omitempty"`
 	Created     string   `json:"created,omitempty"`
+	Started     string   `json:"started,omitempty"`
+	Finished    string   `json:"finished,omitempty"`
+	Iteration   string   `json:"iteration,omitempty"`
 }
 
 // IsTask says whether a note's raw frontmatter is a task's.
@@ -131,7 +139,8 @@ func ReadTask(p string, content []byte) Task {
 	t := Task{Path: p, Title: str("title"), Status: str(KeyStatus), Team: LinkPath(str("team"), project),
 		Assignee: str("assignee"), Parent: LinkPath(str("parent"), project), Paths: list("paths"), Forbid: list("forbid"),
 		ClaimedBy: str(KeyClaimedBy), ChildrenState: str(KeyChildrenState), Branch: str(KeyBranch), Created: str("created"),
-		Board: LinkPath(str("board"), project), Column: str(KeyColumn), ColumnSince: str(KeyColumnSince), DoneBy: str("done_by")}
+		Board: LinkPath(str("board"), project), Column: str(KeyColumn), ColumnSince: str(KeyColumnSince), DoneBy: str("done_by"),
+		Started: str(KeyStarted), Finished: str(KeyFinished), Iteration: LinkPath(str(KeyIteration), project)}
 	for _, d := range list("depends_on") {
 		t.DependsOn = append(t.DependsOn, LinkPath(d, project))
 	}
@@ -179,12 +188,13 @@ type NewTask struct {
 	// person before it starts; a card's is its column's.
 	Status string
 	// A card's (IMP-216): its board's note, its column, its rank, who
-	// closes it and the notes it is for.
-	Board  string
-	Column string
-	Rank   float64
-	DoneBy string
-	For    []string
+	// closes it, the notes it is for and its iteration's note.
+	Board     string
+	Column    string
+	Rank      float64
+	DoneBy    string
+	For       []string
+	Iteration string
 }
 
 var nonSlug = regexp.MustCompile(`[^a-z0-9]+`)
@@ -227,6 +237,9 @@ func (n NewTask) Render(project string, at time.Time) []byte {
 	}
 	if n.DoneBy != "" {
 		fmt.Fprintf(&b, "done_by: %s\n", n.DoneBy)
+	}
+	if n.Iteration != "" {
+		fmt.Fprintf(&b, "%s: %s\n", KeyIteration, yamlString(Link(n.Iteration)))
 	}
 	if n.Parent != "" {
 		fmt.Fprintf(&b, "parent: %s\n", yamlString(Link(n.Parent)))

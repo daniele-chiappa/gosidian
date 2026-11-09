@@ -232,7 +232,7 @@ func (w write) names(c Change) bool {
 
 // line says w in a commit message: "update p/a.md", "rename a -> b",
 // "delete project p", "restore p/a.md to 1a2b3c4", "restore p/f from the
-// trash", "upload p/attachments/1a2b.png".
+// trash", "valid version of p/a.md: V3", "upload p/attachments/1a2b.png".
 func (w write) line() string {
 	switch w.action {
 	case "rename":
@@ -244,6 +244,16 @@ func (w write) line() string {
 			return "restore project " + w.path + " from the trash"
 		}
 		return "restore " + w.path + " from the trash"
+	case "note_valid":
+		if w.to == "" {
+			return "no valid version of " + w.path
+		}
+		return "valid version of " + w.path + ": " + w.to
+	case "note_mcp_version":
+		if w.to == "" {
+			return "no version for MCP of " + w.path
+		}
+		return "version for MCP of " + w.path + ": " + w.to
 	case "upload_attachment":
 		return "upload " + w.path
 	case "delete_attachment":

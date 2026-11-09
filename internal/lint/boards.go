@@ -15,8 +15,10 @@ import (
 // board, on the line of their problem, and the notes type: board without
 // exactly one block; the cards whose board is no board of the project, or
 // whose column is not their state's, as a note edited by hand leaves them;
-// and, in a project with cards, a database of the tasks that lost what the
-// cards need.
+// in a project with cards, a database of the tasks that lost what the
+// cards need. And (phase 2) the iterations that do not read, or whose days
+// meet another's of their board; the cards whose iteration is none of
+// their board's, and whose dates the server did not write as they are.
 func checkBoards(_ context.Context, l *Linter, project string) ([]Issue, error) {
 	notes, err := l.notesInProject(project)
 	if err != nil {
@@ -31,6 +33,7 @@ func checkBoards(_ context.Context, l *Linter, project string) ([]Issue, error) 
 	// not read, whose cards are not checked.
 	boards := map[string]*fleet.Board{}
 	var cards []fleet.Task
+	var its []fleet.Iteration
 	var db *projectNote
 	for i, n := range notes {
 		if !strings.HasSuffix(strings.ToLower(n.Path), ".md") {
@@ -64,11 +67,38 @@ func checkBoards(_ context.Context, l *Linter, project string) ([]Issue, error) 
 				cards = append(cards, t)
 			}
 		}
+		if noteHasType(fm, fleet.IterationType) {
+			its = append(its, fleet.ReadIteration(n.Path, n.Content))
+		}
 		if n.Path == project+"/"+fleet.Database {
 			db = &notes[i]
 		}
 	}
+	const itHint = "an iteration: a note type: iteration with board, start and end (docs/board.md)"
+	byPath := map[string]fleet.Iteration{}
+	for _, it := range its {
+		byPath[it.Path] = it
+		for _, p := range it.Problems() {
+			add(it.Path, 0, "the iteration: "+p, itHint)
+		}
+		if _, ok := boards[it.Board]; it.Board != "" && !ok {
+			add(it.Path, 0, fmt.Sprintf("the iteration's board %s is no board of the project", it.Board), itHint)
+		}
+	}
+	for _, pair := range fleet.Overlapping(its) {
+		add(pair[1].Path, 0, fmt.Sprintf("the iteration's days meet those of %s, of the same board: one iteration at a time", pair[0].Path), itHint)
+	}
 	for _, t := range cards {
+		for _, msg := range cardDates(t) {
+			add(t.Path, 0, msg, "the server writes started and finished as the card moves: take away what was written by hand")
+		}
+		switch it, ok := byPath[t.Iteration]; {
+		case t.Iteration == "":
+		case !ok:
+			add(t.Path, 0, fmt.Sprintf("the card's iteration %s is no iteration of the project", t.Iteration), itHint)
+		case it.Board != t.Board:
+			add(t.Path, 0, fmt.Sprintf("the card's iteration %s is of board %s, the card of %s", t.Iteration, it.Board, t.Board), itHint)
+		}
 		b, ok := boards[t.Board]
 		switch {
 		case !ok:
@@ -99,6 +129,25 @@ func checkBoards(_ context.Context, l *Linter, project string) ([]Issue, error) 
 		}
 	}
 	return issues, nil
+}
+
+// cardDates are the problems of the dates of card t: one that is no time,
+// a finished on a card not closed, or before its start.
+func cardDates(t fleet.Task) []string {
+	var out []string
+	start, okStart := fleet.When(t.Started)
+	end, okEnd := fleet.When(t.Finished)
+	switch {
+	case t.Started != "" && !okStart:
+		out = append(out, fmt.Sprintf("the card's started %q is no time", t.Started))
+	case t.Finished != "" && !okEnd:
+		out = append(out, fmt.Sprintf("the card's finished %q is no time", t.Finished))
+	case t.Finished != "" && !fleet.Ended(t.Status):
+		out = append(out, fmt.Sprintf("the card is %s and has finished: only a closed card has it", t.Status))
+	case okStart && okEnd && end.Before(start):
+		out = append(out, fmt.Sprintf("the card finished (%s) before it started (%s)", t.Finished, t.Started))
+	}
+	return out
 }
 
 // cardsMissing is what the database note of the tasks lacks to hold cards

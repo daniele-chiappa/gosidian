@@ -25,6 +25,15 @@ describe('OverflowMenu (IMP-156, M5)', () => {
     return { w, download, history }
   }
 
+  it('takes the icon a view gives its button', () => {
+    const w = mount(OverflowMenu, {
+      props: { items: [], label: 'Export' },
+      slots: { default: '<i data-own-icon />' },
+    })
+    expect(w.find('[data-overflow-button] [data-own-icon]').exists()).toBe(true)
+    expect(w.find('[data-overflow-button] svg').exists()).toBe(false)
+  })
+
   it('opens on the button, runs the entry picked and closes', async () => {
     const { w, history } = mountMenu()
     expect(w.find('[role="menu"]').exists()).toBe(false)

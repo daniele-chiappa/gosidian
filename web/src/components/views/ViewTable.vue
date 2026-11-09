@@ -27,9 +27,12 @@ import FieldValueView from './FieldValue.vue'
 import NewRowForm from './NewRowForm.vue'
 import { Pencil, Plus } from 'lucide-vue-next'
 import { noteHref } from '@/composables/planciaKey'
+import { useFieldNames } from './fieldNames'
 
 const props = defineProps<{ view: ViewData }>()
 const { t } = useI18n()
+// Columns and values in the reader's language (IMP-220, F-23).
+const { fieldName } = useFieldNames()
 
 // A copy of the rows, so a cell shows its new value while the save is in
 // flight; the note's views are computed again when the row's event comes.
@@ -96,7 +99,13 @@ async function commit(row: ViewRow, col: ViewColumn, input: string | boolean | s
   <table v-else>
     <thead>
       <tr>
-        <th v-for="c in columns" :key="c.name">{{ c.name }}</th>
+        <th
+          v-for="c in columns"
+          :key="c.name"
+          :title="c.name"
+        >
+          {{ fieldName(c) }}
+        </th>
       </tr>
     </thead>
     <tbody>
@@ -117,17 +126,17 @@ async function commit(row: ViewRow, col: ViewColumn, input: string | boolean | s
           <input
             v-else-if="c.type === 'checkbox'"
             type="checkbox"
-            class="rounded-sm border-border bg-bg-elevated text-accent focus:ring-focus"
+            class="rounded-sm border-border-input bg-bg-elevated text-accent focus:ring-focus"
             :checked="row.fields[c.name] === 'true'"
             :disabled="!isEditable(c, row) || saving !== null"
-            :aria-label="t('views.edit', { field: c.name })"
+            :aria-label="t('views.edit', { field: fieldName(c) })"
             @change="commit(row, c, ($event.target as HTMLInputElement).checked)"
           />
           <FieldEditor
             v-else-if="isEditing(row, c)"
             :column="c"
             :value="cellValue(row, c)"
-            :label="t('views.edit', { field: c.name })"
+            :label="t('views.edit', { field: fieldName(c) })"
             @commit="commit(row, c, $event)"
             @cancel="cancel"
           />
@@ -135,11 +144,15 @@ async function commit(row: ViewRow, col: ViewColumn, input: string | boolean | s
             v-else-if="isEditable(c, row) && row.links?.[c.name]?.length"
             class="inline-flex items-center gap-1"
           >
-            <FieldValueView :value="cellValue(row, c)" :links="row.links?.[c.name]" />
+            <FieldValueView
+              :value="cellValue(row, c)"
+              :links="row.links?.[c.name]"
+              :column="c"
+            />
             <button
               type="button"
               class="rounded p-0.5 text-text-muted hover:bg-surface-hover hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
-              :aria-label="t('views.edit', { field: c.name })"
+              :aria-label="t('views.edit', { field: fieldName(c) })"
               :disabled="saving !== null"
               @click="startEdit(row, c)"
             >
@@ -150,14 +163,29 @@ async function commit(row: ViewRow, col: ViewColumn, input: string | boolean | s
             v-else-if="isEditable(c, row)"
             type="button"
             class="-mx-1 w-full cursor-text rounded px-1 text-left hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
-            :aria-label="t('views.edit', { field: c.name })"
             :disabled="saving !== null"
             @click="startEdit(row, c)"
           >
-            <FieldValueView v-if="cellValue(row, c)?.length" :value="cellValue(row, c)" />
-            <span v-else class="text-text-muted">—</span>
+            <!-- Named by what it shows, then what it does (IMP-220, F-22): "review
+                 (edit status)". The space is in the expression, as Vue drops a
+                 leading one. -->
+            <FieldValueView
+              v-if="cellValue(row, c)?.length"
+              :value="cellValue(row, c)"
+              :column="c"
+            />
+            <span v-else class="text-text-muted">
+              <span aria-hidden="true">—</span>
+              <span class="sr-only">{{ t('views.no_value') }}</span>
+            </span>
+            <span class="sr-only">{{ ' ' + t('views.edit_value', { field: fieldName(c) }) }}</span>
           </button>
-          <FieldValueView v-else :value="cellValue(row, c)" :links="row.links?.[c.name]" />
+          <FieldValueView
+            v-else
+            :value="cellValue(row, c)"
+            :links="row.links?.[c.name]"
+            :column="c"
+          />
         </td>
       </tr>
     </tbody>

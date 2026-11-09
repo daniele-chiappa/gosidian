@@ -22,10 +22,13 @@ import { useDebounceFn } from '@vueuse/core'
 import type { ViewColumn } from '@/api/preview'
 import { suggestNoteTitles, type NoteTitleHit } from '@/api/noteTitles'
 import { editorText, lastItemStart } from './cellValue'
+import { useFieldNames } from './fieldNames'
 
 const props = defineProps<{ column: ViewColumn; value?: string | string[]; label: string }>()
 const emit = defineEmits<{ commit: [input: string | string[]]; cancel: [] }>()
 const { t } = useI18n()
+// The options in the reader's language, their values the codes (IMP-220).
+const { valueName } = useFieldNames()
 
 // A multi-select picks options; every other editor holds text, a list as
 // its items joined (toChange splits it back, and keeps it when untouched).
@@ -121,7 +124,7 @@ const inputType = (type?: string) =>
   <select
     v-if="column.type === 'select'"
     :ref="focusOnMount"
-    class="w-full rounded border-border bg-bg-elevated py-0.5 text-sm text-text"
+    class="w-full rounded border-border-input bg-bg-elevated py-0.5 text-sm text-text"
     :value="draft"
     :aria-label="label"
     @change="emit('commit', inputValue($event))"
@@ -129,7 +132,13 @@ const inputType = (type?: string) =>
     @keydown.esc.prevent="emit('cancel')"
   >
     <option v-if="!column.required" value="">—</option>
-    <option v-for="o in column.options ?? []" :key="o" :value="o">{{ o }}</option>
+    <option
+      v-for="o in column.options ?? []"
+      :key="o"
+      :value="o"
+    >
+      {{ valueName(column, o) }}
+    </option>
   </select>
   <div
     v-else-if="column.type === 'multi-select'"
@@ -149,11 +158,11 @@ const inputType = (type?: string) =>
       <input
         :ref="i === 0 ? focusOnMount : undefined"
         type="checkbox"
-        class="rounded-sm border-border bg-bg-elevated text-accent focus:ring-focus"
+        class="rounded-sm border-border-input bg-bg-elevated text-accent focus:ring-focus"
         :checked="Array.isArray(draft) && draft.includes(o)"
         @change="toggleOption(o, ($event.target as HTMLInputElement).checked)"
       />
-      {{ o }}
+      {{ valueName(column, o) }}
     </label>
   </div>
   <div
@@ -165,7 +174,7 @@ const inputType = (type?: string) =>
     <input
       :ref="relationRef"
       type="text"
-      class="w-full rounded border-border bg-bg-elevated px-1 py-0.5 text-sm text-text"
+      class="w-full rounded border-border-input bg-bg-elevated px-1 py-0.5 text-sm text-text"
       :value="draft"
       :placeholder="t('views.relation_hint')"
       :aria-label="label"
@@ -195,7 +204,7 @@ const inputType = (type?: string) =>
     :ref="focusOnMount"
     :type="inputType(column.type)"
     :step="column.type === 'number' ? 'any' : undefined"
-    class="w-full rounded border-border bg-bg-elevated px-1 py-0.5 text-sm text-text"
+    class="w-full rounded border-border-input bg-bg-elevated px-1 py-0.5 text-sm text-text"
     :value="draft"
     :placeholder="column.type === 'list' ? t('views.list_hint') : undefined"
     :aria-label="label"

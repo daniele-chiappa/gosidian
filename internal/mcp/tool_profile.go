@@ -66,14 +66,26 @@ var coreToolSet = map[string]struct{}{
 // table/media notes without ever seeing their schemas (ADR-018).
 //
 // The plugins' tools (IMP-182) pass for every profile, core included, but
-// only to a token of a project the owner exposed their plugin in.
+// only to a token of a project the owner exposed their plugin in; the layout
+// tools, which work with the engine of a plugin, the same.
 func (s *Server) filterToolsByProfile(ctx context.Context, tools []mcp.Tool) []mcp.Tool {
 	tok := s.tokenFromContext(ctx)
 	core := tok != nil && tok.IsCoreProfile()
 	out := make([]mcp.Tool, 0, len(tools))
+	var layoutShown *bool
 	for _, t := range tools {
 		if pt, ok := s.pluginToolOf(t.Name); ok {
 			if s.pluginToolVisible(tok, pt) {
+				out = append(out, t)
+			}
+			continue
+		}
+		if layoutTools[t.Name] {
+			if layoutShown == nil {
+				shown := s.layoutVisible(tok)
+				layoutShown = &shown
+			}
+			if *layoutShown {
 				out = append(out, t)
 			}
 			continue

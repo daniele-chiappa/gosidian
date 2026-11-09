@@ -19,6 +19,7 @@ import { createRow, getNewRow, type FieldValue, type NewRow } from '@/api/notes'
 import type { ViewColumn } from '@/api/preview'
 import { planciaKey, base } from '@/composables/planciaKey'
 import { toChange } from './cellValue'
+import { useFieldNames } from './fieldNames'
 
 const props = defineProps<{
   database: string
@@ -27,6 +28,9 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ done: [path?: string] }>()
 const { t } = useI18n()
+// Fields and values in the reader's language (IMP-220, F-23).
+const { fieldName, valueName } = useFieldNames()
+const columnOf = (name: string): ViewColumn => info.value?.columns.find((c) => c.name === name) ?? { name }
 const openWindow = inject<((spec: OpenSpec) => string) | null>('openWindow', null)
 
 const info = ref<NewRow | null>(null)
@@ -78,7 +82,8 @@ function focusOnMount(el: unknown) {
   if (el instanceof HTMLElement) el.focus()
 }
 
-const show = (v: Exclude<FieldValue, null>) => (Array.isArray(v) ? v.join(', ') : String(v))
+const show = (k: string, v: Exclude<FieldValue, null>) =>
+  (Array.isArray(v) ? v : [String(v)]).map((x) => valueName(columnOf(k), x)).join(', ')
 
 const inputType = (type?: string) =>
   type === 'date' ? 'date' : type === 'number' ? 'number' : type === 'url' ? 'url' : 'text'
@@ -131,7 +136,7 @@ async function submit() {
   for (const c of asked.value) {
     const change = toChange(c, extra[c.name] ?? '')
     if ('error' in change) {
-      message.value = t('views.not_a_number', { field: c.name })
+      message.value = t('views.not_a_number', { field: fieldName(c) })
       return
     }
     if ('set' in change) values[c.name] = change.set
@@ -167,7 +172,7 @@ async function submit() {
       <input
         v-model="name"
         type="text"
-        class="w-full rounded border-border bg-bg px-1 py-0.5 text-sm text-text"
+        class="w-full rounded border-border-input bg-bg px-1 py-0.5 text-sm text-text"
         autocomplete="off"
         required
         data-row-name
@@ -179,7 +184,7 @@ async function submit() {
         :ref="focusOnMount"
         v-model="title"
         type="text"
-        class="w-full rounded border-border bg-bg px-1 py-0.5 text-sm text-text"
+        class="w-full rounded border-border-input bg-bg px-1 py-0.5 text-sm text-text"
         autocomplete="off"
         data-row-title
       />
@@ -189,36 +194,42 @@ async function submit() {
         v-if="c.type === 'multi-select'"
         class="flex flex-col gap-0.5"
         role="group"
-        :aria-label="c.name"
+        :aria-label="fieldName(c)"
       >
-        <span class="text-xs text-text-muted">{{ c.name }}</span>
+        <span class="text-xs text-text-muted">{{ fieldName(c) }}</span>
         <label v-for="o in c.options ?? []" :key="o" class="flex items-center gap-1">
           <input
             type="checkbox"
-            class="rounded-sm border-border bg-bg text-accent focus:ring-focus"
+            class="rounded-sm border-border-input bg-bg text-accent focus:ring-focus"
             :checked="(extra[c.name] as string[]).includes(o)"
             @change="toggle(c.name, o, ($event.target as HTMLInputElement).checked)"
           />
-          {{ o }}
+          {{ valueName(c, o) }}
         </label>
       </div>
       <label v-else-if="c.type === 'checkbox'" class="flex items-center gap-1">
         <input
           v-model="extra[c.name]"
           type="checkbox"
-          class="rounded-sm border-border bg-bg text-accent focus:ring-focus"
+          class="rounded-sm border-border-input bg-bg text-accent focus:ring-focus"
         />
-        <span class="text-xs text-text-muted">{{ c.name }}</span>
+        <span class="text-xs text-text-muted">{{ fieldName(c) }}</span>
       </label>
       <label v-else class="flex flex-col gap-0.5">
-        <span class="text-xs text-text-muted">{{ c.name }}</span>
+        <span class="text-xs text-text-muted">{{ fieldName(c) }}</span>
         <select
           v-if="c.type === 'select'"
           v-model="extra[c.name]"
-          class="w-full rounded border-border bg-bg py-0.5 text-sm text-text"
+          class="w-full rounded border-border-input bg-bg py-0.5 text-sm text-text"
           :data-field="c.name"
         >
-          <option v-for="o in c.options ?? []" :key="o" :value="o">{{ o }}</option>
+          <option
+            v-for="o in c.options ?? []"
+            :key="o"
+            :value="o"
+          >
+            {{ valueName(c, o) }}
+          </option>
         </select>
         <input
           v-else
@@ -232,7 +243,7 @@ async function submit() {
                 ? t('views.relation_hint')
                 : undefined
           "
-          class="w-full rounded border-border bg-bg px-1 py-0.5 text-sm text-text"
+          class="w-full rounded border-border-input bg-bg px-1 py-0.5 text-sm text-text"
           :data-field="c.name"
         />
       </label>
@@ -240,7 +251,7 @@ async function submit() {
     <p v-if="given.length" class="m-0 text-xs text-text-muted" data-row-values>
       {{ t('views.row_with') }}
       <template v-for="([k, v], i) in given" :key="k"
-        >{{ i ? ' · ' : ' ' }}<span class="text-text">{{ k }}: {{ show(v) }}</span></template
+        >{{ i ? ' · ' : ' ' }}<span class="text-text">{{ fieldName(columnOf(k)) }}: {{ show(k, v) }}</span></template
       >
     </p>
     <div class="flex gap-2">

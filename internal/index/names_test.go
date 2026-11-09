@@ -70,6 +70,20 @@ func TestNotesByName_LimitCapped(t *testing.T) {
 	}
 }
 
+// A text no note has gives an empty list, not nil: the API answers [],
+// not null.
+func TestNotesByName_NoMatchIsEmpty(t *testing.T) {
+	idx := openTest(t)
+	upsert(t, idx, "p/alpha.md", "Alpha", "")
+	got, err := idx.NotesByName("zz", nil, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || len(got) != 0 {
+		t.Errorf("zz = %#v, want an empty list", got)
+	}
+}
+
 // The projects scope the names as they scope the recent notes: nil every
 // note, an empty list none.
 func TestNotesByName_Scope(t *testing.T) {

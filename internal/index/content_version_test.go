@@ -47,6 +47,9 @@ var extractionDigests = map[int]string{
 	// (ADR-036); the corpus gained a diagram, and a code sample of one,
 	// whose link is not.
 	10: "065cbc0cbb875c315c30df7ad87cac17efd6646f5ef59aa317154572ac190b3b",
+	// 11: a note with a valid version is searched by that version's text
+	// (SetSearchText, IMP-201); the corpus has none, its rows are the same.
+	11: "065cbc0cbb875c315c30df7ad87cac17efd6646f5ef59aa317154572ac190b3b",
 }
 
 // goldenCorpus covers every extracted row kind: title from frontmatter and

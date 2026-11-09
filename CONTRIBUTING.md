@@ -105,25 +105,32 @@ releases from `main` when the accumulated change justifies one.
 ## Translating gosidian
 
 The web UI strings live in `internal/i18n/catalogs/`, one JSON file per
-(scope, language) pair. The SPA bundles the `ui` catalogs
-(`web/src/locales/index.ts`); `/api/v1/i18n` serves `ui` and `errors` to
-other clients:
+(scope, language) pair. The SPA's first load holds the Italian and English
+`ui` catalogs; German, Spanish and French are chunks of their own, loaded
+when a reader chooses them (`web/src/locales/index.ts`). `/api/v1/i18n`
+serves `ui` and `errors` to other clients. The `audit` catalogs hold the
+phrases of the audit log's actions, which only the owner's audit page
+loads (`web/src/composables/useAuditCatalog.ts`):
 
 ```
 catalogs/
-├── ui.en.json      errors.en.json
-├── ui.it.json      errors.it.json
-├── ui.es.json      errors.es.json    ← stub (v1.10)
-├── ui.fr.json      errors.fr.json    ← stub (v1.10)
-└── ui.de.json      errors.de.json    ← stub (v1.10)
+├── ui.en.json      errors.en.json    audit.en.json
+├── ui.it.json      errors.it.json    audit.it.json
+├── ui.es.json      errors.es.json    audit.es.json
+├── ui.fr.json      errors.fr.json    audit.fr.json
+└── ui.de.json      errors.de.json    audit.de.json
 ```
 
-**Current state**: English is the reference. Italian is complete. Spanish,
-French, and German cover about three quarters of the `ui` keys (the
-two-factor screens are among the missing ones); every missing key falls
-back to the English catalog automatically (vue-i18n's `fallbackLocale` in
-`web/src/locales/index.ts`). An operator who prefers to hide a partial
-translation leaves it out of `i18n.enabled_langs`.
+**Current state**: English is the reference, and every language says
+every text. A test (`TestCatalogs_EveryLanguageWhole` in `internal/i18n`)
+wants each catalogue to hold exactly the English keys, none empty, with
+the same placeholders, and three plural forms where English has three
+(the first for none); one or two forms are each language's own. Another
+(`web/tests/unit/i18n-keys.test.ts`) wants every key used by the web UI.
+So a change that adds a text to the web UI writes it in all five
+languages. German, Spanish and French were translated with an AI model
+in November 2026 and have not had a native speaker's read-through yet:
+corrections are welcome.
 
 ### How to contribute a translation
 
@@ -134,25 +141,23 @@ translation leaves it out of `i18n.enabled_langs`.
    upstream don't silently disappear on merge.
 4. Preserve any format verbs (`%s`, `%d`, …) and placeholders
    (`{name}`). They are filled in at runtime.
-5. Remove the `"_stub"` header key once the file is materially
-   complete — it's a contribution marker, not a translation.
-6. Open a PR with a short summary ("complete ES ui catalog", "fix DE
+5. Open a PR with a short summary ("complete ES ui catalog", "fix DE
    plural in tokens.confirm_revoke", …). No need to translate all
-   both scopes at once; partial PRs are welcome.
+   every scope at once; partial PRs are welcome.
 
 ### Adding a new language
 
-1. Create `<scope>.<lang>.json` for both scopes, mirroring the EN
-   structure. Start with an empty `{}` if you only have time for the
-   topbar — missing keys fall back to EN without crashing.
-2. Add the language to the SPA: import its `ui` catalog in
-   `web/src/locales/index.ts`, add the code to `LocaleCode` and
+1. Create `<scope>.<lang>.json` for the three scopes, mirroring the EN
+   structure, whole: the test above fails on a missing key.
+2. Add the language to the SPA: add it to the glob of the catalogues
+   loaded when chosen in `web/src/locales/index.ts`, add the code to
+   `LocaleCode` and
    `VALID_LOCALES` in `web/src/stores/ui.ts`, and add an entry with its
    display label to `localeOptions` in `web/src/views/SettingsView.vue`.
    The server needs no code change: a language is available once its
    `ui` catalog exists. Add the code to the list `TestLanguages`
    (`internal/i18n`) expects.
-3. Submit a PR with the 2 files + the SPA edits.
+3. Submit a PR with the 3 files + the SPA edits.
 
 ### AI-assisted translations
 
@@ -172,9 +177,9 @@ scrutiny accordingly.
 
 ### Testing locally
 
-After editing a catalog, rebuild and switch languages in Settings. A key
-missing from the language shows the English text; a key missing from
-English too shows its literal dotted path (e.g. `nav.projects`).
+After editing a catalog, run `go test ./internal/i18n/` and the web UI's
+unit tests, then rebuild and switch languages in Settings. A key missing
+from English too shows its literal dotted path (e.g. `nav.projects`).
 
 ## Code of conduct
 

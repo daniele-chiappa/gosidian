@@ -3,7 +3,7 @@ import { createApp, nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import piniaPersist from 'pinia-plugin-persistedstate'
 import { useUIStore } from '@/stores/ui'
-import { i18n } from '@/locales'
+import { i18n, isLoaded, loadLocale } from '@/locales'
 import { getVersion } from '@/api/version'
 
 vi.mock('@/api/version', () => ({ getVersion: vi.fn() }))
@@ -48,10 +48,95 @@ describe('ui store', () => {
   it('hydrate applies both preset and locale at once (avoids first-paint flash)', () => {
     const ui = useUIStore()
     ui.preset = 'solarized-light'
-    ui.locale = 'fr'
+    ui.locale = 'it'
     ui.hydrate()
     expect(document.documentElement.dataset.preset).toBe('solarized-light')
-    expect(document.documentElement.lang).toBe('fr')
+    expect(document.documentElement.lang).toBe('it')
+  })
+
+  describe('languages loaded when chosen (IMP-220, F-20)', () => {
+    const msg = () => i18n.global.t('common.save')
+
+    it('Italian and English are in the first load; German, Spanish and French are not', () => {
+      expect(isLoaded('it')).toBe(true)
+      expect(isLoaded('en')).toBe(true)
+      expect(['de', 'es', 'fr'].filter(isLoaded)).toEqual([])
+    })
+
+    it("switches to German once its catalogue is in, the page's lang with it", async () => {
+      const ui = useUIStore()
+      ui.setLocale('en')
+      ui.setLocale('de')
+      // Until the catalogue is in, the page stays as it was, lang and all.
+      expect(document.documentElement.lang).toBe('en')
+      // A chunk to import: in a CI busy with the whole suite it took over the
+      // second waitFor gives by default, and its late arrival broke the next test.
+      await vi.waitFor(() => expect(document.documentElement.lang).toBe('de'), { timeout: 10_000 })
+      expect(msg()).toBe('Speichern')
+      expect(isLoaded('de')).toBe(true)
+    })
+
+    it('a later choice wins over one still loading', async () => {
+      const ui = useUIStore()
+      ui.setLocale('fr')
+      ui.setLocale('it')
+      await loadLocale('fr')
+      await nextTick()
+      expect(ui.locale).toBe('it')
+      expect(document.documentElement.lang).toBe('it')
+      expect((i18n.global.locale as unknown as { value: string }).value).toBe('it')
+    })
+
+    it('a stored language is in before hydrate ends', async () => {
+      const ui = useUIStore()
+      ui.locale = 'es'
+      await ui.hydrate()
+      expect(document.documentElement.lang).toBe('es')
+      expect(msg()).toBe('Guardar')
+    })
+  })
+
+  describe('view of the plancia', () => {
+    const persisted = () => {
+      // Plugins apply once pinia is installed in an app.
+      const pinia = createPinia()
+      pinia.use(piniaPersist)
+      createApp({}).use(pinia)
+      setActivePinia(pinia)
+      return useUIStore()
+    }
+    beforeEach(() => window.localStorage.removeItem('gosidian.ui'))
+
+    it('starts on the tabs', () => {
+      expect(useUIStore().planciaViewMode).toBe('tabs')
+    })
+
+    it('a strip stored before the choice was told apart from the default gives way to the tabs', async () => {
+      window.localStorage.setItem('gosidian.ui', JSON.stringify({ preset: 'tokyo-night', planciaViewMode: 'strip' }))
+      const ui = persisted()
+      expect(ui.planciaViewMode).toBe('strip')
+      await ui.hydrate()
+      expect(ui.planciaViewMode).toBe('tabs')
+      expect(ui.preset).toBe('tokyo-night')
+    })
+
+    it('a strip the user picks stays across reloads', async () => {
+      const ui = persisted()
+      await ui.hydrate()
+      ui.setPlanciaViewMode('strip')
+      await nextTick()
+      const again = persisted()
+      await again.hydrate()
+      expect(again.planciaViewMode).toBe('strip')
+    })
+
+    it('a sidebar closed on a wide screen stays closed across reloads (IMP-229)', async () => {
+      const ui = persisted()
+      expect(ui.sidebarClosed).toBe(false)
+      ui.setSidebarClosed(true)
+      await nextTick()
+      expect(persisted().sidebarClosed).toBe(true)
+    })
   })
 
   it('reads whether the server runs pipelines (IMP-166)', async () => {

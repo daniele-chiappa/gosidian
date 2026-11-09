@@ -39,6 +39,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_MCP_PACKAGE_MAX_BYTES` | `mcp.package_max_bytes` | `20971520` (20 MiB, a package unpacked) |
 | `GOSIDIAN_MCP_SHRINK_GUARD_PERCENT` | `mcp.shrink_guard_percent` | `10` (`memory_update`, and `memory_ingest` with `overwrite`, refuse a content under this percentage of the note's size unless the call passes `allow_shrink: true`: a placeholder written over a note by mistake; `0` turns the guard off) |
 | `GOSIDIAN_MCP_SHRINK_GUARD_MIN_BYTES` | `mcp.shrink_guard_min_bytes` | `1024` (the guard looks only at notes of at least this size) |
+| `GOSIDIAN_UPLOAD_MAX_ATTACHMENT_BYTES` | `uploads.max_attachment_bytes` | `10485760` (10 MiB: the largest attachment, by every way in: the web UI, the MCP uploads, the ingest, the [page layouts](vault/layouts.md)' images and PDFs) |
 | `GOSIDIAN_UPLOAD_QUOTA_BYTES` | `uploads.quota_bytes` | `0` (no limit; bytes of attachments an account may upload per window, its MCP tokens and web uploads together) |
 | `GOSIDIAN_UPLOAD_QUOTA_WINDOW` | `uploads.quota_window` | `24h` (the sliding window of the quota) |
 | `GOSIDIAN_IN_RESERVE_BYTES` | `in.reserve_bytes` | `5368709120` (5 GiB: the free disk an [upload into IN](in.md#uploading) leaves on the IN folders' filesystem; under it a session, a piece or a zip's next file is refused with 507; `0` turns it off; see [Uploads into IN](#uploads-into-in)) |
@@ -106,6 +107,10 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_WEB_GRAPH_MAX_NODES` | `web.graph_max_nodes` | `5000` (the most nodes a graph, a `graph` block or a plugin's graph may have) |
 | `GOSIDIAN_WEB_GRAPH_MAX_EDGES` | `web.graph_max_edges` | `50000` (the most edges of a plugin's graph) |
 | `GOSIDIAN_WEB_CUT_MAX_CHUNKS` | `web.cut_max_chunks` | `5000` (the chunks of a note the [cut view](web-ui/overview.md#the-cut-view) reads from an archive) |
+| `GOSIDIAN_WEB_LAYOUT_MAX_BYTES` | `web.layout_max_bytes` | `268435456` (256 MiB: a [page layout](vault/layouts.md)'s package, all its entries unpacked) |
+| `GOSIDIAN_WEB_LAYOUT_MAX_DOCUMENT_BYTES` | `web.layout_max_document_bytes` | `16777216` (16 MiB: its `document.json`) |
+| `GOSIDIAN_WEB_LAYOUT_MAX_ENTRIES` | `web.layout_max_entries` | `10000` (its entries) |
+| `GOSIDIAN_WEB_LAYOUT_MAX_FONT_BYTES` | `web.layout_max_font_bytes` | `33554432` (32 MiB: a font added to the catalog of the page-layout editor) |
 | `GOSIDIAN_WEB_PLUGIN_TIMEOUT` | `web.plugin_timeout` | `2m` (the longest the web UI waits for a plugin, a graph or the cut view, within the plugin's own `timeout`) |
 | `GOSIDIAN_SECRETS_KEY` | — | empty (32 bytes in base64, `openssl rand -base64 32`: the key of `<state-dir>/secrets.json`, the secrets the pipelines use; without it `gosidian secret` refuses and the nodes that need a secret fail) |
 | `GOSIDIAN_TRASH_ENABLED` | `trash.enabled` | `false` |

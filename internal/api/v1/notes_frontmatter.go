@@ -16,8 +16,10 @@ import (
 	"github.com/gosidian/gosidian/internal/fleet"
 	"github.com/gosidian/gosidian/internal/frontmatter"
 	"github.com/gosidian/gosidian/internal/index"
+	"github.com/gosidian/gosidian/internal/lint"
 	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/gosidian/gosidian/internal/server/events"
+	"github.com/gosidian/gosidian/internal/vault"
 	"github.com/gosidian/gosidian/internal/views"
 )
 
@@ -89,6 +91,13 @@ func (r *Router) patchFrontmatter(w http.ResponseWriter, req *http.Request, rel 
 	case len(body.Set) == 0 && len(body.Unset) == 0:
 		WriteError(w, http.StatusBadRequest, CodeValidationRequired, "nothing to change: give set or unset")
 		return
+	}
+
+	for _, key := range []string{vault.ValidVersionKey, vault.MCPVersionKey} {
+		if _, set := body.Set[key]; set || slices.Contains(body.Unset, key) {
+			WriteError(w, http.StatusUnprocessableEntity, CodeValidationFormat, key+" is not a field to edit: the project's admin sets it from the note's versions")
+			return
+		}
 	}
 
 	unlock := r.deps.Vault.LockPath(rel)
@@ -280,7 +289,9 @@ func isEmptyList(v any) bool {
 // rowFieldsResponse is what the web UI's property panel shows for a note
 // (IMP-127 phase 5). For a row of a database the reader may see: the
 // schema's fields, the note's values as the index reads them, and whether
-// the reader may edit them. For any other note only Values, empty.
+// the reader may edit them. For any other note Values is empty. Every
+// markdown note gives its tags and whether the reader may write it, for
+// the tag field (IMP-223).
 type rowFieldsResponse struct {
 	Database string         `json:"database,omitempty"`
 	Source   string         `json:"source,omitempty"`
@@ -294,6 +305,12 @@ type rowFieldsResponse struct {
 	// through gosidian, from the audit log (IMP-127 iteration 3).
 	CreatedBy  string `json:"created_by,omitempty"`
 	ModifiedBy string `json:"modified_by,omitempty"`
+	// Tags are the frontmatter's tags, as the index reads them (an inline
+	// #tag of the body is not one); null for a note that is not markdown.
+	Tags []string `json:"tags"`
+	// TagVocabulary is the project's declared tag vocabulary, when it has
+	// the use_tag_vocabulary flag: the tag field suggests it.
+	TagVocabulary []string `json:"tag_vocabulary,omitempty"`
 }
 
 var frontmatterKeyRe = regexp.MustCompile(`(?m)^([a-zA-Z_][\w-]*):`)
@@ -311,6 +328,10 @@ func (r *Router) readRowFields(w http.ResponseWriter, req *http.Request, rel str
 		return
 	}
 	resp := rowFieldsResponse{Values: map[string]any{}}
+	if strings.HasSuffix(strings.ToLower(rel), ".md") {
+		resp.Tags, resp.Writable = noteTags(note.Content), r.viewCanWrite(p)(rel)
+		resp.TagVocabulary = r.tagVocabulary(projectOf(rel))
+	}
 	if r.deps.Index == nil {
 		WriteJSON(w, http.StatusOK, resp)
 		return
@@ -354,6 +375,30 @@ func (r *Router) readRowFields(w http.ResponseWriter, req *http.Request, rel str
 		resp.CreatedBy, resp.ModifiedBy = a.CreatedBy, a.ModifiedBy
 	}
 	WriteJSON(w, http.StatusOK, resp)
+}
+
+// noteTags are a note's frontmatter tags as PATCH .../frontmatter compares
+// them (currentField): never nil, so a note without tags says so.
+func noteTags(content []byte) []string {
+	tags, _ := parser.ParseFrontmatterFields(parser.ExtractFrontmatterRaw(content))["tags"].([]string)
+	if tags == nil {
+		return []string{}
+	}
+	return tags
+}
+
+// tagVocabulary is the vocabulary a project declares in
+// memory/conventions.md, when it has the use_tag_vocabulary flag
+// (IMP-075); nil otherwise.
+func (r *Router) tagVocabulary(project string) []string {
+	if r.deps.Projects == nil || !r.deps.Projects.UsesTagVocabulary(project) {
+		return nil
+	}
+	note, err := r.deps.Vault.Load(lint.ProjectVocabularyNote(project))
+	if err != nil {
+		return nil
+	}
+	return lint.ValidVocabularyEntries(parser.FrontmatterList(parser.FrontmatterRawForPath(note.Path, note.Content), "tag_vocabulary"))
 }
 
 // rowViewsResponse holds the row views of a note that is a row of a
@@ -429,6 +474,12 @@ func (r *Router) patchCard(w http.ResponseWriter, req *http.Request, user *Reque
 	note, err := r.deps.Vault.Load(rel)
 	if err != nil || !fleet.IsTask(parser.FrontmatterRawForPath(rel, note.Content)) || fleet.ReadTask(rel, note.Content).Board == "" {
 		return false
+	}
+	for _, k := range []string{fleet.KeyStarted, fleet.KeyFinished} {
+		if _, set := body.Set[k]; set || slices.Contains(body.Unset, k) {
+			WriteError(w, http.StatusBadRequest, CodeValidationFormat, k+": the server writes it as the card moves")
+			return true
+		}
 	}
 	place := body.At != nil
 	for _, k := range []string{fleet.KeyStatus, fleet.KeyColumn, fleet.KeyRank} {

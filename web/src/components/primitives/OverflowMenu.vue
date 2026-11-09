@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
  * OverflowMenu — a ⋯ button that opens a short list of actions, where a
- * window toolbar puts what does not fit (IMP-156). It closes on a pick, on
+ * window toolbar puts what does not fit (IMP-156); its default slot gives
+ * the button another icon. It closes on a pick, on
  * Escape (focus back to the button), on a click outside, or when the focus
  * leaves it for another control; the arrows move between the entries.
  */
@@ -12,6 +13,8 @@ import { Ellipsis } from 'lucide-vue-next'
 export interface OverflowItem {
   key: string
   label: string
+  /** A word for the item shown in a row next to its icon; label stays its tooltip. */
+  short?: string
   icon?: Component
   disabled?: boolean
   run: () => void
@@ -85,7 +88,7 @@ function onFocusOut(e: FocusEvent) {
       data-overflow-button
       @click="open ? close() : show()"
     >
-      <Ellipsis class="h-3.5 w-3.5" />
+      <slot><Ellipsis class="h-3.5 w-3.5" /></slot>
     </button>
     <ul
       v-if="open"

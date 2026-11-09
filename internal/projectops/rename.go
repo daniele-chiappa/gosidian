@@ -75,41 +75,53 @@ func tellDeleted(name string) {
 // free target, and no MCP token already scoped to the target name, which
 // the renamed project would otherwise fall to. The access entry moves before
 // the folder, and moves back if the folder does not move. ps and tokens may
-// be nil. Returns how many tokens changed.
+// be nil. Returns how many tokens changed. The references to the project's
+// files in other notes stay as written: RenameRewriting rewrites them.
 func Rename(v *vault.Vault, idx *index.Index, ps *projects.Store, tokens *auth.Store, from, to string) (int, error) {
+	n, _, err := RenameRewriting(v, idx, ps, tokens, from, to, nil)
+	return n, err
+}
+
+// RenameRewriting renames the project as Rename does, and rewrites the
+// references to its files in the notes referrers names by their paths
+// before the rename, as vault.ProjectReferrers finds them: the notes its
+// caller may write, the project's own included (BUG-153). It returns the
+// notes rewritten too, by their paths after the rename.
+func RenameRewriting(v *vault.Vault, idx *index.Index, ps *projects.Store, tokens *auth.Store, from, to string, referrers []string) (int, []string, error) {
 	projectMu.Lock()
 	defer projectMu.Unlock()
 	from, err := v.CheckExistingProject(from)
 	if err != nil {
-		return 0, fmt.Errorf("%w: source name: %v", ErrInvalid, err)
+		return 0, nil, fmt.Errorf("%w: source name: %v", ErrInvalid, err)
 	}
 	to, err = v.CheckProject(to)
 	if err != nil {
-		return 0, fmt.Errorf("%w: target name: %v", ErrInvalid, err)
+		return 0, nil, fmt.Errorf("%w: target name: %v", ErrInvalid, err)
 	}
 	if from == to {
-		return 0, nil
+		return 0, nil, nil
 	}
 	if idx == nil {
-		return 0, errors.New("index not configured")
+		return 0, nil, errors.New("index not configured")
 	}
 	if !folderExists(v, from) {
-		return 0, fmt.Errorf("%w: project %q does not exist", ErrInvalid, from)
+		return 0, nil, fmt.Errorf("%w: project %q does not exist", ErrInvalid, from)
 	}
 	if folderExists(v, to) {
-		return 0, fmt.Errorf("%w: target %q already exists", ErrInvalid, to)
+		return 0, nil, fmt.Errorf("%w: target %q already exists", ErrInvalid, to)
 	}
 	if err := refuseScopedName(tokens, to); err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	var since int64
 	if ps != nil {
 		since = ps.Get(from).Since
 		if err := ps.Rename(from, to); err != nil {
-			return 0, err
+			return 0, nil, err
 		}
 	}
-	if err := v.RenameProject(idx, from, to); err != nil {
+	rewritten, err := v.RenameProjectRewriting(idx, from, to, referrers)
+	if err != nil {
 		if folderExists(v, from) {
 			if ps != nil {
 				// Moving the entry back stamps from as just named; it was
@@ -120,20 +132,20 @@ func Rename(v *vault.Vault, idx *index.Index, ps *projects.Store, tokens *auth.S
 					_ = ps.Set(from, f)
 				}
 			}
-			return 0, err
+			return 0, nil, err
 		}
-		// The folder moved but the index did not fully follow: the rename
-		// stands, so the token scopes follow it too.
+		// The folder moved but the index or a note did not fully follow:
+		// the rename stands, so the token scopes follow it too.
 		tellRenamed(from, to)
 		n, _ := renameScopes(tokens, from, to)
-		return n, fmt.Errorf("%w: index: %v", ErrIncomplete, err)
+		return n, rewritten, fmt.Errorf("%w: index: %v", ErrIncomplete, err)
 	}
 	tellRenamed(from, to)
 	n, err := renameScopes(tokens, from, to)
 	if err != nil {
-		return n, fmt.Errorf("%w: MCP token scopes: %v", ErrIncomplete, err)
+		return n, rewritten, fmt.Errorf("%w: MCP token scopes: %v", ErrIncomplete, err)
 	}
-	return n, nil
+	return n, rewritten, nil
 }
 
 func renameScopes(tokens *auth.Store, from, to string) (int, error) {

@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/projects"
 	"github.com/gosidian/gosidian/internal/webauth"
 )
@@ -125,7 +126,7 @@ func (r *Router) handleAdminTeams(w http.ResponseWriter, req *http.Request) {
 			WriteError(w, code, CodeValidationFormat, err.Error())
 			return
 		}
-		r.auditAccess(user, "team_create", t.ID, t.Name)
+		r.auditAccess(user, audit.ActionTeamCreate, t.ID, t.Name)
 		WriteJSON(w, http.StatusCreated, r.toTeamView(t))
 	default:
 		WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
@@ -177,14 +178,14 @@ func (r *Router) handleAdminTeam(w http.ResponseWriter, req *http.Request, user 
 			WriteError(w, code, CodeValidationFormat, err.Error())
 			return
 		}
-		r.auditAccess(user, "team_update", t.ID, t.Name)
+		r.auditAccess(user, audit.ActionTeamUpdate, t.ID, t.Name)
 		WriteJSON(w, http.StatusOK, r.toTeamView(t))
 	case http.MethodDelete:
 		if err := r.deps.Projects.DeleteTeam(team.ID); err != nil {
 			WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
 			return
 		}
-		r.auditAccess(user, "team_delete", team.ID, team.Name)
+		r.auditAccess(user, audit.ActionTeamDelete, team.ID, team.Name)
 		for p := range team.Grants {
 			r.publishSidebarEvent("update", p)
 		}
@@ -223,7 +224,7 @@ func (r *Router) handleAdminTeamUsers(w http.ResponseWriter, req *http.Request, 
 			WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
 			return
 		}
-		r.auditAccess(user, "team_user_add", team.ID+"/"+target.ID, "")
+		r.auditAccess(user, audit.ActionTeamUserAdd, team.ID+"/"+target.ID, "")
 		for p := range team.Grants {
 			r.publishSidebarEvent("update", p)
 		}
@@ -238,7 +239,7 @@ func (r *Router) handleAdminTeamUsers(w http.ResponseWriter, req *http.Request, 
 			WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
 			return
 		}
-		r.auditAccess(user, "team_user_remove", team.ID+"/"+userID, "")
+		r.auditAccess(user, audit.ActionTeamUserRemove, team.ID+"/"+userID, "")
 		for p := range team.Grants {
 			r.publishSidebarEvent("update", p)
 		}
@@ -273,7 +274,7 @@ func (r *Router) handleAdminTeamGrants(w http.ResponseWriter, req *http.Request,
 			WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
 			return
 		}
-		r.auditAccess(user, "team_grant_set", team.ID+"/"+body.Project, body.Level)
+		r.auditAccess(user, audit.ActionTeamGrantSet, team.ID+"/"+body.Project, body.Level)
 		r.publishSidebarEvent("update", body.Project)
 		t, _ := r.deps.Projects.Team(team.ID)
 		WriteJSON(w, http.StatusCreated, r.toTeamView(t))
@@ -286,7 +287,7 @@ func (r *Router) handleAdminTeamGrants(w http.ResponseWriter, req *http.Request,
 			WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
 			return
 		}
-		r.auditAccess(user, "team_grant_remove", team.ID+"/"+project, "")
+		r.auditAccess(user, audit.ActionTeamGrantRemove, team.ID+"/"+project, "")
 		r.publishSidebarEvent("update", project)
 		w.WriteHeader(http.StatusNoContent)
 	default:

@@ -1,6 +1,6 @@
 # MCP tool catalogue
 
-**71 tools** cover the full retrieval → write → workflow →
+**81 tools** cover the full retrieval → write → workflow →
 orchestration → self-check cycle for agent memory.
 
 Four belong to branches that are off by default, and `tools/list` shows
@@ -11,7 +11,9 @@ token that may write in a project with an IN folder (`use_in`). In the
 same way `memory_create_table_note` and `memory_create_media_note` are
 listed only while `table_notes` and `media_notes` are on: off, they could
 only refuse, and `memory_ingest` stores a `.csv` or an image as an
-attachment. Hidden, these tools are also unknown to `tools/call`.
+attachment. The nine `layout_*` show where the owner exposed the plugin
+with the page-layout engine. Hidden, these tools are also unknown to
+`tools/call`.
 
 Consult each tool's `description` via your client's `tools/list` call
 for precise schemas; the groupings below are the conceptual map.
@@ -127,7 +129,12 @@ a note naming it (and the likely intended argument, e.g. `Project` →
   A note with ```` ```diagram ```` blocks also returns `diagrams`: for
   each its `kind`, `title`, `line`, the diagram in words (`text`) and its
   `problems` ([diagrams](../diagrams.md)); `memory_bootstrap` gives the
-  format in `capabilities.diagrams`. With `media: "inline"` a note's
+  format in `capabilities.diagrams`. One with ```` ```graph ```` blocks
+  returns `graphs`: for each its `line`, its `source` and the view in
+  words (`text`): the links' notes and links counted among the notes the
+  token reads, with its ten most linked as wikilinks; a plugin's graph by
+  its view alone, without asking the plugin; or its `problems`
+  ([graph views](../vault/graphs.md)). With `media: "inline"` a note's
   images come as text, from their image notes (`[icon: label]` inside a
   sentence, `[image: label] description` on a line of their own), and
   `media_inline` counts them: a document read whole, as a model would read
@@ -196,6 +203,57 @@ a note naming it (and the likely intended argument, e.g. `Project` →
   keys its links come from (absent when they are in the body only), an
   outlink its key in `field`
 
+## Versions of a note
+
+`memory_versions(path, action?, label?, sha?, message?, tag?, if_match?, limit?)`
+gives a note's history and the versions that have a name, with git sync on.
+
+A note can name its **valid version**, the one readers must see, with the key
+`valid_version` in its frontmatter. The note as it is stays the draft: every
+write goes there, and `memory_get` reads it, adds `valid_version
+{tag, label, sha, date, same, missing}` and, when the two differ, says so in
+its `hint`. `memory_get(version: "valid")`, or a tag, reads that version; the
+etag that comes with it is no etag to write with, so nobody overwrites the
+draft with what they read. A pipeline's `note.read` stays on the draft for the
+same reason.
+
+| `action` | Who | What |
+|---|---|---|
+| `list`, the default | who reads the note | `tags`, `valid`, `mcp`, the last `commits` (`limit`, 20), `can_admin` |
+| `tag` | the project's admin | Names a version: `label` such as `V3`, `sha` a commit of the list or none for the note as it is, `message`. A tag never moves |
+| `valid` | the project's admin | `tag`, whole or by its label, becomes the valid version, committed at once |
+| `clear` | the project's admin | Removes it: every reader sees the note as it is |
+| `mcp` | the project's admin | What MCP callers read: `tag`, whole or by its label, `valid` to follow the valid version, `draft` for the note as it is |
+
+A token acts as the account behind it: it must be of the project's admin, and
+have the write scope. A token of no account must be for the whole vault. Any
+other write leaves `valid_version` as it was, whatever its text says, and a
+text that cannot hold it is refused. `memory_search` reads the valid version,
+so a word only in the draft finds nothing, while the title, the tags and the
+frontmatter stay the note's as it is; a pipeline cuts it with `at: valid`.
+
+### What a note gives MCP callers
+
+A note can also choose what MCP callers read while it changes, with the key
+`mcp_version`: a tag, or `valid` to follow the valid version. Without the key
+they read the note as it is. The key changes only with the action `mcp`, or
+from the version button in the web UI, as `valid_version` does.
+
+- `memory_get`, `memory_batch_get`, `memory_get_section`, `memory_get_outline`,
+  `memory_get_frontmatter`, a `memory://notes/` resource, `layout_pieces` and
+  `layout_open` give that version, with `version: "V3"` and a `hint` in the
+  answer. `memory_get(version: "draft")` and `layout_open(version: "draft")`
+  read the note as it is.
+- Writes go to the draft. The etag of the version is no etag to write with, and
+  a `memory_update` without `if_match` is refused, so that the version read does
+  not end up over the draft: read the draft and pass its etag. `memory_edit` and
+  `memory_append` need nothing more.
+- A `transfer: "http"` takes the file as it is, so it asks for `version: "draft"`.
+- A tag that cannot be read, or a version that is the note as it is, gives the
+  note as it is.
+- `memory_search` follows the valid version, and a pipeline chooses with `at`:
+  neither looks at this key.
+
 ## Graph (read-only, scope-aware)
 
 - `memory_hubs(project?, limit?)` — most-connected notes ("god nodes")
@@ -243,7 +301,13 @@ a note naming it (and the likely intended argument, e.g. `Project` →
   (`trash_id`, restorable from the web UI with its access); revokes the
   MCP tokens scoped to it alone and narrows the others
   (`tokens_revoked`, `tokens_narrowed`)
-- `memory_rename_project(from, to)`
+- `memory_rename_project(from, to)` — the wiki-links with the project's
+  path, the links to its attachments and the `media:` pointers follow it
+  in the notes the token may write (`rewritten`, the first 50, and
+  `rewritten_count`), each note outside the project recorded as an
+  update in its name; the others keep the old path, and are only counted
+  (`not_rewritten`, with a notice); views are not rewritten (see
+  [Multi-project](../vault/multi-project.md#project-discovery--creation))
 - `memory_global_check(project)` — owner-only: report which
   `global-private` notes a project references, for private→public
   promotion (see [Global projects](../vault/global-projects.md))
@@ -310,8 +374,9 @@ a note naming it (and the likely intended argument, e.g. `Project` →
 - `memory_gc_attachments(project, dry_run?, min_age_hours?)` — the
   project's attachments that no file of the vault names any more, older
   than `min_age_hours` (default 24, so an upload not linked yet is left
-  alone). References count from every project, canvases, bases and the
-  trash. A dry run (the default) lists them with size and age; with
+  alone). References count from every project, canvases, bases, the
+  trash and a note's [valid version](#versions-of-a-note). A dry run (the
+  default) lists them with size and age; with
   `dry_run: false` they go to the trash when it is on, else they are
   deleted (write scope; audited as `delete_attachment`)
 - `memory_attachment_info(path)`
@@ -335,6 +400,24 @@ cannot read its bearer — is documented there too, as is `POST /mcp/append?path
 write for scripts that hold a bearer but no MCP session (the Claude Code
 hooks in `contrib/claude-code/`); it runs the same pipeline as
 `memory_append`.
+
+## Page layouts
+
+A note and its design, built one block at a time ([page
+layouts](../vault/layouts.md#an-agents-session)). They show where the owner
+exposed the plugin with the engine (`gosidian plugin expose layout <project>`).
+
+| Tool | Does |
+|---|---|
+| `layout_pieces` | The note's pieces, with number, hash, kind, text and an image's path |
+| `layout_add_piece` | A text or an image into the note, after a piece or at its end |
+| `layout_number_pieces` | Numbers the blocks, so each can be placed |
+| `layout_open` | The note's design in a session, with the installation's fonts; a new document for a note without one |
+| `layout_run` | Commands on the session's design, in order |
+| `layout_render` | One page as a PNG |
+| `layout_commands` | The engine's commands and their parameters |
+| `layout_save` | The session's design into the note, against the etag of the opening |
+| `layout_close` | Ends the session |
 
 ## Orchestration (agent-to-agent handoffs + change feed)
 
@@ -379,20 +462,23 @@ All but `memory_create_team` are in the `core` profile.
 - `memory_tasks(project, team?, board?, status?, role?)` — the tasks
   (`open` by default, `all`, or one status), each submitted one with why
   it does not start yet, and each team with its spend of the day against
-  its budget; with `board`, its cards and its columns with their counts
+  its budget; with `board`, its cards, its columns with their counts, its
+  flow, its iteration in progress and the retrospectives to write
+  ([board](../board.md#flow))
 - `memory_task_create(project, team, assignee, title, body?, parent?,
   depends_on?, paths?, forbid?, budget_usd?, hold?)` — a task for a role.
   A run token creates tasks only for the roles its own role delegates
   to, under its own task; one level of sub-tasks, `[agents] max_tasks`
   per objective. With `board` instead of `team` and `assignee`, a card
-  (`column?`, `for?`, `done_by?`), at the bottom of a column of
-  `backlog` or `submitted`
+  (`column?`, `for?`, `done_by?`, `iteration?`), at the bottom of a column
+  of `backlog` or `submitted`
 - `memory_task_claim(path | board)` — an outside agent takes a ready
   task, or the board's next card, with a lease of `[agents] lease`
 - `memory_task_heartbeat(path)` — renews the lease
-- `memory_task_update(path, status | column, message?)` — `working`,
-  `input-required`, `review`, or `submitted` to give it back; a card, to a
-  column of those
+- `memory_task_update(path, status | column | iteration, message?)` —
+  `working`, `input-required`, `review`, or `submitted` to give it back; a
+  card, to a column of those, or into an iteration of its board, held or
+  not (an empty one takes it out)
 - `memory_task_complete(path, report, status?)` — closes it with the
   `## Report` section the tasks after it read; a card a person closes
   goes to review instead

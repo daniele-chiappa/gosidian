@@ -8,7 +8,6 @@ import (
 
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/auth"
-	"github.com/gosidian/gosidian/internal/chatbot"
 	"github.com/gosidian/gosidian/internal/gitsync"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/marks"
@@ -57,8 +56,8 @@ func wireGitWriters(s *gitsync.Sync, al *audit.Log, names *authorNames, v *vault
 			return
 		}
 		// The attachments are files of the history too, not notes of the
-		// authors (BUG-148).
-		if e.Action == audit.ActionUploadAttachment || e.Action == audit.ActionDeleteAttachment {
+		// authors (BUG-148), and who sets a valid version is no author.
+		if e.Action == audit.ActionUploadAttachment || e.Action == audit.ActionDeleteAttachment || e.Action == audit.ActionNoteValid {
 			s.RecordWrite(string(e.Action), e.Path, e.To, names.of(e))
 			return
 		}
@@ -202,16 +201,39 @@ func (n *authorNames) user(id string) (string, bool) {
 
 // wireChat tells the bots' service of the notes written, moved and
 // deleted (IMP-191): a bot's note is handed to its plugin again soon after.
-func wireChat(c *chatbot.Service, al *audit.Log) {
+// A folder or a project goes as its path with a trailing slash, and a
+// restore from the trash as the place it brings back (BUG-152).
+func wireChat(c interface{ Changed(path string) }, al *audit.Log) {
 	al.OnWrite(func(e audit.Entry) {
+		if origin, _, ok := restoreFromTrash(e); ok {
+			c.Changed(chatPlace(origin))
+			return
+		}
 		switch e.Action {
-		case audit.ActionCreate, audit.ActionUpdate, audit.ActionAppend, audit.ActionRestore, audit.ActionDelete:
+		case audit.ActionCreate, audit.ActionUpdate, audit.ActionAppend, audit.ActionRestore:
 			c.Changed(e.Path)
+		case audit.ActionDelete:
+			c.Changed(chatPlace(e.Path))
 		case audit.ActionRename:
-			c.Changed(e.Path)
-			c.Changed(e.To)
+			c.Changed(chatPlace(e.Path))
+			c.Changed(chatPlace(e.To))
+		case audit.ActionDeleteProject:
+			c.Changed(e.Path + "/")
+		case audit.ActionRenameProject:
+			c.Changed(e.Path + "/")
+			c.Changed(e.To + "/")
 		}
 	})
+}
+
+// chatPlace is a path as the bots' service reads it: a note as it is, any
+// other path, a folder or a project, with a trailing slash (as for the
+// marks, "v1.2" is a folder).
+func chatPlace(p string) string {
+	if strings.HasSuffix(strings.ToLower(p), ".md") {
+		return p
+	}
+	return p + "/"
 }
 
 // wireMarks keeps the marks of the notes with them (IMP-188): a note, a

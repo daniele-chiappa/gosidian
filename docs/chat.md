@@ -117,8 +117,10 @@ own with the secret of `signed`; its `iss` is its own.
 
 ## What gosidian does
 
-- **It hands the bot to its plugin** when the note is saved, at the
-  server's start and every five minutes, with the tool `chat_configure`;
+- **It hands the bot to its plugin** when the note is saved, restored
+  from the trash or moved with its folder or project, at the server's
+  start and every five minutes, with the tool `chat_configure`; a bot
+  whose note, folder or project is deleted leaves its plugin as soon;
   and at once when the plugin lost it: every 30 seconds it asks the
   plugins that have bots which ones they still have (`chat_bots`), and a
   plugin that restarted, or misses a bot, gets them all again; so does a

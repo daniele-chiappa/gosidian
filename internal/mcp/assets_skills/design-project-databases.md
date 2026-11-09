@@ -61,6 +61,8 @@ fields:
 
 Field types: `text`, `number`, `date`, `checkbox`, `select` and `multi-select` (with `options`), `url`, `relation` (wikilinks), `list`, `rollup` (computed when read). `title` and `tags` need no declaring.
 
+For the people who read the database in the web UI, a field may carry `label` (a text, or `{it: Stato, en: Status}`) and a select `option_labels` (`{it: {open: aperta}}`), in the language of its readers: rows, filters and queries keep the codes.
+
 Rules that keep a database honest:
 
 - **One fact in one place**: a field, a tag or the body, not two of them.

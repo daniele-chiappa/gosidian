@@ -149,7 +149,7 @@ func TestBoardTools_TakeMoveAndClose(t *testing.T) {
 	if msg := expectError(t, mustCall(s.handleTaskUpdate(context.Background(), call(map[string]any{"path": first.Path, "column": "Fatto"})))); !strings.Contains(msg, "completed") {
 		t.Fatalf("an update to the column of completed: %s", msg)
 	}
-	if msg := expectError(t, mustCall(s.handleTaskUpdate(context.Background(), call(map[string]any{"path": first.Path})))); !strings.Contains(msg, "status or column") {
+	if msg := expectError(t, mustCall(s.handleTaskUpdate(context.Background(), call(map[string]any{"path": first.Path})))); !strings.Contains(msg, "status, column") {
 		t.Fatalf("an update without status or column: %s", msg)
 	}
 	// Analisi has room again: the second card.

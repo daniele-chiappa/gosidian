@@ -113,12 +113,14 @@ function syncWindow(where: QueryCondition[]) {
   const w = store.windows.find((x) => x.type === 'query' && x.key === planciaKey('query'))
   if (!w) return
   const fields = splitList(fieldsText.value)
+  // Every part, undefined when empty: identify merges the props, so one
+  // left out kept its old value in the address (BUG-158).
   store.identify(w.id, w.key, {
     where,
-    ...(project.value.trim() ? { project: project.value.trim() } : {}),
-    ...(sort.value.trim() ? { sort: sort.value.trim() } : {}),
-    ...(order.value ? { order: order.value } : {}),
-    ...(fields.length ? { fields } : {}),
+    project: project.value.trim() || undefined,
+    sort: sort.value.trim() || undefined,
+    order: order.value || undefined,
+    fields: fields.length ? fields : undefined,
   })
 }
 
@@ -231,7 +233,7 @@ onMounted(async () => {
           v-model="project"
           list="query-projects"
           :placeholder="t('query.project_placeholder')"
-          class="h-control py-0 w-56 rounded bg-bg-elevated border border-border px-2 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
+          class="h-control py-0 w-56 rounded bg-bg-elevated border border-border-input px-2 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
         >
       </div>
 
@@ -246,12 +248,12 @@ onMounted(async () => {
           list="query-fields"
           :placeholder="t('query.field')"
           :aria-label="t('query.field')"
-          class="h-control py-0 w-44 rounded bg-bg-elevated border border-border px-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-focus"
+          class="h-control py-0 w-44 rounded bg-bg-elevated border border-border-input px-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-focus"
         >
         <select
           v-model="r.op"
           :aria-label="t('query.operator')"
-          class="h-control py-0 rounded bg-bg-elevated border border-border px-2 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
+          class="h-control py-0 rounded bg-bg-elevated border border-border-input px-2 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
         >
           <option
             v-for="op in QUERY_OPS"
@@ -265,7 +267,7 @@ onMounted(async () => {
           v-if="r.op === 'exists'"
           v-model="r.value"
           :aria-label="t('query.value')"
-          class="h-control py-0 rounded bg-bg-elevated border border-border px-2 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
+          class="h-control py-0 rounded bg-bg-elevated border border-border-input px-2 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
         >
           <option value="true">
             true
@@ -279,7 +281,7 @@ onMounted(async () => {
           v-model="r.value"
           :placeholder="r.op === 'in' ? 'a, b, c' : t('query.value')"
           :aria-label="t('query.value')"
-          class="h-control py-0 flex-1 min-w-40 rounded bg-bg-elevated border border-border px-2 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
+          class="h-control py-0 flex-1 min-w-40 rounded bg-bg-elevated border border-border-input px-2 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
         >
         <button
           type="button"
@@ -310,12 +312,12 @@ onMounted(async () => {
             list="query-sort"
             :placeholder="t('query.sort_placeholder')"
             :title="t('query.sort_hint')"
-            class="h-control py-0 w-56 rounded bg-bg-elevated border border-border px-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-focus"
+            class="h-control py-0 w-56 rounded bg-bg-elevated border border-border-input px-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-focus"
           >
           <select
             v-model="order"
             :aria-label="t('query.order')"
-            class="h-control py-0 rounded bg-bg-elevated border border-border px-2 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
+            class="h-control py-0 rounded bg-bg-elevated border border-border-input px-2 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
           >
             <option value="">
               {{ t('query.order_default') }}
@@ -337,7 +339,7 @@ onMounted(async () => {
             id="query-fields-input"
             v-model="fieldsText"
             :placeholder="t('query.fields_placeholder')"
-            class="h-control py-0 w-56 rounded bg-bg-elevated border border-border px-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-focus"
+            class="h-control py-0 w-56 rounded bg-bg-elevated border border-border-input px-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-focus"
           >
         </span>
         <button

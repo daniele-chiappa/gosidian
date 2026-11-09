@@ -3,6 +3,7 @@ import { useI18n } from 'vue-i18n'
 import { onMounted, ref } from 'vue'
 import { listSpaTokens, revokeSpaToken, type SpaToken } from '@/api/admin'
 import { errorText } from '@/api/errors'
+import ScrollRegion from '@/components/primitives/ScrollRegion.vue'
 import DateTime from '@/components/primitives/DateTime.vue'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
 import { confirmAction } from '@/composables/useConfirm'
@@ -50,8 +51,7 @@ onMounted(load)
 
   <p v-else-if="!tokens.length" class="text-text-muted text-sm">{{ t('admin.sessions.empty') }}</p>
 
-  <div v-else class="overflow-x-auto">
-    <!-- Scrolls inside its box in a narrow window (IMP-156, M7). -->
+  <ScrollRegion v-else :label="t('admin.tab.spa-tokens')">
 
     <table class="w-full text-sm">
       <thead class="text-text-muted text-xs [&_th]:font-medium">
@@ -88,5 +88,5 @@ onMounted(load)
       </tbody>
     </table>
 
-  </div>
+  </ScrollRegion>
 </template>

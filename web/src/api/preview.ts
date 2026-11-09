@@ -6,6 +6,11 @@ export interface ViewColumn {
   type?: string
   options?: string[]
   required?: boolean
+  /** The field's name from the schema: in every language, or per language. */
+  label?: string
+  labels?: Record<string, string>
+  /** The options' names from the schema, by language then option. */
+  option_labels?: Record<string, Record<string, string>>
 }
 
 /** A wikilink in a field value; path is "" when it names no visible note. */
@@ -49,7 +54,45 @@ export interface ViewData {
   creatable?: boolean
   /** The columns of a ```board block, with their states and limits (IMP-216). */
   lanes?: ViewLane[]
+  /** Its board's flow and iterations (IMP-216 phase 2). */
+  board?: ViewBoardState
   error?: string
+}
+
+/** A card that waits in its column longer than its board's stale days. */
+export interface ViewStaleCard {
+  path: string
+  title: string
+  column: string
+  days: number
+}
+
+/** An iteration of a board: its note, goal and days (2006-01-02). */
+export interface ViewIteration {
+  path: string
+  title?: string
+  board: string
+  goal?: string
+  start: string
+  end: string
+  reviewed?: string
+  retro?: string
+}
+
+/** What a ```board block's board shows above its columns. */
+export interface ViewBoardState {
+  flow: {
+    /** In days, with one decimal; no p50 with too few cards. */
+    cycle_days: { p50?: number; p85?: number; n: number }
+    /** The last 4 weeks, the oldest first. */
+    closed_per_week: number[]
+    stale?: ViewStaleCard[]
+  }
+  stale_days: number
+  /** The iteration in progress: days_left counts today. */
+  iteration?: ViewIteration & { days_left: number; cards: { done: number; total: number } }
+  /** The iterations whose retrospective waits. */
+  retro?: ViewIteration[]
 }
 
 /** A column of a board's block: its cards are in status; wip is its limit. */

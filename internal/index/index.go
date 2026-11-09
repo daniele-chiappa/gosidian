@@ -37,6 +37,9 @@ type Index struct {
 	db    *sql.DB
 	stems *stemmer   // query-side Porter stems, see stem.go
 	stmts *stmtCache // the statements of the writes, prepared (stmts.go)
+	// searchText gives the text a note is searched by, when it is not the
+	// note's own (SetSearchText).
+	searchText func(path, body string) string
 }
 
 type NoteDoc struct {
@@ -103,8 +106,10 @@ const schemaVersion = 7
 // re-indexes the whole vault, instead of skipping the unchanged notes and
 // keeping rows extracted by the old code. TestContentVersion_Golden fails
 // when the extraction output changes without a bump. Link resolution is not
-// covered: the boot scan runs ResolveAll every time.
-const ContentVersion = 10
+// covered: the boot scan runs ResolveAll every time. 11: a note with a valid
+// version is searched by that version's text (SetSearchText), the golden
+// corpus's rows the same.
+const ContentVersion = 11
 
 // migrate brings an index file to schemaVersion and reports whether it had
 // to. The index is a cache of the vault — the boot scan re-upserts every
@@ -335,7 +340,7 @@ func extractForPath(path, body string) (links []parser.WikiLinkRef, tags []strin
 // links unresolved, which lint reported as broken right after a write
 // (BUG-079).
 func (i *Index) Upsert(n NoteDoc) error {
-	_, err := i.upsertLocked(Extract(n), true)
+	_, err := i.upsertLocked(i.Extract(n), true)
 	return err
 }
 
@@ -344,8 +349,28 @@ func (i *Index) Upsert(n NoteDoc) error {
 // at the end reaches the same result as resolving note by note, the links of
 // each note and then the links elsewhere it answers, with fewer queries.
 func (i *Index) UpsertUnresolved(n NoteDoc) error {
-	_, err := i.upsertLocked(Extract(n), false)
+	_, err := i.upsertLocked(i.Extract(n), false)
 	return err
+}
+
+// SetSearchText gives what the full-text body of a note reads, when it is
+// not the note's own text: for a note with a valid version (IMP-201), that
+// version, so a word of the draft is found by no search. fn answers "" for
+// the others. All the rest of the row is of the note as it is, its title,
+// tags, links and frontmatter among them, and so is its hash: fn must depend
+// on the note's text alone. Set it before the first scan; every upsert and
+// the boot scan pass here. fn runs outside the lock, on every core of a scan.
+func (i *Index) SetSearchText(fn func(path, body string) string) { i.searchText = fn }
+
+// Extract is the package's Extract, with the text the note is searched by.
+func (i *Index) Extract(n NoteDoc) Extracted {
+	e := Extract(n)
+	if i.searchText != nil {
+		if text := i.searchText(n.Path, n.Body); text != "" {
+			_, _, _, e.ftsBody = extractForPath(n.Path, text)
+		}
+	}
+	return e
 }
 
 // UpsertMany stores the extracted notes like UpsertUnresolved, in order, in

@@ -19,7 +19,7 @@ import { useAccessStore } from '@/stores/access'
 import { errorText } from '@/api/errors'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 
 const props = defineProps<{ project: string }>()
 
@@ -35,6 +35,7 @@ const addTeamLevel = ref<GrantLevel>('read')
 
 const LEVELS: GrantLevel[] = ['read', 'write', 'admin']
 const levelHelp = (l: GrantLevel) => t(`members.level_help.${l}`)
+const levelName = (l: string) => (te(`members.level_name.${l}`) ? t(`members.level_name.${l}`) : l)
 
 const canAdmin = computed(() => view.value?.can_admin ?? false)
 
@@ -119,9 +120,9 @@ async function dropTeam(g: ProjectTeamGrant) {
 
 function levelClass(level: GrantLevel): string {
   return level === 'admin'
-    ? 'bg-accent/20 text-accent'
+    ? 'bg-accent/10 text-accent'
     : level === 'write'
-      ? 'bg-success/20 text-success'
+      ? 'bg-success/10 text-success'
       : 'border border-border text-text-muted'
 }
 
@@ -164,12 +165,13 @@ onMounted(load)
           class="flex items-center gap-3 rounded border border-border bg-surface px-3 py-2"
         >
           <span class="flex-1 text-sm font-medium">{{ m.username }}</span>
-          <span class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded" :class="levelClass(m.level)">{{ m.level }}</span>
+          <span class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded" :class="levelClass(m.level)" :title="m.level" data-level>{{ levelName(m.level) }}</span>
           <template v-if="canAdmin">
             <select
-              class="h-control-sm py-0 text-xs rounded bg-bg-elevated border border-border px-2"
+              class="h-control-sm py-0 text-xs rounded bg-bg-elevated border border-border-input px-2"
               :value="m.level"
               :title="levelHelp(m.level)"
+              :aria-label="t('members.level_of', { name: m.username })"
               @change="changeUser(m, ($event.target as HTMLSelectElement).value)"
             >
               <option v-for="l in LEVELS" :key="l" :value="l">{{ t(`members.level_name.${l}`) }}</option>
@@ -184,16 +186,16 @@ onMounted(load)
         <li v-if="view.users.length === 0" class="text-sm text-text-muted">{{ t('members.no_accounts') }}</li>
       </ul>
       <form v-if="canAdmin && view.candidates" class="flex items-end gap-2 mb-6" @submit.prevent="grantUser">
-        <label class="flex-1 text-sm">
+        <label class="flex-1 min-w-0 text-sm">
           <span class="text-text-muted text-xs">{{ t('members.add_account') }}</span>
-          <select v-model="addUser" class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-2">
+          <select v-model="addUser" class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border-input px-2">
             <option value="">{{ t('members.select_account') }}</option>
             <option v-for="u in view.candidates.users" :key="u.id" :value="u.id">{{ u.username }} ({{ roleLabel(u.role) }})</option>
           </select>
         </label>
-        <label class="text-sm">
-          <span class="text-text-muted text-xs">{{ t('members.level') }}</span>
-          <select v-model="addUserLevel" class="h-control py-0 mt-1 rounded bg-bg-elevated border border-border px-2" :title="levelHelp(addUserLevel)">
+        <label class="shrink-0 text-sm">
+          <span class="block text-text-muted text-xs">{{ t('members.level') }}</span>
+          <select v-model="addUserLevel" class="h-control py-0 mt-1 rounded bg-bg-elevated border border-border-input px-2" :title="levelHelp(addUserLevel)">
             <option v-for="l in LEVELS" :key="l" :value="l">{{ t(`members.level_name.${l}`) }}</option>
           </select>
         </label>
@@ -213,12 +215,13 @@ onMounted(load)
           class="flex items-center gap-3 rounded border border-border bg-surface px-3 py-2"
         >
           <span class="flex-1 text-sm font-medium">{{ g.name }}</span>
-          <span class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded" :class="levelClass(g.level)">{{ g.level }}</span>
+          <span class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded" :class="levelClass(g.level)" :title="g.level" data-level>{{ levelName(g.level) }}</span>
           <template v-if="canAdmin">
             <select
-              class="h-control-sm py-0 text-xs rounded bg-bg-elevated border border-border px-2"
+              class="h-control-sm py-0 text-xs rounded bg-bg-elevated border border-border-input px-2"
               :value="g.level"
               :title="levelHelp(g.level)"
+              :aria-label="t('members.level_of', { name: g.name })"
               @change="changeTeam(g, ($event.target as HTMLSelectElement).value)"
             >
               <option v-for="l in LEVELS" :key="l" :value="l">{{ t(`members.level_name.${l}`) }}</option>
@@ -233,16 +236,16 @@ onMounted(load)
         <li v-if="view.teams.length === 0" class="text-sm text-text-muted">{{ t('members.no_teams') }}</li>
       </ul>
       <form v-if="canAdmin && view.candidates" class="flex items-end gap-2" @submit.prevent="grantTeam">
-        <label class="flex-1 text-sm">
+        <label class="flex-1 min-w-0 text-sm">
           <span class="text-text-muted text-xs">{{ t('members.add_team') }}</span>
-          <select v-model="addTeam" class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-2">
+          <select v-model="addTeam" class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border-input px-2">
             <option value="">{{ t('members.select_team') }}</option>
             <option v-for="t in view.candidates.teams" :key="t.id" :value="t.id">{{ t.name }}</option>
           </select>
         </label>
-        <label class="text-sm">
-          <span class="text-text-muted text-xs">{{ t('members.level') }}</span>
-          <select v-model="addTeamLevel" class="h-control py-0 mt-1 rounded bg-bg-elevated border border-border px-2" :title="levelHelp(addTeamLevel)">
+        <label class="shrink-0 text-sm">
+          <span class="block text-text-muted text-xs">{{ t('members.level') }}</span>
+          <select v-model="addTeamLevel" class="h-control py-0 mt-1 rounded bg-bg-elevated border border-border-input px-2" :title="levelHelp(addTeamLevel)">
             <option v-for="l in LEVELS" :key="l" :value="l">{{ t(`members.level_name.${l}`) }}</option>
           </select>
         </label>

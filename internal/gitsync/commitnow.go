@@ -180,9 +180,15 @@ func (s *Sync) head() (sha, short string, err error) {
 	return sha, short, nil
 }
 
-// tag puts the annotated tag name, with message, on sha. A tag there
-// already on sha is fine; on another commit it is an error.
+// tag puts the annotated tag name, with message, on sha, in the configured
+// author's name. A tag there already on sha is fine; on another commit it
+// is an error.
 func (s *Sync) tag(name, sha, message string) error {
+	return s.tagBy("", name, sha, message)
+}
+
+// tagBy is tag in the name of by, with the configured email.
+func (s *Sync) tagBy(by, name, sha, message string) error {
 	if have, err := s.capture("git", "rev-parse", "-q", "--verify", "refs/tags/"+name+"^{commit}"); err == nil {
 		have = strings.TrimSpace(have)
 		if have == sha {
@@ -190,7 +196,11 @@ func (s *Sync) tag(name, sha, message string) error {
 		}
 		return fmt.Errorf("tag %s is on commit %.12s already, not on %.12s: a tag is never moved", name, have, sha)
 	}
-	if err := s.run("git", "tag", "-a", "-m", message, name, sha); err != nil {
+	var env []string
+	if by = authorName(by); by != "" {
+		env = []string{"GIT_COMMITTER_NAME=" + by}
+	}
+	if err := s.runEnv(context.Background(), env, "git", "tag", "-a", "-m", message, name, sha); err != nil {
 		return fmt.Errorf("git tag %s: %w", name, err)
 	}
 	return nil

@@ -21,6 +21,13 @@ vi.mock('@/api/preview', async (orig) => ({
   listCutCollections: vi.fn(),
 }))
 vi.mock('@/api/marks', () => ({ listMarks: vi.fn() }))
+// The app a plugin offers for a note's type (IMP-226): none unless a test says.
+const apps = vi.hoisted(() => ({ forType: vi.fn() }))
+vi.mock('@/api/layouts', async (orig) => ({
+  ...(await orig<typeof import('@/api/layouts')>()),
+  numberPieces: vi.fn(),
+}))
+vi.mock('@/composables/pluginApps', () => ({ appForType: apps.forType }))
 // The view's note events and conflict announcements, for a test to fire.
 const hooks = vi.hoisted(() => ({
   note: (_p: { path?: string; etag?: string; action?: string }) => {},
@@ -54,9 +61,10 @@ vi.mock('@/composables/useRecentlyViewed', async (orig) => ({
   ...(await orig<typeof import('@/composables/useRecentlyViewed')>()),
   useRecentlyViewed: () => ({ record: vi.fn(), clear: vi.fn() }),
 }))
+const rights = vi.hoisted(() => ({ write: true }))
 vi.mock('@/stores/access', async (orig) => ({
   ...(await orig<typeof import('@/stores/access')>()),
-  useAccessStore: () => ({ canWrite: () => true, deleteNoteKey: 'note.confirm_delete' }),
+  useAccessStore: () => ({ canWrite: () => rights.write, deleteNoteKey: 'note.confirm_delete' }),
 }))
 vi.mock('@/stores/tree', async (orig) => ({
   ...(await orig<typeof import('@/stores/tree')>()),
@@ -89,11 +97,11 @@ vi.mock('@/components/editor/CodeMirrorEditor.vue', async () => {
     __esModule: true,
     default: defineComponent({
       name: 'CodeMirrorEditor',
-      props: { modelValue: { type: String, default: '' } },
+      props: { modelValue: { type: String, default: '' }, label: { type: String, default: undefined } },
       emits: ['update:modelValue'],
       setup: (_, { expose }) => {
         const el = ref<HTMLElement | null>(null)
-        expose({ focus: () => el.value?.focus() })
+        expose({ focus: () => el.value?.focus(), goToLine: () => {} })
         return () => h('div', { 'data-editor': '', tabindex: -1, ref: el })
       },
     }),
@@ -101,11 +109,13 @@ vi.mock('@/components/editor/CodeMirrorEditor.vue', async () => {
 })
 
 import { deleteNote, getNote, updateNote } from '@/api/notes'
+import { numberPieces } from '@/api/layouts'
 import { useAuthStore } from '@/stores/auth'
 import { DRAFT_STORAGE_PREFIX } from '@/composables/useSessionReset'
 import { listCutCollections, renderCut } from '@/api/preview'
 import { listMarks } from '@/api/marks'
 import CutPreview from '@/components/domain/CutPreview.vue'
+import { renderPreviewData } from '@/api/preview'
 import NoteView from '@/views/NoteView.vue'
 import { announcement } from '@/composables/useAnnounce'
 
@@ -421,6 +431,12 @@ describe('NoteView, its heading (IMP-217, F-03)', () => {
     expect(w.find('h1[data-window-heading]').text()).toBe('Alpha, the first')
   })
 
+  it('names its editor by the note, as its heading (IMP-220, F-11)', async () => {
+    vi.mocked(getNote).mockReset().mockImplementation(async (p: string) => ({ ...note(p), title: 'Alpha, the first' }))
+    const w = await mountNote('p/alpha.md', undefined, { mode: 'edit' })
+    expect(w.findComponent({ name: 'CodeMirrorEditor' }).props('label')).toBe('Text of Alpha, the first')
+  })
+
   it('puts the focus in the editor of a note just made, and nowhere else in another', async () => {
     vi.mocked(getNote).mockReset().mockImplementation(async (p: string) => note(p))
     const made = await mountNote('p/a.md', document.body, { mode: 'edit', editorFocus: true })
@@ -547,6 +563,142 @@ describe('NoteView, the save said and kept in sight (IMP-217, F-10)', () => {
     expect(narrow.find('[data-saved-time]').text()).toBe(wide.text().replace(/^saved at /, ''))
     // A screen reader hears the whole, not a bare time.
     expect(narrow.find('.sr-only').text()).toBe(wide.text())
+  })
+})
+
+describe("NoteView, the toolbar's actions in words (IMP-220, F-25)", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.mocked(getNote).mockReset().mockImplementation(async (p: string) => note(p))
+    vi.mocked(listMarks).mockReset().mockResolvedValue([])
+    size.width.value = 0
+  })
+
+  const history = (w: VueWrapper) => w.findAll('header button').find((b) => b.attributes('title') === 'History')
+
+  it('names each action next to its icon when the toolbar is wide', async () => {
+    const w = await mountNote()
+    size.width.value = 1000
+    await flushPromises()
+    const download = w.findAll('header button').find((b) => b.attributes('title') === 'Download original file')!
+    // The name read is the word shown; the tooltip says the whole.
+    expect(download.text()).toBe('Download')
+    expect(download.attributes('aria-label')).toBeUndefined()
+    expect(history(w)!.text()).toBe('History')
+  })
+
+  it('keeps the icons alone, named, when it is not', async () => {
+    const w = await mountNote()
+    size.width.value = 600
+    await flushPromises()
+    const download = w.findAll('header button').find((b) => b.attributes('title') === 'Download original file')!
+    expect(download.text()).toBe('')
+    expect(download.attributes('aria-label')).toBe('Download original file')
+    size.width.value = 300
+    await flushPromises()
+    expect(history(w)).toBeUndefined()
+  })
+})
+
+describe("NoteView, a note in its plugin's app (IMP-226)", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.mocked(listMarks).mockReset().mockResolvedValue([])
+    size.width.value = 1000
+    apps.forType.mockReset().mockImplementation(async (type: string) =>
+      type === 'layout'
+        ? { plugin: 'layout', name: 'layout', title: 'Impaginazione', url: 'https://l.example.com/app/', origin: 'https://l.example.com', note_type: 'layout', bridge: 'layout/2', status: 'ok' }
+        : null,
+    )
+  })
+  const action = (w: VueWrapper) => w.findAll('header button').find((b) => b.attributes('title') === 'Open in the editor')
+
+  it('opens a note whose type an app opens in that app', async () => {
+    vi.mocked(getNote).mockReset().mockImplementation(async (p: string) => note(p, '---\ntype: layout\n---\n'))
+    const open = vi.fn(() => 'id')
+    const w = mount(NoteView, {
+      props: { path: 'r/n1.md' },
+      global: { plugins: [i18n()], provide: { openWindow: open }, stubs: { MarkdownPreview: true, CutPreview: true, PropertiesPanel: true, RowViews: true } },
+    })
+    await flushPromises()
+    expect(apps.forType).toHaveBeenCalledWith('layout')
+    await action(w)!.trigger('click')
+    expect(open).toHaveBeenCalledWith(expect.objectContaining({ type: 'app', key: 'app:r/n1.md', props: { path: 'r/n1.md' } }))
+  })
+
+  const layOut = (w: VueWrapper) => w.findAll('header button').find((b) => b.attributes('title') === 'Lay out this note')
+
+  it('lays out any markdown note, each of its blocks with a number', async () => {
+    vi.mocked(numberPieces).mockReset().mockResolvedValue({ etag: '"E2"', pieces: [] })
+    vi.mocked(getNote).mockReset().mockImplementation(async (p: string) => note(p, '---\ntype: plan\n---\n# Testo\n'))
+    const open = vi.fn(() => 'id')
+    const w = mount(NoteView, {
+      props: { path: 'r/plan.md' },
+      global: { plugins: [i18n()], provide: { openWindow: open }, stubs: { MarkdownPreview: true, CutPreview: true, PropertiesPanel: true, RowViews: true } },
+    })
+    await flushPromises()
+    expect(action(w)).toBeUndefined()
+    await layOut(w)!.trigger('click')
+    await flushPromises()
+    expect(numberPieces).toHaveBeenCalledWith('r/plan.md', expect.any(String))
+    expect(open).toHaveBeenCalledWith(expect.objectContaining({ type: 'app', key: 'app:r/plan.md', props: { path: 'r/plan.md' } }))
+  })
+
+  it('says why a note could not be numbered, and stays on it', async () => {
+    vi.mocked(numberPieces).mockReset().mockRejectedValue(new Error('no'))
+    vi.mocked(getNote).mockReset().mockImplementation(async (p: string) => note(p, '---\ntype: plan\n---\n# Testo\n'))
+    const open = vi.fn(() => 'id')
+    const w = mount(NoteView, {
+      props: { path: 'r/plan.md' },
+      global: { plugins: [i18n()], provide: { openWindow: open }, stubs: { MarkdownPreview: true, CutPreview: true, PropertiesPanel: true, RowViews: true } },
+    })
+    await flushPromises()
+    await layOut(w)!.trigger('click')
+    await flushPromises()
+    expect(open).not.toHaveBeenCalled()
+    expect(w.find('[data-preview-error]').exists()).toBe(true)
+  })
+
+  it('shows the card and opens the editor of a note with a design', async () => {
+    vi.mocked(getNote).mockReset().mockImplementation(async (p: string) =>
+      note(p, '---\ntype: plan\nlayout_file: r/attachments/a.json\nlayout_preview: r/attachments/a.png\n---\n# Testo\n'),
+    )
+    const w = await mountNote('r/plan.md')
+    expect(layOut(w)).toBeUndefined()
+    expect(action(w)).toBeDefined()
+    expect(w.find('[data-layout-preview]').attributes('src')).toBe('/vault-files/r/attachments/a.png')
+  })
+
+  it('has neither action without the editor', async () => {
+    apps.forType.mockReset().mockResolvedValue(null)
+    vi.mocked(getNote).mockReset().mockImplementation(async (p: string) => note(p, '---\ntype: plan\n---\n'))
+    const w = await mountNote('r/plan.md')
+    expect(action(w)).toBeUndefined()
+    expect(layOut(w)).toBeUndefined()
+  })
+})
+
+describe('NoteView, the tags checked as they are written (IMP-223, F-13)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.mocked(getNote).mockReset().mockImplementation(async (p: string) => note(p))
+    vi.mocked(listMarks).mockReset().mockResolvedValue([])
+  })
+
+  it('says which tags are empty or have a space, until they are right', async () => {
+    const w = await mountNote()
+    await edit(w, '---\ntags: [agile-lab,, topic:audit type:task]\n---\n# A\n')
+    await vi.waitFor(() => expect(w.find('[data-tag-warning]').exists()).toBe(true))
+    const banner = w.find('[data-tag-warning]')
+    expect(banner.attributes('role')).toBe('status')
+    expect(banner.text()).toBe(
+      'Check the tags: an empty tag; “topic:audit type:task” has a space. A comma separates two tags, and a tag has no spaces.',
+    )
+    editor(w).vm.$emit(
+      'update:modelValue',
+      '---\ntags: [agile-lab, topic:audit, type:task]\n---\n# A\n',
+    )
+    await vi.waitFor(() => expect(w.find('[data-tag-warning]').exists()).toBe(false))
   })
 })
 
@@ -699,5 +851,188 @@ describe('NoteView, the draft kept in the browser (BUG-142)', () => {
     await flushPromises()
     expect(deleteNote).toHaveBeenCalledWith('p/a.md')
     expect(kept()).toBeNull()
+  })
+})
+
+describe('NoteView, the valid version (IMP-201)', () => {
+  const valid = { tag: 'note/p/a.md/V3', label: 'V3', sha: 'a'.repeat(40), same: false }
+  const latest = (over: Partial<Note> = {}): Note => ({
+    path: 'p/a.md',
+    title: 'a',
+    content: 'the draft\n',
+    etag: 'E2',
+    size: 9,
+    mod_time: '',
+    valid,
+    ...over,
+  })
+  const atVersion: Note = { ...latest(), content: 'the valid text\n', etag: 'E1' }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(getNote).mockImplementation(async (_p, opts) => (opts?.version ? atVersion : latest()))
+  })
+
+  async function mountNote(mode?: 'edit') {
+    const w = mount(NoteView, {
+      props: { path: 'p/a.md', ...(mode ? { mode } : {}) },
+      global: { plugins: [i18n()] },
+      attachTo: document.body,
+    })
+    await flushPromises()
+    return w
+  }
+  const rendered = () => vi.mocked(renderPreviewData).mock.calls.at(-1)?.[0]
+
+  it('shows the valid version to who reads, and tells of the draft', async () => {
+    const w = await mountNote()
+    expect(getNote).toHaveBeenCalledWith('p/a.md', { version: 'valid' })
+    expect(rendered()).toBe('the valid text\n')
+    expect(w.find('[data-valid-version]').text()).toContain('Pinned version V3 · a newer draft exists')
+    w.unmount()
+  })
+
+  it('moves to the draft and back', async () => {
+    const w = await mountNote()
+    await w.find('[data-valid-toggle]').trigger('click')
+    await flushPromises()
+    expect(rendered()).toBe('the draft\n')
+    expect(w.find('[data-valid-version]').text()).toContain('You are seeing the draft: readers see V3')
+    await w.find('[data-valid-toggle]').trigger('click')
+    await flushPromises()
+    expect(rendered()).toBe('the valid text\n')
+    w.unmount()
+  })
+
+  it('says who edits works on the draft', async () => {
+    const w = await mountNote('edit')
+    expect(w.find('[data-valid-version]').text()).toContain('You are editing the draft: readers keep seeing V3')
+    expect(w.find('[data-valid-toggle]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('reads one call for a note that is its valid version', async () => {
+    vi.mocked(getNote).mockResolvedValue(latest({ valid: { ...valid, same: true } }))
+    const w = await mountNote()
+    expect(getNote).toHaveBeenCalledTimes(1)
+    expect(rendered()).toBe('the draft\n')
+    expect(w.find('[data-valid-version]').text()).toBe('Pinned version V3')
+    expect(w.find('[data-valid-toggle]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('warns and shows the note when the version does not read', async () => {
+    vi.mocked(getNote).mockResolvedValue(latest({ valid: { ...valid, same: false, missing: true } }))
+    const w = await mountNote()
+    expect(rendered()).toBe('the draft\n')
+    expect(w.find('[data-valid-version]').text()).toContain('cannot be read')
+    w.unmount()
+  })
+
+  it('says nothing for a note without one', async () => {
+    vi.mocked(getNote).mockResolvedValue(latest({ valid: undefined }))
+    const w = await mountNote()
+    expect(w.find('[data-valid-version]').exists()).toBe(false)
+    w.unmount()
+  })
+})
+
+describe('NoteView, the text in the editor', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    localStorage.clear()
+    vi.clearAllMocks()
+    vi.mocked(getNote).mockReset().mockImplementation(async (p: string) => note(p))
+    vi.mocked(listMarks).mockReset().mockResolvedValue([])
+  })
+
+  it('shows the text to who edits, whatever layout was left on', async () => {
+    localStorage.setItem('gosidian.editorMode', 'preview')
+    const w = await mountNote()
+    await button(w, 'Edit').trigger('click')
+    await flushPromises()
+    expect(w.find('[data-editor]').exists()).toBe(true)
+    w.unmount()
+  })
+
+  it('shows it again after the preview was chosen, reading and back to Edit', async () => {
+    const w = await mountNote('p/a.md', undefined, { mode: 'edit' })
+    await w.find('[data-layout="preview"]').trigger('click')
+    expect(w.find('[data-editor]').exists()).toBe(false)
+    await button(w, 'View').trigger('click')
+    await flushPromises()
+    await button(w, 'Edit').trigger('click')
+    await flushPromises()
+    expect(w.find('[data-editor]').exists()).toBe(true)
+    w.unmount()
+  })
+
+  it('does not remember the preview for the next note', async () => {
+    const w = await mountNote('p/a.md', undefined, { mode: 'edit' })
+    await w.find('[data-layout="preview"]').trigger('click')
+    await flushPromises()
+    expect(localStorage.getItem('gosidian.editorMode')).not.toBe('preview')
+    w.unmount()
+  })
+
+  it('goes back to reading from a window the design opened at a line', async () => {
+    const w = await mountNote('p/a.md', undefined, { mode: 'edit', line: 3, lineAt: 1 })
+    expect(w.find('[data-editor]').exists()).toBe(true)
+    await button(w, 'View').trigger('click')
+    await flushPromises()
+    expect(w.find('[data-editor]').exists()).toBe(false)
+    expect(button(w, 'View').attributes('aria-pressed')).toBe('true')
+    w.unmount()
+  })
+
+  it('shows the draft beside the text, not the version readers see', async () => {
+    const valid = { tag: 'note/p/a.md/V3', label: 'V3', sha: 'a'.repeat(40), same: false }
+    const latest = { ...note('p/a.md', 'the draft\n'), valid }
+    vi.mocked(getNote).mockImplementation(async (_p, opts) => (opts?.version ? { ...latest, content: 'the valid text\n' } : latest))
+    const w = await mountNote()
+    await button(w, 'Edit').trigger('click')
+    await flushPromises()
+    expect(vi.mocked(renderPreviewData).mock.calls.at(-1)?.[0]).toBe('the draft\n')
+    w.unmount()
+  })
+})
+
+describe('NoteView, the design of a pinned note (IMP-228)', () => {
+  const valid = { tag: 'note/p/a.md/V3', label: 'V3', sha: 'a'.repeat(40), same: false }
+  const text = '---\nlayout_file: p/attachments/d.json\n---\n\nthe draft\n'
+  const open = vi.fn(() => 'win')
+
+  async function designButton() {
+    const latest = { ...note('p/a.md', text), valid }
+    vi.mocked(getNote).mockImplementation(async (_p, opts) => (opts?.version ? { ...latest, content: text.replace('the draft', 'V3') } : latest))
+    apps.forType.mockResolvedValue({ plugin: 'layout', name: 'layout', title: 'L', status: 'ok' })
+    const w = mount(NoteView, {
+      props: { path: 'p/a.md' },
+      global: { plugins: [i18n()], provide: { openWindow: open }, stubs: { MarkdownPreview: true, PropertiesPanel: true, RowViews: true, LayoutCard: true } },
+    })
+    await flushPromises()
+    await w.find('button[title="Open in the editor"]').trigger('click')
+    return w
+  }
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    open.mockClear()
+    vi.mocked(listMarks).mockReset().mockResolvedValue([])
+  })
+
+  it('opens the draft for who can edit', async () => {
+    rights.write = true
+    const w = await designButton()
+    expect(open).toHaveBeenCalledWith(expect.objectContaining({ type: 'app', props: { path: 'p/a.md' } }))
+    w.unmount()
+  })
+
+  it('opens the version for who reads', async () => {
+    rights.write = false
+    const w = await designButton()
+    expect(open).toHaveBeenCalledWith(expect.objectContaining({ type: 'app', props: { path: 'p/a.md', version: valid.tag } }))
+    rights.write = true
+    w.unmount()
   })
 })

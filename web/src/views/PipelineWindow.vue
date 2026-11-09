@@ -402,7 +402,7 @@ onBeforeUnmount(() => {
       <select
         v-if="runs.length"
         v-model="runId"
-        class="h-control-sm rounded border border-border bg-bg-elevated px-2 py-0 text-xs"
+        class="h-control-sm rounded border border-border-input bg-bg-elevated px-2 py-0 text-xs"
         :aria-label="t('pipeline_editor.runs')"
         data-run-select
       >
@@ -455,7 +455,7 @@ onBeforeUnmount(() => {
         <textarea
           v-model="formText"
           rows="3"
-          class="rounded border border-border bg-bg-elevated p-1 font-mono"
+          class="rounded border border-border-input bg-bg-elevated p-1 font-mono"
           spellcheck="false"
           data-run-input
         />

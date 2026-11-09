@@ -28,3 +28,44 @@ func TestSearchText(t *testing.T) {
 		t.Errorf("fenced:\n%q\nwant\n%q", got, want)
 	}
 }
+
+// The comments that number a note's pieces are no words of the note
+// (IMP-226), in search or anywhere else; in code they are what they show.
+func TestWithoutPieceMarks(t *testing.T) {
+	in := "<!-- 1 -->\n## Titolo\n\n<!-- 2 escluso -->\nTesto <!-- 3 --> in riga.\n\n<!-- una nota -->\n\n```\n<!-- 4 -->\n```\n"
+	want := "## Titolo\n\nTesto <!-- 3 --> in riga.\n\n<!-- una nota -->\n\n```\n<!-- 4 -->\n```\n"
+	if got := WithoutPieceMarks(in); got != want {
+		t.Errorf("got %q", got)
+	}
+	if got := SearchText(in); got != want {
+		t.Errorf("SearchText got %q", got)
+	}
+	if got := WithoutPieceMarks("nessun commento\n"); got != "nessun commento\n" {
+		t.Errorf("got %q", got)
+	}
+	if got := WithoutPieceMarks("<!-- 1 -->\r\nUno.\r\n"); got != "Uno.\r\n" {
+		t.Errorf("CRLF: got %q", got)
+	}
+}
+
+func TestPieceMark(t *testing.T) {
+	for line, want := range map[string]struct {
+		n        int
+		excluded bool
+		ok       bool
+	}{
+		"<!-- 3 -->":              {3, false, true},
+		"<!--3-->":                {3, false, true},
+		"  <!-- 12 escluso -->  ": {12, true, true},
+		"<!-- una nota -->":       {},
+		"<!-- 3 altro -->":        {},
+		"<!-- 0 -->":              {},
+		"testo <!-- 3 -->":        {},
+		"<!-- 99999999999 -->":    {},
+	} {
+		n, excluded, ok := PieceMark(line)
+		if n != want.n || excluded != want.excluded || ok != want.ok {
+			t.Errorf("%q: %d %v %v", line, n, excluded, ok)
+		}
+	}
+}

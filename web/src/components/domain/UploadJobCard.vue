@@ -60,13 +60,13 @@ const results = computed(() => {
 })
 
 const stateClass: Record<UploadJob['state'], string> = {
-  opening: 'bg-info/15 text-info',
-  asking: 'bg-warning/15 text-warning',
-  sending: 'bg-info/15 text-info',
+  opening: 'bg-info/10 text-info',
+  asking: 'bg-warning/10 text-warning',
+  sending: 'bg-info/10 text-info',
   paused: 'bg-surface-hover text-text-muted',
-  completing: 'bg-info/15 text-info',
-  done: 'bg-success/15 text-success',
-  error: 'bg-danger/15 text-danger',
+  completing: 'bg-info/10 text-info',
+  done: 'bg-success/10 text-success',
+  error: 'bg-danger/10 text-danger',
 }
 
 function itemPercent(it: UploadItem): number {

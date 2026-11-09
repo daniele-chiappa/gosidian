@@ -1,6 +1,9 @@
 package v1
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"path"
 	"sort"
@@ -104,7 +107,26 @@ func (r *Router) handleTree(w http.ResponseWriter, req *http.Request) {
 	root := buildAPITree(paths, titles, inProgress)
 	r.annotateProjectFlags(root)
 	computeAPINoteCount(root)
-	WriteJSON(w, http.StatusOK, map[string]any{"root": root})
+	body, err := json.Marshal(map[string]any{"root": root})
+	if err != nil {
+		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
+		return
+	}
+	// The web UI asks again at each write in the vault (IMP-225): a tree
+	// that has not changed, as after an edit of a note's body, answers 304
+	// without a body. Weak, as gzip may change the bytes; never stored,
+	// since it says what the account may see.
+	sum := sha256.Sum256(body)
+	etag := `W/"` + hex.EncodeToString(sum[:16]) + `"`
+	w.Header().Set("ETag", etag)
+	w.Header().Set("Cache-Control", "no-store")
+	if req.Header.Get("If-None-Match") == etag {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(append(body, '\n'))
 }
 
 // buildAPITree assembles the tree from a flat list of slash-separated

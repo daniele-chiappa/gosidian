@@ -1,0 +1,46 @@
+{
+  "board": {
+    "head": {
+      "label": "Iteration und Fluss des Boards",
+      "iteration": "Iteration",
+      "days_left": "letzter Tag | noch {n} Tage",
+      "cards_done": "{done} von {total} erledigt",
+      "only_iteration": "Nur die Iteration",
+      "new_iteration": "Neue Iteration",
+      "retro_pending": "Retrospektive zu schreiben",
+      "cycle": "Durchlaufzeit: {p50} T (85 %: {p85} T)",
+      "cycle_few": "Durchlaufzeit: zu wenige Karten",
+      "cycle_title": "Median und 85. Perzentil der Tage von der ersten Arbeitsspalte bis erledigt, Karten der letzten 28 Tage",
+      "closed": "Erledigt: {weeks} pro Woche",
+      "closed_title": "Erledigte Karten in jeder der letzten 4 Wochen, die älteste zuerst",
+      "stale": "Stillstehend: {n}",
+      "stale_title": "Karten seit mehr als {days} Tagen in einer Spalte für Arbeit, Warten oder Prüfung",
+      "stale_card": "steht seit {n} T",
+      "stale_card_long": "steht seit einem Tag | steht seit {n} Tagen",
+      "columns_shown": "{shown} von {total} Spalten",
+      "prev_column": "Vorherige Spalte",
+      "next_column": "Nächste Spalte",
+      "goal": "Ziel",
+      "start": "Erster Tag",
+      "end": "Letzter Tag",
+      "create_failed": "Die Iteration wurde nicht angelegt: {reason}"
+    },
+    "review": {
+      "title": "Review",
+      "closed_on": "Abgeschlossen am {date}.",
+      "goal": "Ziel",
+      "done": "Erledigt",
+      "deferred": "Verschoben, in ihrer Spalte",
+      "dropped": "Gescheitert oder abgebrochen",
+      "none": "keine",
+      "cycle": "Durchlaufzeit",
+      "cycle_value": "Median {p50} Tage, 85. Perzentil {p85} Tage, über {n} Karten",
+      "cycle_few": "zu wenige Karten ({n}, es braucht 3)",
+      "closed_week": "Erledigt pro Woche",
+      "stale": "Stillstehend beim Abschluss",
+      "retro": "Retrospektive",
+      "went_well": "Was lief gut?",
+      "change": "Was ändern wir?"
+    }
+  }
+}

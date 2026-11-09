@@ -340,6 +340,62 @@ func TestAdminAudit_FilterByAction(t *testing.T) {
 	}
 }
 
+// The admin's audit pages from the newest (order=desc) or the oldest
+// (order=asc), and says how many entries match in all (IMP-224, F-30).
+func TestAdminAudit_Pages(t *testing.T) {
+	f := newAdminFixture(t)
+	var ids []string
+	for _, name := range []string{"one", "two", "three"} {
+		w := f.doAuthRecorder(http.MethodPost, "/api/v1/admin/tokens",
+			`{"name":"`+name+`","scopes":["read"],"password":"supersecret"}`, nil)
+		if w.code != http.StatusCreated {
+			t.Fatalf("token create: %d %s", w.code, w.body)
+		}
+		var resp struct {
+			Record struct {
+				ID string `json:"id"`
+			} `json:"record"`
+		}
+		_ = json.Unmarshal([]byte(w.body), &resp)
+		ids = append(ids, resp.Record.ID)
+	}
+	for _, c := range []struct {
+		query string
+		want  []string
+	}{
+		{"order=desc&limit=2", []string{ids[2], ids[1]}},
+		{"order=desc&limit=2&offset=2", []string{ids[0]}},
+		{"order=asc&limit=2&offset=1", []string{ids[1], ids[2]}},
+		// Without an order, as before: the newest, oldest first.
+		{"limit=2", []string{ids[1], ids[2]}},
+	} {
+		w := f.doAuthRecorder(http.MethodGet, "/api/v1/admin/audit?action=token_create&"+c.query, "", nil)
+		if w.code != http.StatusOK {
+			t.Fatalf("%s: %d %s", c.query, w.code, w.body)
+		}
+		var resp struct {
+			Items []struct {
+				Path string `json:"path"`
+			} `json:"items"`
+			Total  int `json:"total"`
+			Offset int `json:"offset"`
+		}
+		_ = json.Unmarshal([]byte(w.body), &resp)
+		var got []string
+		for _, it := range resp.Items {
+			got = append(got, it.Path)
+		}
+		if strings.Join(got, ",") != strings.Join(c.want, ",") || resp.Total != 3 {
+			t.Errorf("%s: %v of %d, want %v of 3", c.query, got, resp.Total, c.want)
+		}
+	}
+	for _, bad := range []string{"order=newest", "offset=-1", "offset=two"} {
+		if w := f.doAuthRecorder(http.MethodGet, "/api/v1/admin/audit?"+bad, "", nil); w.code != http.StatusBadRequest {
+			t.Errorf("%s: %d, want 400", bad, w.code)
+		}
+	}
+}
+
 func TestAdminAudit_RejectsBadSince(t *testing.T) {
 	f := newAdminFixture(t)
 	w := f.doAuthRecorder(http.MethodGet, "/api/v1/admin/audit?since=not-a-date", "", nil)

@@ -398,3 +398,49 @@ func TestBulkLoad_SwitchesMerging(t *testing.T) {
 		}
 	}
 }
+
+// A note is searched by the text SetSearchText gives, and is the note as it
+// is in all the rest: its title, tags and hash, so a scan finds it unchanged
+// (IMP-201). A note it has nothing for is searched by its own text.
+func TestSearchText(t *testing.T) {
+	idx := openTest(t)
+	asked := []string{}
+	idx.SetSearchText(func(path, body string) string {
+		asked = append(asked, path)
+		if path == "p/a.md" {
+			return "---\ntitle: Old\n---\nvalidated words\n"
+		}
+		return ""
+	})
+	a := NoteDoc{Path: "p/a.md", Title: "a", Body: "---\ntitle: Draft title\ntags: [draftag]\n---\nunapproved words\n", ModTime: 1, Size: 9}
+	if err := idx.Upsert(a); err != nil {
+		t.Fatal(err)
+	}
+	if err := idx.UpsertUnresolved(NoteDoc{Path: "p/b.md", Title: "b", Body: "plain words\n", ModTime: 1, Size: 9}); err != nil {
+		t.Fatal(err)
+	}
+	if len(asked) != 2 {
+		t.Errorf("asked %v", asked)
+	}
+	found := func(q string) string {
+		t.Helper()
+		hits, err := idx.Search(q, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, h := range hits {
+			out = append(out, h.Path)
+		}
+		return strings.Join(out, " ")
+	}
+	for q, want := range map[string]string{"validated": "p/a.md", "unapproved": "", "plain": "p/b.md", "Draft": "p/a.md", "draftag": "p/a.md"} {
+		if got := found(q); got != want {
+			t.Errorf("%q found %q, want %q", q, got, want)
+		}
+	}
+	st, ok, err := idx.StampOf("p/a.md")
+	if err != nil || !ok || !st.Holds(a) {
+		t.Errorf("the stamp %+v %v %v does not hold the note", st, ok, err)
+	}
+}

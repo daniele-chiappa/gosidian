@@ -472,7 +472,7 @@ func (e *Engine) Start(req StartRequest) (jobs.Run, bool, error) {
 		if p.Spec.Trigger.On != TriggerChat {
 			return jobs.Run{}, false, fmt.Errorf("the pipeline starts on %s, not on chat", p.Spec.Trigger.On)
 		}
-	case TriggerIngest, TriggerSchedule, TriggerIN, TriggerCommit, TriggerRun, TriggerQueue, TriggerTask:
+	case TriggerIngest, TriggerSchedule, TriggerIN, TriggerCommit, TriggerRun, TriggerQueue, TriggerTask, TriggerIteration:
 	default:
 		return jobs.Run{}, false, fmt.Errorf("unknown trigger %q", req.Trigger)
 	}

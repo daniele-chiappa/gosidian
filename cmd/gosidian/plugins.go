@@ -208,12 +208,19 @@ func runPluginCmd(args []string) {
 			}
 			fmt.Printf("Sources: %s (gosidian plugin bind %s <source> <project>).\n", strings.Join(names, ", "), a.Manifest.Name)
 		}
-		if len(a.Manifest.Tools) > 0 {
-			names := make([]string, 0, len(a.Manifest.Tools))
-			for _, t := range a.Manifest.Tools {
+		var names, own []string
+		for _, t := range a.Manifest.Tools {
+			if t.Internal {
+				own = append(own, t.Name)
+			} else {
 				names = append(names, plugins.ToolName(a.Manifest.Name, t.Name))
 			}
+		}
+		if len(names) > 0 {
 			fmt.Printf("Tools: %s (the agents of a project see them once you run gosidian plugin expose %s <project>).\n", strings.Join(names, ", "), a.Manifest.Name)
+		}
+		if len(own) > 0 {
+			fmt.Printf("Internal tools: %s (only gosidian calls them, no agent is offered them; gosidian plugin expose %s <project> turns on gosidian's tools that use them).\n", strings.Join(own, ", "), a.Manifest.Name)
 		}
 		if len(a.Manifest.Graphs) > 0 {
 			names := make([]string, 0, len(a.Manifest.Graphs))
@@ -392,9 +399,16 @@ func printManifestHead(m *plugins.Manifest) {
 
 // printManifestBody prints a manifest's tools, graphs and nodes.
 func printManifestBody(m *plugins.Manifest) {
-	if len(m.Tools) > 0 {
-		fmt.Println("\nTools (for the agents of the projects it is exposed in):")
+	printTools := func(title string, internal bool) {
+		printed := false
 		for _, t := range m.Tools {
+			if t.Internal != internal {
+				continue
+			}
+			if !printed {
+				fmt.Println(title)
+				printed = true
+			}
 			fmt.Printf("  %s (%s)\n", plugins.ToolName(m.Name, t.Name), t.Access)
 			if t.Description != "" {
 				fmt.Printf("    %s\n", t.Description)
@@ -404,6 +418,8 @@ func printManifestBody(m *plugins.Manifest) {
 			}
 		}
 	}
+	printTools("\nTools (for the agents of the projects it is exposed in):", false)
+	printTools("\nInternal tools (only gosidian calls them, no agent is offered them):", true)
 	if len(m.Graphs) > 0 {
 		fmt.Println("\nGraphs (for the graph views of the projects it is exposed in):")
 		for _, g := range m.Graphs {
@@ -413,6 +429,21 @@ func printManifestBody(m *plugins.Manifest) {
 			}
 			if len(g.Input) > 0 {
 				fmt.Printf("    arguments: %s\n", g.Input)
+			}
+		}
+	}
+	if len(m.Apps) > 0 {
+		fmt.Println("\nApps (each framed in a window of gosidian for the notes of its type, from its address):")
+		for _, a := range m.Apps {
+			fmt.Printf("  %s/%s, notes type: %s, bridge %s\n    %s\n", m.Name, a.Name, a.NoteType, a.Bridge, a.URL)
+			for _, u := range a.AltURLs {
+				fmt.Printf("    also at %s\n", u)
+			}
+			if a.Engine != "" {
+				fmt.Printf("    built on %s\n", a.Engine)
+			}
+			if a.Description != "" {
+				fmt.Printf("    %s\n", a.Description)
 			}
 		}
 	}

@@ -236,6 +236,16 @@ func TestCutNote(t *testing.T) {
 
 // A section longer than maxChars is cut in parts at its paragraphs, each
 // with its own paragraphs; a paragraph longer than that is a part alone.
+// The comments that number a note's pieces for its design are no text of a
+// chunk (IMP-226).
+func TestCutNote_PieceMarks(t *testing.T) {
+	for _, p := range cutNote("p/n.md", "N", "<!-- 1 -->\n## Titolo\n\n<!-- 2 -->\nUn paragrafo.\n", cutOptions{maxChars: 6000, paragraphs: true}) {
+		if strings.Contains(p.text, "<!--") {
+			t.Errorf("a comment in a chunk: %q", p.text)
+		}
+	}
+}
+
 func TestCutNote_LongSection(t *testing.T) {
 	para := func(c string, n int) string { return strings.Repeat(c, n) }
 	body := "## Lunga\n\n" + para("a", 120) + "\n\n" + para("b", 120) + "\n\n" + para("c", 300) + "\n\n" + para("d", 50) + "\n"
@@ -514,5 +524,70 @@ func TestNoteRead_MediaInline(t *testing.T) {
 	}
 	if _, err := noteRead(context.Background(), env, map[string]any{"path": "docs/stampanti.md", "media": "all"}); err == nil {
 		t.Error("media all: no error")
+	}
+}
+
+// atHost reads a version of any note as text of its own.
+type atHost struct {
+	Host
+	asked []string
+}
+
+func (h *atHost) ReadNoteAt(project, path, at string) (NoteData, error) {
+	h.asked = append(h.asked, path+" "+at)
+	return NoteData{Path: path, Title: "V3", Body: "## At the version\n\nThe validated text.\n", ETag: "version"}, nil
+}
+
+// note.read and note.sections stay on the note as it is unless with.at says
+// a version: a pipeline that reads and writes back must not lose the draft
+// (IMP-201).
+func TestNodes_ReadAVersionOnRequest(t *testing.T) {
+	env := sectionsFixture(t)
+	ctx := context.Background()
+	plain := env.Engine.host
+
+	// A host that reads no version says so.
+	for name, run := range map[string]func() (any, error){
+		"note.read": func() (any, error) {
+			return noteRead(ctx, env, map[string]any{"path": "docs/stampanti.md", "at": "valid"})
+		},
+		"note.sections": func() (any, error) {
+			return noteSections(ctx, env, map[string]any{"path": "docs/stampanti.md", "at": "valid", "media": "keep"})
+		},
+	} {
+		if _, err := run(); err == nil || !strings.Contains(err.Error(), "versions of a note") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+
+	host := &atHost{Host: plain}
+	env.Engine.host = host
+	out, err := noteRead(ctx, env, map[string]any{"path": "docs/stampanti.md", "at": "valid"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := out.(NoteData); !strings.Contains(n.Body, "validated") || n.ETag != "version" {
+		t.Errorf("note.read %+v", n)
+	}
+	out, err = noteSections(ctx, env, map[string]any{"path": "docs/stampanti.md", "at": "note/p/V3", "media": "keep"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(out)
+	if !strings.Contains(string(b), "The validated text") || strings.Contains(string(b), "La schermata") {
+		t.Errorf("note.sections %s", b)
+	}
+	if got := strings.Join(host.asked, ", "); got != "p/docs/stampanti.md valid, p/docs/stampanti.md note/p/V3" {
+		t.Errorf("asked %s", got)
+	}
+
+	// Without at, the note as it is, and no version is asked for.
+	host.asked = nil
+	out, err = noteRead(ctx, env, map[string]any{"path": "docs/stampanti.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := out.(NoteData); strings.Contains(n.Body, "validated") || len(host.asked) != 0 {
+		t.Errorf("as it is: %+v, %v", n, host.asked)
 	}
 }

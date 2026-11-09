@@ -76,7 +76,8 @@ func cspHeader(nonce string) string {
 		// notes (ADR-011). The iframe runs with sandbox="allow-scripts" WITHOUT
 		// allow-same-origin (opaque origin) plus its own injected restrictive CSP,
 		// so this does not widen the SPA's own execution surface. The origins
-		// of the chat plugins follow: a bot's note shows its chat (IMP-191).
+		// of the chat plugins follow: a bot's note shows its chat (IMP-191);
+		// and those of the plugins' apps, each in a window (IMP-226).
 		frameSrc(),
 		"frame-ancestors 'none'",
 		"form-action 'self'",

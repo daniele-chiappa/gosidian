@@ -133,32 +133,36 @@ func (s *Sync) Version(relPath, sha string, max int64) (Version, error) {
 		return Version{}, err
 	}
 	for _, c := range commits {
-		if !strings.HasPrefix(c.SHA, sha) {
-			continue
+		if strings.HasPrefix(c.SHA, sha) {
+			return s.readVersion(c, max)
 		}
-		v := Version{Commit: c}
-		if c.Status == "deleted" {
-			return v, nil
-		}
-		object := c.SHA + ":" + c.Path
-		size, err := s.capture("git", "cat-file", "-s", object)
-		if err != nil {
-			return Version{}, err
-		}
-		if v.Size, err = strconv.ParseInt(strings.TrimSpace(size), 10, 64); err != nil {
-			return Version{}, err
-		}
-		if v.Size > max {
-			return v, nil
-		}
-		content, err := s.capture("git", "cat-file", "blob", object)
-		if err != nil {
-			return Version{}, err
-		}
-		v.Content = []byte(content)
-		return v, nil
 	}
 	return Version{}, ErrNoVersion
+}
+
+// readVersion reads the note as commit c holds it.
+func (s *Sync) readVersion(c Commit, max int64) (Version, error) {
+	v := Version{Commit: c}
+	if c.Status == "deleted" {
+		return v, nil
+	}
+	object := c.SHA + ":" + c.Path
+	size, err := s.capture("git", "cat-file", "-s", object)
+	if err != nil {
+		return Version{}, err
+	}
+	if v.Size, err = strconv.ParseInt(strings.TrimSpace(size), 10, 64); err != nil {
+		return Version{}, err
+	}
+	if v.Size > max {
+		return v, nil
+	}
+	content, err := s.capture("git", "cat-file", "blob", object)
+	if err != nil {
+		return Version{}, err
+	}
+	v.Content = []byte(content)
+	return v, nil
 }
 
 // Diff is the unified diff from old to new, as git makes it, its hunks

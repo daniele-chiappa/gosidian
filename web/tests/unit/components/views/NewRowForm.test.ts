@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { AxiosError, AxiosHeaders } from 'axios'
 import enUI from '@catalogs/ui.en.json'
+import itUI from '@catalogs/ui.it.json'
 
 vi.mock('@/api/notes', () => ({ getNewRow: vi.fn(), createRow: vi.fn() }))
 import { createRow, getNewRow, type Note } from '@/api/notes'
@@ -63,7 +64,7 @@ describe('NewRowForm', () => {
     expect(document.activeElement).toBe(w.find('[data-row-title]').element)
     // status comes from the view, owner from the template: only points is asked.
     expect(w.findAll('[data-field]').map((e) => e.attributes('data-field'))).toEqual(['points'])
-    expect(w.find('[data-row-values]').text()).toContain('status: doing')
+    expect(w.find('[data-row-values]').text()).toContain('Status: doing')
 
     await w.find('[data-row-title]').setValue('Fix the menu')
     await w.find('[data-field="points"]').setValue('3')
@@ -125,5 +126,30 @@ describe('NewRowForm', () => {
     expect(w.emitted('done')).toEqual([[], []])
     expect(create).not.toHaveBeenCalled()
     w.unmount()
+  })
+})
+
+describe("NewRowForm in the reader's language (IMP-220, F-23)", () => {
+  it('names the fields it asks and the values it was given', async () => {
+    suggest.mockReset()
+    suggest.mockResolvedValue({
+      name: 'T-011',
+      source: 'p/tasks',
+      columns: [
+        { name: 'title', type: 'text', required: true },
+        { name: 'status', type: 'select', options: ['submitted', 'working'], required: true },
+        { name: 'priority', type: 'select', options: ['low', 'high'], required: true },
+      ],
+    })
+    const i18n = createI18n({ legacy: false, locale: 'it', fallbackLocale: 'en', messages: { en: enUI, it: itUI } })
+    const w = mount(NewRowForm, {
+      props: { database: 'p/tasks.md', values: { status: 'submitted' } },
+      global: { plugins: [i18n], provide: { openWindow: vi.fn() } },
+    })
+    await flushPromises()
+    const priority = w.find('[data-field="priority"]')
+    expect(priority.element.closest('label')!.querySelector('span')!.textContent).toBe('Priorità')
+    expect(priority.findAll('option').map((o) => o.text())).toEqual(['bassa', 'alta'])
+    expect(w.find('[data-row-values]').text()).toContain('Stato: inviato')
   })
 })

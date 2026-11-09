@@ -83,11 +83,17 @@ func (s *Server) cardsDatabase(ctx context.Context, project string) error {
 // for an agent, at place at, or at the bottom when at is nil; at moves it
 // within its own column too. A column at its limit refuses the card when
 // the board is hard for who writes, and otherwise takes it with a
-// warning.
+// warning. The move writes when the card starts and finishes
+// (fleet.Dates).
 func (s *Server) moveCard(ctx context.Context, w taskWrite, b fleet.Board, cards []fleet.Task, cur fleet.Task, column, status string,
 	at *int, move func(cur fleet.Task, content []byte, status string) ([]byte, error)) (fleet.Task, string, error) {
 	target, err := b.Target(cur, column, status)
 	if err != nil {
+		return fleet.Task{}, "", err
+	}
+	// A database written before phase 2 gets its fields of the dates.
+	project, _, _ := strings.Cut(cur.Path, "/")
+	if err := s.cardsDatabase(ctx, project); err != nil {
 		return fleet.Task{}, "", err
 	}
 	warning := ""
@@ -98,11 +104,10 @@ func (s *Server) moveCard(ctx context.Context, w taskWrite, b fleet.Board, cards
 		if err != nil {
 			return nil, err
 		}
-		set := map[string]any{}
-		var unset []string
+		set, unset := fleet.Dates(c, target.Status, time.Now())
 		switch from := b.ColumnOf(c); {
 		case target.Name == "":
-			unset = []string{fleet.KeyColumn, fleet.KeyRank}
+			unset = append(unset, fleet.KeyColumn, fleet.KeyRank)
 		case !strings.EqualFold(from, target.Name):
 			if warning, err = wip(b, cards, target, c.Path, w.person); err != nil {
 				return nil, err
@@ -219,17 +224,20 @@ func (s *Server) boardCards(ctx context.Context, b fleet.Board, project string) 
 				return nil, pipeline.ErrTaskSkip
 			}
 			out, err := fleet.GiveBack(c, content, max, clock.Now())
-			switch {
-			case err != nil:
+			if err != nil {
 				return nil, err
-			case target.Name == "":
-				return fleet.Set(out, nil, fleet.KeyColumn, fleet.KeyRank)
+			}
+			// Failed at the last attempt, it finished.
+			set, unset := fleet.Dates(c, target.Status, now)
+			if target.Name == "" {
+				return fleet.Set(out, set, append(unset, fleet.KeyColumn, fleet.KeyRank)...)
 			}
 			top := 0
 			in = columnCards(b, cards, target.Name, c.Path)
 			rank, others := place(in, &top)
 			ranks = others
-			return fleet.Set(out, map[string]any{fleet.KeyColumn: target.Name, fleet.KeyRank: rank, fleet.KeyColumnSince: time.Now().Format(time.RFC3339)})
+			set[fleet.KeyColumn], set[fleet.KeyRank], set[fleet.KeyColumnSince] = target.Name, rank, time.Now().Format(time.RFC3339)
+			return fleet.Set(out, set, unset...)
 		})
 		switch {
 		case errors.Is(err, pipeline.ErrTaskSkip):

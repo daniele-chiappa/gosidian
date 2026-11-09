@@ -14,6 +14,32 @@
   [aria-disabled='true'] {
     cursor: not-allowed;
   }
+
+  /* A checkbox or a radio with no border class has the forms plugin's grey,
+     2.6:1 on Mocha's surface: the fields' border instead (IMP-221). */
+  [type='checkbox'],
+  [type='radio'] {
+    border-color: rgb(var(--color-border-input));
+  }
+
+  /* A field with the focus took the plugin's fixed blue, 2.4:1 on Mocha's
+     surface, over its border-border-input: the theme's focus colour, with
+     the plugin's weight (input:where(…):focus) and after it; a focus:
+     utility still wins (IMP-221). */
+  :is(input, select, textarea):focus {
+    border-color: rgb(var(--color-focus));
+  }
+}
+
+/*
+ * A select keeps the room of its arrow (BUG-156): the forms plugin draws it
+ * in the right padding, 1.5em wide and 0.5rem from the edge, which the px-
+ * classes of the views took back, so a select as wide as its words put the
+ * last of them under the arrow. Outside the layers and an attribute heavier
+ * than a utility, so a px- class no longer takes it.
+ */
+select:not([multiple], [size]) {
+  padding-right: calc(1.5em + 0.75rem);
 }
 
 /*

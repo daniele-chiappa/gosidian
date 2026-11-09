@@ -55,10 +55,12 @@ var i18nState = struct {
 }{defaultLang: "en", enabled: []string{"en"}}
 
 // SetI18n sets the default language and the enabled ones, already checked
-// (config.I18nConfig.Effective).
+// (config.I18nConfig.Effective): the default is also the language of the
+// texts the server writes in the notes (i18n.SetLang).
 func SetI18n(defaultLang string, enabled []string) {
 	i18nState.Lock()
 	defer i18nState.Unlock()
+	i18n.SetLang(defaultLang)
 	i18nState.defaultLang = defaultLang
 	i18nState.enabled = append([]string(nil), enabled...)
 }

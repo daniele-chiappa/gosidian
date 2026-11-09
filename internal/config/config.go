@@ -75,6 +75,10 @@ type UploadsConfig struct {
 	QuotaBytes int64 `toml:"quota_bytes"`
 	// QuotaWindow is the sliding window of the quota; default 24h.
 	QuotaWindow time.Duration `toml:"quota_window"`
+	// MaxAttachmentBytes is the largest attachment the server takes, by
+	// every way in: the web UI, the MCP uploads, the ingest, the page
+	// layouts' images and PDFs (IMP-226). Default 10 MiB.
+	MaxAttachmentBytes int64 `toml:"max_attachment_bytes"`
 }
 
 // INConfig is the upload into the IN folders (IMP-172 phase 5): the free
@@ -628,6 +632,14 @@ type WebConfig struct {
 	// PluginTimeout caps a plugin's answer the web UI waits for (a graph,
 	// the cut view), within the plugin's own timeout; default 2m.
 	PluginTimeout time.Duration `toml:"plugin_timeout"`
+	// LayoutMaxBytes caps the package of a page layout the editor saves,
+	// all its entries unpacked (default 256 MiB); LayoutMaxDocumentBytes
+	// its document.json (16 MiB); LayoutMaxEntries its entries (10000);
+	// LayoutMaxFontBytes a font added to the catalog (32 MiB) (IMP-226).
+	LayoutMaxBytes         int `toml:"layout_max_bytes"`
+	LayoutMaxDocumentBytes int `toml:"layout_max_document_bytes"`
+	LayoutMaxEntries       int `toml:"layout_max_entries"`
+	LayoutMaxFontBytes     int `toml:"layout_max_font_bytes"`
 }
 
 // GitConfig controls the auto-sync of the vault to a git remote.
@@ -866,6 +878,13 @@ func (c *Config) ApplyEnv() error {
 			return fmt.Errorf("GOSIDIAN_UPLOAD_QUOTA_BYTES: %w", err)
 		}
 		c.Uploads.QuotaBytes = n
+	}
+	if v := os.Getenv("GOSIDIAN_UPLOAD_MAX_ATTACHMENT_BYTES"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("GOSIDIAN_UPLOAD_MAX_ATTACHMENT_BYTES: %q is no size in bytes", v)
+		}
+		c.Uploads.MaxAttachmentBytes = n
 	}
 	if v := os.Getenv("GOSIDIAN_UPLOAD_QUOTA_WINDOW"); v != "" {
 		d, err := time.ParseDuration(v)
@@ -1244,6 +1263,10 @@ func (c *Config) applyDefaults() {
 		{&c.Web.GraphMaxNodes, 5000},
 		{&c.Web.GraphMaxEdges, 50000},
 		{&c.Web.CutMaxChunks, 5000},
+		{&c.Web.LayoutMaxBytes, 256 << 20},
+		{&c.Web.LayoutMaxDocumentBytes, 16 << 20},
+		{&c.Web.LayoutMaxEntries, 10000},
+		{&c.Web.LayoutMaxFontBytes, 32 << 20},
 	} {
 		if *n.dst <= 0 {
 			*n.dst = n.def
@@ -1251,6 +1274,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Pipelines.MaxPluginFilesBytes <= 0 {
 		c.Pipelines.MaxPluginFilesBytes = 100 << 20
+	}
+	if c.Uploads.MaxAttachmentBytes <= 0 {
+		c.Uploads.MaxAttachmentBytes = 10 << 20
 	}
 	if c.Pipelines.StarlarkSteps == 0 {
 		c.Pipelines.StarlarkSteps = 10_000_000
@@ -1360,10 +1386,14 @@ func mergePlugins(file, env []PluginConfig) []PluginConfig {
 // applyWebEnv reads the limits of the web UI's views (IMP-190).
 func (c *Config) applyWebEnv() error {
 	if err := envPositiveInts(map[string]*int{
-		"GOSIDIAN_WEB_GRAPH_DEFAULT_NODES": &c.Web.GraphDefaultNodes,
-		"GOSIDIAN_WEB_GRAPH_MAX_NODES":     &c.Web.GraphMaxNodes,
-		"GOSIDIAN_WEB_GRAPH_MAX_EDGES":     &c.Web.GraphMaxEdges,
-		"GOSIDIAN_WEB_CUT_MAX_CHUNKS":      &c.Web.CutMaxChunks,
+		"GOSIDIAN_WEB_GRAPH_DEFAULT_NODES":       &c.Web.GraphDefaultNodes,
+		"GOSIDIAN_WEB_GRAPH_MAX_NODES":           &c.Web.GraphMaxNodes,
+		"GOSIDIAN_WEB_GRAPH_MAX_EDGES":           &c.Web.GraphMaxEdges,
+		"GOSIDIAN_WEB_CUT_MAX_CHUNKS":            &c.Web.CutMaxChunks,
+		"GOSIDIAN_WEB_LAYOUT_MAX_BYTES":          &c.Web.LayoutMaxBytes,
+		"GOSIDIAN_WEB_LAYOUT_MAX_DOCUMENT_BYTES": &c.Web.LayoutMaxDocumentBytes,
+		"GOSIDIAN_WEB_LAYOUT_MAX_ENTRIES":        &c.Web.LayoutMaxEntries,
+		"GOSIDIAN_WEB_LAYOUT_MAX_FONT_BYTES":     &c.Web.LayoutMaxFontBytes,
 	}); err != nil {
 		return err
 	}

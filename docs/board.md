@@ -41,6 +41,7 @@ columns:
   - {name: Done, status: completed}
 wip: {agents: hard, people: warn}
 done: agent
+stale: 3
 ```
 
 ## Done
@@ -58,6 +59,7 @@ Take the next card of Ready. Say in the card what is left when you stop.
 | `columns` | the columns in their order, at most 20: `name` (at most 64 bytes, one of a kind in any case), `status` (`backlog`, `submitted`, `working`, `input-required`, `review`, `completed`, `failed`, `canceled`) and `wip`, the most cards the column holds (a whole number from 1; none: no limit) |
 | `wip` | how hard the limits are: for `agents` (default `hard`: a card past a column's limit is refused) and for `people` (default `warn`: the card goes, and the board says the column is past its limit) |
 | `done` | who closes a card: `agent` (default), or `person`: an agent's completion puts the card in review with its report, and a person closes it. A card's own `done_by` wins |
+| `stale` | the days a card waits in a column of `working`, `input-required` or `review` before the board shows it as stale ([Flow](#flow)): a whole number from 0 (never) to 365, default 3 |
 
 A board has a column of `submitted`, where an agent takes the next card,
 and a column of `working`, where the card goes; with `done: person`, a
@@ -114,6 +116,9 @@ What to do, and how it is accepted.
 | `column_since` | when it entered its column |
 | `done_by` | `agent` or `person`; default the board's `done` |
 | `for` | the notes it serves: an improvement, a plan, a bug. A [row view](vault/databases.md#row-views) of their database lists their cards (below) |
+| `started` | when it first entered a column of `working`, written by the server |
+| `finished` | when it closed (`completed`, `failed`, `canceled`), written by the server and taken away when the card opens again |
+| `iteration` | the [iteration](#iterations) of its board it belongs to |
 
 A card is a task, with the task's other fields: `depends_on` (a card
 starts when they are completed), `claimed_by`, `lease_until` and
@@ -125,7 +130,72 @@ The first card of a project rewrites the `fields` of its `tasks.md`, as
 the server: `backlog` goes first among the options of `status`, `team`
 and `assignee` are no longer required, and the card's fields join the
 schema; a project without a `tasks.md` gets one with them. The rest of
-the note stays as written.
+the note stays as written. A `tasks.md` written before `started`,
+`finished` and `iteration` gets them with the next move of a card.
+
+## Flow
+
+The server measures a board's flow from its cards at each read: they are
+few, and nothing is kept.
+
+- **Cycle time**: the days from `started` to `finished` of the cards
+  completed in the last 28 days, their median and 85th percentile with
+  one decimal, and how many they are. Under 3 cards it says too few.
+- **Closed per week**: the cards completed in each of the last 4 weeks,
+  Monday to Sunday in the server's [time zone](configuration.md#time-zone),
+  the oldest first.
+- **Stale**: the cards in a column of `working`, `input-required` or
+  `review` for more than the board's `stale` days, from their
+  `column_since`, the longest first. A card waiting in `backlog` or
+  `submitted` is not stale.
+
+`started` and `finished` are the server's: it writes them as a card
+moves, by an agent, by a person, or when a lease ends at the last
+attempt. A card that goes back to work keeps its `started`; one opened
+again loses its `finished`. The cards of before have no dates, and count
+only once they have them: the measures start with the release that wrote
+them.
+
+## Iterations
+
+An iteration is a note `type: iteration` of the project: a board, a goal,
+its first and last day. Its body is free (a plan, notes).
+
+```yaml
+---
+title: Iteration 12
+type: iteration
+board: "[[myproject/board]]"
+goal: Sign in with passkeys
+start: 2026-11-09
+end: 2026-11-20
+---
+```
+
+- A card belongs to an iteration of its board with `iteration`:
+  `memory_task_create(…, iteration)`, `memory_task_update(path,
+  iteration)` (an empty one takes it out), or the field in the web UI.
+  An iteration already closed takes no card.
+- The iteration **in progress** of a board is the one whose days hold
+  today. Two of the same board whose days meet are reported by the lint.
+- **At its end**, once its last day is over in the server's time zone,
+  the server closes it, with the pipelines on or off, checking every 5
+  minutes: in the iteration's note a section **Review** (the cards done,
+  those left with their column, those failed or canceled, the cycle time
+  and the cards closed in each of its weeks, the stale ones) and an empty
+  **Retrospective** with two questions, in the instance's language
+  (`[i18n] default_lang`); in its frontmatter `reviewed` (when) and
+  `retro: pending`. The cards not closed lose their `iteration` and stay
+  in their column: the next iteration takes them only when someone links
+  them. A note with `reviewed` is not closed again, even with its `end`
+  moved forward: that is a new iteration.
+- **The retrospective** waits until someone, a person or an agent, writes
+  it and sets `retro: done`. Meanwhile the board's head says so, and
+  `memory_tasks` lists it in `board.retro`, so the agent working on the
+  board sees it and may write it.
+- With the pipelines on, a pipeline [`on: iteration`](pipelines.md#triggers)
+  starts when an iteration closes: it sends the review on, or has an agent
+  write the retrospective.
 
 ## Agents
 
@@ -133,8 +203,8 @@ An agent in a session works on the cards with its MCP token, as an
 [outside agent](agents.md#outside-agents) works on a team's tasks:
 
 - `memory_task_create(project, board, title, column?, for?, done_by?,
-  depends_on?, body?)` writes a card at the bottom of its column, of
-  `backlog` or `submitted` (default the board's first);
+  depends_on?, iteration?, body?)` writes a card at the bottom of its
+  column, of `backlog` or `submitted` (default the board's first);
 - `memory_task_claim(board)` takes the board's next card: in the columns
   of `submitted`, in their order, the first by rank whose dependencies are
   completed and that nobody holds. `memory_task_claim(path)` takes that
@@ -145,22 +215,34 @@ An agent in a session works on the cards with its MCP token, as an
   the `[agents] max_attempts`-th attempt (3) it fails;
 - `memory_task_update(path, column)` moves the card it holds to a column
   of `working`, `input-required`, `review` or `submitted` (which gives it
-  back), with a `message` in the card;
+  back), with a `message` in the card; `memory_task_update(path,
+  iteration)` puts any card of the board in an iteration, held or not,
+  and an empty `iteration` takes it out. `started` and `finished` are
+  refused: the server writes them;
 - `memory_task_complete(path, report)` closes it with its report, or puts
   it in review for a person when the card is done by a person;
 - `memory_tasks(project, board)` lists the board's cards, and its
-  columns with the cards of each and their limit.
+  columns with the cards of each and their limit; its `flow`
+  (`cycle_days {p50, p85, n}`, `closed_per_week`, `stale [{path, title,
+  column, days}]`), its `iteration` in progress (`path`, `title`, `goal`,
+  `start`, `end`, `days_left` counting today, `cards {done, total}`) and
+  `retro`, the iterations whose retrospective waits.
 
 The answer of each tool on a card holds the board's text (`board.text`,
 for a token that reads): its note without the frontmatter and the board
-and view blocks, the first 8 KB of it, and a `warning` when the card took
-a column past its limit. The agent of a team's run creates and takes no card.
+and view blocks, the first 8 KB of it; the board's stale cards
+(`board.stale`), and a `warning` when the card took a column past its
+limit. The agent of a team's run creates and takes no card.
 
 `memory_get` of the board's note with `render_views: true` shows the
-cards under the block, one list for each column that has some, in the
-board's order, with its count and limit:
+cards under the block: first its flow, its iteration and the
+retrospectives to write, then one list for each column that has some, in
+the board's order, with its count and limit:
 
 ```text
+_Flow: cycle time 2.5 days median, 4 at the 85th percentile (6 cards); closed per week 3 · 5 · 2 · 4; stale 1 (over 3 days)._
+_Iteration [[myproject/iterations/12\|Iteration 12]]: Sign in with passkeys, 2026-11-09 to 2026-11-20, 5 days left, 2 of 6 cards done._
+
 **Ready** (2)
 
 - [[myproject/tasks/20261031-101200-the-login-page\|The login page]] · for: [[myproject/docs/improvements/IMP-012]]
@@ -195,6 +277,20 @@ each of the block's, empty ones too, with its count against its limit
   1").
 - The "+" of a column of `backlog` or `submitted` writes a new card there,
   at its bottom.
+- "Move to…" opens a menu on the card's column: the arrows choose, Enter
+  moves the card, Esc closes it without a move and gives the focus back
+  to the card.
+- When columns are out of view, a shadow and an arrow at the edge say so,
+  and the arrow scrolls by one column; a line says how many show ("2 of 5
+  columns").
+- **The head** of the board, above its columns, shows its iteration in
+  progress (its goal, the days left, the cards done of all) with "Only the
+  iteration", which leaves only its cards on the board, or "New
+  iteration", a form that writes the note in the project's `iterations/`;
+  the retrospectives to write; and the [flow](#flow): "Cycle time: 2.5 d
+  (85%: 4 d)", "Closed: 3 · 5 · 2 · 4 a week", "Stale: 2". A stale card
+  says for how long ("stale for 5 d"), in its name too for a screen
+  reader.
 
 `PATCH /api/v1/notes/<card>/frontmatter` moves a card when it touches its
 place, as the web UI does:
@@ -207,7 +303,8 @@ place, as the web UI does:
   the card's place in its column from 0, the top: with a new column, where
   it enters (default its bottom); alone, where it goes in its own.
 - A move changes nothing else: another key with it, `rank` (the server
-  keeps it) or an `unset` of these keys answers **400**.
+  keeps it) or an `unset` of these keys answers **400**, and so do
+  `started` and `finished`, in any edit of a card.
 - `expect` and `if_match` work as for any field (**409**, **412**). A move
   the board refuses (a column it has not, a full column of a `hard`
   board) answers **422** with the reason. A move answers 200 with the
@@ -237,4 +334,7 @@ without exactly one block, a card whose board is no board of the project,
 a card whose column the board has not or that is not its state's, and in
 a project with cards a `tasks.md` that lost what they need (`backlog`
 among the options of `status`, `team` and `assignee` not required, the
-card's fields).
+card's fields). And an iteration without its board, start or end, with
+its end before its start, or whose days meet another's of its board; a
+card whose `iteration` is none of its board's; a `started` or `finished`
+that is no time, a `finished` on a card not closed, or before its start.

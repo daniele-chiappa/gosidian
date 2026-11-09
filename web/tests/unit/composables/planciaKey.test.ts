@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { WindowInstance } from 'plancia'
-import { codec, planciaKey, base, noteHref } from '@/composables/planciaKey'
+import { codec, codecTypes, planciaKey, base, noteHref, retitle } from '@/composables/planciaKey'
+import { windowRegistry } from '@/components/plancia/windowRegistry'
 
 // codec.encode reads only `type`/`props` from a window; build a minimal stub.
 const win = (type: string, props: Record<string, unknown> = {}): WindowInstance =>
@@ -43,6 +44,20 @@ describe('plancia codec round-trip', () => {
     expect(codec.decode('admin:foo')?.title).toBe('Admin · foo')
   })
 
+  it("keeps one admin window, its section and the audit's filter in the address (IMP-224)", () => {
+    const tok = codec.encode(win('admin', { section: 'audit', audit: 'actor=claude&order=asc' }))!
+    expect(tok).toBe('admin:' + encodeURIComponent('audit?actor=claude&order=asc'))
+    expect(codec.decode(tok)).toEqual({
+      type: 'admin',
+      key: 'admin',
+      title: 'Admin · Audit',
+      props: { section: 'audit', audit: 'actor=claude&order=asc' },
+    })
+    expect(codec.decode('admin:teams')?.key).toBe('admin')
+    expect(codec.key({ type: 'admin', props: { section: 'tokens' } })).toBe('admin')
+    expect(codec.encode(win('admin', { section: 'users' }))).toBe('admin:users')
+  })
+
   it('graph focus uses the focus prop; bare graph is the global graph', () => {
     expect(codec.encode(win('graph'))).toBe('graph')
     const ego = codec.encode(win('graph', { focus: 'p/n.md', depth: 1 }))!
@@ -52,6 +67,17 @@ describe('plancia codec round-trip', () => {
       key: 'graph:p/n.md',
       title: 'Links · n',
       props: { focus: 'p/n.md', depth: 1 },
+    })
+  })
+
+  it('graph of every project, chosen by hand, keeps it in the address (BUG-158)', () => {
+    const tok = codec.encode(win('graph', { global: true, allProjects: true, minDegree: 2 }))!
+    expect(decodeURIComponent(tok)).toBe('graph:p=*&m=2')
+    expect(codec.decode(tok)).toEqual({
+      type: 'graph',
+      key: 'graph',
+      title: 'Graph',
+      props: { global: true, allProjects: true, minDegree: 2 },
     })
   })
 
@@ -67,6 +93,70 @@ describe('plancia codec round-trip', () => {
     expect(codec.encode(win('note', { path: 'a/b.md', mode: 'edit' }))).toBe(
       'note:' + encodeURIComponent('a/b.md'),
     )
+  })
+
+  it("a project's members window keeps its project (BUG-154)", () => {
+    const tok = codec.encode(win('project-members', { project: 'agile lab' }))!
+    expect(tok).toBe('project-members:' + encodeURIComponent('agile lab'))
+    expect(codec.decode(tok)).toEqual({
+      type: 'project-members',
+      key: 'project-members:agile lab',
+      title: 'Access · agile lab',
+      props: { project: 'agile lab' },
+    })
+    // Two projects, two windows.
+    expect(codec.key({ type: 'project-members', props: { project: 'b' } })).toBe(
+      'project-members:b',
+    )
+  })
+
+  it("a note in a plugin's app keeps its path, one window a note (IMP-226)", () => {
+    const tok = codec.encode(win('app', { path: 'rivista/numero 1.md' }))!
+    expect(tok).toBe('app:' + encodeURIComponent('rivista/numero 1.md'))
+    expect(codec.decode(tok)).toEqual({
+      type: 'app',
+      key: 'app:rivista/numero 1.md',
+      title: 'numero 1 · editor',
+      props: { path: 'rivista/numero 1.md' },
+    })
+    expect(codec.key({ type: 'app', props: { path: 'r/b.md' } })).toBe(planciaKey('app', 'r/b.md'))
+  })
+
+  it("a creation window keeps its folder, keyed as the tree's + opens it (BUG-154)", () => {
+    const props = { path: 'p/docs' }
+    expect(codec.key({ type: 'create', props })).toBe(planciaKey('create', 'p/docs'))
+    expect(codec.decode(codec.encode(win('create', props))!)).toEqual({
+      type: 'create',
+      key: 'create:p/docs',
+      title: 'New note · docs',
+      props,
+    })
+  })
+
+  it("a creation window keeps its folder and name, keyed as a missing note's link opens it (BUG-154)", () => {
+    for (const props of [
+      { path: 'p/docs', name: 'idea: nuova' },
+      { path: '', name: 'top' },
+    ]) {
+      const key = planciaKey('create', `${props.path}/${props.name}`)
+      expect(codec.key({ type: 'create', props })).toBe(key)
+      expect(codec.decode(codec.encode(win('create', props))!)).toEqual({
+        type: 'create',
+        key,
+        title: `New note · ${props.path.split('/').pop() || '/'}`,
+        props,
+      })
+    }
+    // Same folder, no name: another window.
+    expect(codec.key({ type: 'create', props: { path: 'p/docs' } })).not.toBe(
+      codec.key({ type: 'create', props: { path: 'p/docs', name: 'x' } }),
+    )
+  })
+
+  it('knows every window type the plancia can open (BUG-154)', () => {
+    // A type the codec does not list comes back from the address as a
+    // singleton without its props.
+    expect(Object.keys(windowRegistry).filter((t) => !codecTypes.includes(t))).toEqual([])
   })
 
   it('decode rejects empty input', () => {
@@ -91,5 +181,41 @@ describe('plancia codec round-trip', () => {
 
   it('noteHref escapes each segment of the path', () => {
     expect(noteHref('p/a b/c#d.md')).toBe('/notes/p/a%20b/c%23d.md')
+  })
+})
+
+describe('window titles in a new language (BUG-155)', () => {
+  const titled = (type: string, props: Record<string, unknown>, title: string): WindowInstance =>
+    ({ type, props, title }) as WindowInstance
+
+  it('translates again a title the address gives', () => {
+    expect(retitle(titled('settings', {}, 'Settings'), 'en', 'it')).toBe('Impostazioni')
+    expect(retitle(titled('project-members', { project: 'p' }, 'Access · p'), 'en', 'it')).toBe(
+      'Accesso · p',
+    )
+    expect(retitle(titled('graph', { global: true, project: 'p' }, 'Graph · p'), 'en', 'it')).toBe(
+      'Grafo · p',
+    )
+  })
+
+  it("keeps the note's name in a «kind · name» title and translates the kind", () => {
+    const links = titled('graph', { focus: 'p/nota-alfa.md', depth: 1 }, 'Links · Nota alfa')
+    expect(retitle(links, 'en', 'it')).toBe('Legami · Nota alfa')
+    expect(
+      retitle(titled('history', { path: 'p/nota-alfa.md' }, 'History · Nota alfa'), 'en', 'it'),
+    ).toBe('Cronologia · Nota alfa')
+  })
+
+  it('leaves alone a title a view gave', () => {
+    expect(retitle(titled('note', { path: 'p/nota-alfa.md' }, 'Nota alfa'), 'en', 'it')).toBeNull()
+    expect(
+      retitle(titled('graph', { focus: 'p/a.md', depth: 1 }, 'Legami · a'), 'en', 'it'),
+    ).toBeNull()
+  })
+
+  it('names a history window from the address after its kind', () => {
+    expect(codec.decode(codec.encode(win('history', { path: 'p/nota-alfa.md' }))!)?.title).toBe(
+      'History · nota-alfa',
+    )
   })
 })

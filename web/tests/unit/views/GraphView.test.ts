@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import enUI from '@catalogs/ui.en.json'
@@ -11,16 +11,29 @@ vi.mock('@/api/noteTitles', () => ({ suggestNoteTitles: vi.fn(async () => []) })
 vi.mock('@/stores/ui', () => ({
   useUIStore: () => ({ graphMode: '2d', setGraphMode: vi.fn(), graphDefaultNodes: 2000, graphMaxNodes: 5000 }),
 }))
-vi.mock('plancia', async (orig) => ({
-  ...(await orig<typeof import('plancia')>()),
-  useWindowsStore: () => ({ windows: [], open: vi.fn(), identify: vi.fn(), setTitle: vi.fn() }),
-}))
+const { store } = vi.hoisted(() => {
+  const store = {
+    windows: [] as { id: string; type: string; key: string; title: string; props: Record<string, unknown> }[],
+    open: vi.fn(),
+    // As plancia's, identify merges the props it is given into the window's.
+    identify: vi.fn((id: string, _key: string, props: Record<string, unknown>) => {
+      const win = store.windows.find((w) => w.id === id)
+      if (win) Object.assign(win.props, props)
+    }),
+    setTitle: vi.fn(),
+  }
+  return { store }
+})
+vi.mock('plancia', async (orig) => ({ ...(await orig<typeof import('plancia')>()), useWindowsStore: () => store }))
 vi.mock('@vueuse/core', async (orig) => ({
   ...(await orig<typeof import('@vueuse/core')>()),
   useDebounceFn: (fn: () => void) => fn,
 }))
 
+import type { WindowInstance } from 'plancia'
 import { fetchGraph, fetchGraphSources } from '@/api/graph'
+import { listProjects } from '@/api/projects'
+import { codec } from '@/composables/planciaKey'
 import GraphView from '@/views/GraphView.vue'
 
 const i18n = () => createI18n({ legacy: false, locale: 'en', messages: { en: enUI } })
@@ -109,3 +122,87 @@ describe('GraphView, its heading (IMP-217, F-03)', () => {
     await flushPromises()
   })
 })
+
+describe('GraphView, its filters in the address (BUG-158)', () => {
+  afterEach(() => {
+    store.windows = []
+  })
+
+  it('takes a filter out of the address when it is cleared', async () => {
+    vi.mocked(fetchGraph).mockReset().mockResolvedValue(graph(3))
+    vi.mocked(fetchGraphSources).mockResolvedValue([{ source: 'links' }])
+    const win = { id: 'g1', type: 'graph', key: 'graph:project:claude', title: '', props: { project: 'claude', global: true } }
+    store.windows = [win]
+    const address = () => decodeURIComponent(codec.encode(win as unknown as WindowInstance) ?? '')
+    const w = mount(GraphView, {
+      props: { project: 'claude', global: true },
+      global: { plugins: [i18n()], stubs: { GraphCanvas: true, Graph3DCanvas: true, SearchSelect: true } },
+    })
+    await flushPromises()
+    const [, minDegree, limit] = w.findAll('input[type="number"]')
+    await minDegree!.setValue(2)
+    await limit!.setValue(50)
+    await flushPromises()
+    expect(address()).toBe('graph:p=claude&m=2&l=50')
+
+    await minDegree!.setValue(0)
+    await limit!.setValue('')
+    await flushPromises()
+    expect(address()).toBe('graph:p=claude')
+
+    // Every project, chosen by hand: a reload must not put the most recent
+    // one back.
+    await w.findAll('button').find((b) => b.text() === 'Reset')!.trigger('click')
+    await flushPromises()
+    expect(address()).toBe('graph:p=*')
+  })
+
+  it('opens on every project when the address says so, not on the most recent one', async () => {
+    vi.mocked(fetchGraph).mockReset().mockResolvedValue(graph(3))
+    vi.mocked(listProjects).mockResolvedValueOnce([{ name: 'recent', note_count: 1, mod_time: '2026-11-04T10:00:00Z' }] as never)
+    const win = { id: 'g1', type: 'graph', key: 'graph', title: '', props: { allProjects: true, global: true } }
+    store.windows = [win]
+    mount(GraphView, {
+      props: { allProjects: true, global: true },
+      global: { plugins: [i18n()], stubs: { GraphCanvas: true, Graph3DCanvas: true, SearchSelect: true } },
+    })
+    await flushPromises()
+    expect(fetchGraph).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(fetchGraph).mock.calls[0]![0]).toMatchObject({ project: undefined })
+    expect(decodeURIComponent(codec.encode(win as unknown as WindowInstance) ?? '')).toBe('graph:p=*')
+  })
+})
+
+describe('GraphView, the graph as text (IMP-224, F-32)', () => {
+  it('names the drawing with its counts, and shows it as a list beside 2D and 3D', async () => {
+    vi.mocked(fetchGraph).mockReset().mockResolvedValue({
+      nodes: [
+        { id: 'p/a.md', label: 'Alpha', degree: 1, project: 'p' },
+        { id: 'p/b.md', label: 'Beta', degree: 1, project: 'p' },
+      ],
+      edges: [{ source: 'p/a.md', target: 'p/b.md', count: 1 }],
+      stats: { node_count: 2, edge_count: 1 },
+    } as unknown as GraphResponse)
+    const w = mount(GraphView, {
+      props: { project: 'p', global: true },
+      global: { plugins: [i18n()], stubs: { GraphCanvas: true, Graph3DCanvas: true, SearchSelect: true } },
+    })
+    await flushPromises()
+    expect(w.find('graph-canvas-stub').attributes('label')).toBe('Graph: 2 nodes, 1 links. The List shows them as text.')
+    const views = () => w.findAll('[data-graph-views] button')
+    expect(views().map((b) => [b.text(), b.attributes('aria-pressed')])).toEqual([
+      ['2D', 'true'],
+      ['3D', 'false'],
+      ['List', 'false'],
+    ])
+
+    await views()[2]!.trigger('click')
+    expect(w.find('graph-canvas-stub').exists()).toBe(false)
+    expect(w.find('[data-graph-list]').text()).toContain('Alpha')
+    expect(views().map((b) => b.attributes('aria-pressed'))).toEqual(['false', 'false', 'true'])
+
+    await views()[0]!.trigger('click')
+    expect(w.find('graph-canvas-stub').exists()).toBe(true)
+  })
+})
+

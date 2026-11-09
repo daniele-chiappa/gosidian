@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -21,13 +22,18 @@ import (
 // task tools, the task trigger and the task nodes read and write. Every
 // write of a task goes through writeNote, under the note's lock.
 
-// notesOfType lists the notes of project whose frontmatter says type typ.
-func (s *Server) notesOfType(project, typ string) ([]string, error) {
+// notesOfType lists the notes of project, of every project for "", whose
+// frontmatter says type typ and meets conds.
+func (s *Server) notesOfType(project, typ string, conds ...index.FieldCond) ([]string, error) {
+	var projects []string
+	if project != "" {
+		projects = []string{project}
+	}
+	where := append([]index.FieldCond{{Field: "type", Op: index.OpEq, Values: []string{typ}}}, conds...)
 	var out []string
 	for offset := 0; ; offset += index.QueryMaxLimit {
-		hits, total, err := s.index.Query(index.QueryOptions{Projects: []string{project},
-			Where: []index.FieldCond{{Field: "type", Op: index.OpEq, Values: []string{typ}}},
-			Sort:  "path", Limit: index.QueryMaxLimit, Offset: offset})
+		hits, total, err := s.index.Query(index.QueryOptions{Projects: projects, Where: where,
+			Sort: "path", Limit: index.QueryMaxLimit, Offset: offset})
 		if err != nil {
 			return nil, err
 		}
@@ -93,11 +99,12 @@ func (s *Server) fleetRead(rel string) (fleet.Task, []byte, error) {
 }
 
 // taskWrite is how a task is written: by a token (the limiter counts it),
-// by the server for a run (actor), or for a person of the web UI (actor,
-// person) who saw the note at ifMatch.
+// by the server for a run (actor) or as itself (actor and source), or for
+// a person of the web UI (actor, person) who saw the note at ifMatch.
 type taskWrite struct {
 	tok     *auth.Token
 	actor   string
+	source  audit.Source
 	person  bool
 	ifMatch string
 }
@@ -107,7 +114,7 @@ func (w taskWrite) noteWrite(nw noteWrite) noteWrite {
 	case w.person:
 		nw.automation, nw.source, nw.actor, nw.ifMatch = true, audit.SourceHTTP, w.actor, w.ifMatch
 	case w.tok == nil:
-		nw.automation, nw.source, nw.actor, nw.batched = true, audit.SourcePipeline, w.actor, true
+		nw.automation, nw.source, nw.actor, nw.batched = true, cmp.Or(w.source, audit.SourcePipeline), w.actor, true
 	}
 	return nw
 }

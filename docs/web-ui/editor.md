@@ -18,7 +18,8 @@ While in *edit*, a toolbar above the editor toggles four layout modes:
 - **Stacked** — editor on top, preview below (good on narrow displays)
 - **Preview** — rendered note only; no editing affordance
 
-Mode choice is persisted in local storage per browser.
+The choice among the first three is persisted in local storage per browser.
+Preview is for a look and is not remembered: Edit always shows the text.
 
 ## Live preview
 
@@ -38,6 +39,27 @@ with the path beside it, and picking one writes the path:
 notes edited last. A `relation` field of the properties suggests notes
 the same way.
 
+## Tags
+
+A markdown note shows its tags as chips above its text: among the fields
+of the property panel for a row of a database, on a line of their own
+for any other note. Who may write the note takes a tag away with its ×
+and adds one in the field beside them: Enter, a comma or a space adds
+what is typed (without the `#`), and a pasted list is split at its commas
+and spaces. While you type, the field suggests the project's tags, the
+most used first, then the project's `tag_vocabulary` when it has the
+vocabulary flag; ↑ and ↓ walk them, Enter picks one, Esc closes them. A
+tag that is new is written all the same. Each change is saved at once,
+against the tags the note had: if someone changed them meanwhile, nothing
+is overwritten and the field shows the tags of now. A reader who may not
+write sees the chips alone, and nothing when there are none. The tags
+written in the text (`#tag`) are not chips.
+
+In the editor the frontmatter's tags are checked as you write: a line
+above the editor says which are empty (`[a,, b]`) or have a space
+(`topic:audit type:task`, one tag for the server), until they are right.
+It does not stop the save.
+
 ## Save / history
 
 - **Save** writes the note atomically (temp file + rename) and updates
@@ -49,6 +71,50 @@ the same way.
   menu) lists the commits of the note when git sync is on, newest first:
   the date, who wrote it, and what was done (`update notes/plan.md`,
   `rename a.md -> b.md`). See [History](#history) below.
+
+
+## The valid version
+
+A note that changes while the right text must stay available can name its
+**valid version**, which the web UI calls the pinned one: a booklet under
+revision, say. A reader sees that version, with a line that says a newer draft
+exists and a button to it; who edits works on the note as it is, the draft, and
+is told that readers keep seeing the other. A pinned note goes on changing: no
+need to unpin it to work on it. Copying and downloading follow what the window
+shows. The page layout opens the draft for who can edit it, and the version for
+who can only read: there it reads and exports, and has no Save.
+
+- The **version button**, in the bar of the note and of its design, says what
+  readers see: *Latest*, or *Pinned V3* with a dot when a newer draft exists.
+  Its panel is for the project's admin, and shows the rest of the readers what
+  it says, with *Open* on each version:
+  - a click on a version pins it, and one on *The latest change* goes back;
+  - *Pin this version* gives the note as it is a name, such as `V3`, and pins
+    it in one step, saving first what is not saved. *Tag only* names it
+    without pinning it;
+  - *Another commit…* does the same for an older commit;
+  - *MCP callers see* chooses what agents read while the note changes: the
+    latest change, the same as readers, or a named version
+    ([what they get](../mcp/tools.md#what-a-note-gives-mcp-callers)).
+- In the note's **History** the admin does the same from a version's entry. A
+  name never moves to another version, and the named versions show on their
+  entries for everyone.
+- It needs git sync: the version is a tag on the commit, and the note names
+  it in `valid_version` in its frontmatter. Any other write leaves that key as
+  it was, and the properties panel refuses it. Renames, the trash and a
+  restore keep it.
+- A valid version says which text is right, it hides nothing: who reads the
+  note can reach the draft and the history.
+- `memory_gc_attachments` keeps what the valid version names, and a version
+  chosen long after brings back from git the attachments it lost.
+- **Search reads the valid version**: a word only in the draft is found by no
+  search, and a word of that version finds the note. The title, the tags, the
+  links and the frontmatter stay the note's as it is. A pipeline reads the
+  draft unless it asks for
+  [`at: valid`](../pipelines.md#the-valid-version-of-a-note), which is what a
+  pipeline that cuts notes for a bot must set.
+- If the tag can no longer be read, the window shows the note as it is, with a
+  warning, and search reads the note as it is.
 
 ## History
 
@@ -119,14 +185,16 @@ affordances (maximize, minimize, close, drag, resize).
 
 `Cmd+K` / `Ctrl+K` opens a finder for a note, a project or a tag by its
 name: a note by its title or its path. Keyboard-first: arrow keys to
-select, `Enter` to open, `Esc` to close. With the field empty, the notes
+select, `Enter` to open, `Esc` to close. A project opens Projects with
+the focus on its name, in view, whether Projects was open already or
+not. With the field empty, the notes
 viewed recently come first. The list it shows comes from the server at
 each opening; the one it has shows while the new one arrives.
 
 The palette matches names, not what the notes say. Once there is a
 text, its last entry, **Search the text for "…"**, looks for it in the
 notes' text: it opens Search with the text, or hands it to the Search
-already open. The **Search** button in the top bar opens Search, and
+already open, which searches again even when its field holds that text. The **Search** button in the top bar opens Search, and
 shows no shortcut: `Ctrl+K` opens the palette.
 
 To a screen reader the palette is a dialog named *Jump to a note, a

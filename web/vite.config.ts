@@ -144,7 +144,8 @@ export default defineConfig({
   },
   build: {
     target: 'es2022',
-    sourcemap: true,
+    // No source maps: the server embeds the build, and they were 20.8 of
+    // the binary's 71.8 MB.
     manifest: true,
     rollupOptions: {
       output: {

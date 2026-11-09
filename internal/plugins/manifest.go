@@ -47,6 +47,8 @@ const (
 	maxSources = 32
 	maxTools   = 32
 	maxGraphs  = 16
+	maxApps    = 8
+	maxAltURLs = 4
 )
 
 // MaxToolName caps the name an agent sees a plugin's tool by,
@@ -66,6 +68,7 @@ var (
 	pluginName   = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 	nodeName     = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
 	contractName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}/[1-9][0-9]{0,3}$`)
+	noteTypeName = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
 )
 
 // ContractAgentRun is the contract of the agents' nodes (IMP-193): a
@@ -99,12 +102,39 @@ type Manifest struct {
 	// Graphs are the graphs it offers the Graph window and the ```graph
 	// blocks, as <plugin>/<graph>, in the projects the owner exposes it in
 	// (IMP-183).
-	Graphs      []GraphSpec `json:"graphs,omitempty"`
+	Graphs []GraphSpec `json:"graphs,omitempty"`
+	// Apps are the pages it offers for a window of gosidian's own, framed
+	// from the plugin's address (IMP-226).
+	Apps        []AppSpec   `json:"apps,omitempty"`
 	Permissions Permissions `json:"permissions"`
 	// MaxConcurrent is how many calls at once the plugin bears (a model on
 	// one GPU: 1), until the server's config says otherwise (IMP-196); 0:
 	// no limit.
 	MaxConcurrent int `json:"max_concurrent,omitempty"`
+}
+
+// AppSpec is a page a plugin offers for a window of gosidian's own
+// (IMP-226): the editor of the notes of a type, say. gosidian frames URL,
+// with the sandbox it chooses for every app, and talks to the page with
+// postMessage under the contract Bridge; the page reaches the vault only
+// through that window, with the rights of whoever is logged in.
+type AppSpec struct {
+	Name        string `json:"name"`
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+	// URL is the page's address, which the browser loads: absolute, http
+	// or https, without credentials, query or fragment.
+	URL string `json:"url"`
+	// AltURLs are the same page at other addresses, each like URL, for a
+	// browser that reaches gosidian another way (the LAN and a tunnel, say):
+	// the window opens the one on the host gosidian was opened at, else URL.
+	AltURLs []string `json:"alt_urls,omitempty"`
+	// NoteType is the type of the notes it opens; one app a type.
+	NoteType string `json:"note_type"`
+	// Bridge is the contract of its messages, such as layout/2.
+	Bridge string `json:"bridge"`
+	// Engine is what the page is built on, for the reader.
+	Engine string `json:"engine,omitempty"`
 }
 
 // GraphSpec is a graph a plugin offers: nodes and edges it makes of its
@@ -132,6 +162,10 @@ type ToolSpec struct {
 	// files a write tool gives back as attachments (IMP-184).
 	Files    []string `json:"files,omitempty"`
 	FileRefs bool     `json:"file_refs,omitempty"`
+	// Internal is a tool only gosidian's code calls, for a tool of its own
+	// that checks what the call touches: no agent is offered it, wherever
+	// the plugin is exposed (AppTool).
+	Internal bool `json:"internal,omitempty"`
 }
 
 // SourceSpec is a source a plugin offers: an archive it reads, set up in
@@ -228,8 +262,11 @@ func (m *Manifest) check(name string) error {
 	if len(m.Graphs) > maxGraphs {
 		return fmt.Errorf("the manifest has %d graphs, at most %d", len(m.Graphs), maxGraphs)
 	}
-	if len(m.Nodes) == 0 && len(m.Sources) == 0 && len(m.Tools) == 0 && len(m.Graphs) == 0 {
-		return errors.New("the manifest has no nodes, no sources, no tools and no graphs")
+	if len(m.Apps) > maxApps {
+		return fmt.Errorf("the manifest has %d apps, at most %d", len(m.Apps), maxApps)
+	}
+	if len(m.Nodes) == 0 && len(m.Sources) == 0 && len(m.Tools) == 0 && len(m.Graphs) == 0 && len(m.Apps) == 0 {
+		return errors.New("the manifest has no nodes, no sources, no tools, no graphs and no apps")
 	}
 	seen := map[string]bool{}
 	for _, n := range m.Nodes {
@@ -284,12 +321,64 @@ func (m *Manifest) check(name string) error {
 			return fmt.Errorf("graph %q: %w", g.Name, err)
 		}
 	}
+	if err := m.checkApps(); err != nil {
+		return err
+	}
 	for _, h := range m.Permissions.SourceHosts {
 		if !validHost(h) {
 			return fmt.Errorf("permissions.source_hosts: %q is not a host (a name or an address, with a port or not)", h)
 		}
 	}
 	return nil
+}
+
+// checkApps checks the apps of a manifest: their names, addresses, note
+// types and contracts.
+func (m *Manifest) checkApps() error {
+	names, types := map[string]bool{}, map[string]bool{}
+	for _, a := range m.Apps {
+		switch {
+		case !nodeName.MatchString(a.Name):
+			return fmt.Errorf("app %q: a name of lower-case letters, digits and _", a.Name)
+		case names[a.Name]:
+			return fmt.Errorf("app %q twice", a.Name)
+		case strings.TrimSpace(a.Title) == "":
+			return fmt.Errorf("app %q has no title", a.Name)
+		case !noteTypeName.MatchString(a.NoteType):
+			return fmt.Errorf("app %q: note_type %q is the type of the notes it opens, lower-case letters, digits, _ and -", a.Name, a.NoteType)
+		case types[a.NoteType]:
+			return fmt.Errorf("app %q: another app opens the notes type: %s", a.Name, a.NoteType)
+		case !contractName.MatchString(a.Bridge):
+			return fmt.Errorf("app %q: bridge %q is a name and a version, such as layout/1", a.Name, a.Bridge)
+		}
+		if len(a.AltURLs) > maxAltURLs {
+			return fmt.Errorf("app %q has %d other addresses, at most %d", a.Name, len(a.AltURLs), maxAltURLs)
+		}
+		for _, raw := range a.urls() {
+			if _, err := appOrigin(raw); err != nil {
+				return fmt.Errorf("app %q: %w", a.Name, err)
+			}
+		}
+		names[a.Name], types[a.NoteType] = true, true
+	}
+	return nil
+}
+
+// urls are the addresses of the app's page, the main one first.
+func (a AppSpec) urls() []string {
+	return append([]string{a.URL}, a.AltURLs...)
+}
+
+// appOrigin is the origin of an app's address, which the SPA's CSP admits
+// in frame-src: the address absolute, http or https, without credentials,
+// query or fragment, its host a name or an address.
+func appOrigin(raw string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil ||
+		u.RawQuery != "" || u.Fragment != "" || strings.Contains(raw, "#") || !validHost(u.Host) || strings.ContainsAny(raw, " ;,'\"") {
+		return "", fmt.Errorf("url %q: the page's address, https://layout.example.com/app/", raw)
+	}
+	return u.Scheme + "://" + u.Host, nil
 }
 
 // checkTools checks the tools a manifest offers the agents.
@@ -314,6 +403,8 @@ func (m *Manifest) checkTools() error {
 			return fmt.Errorf("tool %q: the gosidian_ names are gosidian's", t.Name)
 		case withFiles[t.Name] && len(t.Files) == 0:
 			return fmt.Errorf("tool %q runs a node that takes files, which an agent cannot hand it: list them in the tool's files", t.Name)
+		case t.Internal && len(t.Files) > 0:
+			return fmt.Errorf("tool %q is internal: gosidian gives it what it needs, and it takes no agent's files", t.Name)
 		case len(t.Files) > 0 && !t.FileRefs:
 			return fmt.Errorf("tool %q takes files: an agent's files go by reference (file_refs: true)", t.Name)
 		case len(t.Files) > 0 && !m.Permissions.Files:
@@ -378,6 +469,30 @@ func (m *Manifest) Graph(name string) (GraphSpec, bool) {
 		}
 	}
 	return GraphSpec{}, false
+}
+
+// App finds an app by name.
+func (m *Manifest) App(name string) (AppSpec, bool) {
+	for _, a := range m.Apps {
+		if a.Name == name {
+			return a, true
+		}
+	}
+	return AppSpec{}, false
+}
+
+// AppOrigins are the origins of the manifest's apps, for the SPA's
+// frame-src.
+func (m *Manifest) AppOrigins() []string {
+	var out []string
+	for _, a := range m.Apps {
+		for _, raw := range a.urls() {
+			if o, err := appOrigin(raw); err == nil {
+				out = append(out, o)
+			}
+		}
+	}
+	return out
 }
 
 // Tool finds a tool by name.

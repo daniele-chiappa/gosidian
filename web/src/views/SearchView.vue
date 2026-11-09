@@ -69,10 +69,14 @@ async function run(q: string, p: string) {
 const debounced = useDebounceFn(() => void run(query.value, project.value), 300)
 watch([query, project], debounced)
 // The text asked replaces the field, even the same text over what was typed.
+// The text the field already holds searches again: the field's own watch
+// does not see it, and a note written since may hold it (BUG-159).
 watch(
   () => [props.q, props.qAt],
   () => {
-    query.value = props.q ?? ''
+    const q = props.q ?? ''
+    if (query.value === q) void debounced()
+    else query.value = q
   },
 )
 
@@ -121,13 +125,15 @@ onMounted(() => {
         type="search"
         :autofocus="autofocus"
         :placeholder="t('search.placeholder')"
-        class="h-control py-0 flex-1 rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
+        :aria-label="t('search.query_label')"
+        class="h-control py-0 flex-1 rounded bg-bg-elevated border border-border-input px-3 focus:outline-none focus:ring-2 focus:ring-focus"
       />
       <input
         v-model="project"
         type="text"
         :placeholder="t('search.project_placeholder')"
-        class="h-control py-0 w-48 min-w-0 shrink rounded bg-bg-elevated border border-border px-3 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
+        :aria-label="t('search.project_label')"
+        class="h-control py-0 w-48 min-w-0 shrink rounded bg-bg-elevated border border-border-input px-3 text-sm focus:outline-none focus:ring-2 focus:ring-focus"
       />
     </div>
 
@@ -160,7 +166,7 @@ onMounted(() => {
           @click="openPalette(lastSubmitted)"
         >
           {{ t('search.in_titles') }}
-          <kbd class="opacity-60">{{ paletteKeys }}</kbd>
+          <kbd class="text-text-muted">{{ paletteKeys }}</kbd>
         </button>
       </div>
     </div>

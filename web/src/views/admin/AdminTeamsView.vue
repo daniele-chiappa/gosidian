@@ -26,7 +26,7 @@ import { errorText } from '@/api/errors'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
 import { confirmAction } from '@/composables/useConfirm'
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 
 const access = useAccessStore()
 const teams = ref<Team[]>([])
@@ -36,6 +36,7 @@ const loading = ref(false)
 const error = ref<string | null>(null)
 
 const LEVELS: GrantLevel[] = ['read', 'write', 'admin']
+const levelName = (l: string) => (te(`members.level_name.${l}`) ? t(`members.level_name.${l}`) : l)
 
 // --- Create ---
 const newTeam = reactive({ name: '', description: '' })
@@ -188,9 +189,9 @@ function grantDraft(team: Team): { project: string; level: GrantLevel } {
 
 function levelClass(level: string): string {
   return level === 'admin'
-    ? 'bg-accent/20 text-accent'
+    ? 'bg-accent/10 text-accent'
     : level === 'write'
-      ? 'bg-success/20 text-success'
+      ? 'bg-success/10 text-success'
       : 'border border-border text-text-muted'
 }
 
@@ -213,7 +214,7 @@ onMounted(load)
             type="text"
             :placeholder="t('admin.teams.name')"
             required
-            class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
+            class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border-input px-3 focus:outline-none focus:ring-2 focus:ring-focus"
           />
         </label>
         <label class="text-sm flex-[2] min-w-[12rem]">
@@ -221,7 +222,7 @@ onMounted(load)
           <input
             v-model.trim="newTeam.description"
             type="text"
-            class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
+            class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border-input px-3 focus:outline-none focus:ring-2 focus:ring-focus"
           />
         </label>
         <button
@@ -250,13 +251,15 @@ onMounted(load)
                 v-model.trim="editDraft.name"
                 type="text"
                 required
-                class="h-control-sm py-0 rounded bg-bg-elevated border border-border px-2 text-sm"
+                :aria-label="t('admin.teams.name_label')"
+                class="h-control-sm py-0 rounded bg-bg-elevated border border-border-input px-2 text-sm"
               />
               <input
                 v-model.trim="editDraft.description"
                 type="text"
                 :placeholder="t('admin.teams.description')"
-                class="h-control-sm py-0 min-w-0 flex-1 rounded bg-bg-elevated border border-border px-2 text-sm"
+                :aria-label="t('admin.teams.description_label')"
+                class="h-control-sm py-0 min-w-0 flex-1 rounded bg-bg-elevated border border-border-input px-2 text-sm"
               />
               <button type="submit" class="h-control-sm text-xs px-2 rounded bg-accent text-accent-fg">{{ t('common.save') }}</button>
               <button type="button" class="h-control-sm text-xs px-2 rounded border border-border" @click="editing = null">{{ t('common.cancel') }}</button>
@@ -305,7 +308,8 @@ onMounted(load)
           <form class="flex gap-2" @submit.prevent="addUser(team)">
             <select
               v-model="addUserDraft[team.id]"
-              class="h-control-sm py-0 min-w-0 flex-1 rounded bg-bg-elevated border border-border px-2 text-sm"
+              :aria-label="t('admin.teams.add_account_to', { team: team.name })"
+              class="h-control-sm py-0 min-w-0 flex-1 rounded bg-bg-elevated border border-border-input px-2 text-sm"
             >
               <option value="">{{ t('admin.teams.add_account') }}</option>
               <option v-for="u in candidatesFor(team)" :key="u.id" :value="u.id">{{ u.username }} ({{ roleLabel(u.role) }})</option>
@@ -328,10 +332,11 @@ onMounted(load)
               class="flex items-center gap-2 text-sm rounded border border-border bg-surface px-2 py-1"
             >
               <span class="flex-1 truncate font-medium">{{ g.project }}</span>
-              <span class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded" :class="levelClass(g.level)">{{ g.level }}</span>
+              <span class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded" :class="levelClass(g.level)" :title="g.level" data-level>{{ levelName(g.level) }}</span>
               <select
-                class="h-control-sm py-0 text-xs rounded bg-bg-elevated border border-border px-1"
+                class="h-control-sm py-0 text-xs rounded bg-bg-elevated border border-border-input px-1"
                 :value="g.level"
+                :aria-label="t('admin.teams.level_of', { team: team.name, project: g.project })"
                 @change="changeGrant(team, g.project, ($event.target as HTMLSelectElement).value)"
               >
                 <option v-for="l in LEVELS" :key="l" :value="l">{{ t(`members.level_name.${l}`) }}</option>
@@ -349,14 +354,16 @@ onMounted(load)
           <form class="flex gap-2" @submit.prevent="addGrant(team)">
             <select
               v-model="grantDraft(team).project"
-              class="h-control-sm py-0 min-w-0 flex-1 rounded bg-bg-elevated border border-border px-2 text-sm"
+              :aria-label="t('admin.teams.grant_project_to', { team: team.name })"
+              class="h-control-sm py-0 min-w-0 flex-1 rounded bg-bg-elevated border border-border-input px-2 text-sm"
             >
               <option value="">{{ t('admin.teams.grant_project') }}</option>
               <option v-for="p in projectsFor(team)" :key="p.name" :value="p.name">{{ p.name }}</option>
             </select>
             <select
               v-model="grantDraft(team).level"
-              class="h-control-sm py-0 rounded bg-bg-elevated border border-border px-2 text-sm"
+              :aria-label="t('admin.teams.grant_level')"
+              class="h-control-sm py-0 rounded bg-bg-elevated border border-border-input px-2 text-sm"
             >
               <option v-for="l in LEVELS" :key="l" :value="l">{{ t(`members.level_name.${l}`) }}</option>
             </select>

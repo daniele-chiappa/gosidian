@@ -130,12 +130,12 @@ onMounted(() => {
           type="text"
           :placeholder="tr('my_tokens.name_placeholder')"
           required
-          class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
+          class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border-input px-3 focus:outline-none focus:ring-2 focus:ring-focus"
         />
       </label>
       <label class="text-sm">
         <span class="text-text-muted text-xs">{{ tr('my_tokens.projects') }}</span>
-        <select v-model="draft.mode" class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-2">
+        <select v-model="draft.mode" class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border-input px-2">
           <option value="inherit">{{ tr('my_tokens.inherit') }}</option>
           <option value="custom">{{ tr('my_tokens.custom') }}</option>
         </select>
@@ -145,7 +145,7 @@ onMounted(() => {
         <select
           :value="draft.write && canWrite ? 'rw' : 'r'"
           :disabled="!canWrite"
-          class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-2 disabled:opacity-60"
+          class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border-input px-2 disabled:opacity-60"
           @change="draft.write = ($event.target as HTMLSelectElement).value === 'rw'"
         >
           <option value="r">{{ tr('my_tokens.read_only') }}</option>
@@ -154,20 +154,20 @@ onMounted(() => {
       </label>
       <label v-if="draft.mode === 'custom'" class="text-sm col-span-full">
         <span class="text-text-muted text-xs">{{ tr('my_tokens.pick') }}</span>
-        <select v-model="draft.projects" multiple size="4" class="mt-1 w-full rounded bg-bg-elevated border border-border px-2 py-1">
+        <select v-model="draft.projects" multiple size="4" class="mt-1 w-full rounded bg-bg-elevated border border-border-input px-2 py-1">
           <option v-for="p in visibleProjects" :key="p" :value="p">{{ p }}</option>
         </select>
       </label>
       <label class="text-sm">
         <span class="text-text-muted text-xs">{{ tr('my_tokens.profile') }}</span>
-        <select v-model="draft.profile" class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-2">
+        <select v-model="draft.profile" class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border-input px-2">
           <option value="">{{ tr('my_tokens.profile_full') }}</option>
           <option value="core">{{ tr('my_tokens.profile_core') }}</option>
         </select>
       </label>
       <label class="text-sm">
         <span class="text-text-muted text-xs">{{ tr('my_tokens.ttl') }}</span>
-        <input v-model.number="draft.ttlDays" type="number" min="0" class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3" />
+        <input v-model.number="draft.ttlDays" type="number" min="0" class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border-input px-3" />
       </label>
       <label class="text-sm col-span-full">
         <span class="text-text-muted text-xs">{{ tr('password.confirm_action') }}</span>
@@ -177,7 +177,7 @@ onMounted(() => {
           autocomplete="current-password"
           required
           data-token-password
-          class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
+          class="h-control py-0 mt-1 w-full rounded bg-bg-elevated border border-border-input px-3 focus:outline-none focus:ring-2 focus:ring-focus"
         />
       </label>
       <div class="col-span-full">

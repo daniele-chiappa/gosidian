@@ -41,11 +41,30 @@ scrollable strip.
   that takes over, and to the main once no window is left; a window
   restored from the footer takes it on its title, and so does the window
   `Alt-←` / `Alt-→` move to.
-- **Tabs**: the bar's *Tabs* button shows one window at a time, each
-  with its tab. The tabs are one `Tab` stop, which a screen reader hears
-  as tabs: the arrows go from one to the next, `Home` and `End` to the
-  first and the last, `Delete` closes the tab's window. *Strip* goes
-  back to the windows side by side.
+- **Tabs**: the plancia starts on the *Tabs* view, one window at a time,
+  each with its tab. The tabs are one `Tab` stop, which a screen reader
+  hears as tabs: the arrows go from one to the next, `Home` and `End` to
+  the first and the last, `Delete` closes the tab's window. The bar's
+  *Strip* button puts the windows side by side, and *Tabs* brings them
+  back; the browser keeps the view you pick.
+- **Full screen**: the button with four corners in a window's bar makes
+  that window cover the page. The bar, the sidebar and the other windows
+  go, and the browser goes full screen too. `Esc`, or the same button,
+  ends it, and so does closing the window; a note opened from it takes
+  its place. Where the browser does not go full screen (an iPhone), the
+  window covers the page all the same, and the button ends it. `Esc` is
+  the browser's: pressed in the page-layout editor, it ends the full
+  screen too.
+- **Narrow screens**: at 640 px and under (a phone, or a desktop zoomed
+  to 200% and more) the page fits the width with no sideways scrolling.
+  The sidebar is a drawer: the button at the left of the bar opens it,
+  with the focus on its first control; its own button, `Esc` and a click
+  beside it close it, with the focus back on the bar's button; and it
+  closes when a window takes the focus, as a note opened from the tree
+  does. One window at a time takes the width, as in the *Tabs* view;
+  the bar has no *Strip* / *Tabs* choice, and the view you saved comes
+  back on a wider screen. The bar keeps Search and the badges, and puts
+  the account's name, its role and *Sign out* in its ⋯ menu.
 - **Skip to the active window**: the first `Tab` from the top of the
   page shows this link, which takes the focus past the bar and the
   sidebar to the title of the focused window. A screen reader also jumps
@@ -54,7 +73,8 @@ scrollable strip.
   time, and a desk with no windows says so in its heading.
 - **The focus stays where you work**: a note just made opens with the
   focus in its editor; a creation the server refuses puts it on the name,
-  with the reason; a field of the properties, once saved, and a card
+  with the reason (a name already taken says which file exists, under
+  the field); a field of the properties, once saved, and a card
   moved on a board, in its new column, keep it; the palette closed with
   `Esc` gives it back where it was opened. *Save* stays in the `Tab`
   order with nothing to save, and does nothing then. A note that reloads
@@ -66,6 +86,27 @@ scrollable strip.
   keeps, a change made elsewhere to the note being edited. The command
   palette says which entry the arrows are on
   ([editor → command palette](editor.md#command-palette)).
+- **Every control has a name**: the editor is *Text of* the note; a
+  select in a table's row says whose it is (*Role of claude*, *Level of
+  a team on a project*); an editable cell of a view starts with the
+  value it shows (*review (edit Status)*); a field whose placeholder is
+  an example has a label over it in a form of several fields, and a name
+  of its own where what it is for shows around it (the search, a new
+  project).
+- **Labels say what they do**: a project's grants read *Members: 1 ·
+  teams: 0*; its flags are words (*not in git*, *short read*), each code
+  first in the tooltip and next to its word in *What the flags do*; the
+  audit says what each entry did (*signed out of the web UI*), the code
+  in the tooltip, and its Action filter is a menu of the actions by
+  group. A note's toolbar, from about 800 px (880 while editing), says a
+  word next to each icon, the whole name in the tooltip; narrower, the
+  icons alone, then the ⋯ menu.
+- **Fields in the reader's language**: the properties panel, the tables,
+  the boards and the forms of a database name its fields and a select's
+  values as its schema says, or as the web UI's catalogue does for the
+  fields of gosidian's own databases, the codes in the tooltips; dates
+  read as the reader writes them
+  ([databases → names in the web UI](../vault/databases.md#names-in-the-web-ui)).
 - **Tab title**: the browser's tab says the focused window and its
   project, `nota-alfa · agile-lab · gosidian`, so two tabs of gosidian
   are told apart; the login page says `Sign in · gosidian` (`Sign up`
@@ -81,6 +122,14 @@ The open windows + focus are encoded in the URL (`?w=…&f=…`), so a
 workspace is shareable and survives reload; when the URL is empty the
 last workspace is restored from `localStorage`.
 
+Each window you open is a step of the browser's history (IMP-224,
+F-29): **Back** closes the last window opened, and **Forward** opens it
+again; the other windows stay as they are. Closing that window with its
+× goes back the same step. Any other change rewrites the current step:
+the focus, a filter of the window, closing another window. Back on a
+window with unsaved changes asks first, as the × does; on Cancel the
+window stays. The windows a reload or a link opens add no step.
+
 ## Deep-link routes
 
 These canonical routes still work as entry points — visiting one opens
@@ -91,7 +140,7 @@ working):
 |---|---|
 | `/notes/<path>` | the note (view; `…/edit` opens in edit mode) |
 | `/notes/<path>/history` | the note's git history |
-| `/projects` | project listing & admin |
+| `/projects` | project listing & admin; a rename says how many notes that named the project's files it rewrote, and how many, in projects you may not write, keep the old name ([Multi-project](../vault/multi-project.md#project-discovery--creation)) |
 | `/tags` / `/tags/<tag>` | tag explorer |
 | `/graph` | graph of wiki-link relations |
 | `/search` | full-text search |
@@ -128,6 +177,20 @@ are a table; a title opens the note. The whole query lives in the URL,
 so it survives a reload and can be shared as a link. The backend is
 `POST /api/v1/query`, scoped to the projects the account can read.
 
+## Admin audit
+
+**Menu → Admin → Audit** (owner only) lists what the accounts and the
+agents did, the newest first; *When* sorts from the oldest. A filter by
+actor, action (a menu of the actions by group), source and path keeps
+some entries, and the page says which it shows of how many match
+(*1–100 of 1,234*), with *Previous page* and *Next page*; *How many
+entries* sets the page's size. The section, and the audit's filter,
+order and page, live in the window's address: a reload or a link shows
+the same entries, and the filter stays while another section is open.
+The backend is `GET /api/v1/admin/audit` (`limit`, `offset`, `order`,
+and the filters `actor`, `user_id`, `action`, `source`, `path_prefix`,
+`since`, `until`); its `total` counts the entries the filters keep.
+
 ## Sidebar tree
 
 The sidebar lists the vault's projects, folders and notes. A folder's
@@ -149,10 +212,25 @@ whole. The rows stay in file-name order, so notes named by their date
 stay in time order, and the window a row opens starts with the title.
 **Recent**, under the tree, shows its notes the same way.
 
+The tree follows the writes in the vault, of this page, of the agents and
+of the files on disk, with no reload of the page. A write reloads the
+tree of its project alone, asked with the ETag of the last answer: an
+edit of a note's body, which leaves the tree as it was, costs a 304
+without a body. A change to a whole project (made, renamed, deleted)
+reloads the whole tree. Large answers come in gzip.
+
 The sidebar's width changes by dragging its right edge, or from the
 keyboard, as a window's: `Tab` reaches the edge, the arrows move it by
 24 px (64 with `Shift`), and `Home`, like a double click, brings it back
-to 260 px. It goes from 180 to 560 px, and this browser keeps it.
+to 260 px. It goes from 180 to 560 px, and this browser keeps it. On a
+narrow screen the sidebar is a drawer at most 280 px wide, with no edge
+to drag.
+
+On a wide screen the button at the left of the bar closes the sidebar,
+and opens it again; so does `Ctrl+\` (`Cmd+\` on a Mac). The browser
+keeps the choice, and a narrow screen's drawer leaves it as it is. A key
+typed in the page-layout editor stays in the editor's frame: there, the
+bar's button does it.
 
 ## Tree context menu
 
@@ -211,7 +289,8 @@ limit or the audit.
 ## Rendering stack
 
 - **Vue 3** (composition API) + **vue-router** + **Pinia** state
-- **Vite** build; output embedded under `internal/server/web/dist`
+- **Vite** build; output embedded under `internal/server/web/dist`,
+  without source maps
 - **Tailwind CSS** with a semantic-token theme system (presets +
   custom palette)
 - **CodeMirror 6** for the editor (markdown, wikilink autocomplete),

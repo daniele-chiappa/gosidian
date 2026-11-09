@@ -34,7 +34,10 @@ vi.mock('@/stores/access', () => ({
     },
   }),
 }))
-vi.mock('@/stores/tree', () => ({ useTreeStore: () => tree }))
+vi.mock('@/stores/tree', async (orig) => ({
+  ...(await orig<typeof import('@/stores/tree')>()),
+  useTreeStore: () => tree,
+}))
 vi.mock('@/composables/useConfirm', () => ({ confirmAction: vi.fn(), showNotice: vi.fn() }))
 vi.mock('plancia', () => ({ useWindowsStore: () => windows }))
 
@@ -137,7 +140,8 @@ describe('TreeContextMenu', () => {
     expect(deleteFolder).toHaveBeenCalledWith('Alpha/sub')
     // The dirty window keeps its draft.
     expect(windows.close.mock.calls).toEqual([['w1']])
-    expect(tree.refresh).toHaveBeenCalled()
+    // The tree of its project alone (IMP-225).
+    expect(tree.refresh.mock.calls).toEqual([['Alpha']])
   })
 
   it('says a delete is for good without the trash, and offers none on a folder (BUG-116, S6-3)', async () => {

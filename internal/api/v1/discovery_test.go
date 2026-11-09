@@ -52,6 +52,41 @@ func TestTree_ProjectFilter(t *testing.T) {
 	}
 }
 
+// The tree carries an ETag of what it holds (IMP-225): asked again with
+// it, an unchanged tree answers 304 without a body, so a write that leaves
+// the tree as it was costs the web UI nothing; a changed tree answers 200
+// with a new ETag. It is never stored by the browser.
+func TestTree_ETag(t *testing.T) {
+	f := newNotesFixture(t)
+	f.seedNote(t, "alpha/a.md", "x")
+	f.seedNote(t, "beta/b.md", "y")
+	const url = "/api/v1/tree?project=alpha"
+	first := f.doAuthRecorder(http.MethodGet, url, "", nil)
+	etag := first.headers.Get("ETag")
+	if first.code != http.StatusOK || !strings.HasPrefix(etag, `W/"`) || first.headers.Get("Cache-Control") != "no-store" {
+		t.Fatalf("first: %d etag %q cache %q", first.code, etag, first.headers.Get("Cache-Control"))
+	}
+	again := func() *recorder {
+		t.Helper()
+		return f.doAuthRecorder(http.MethodGet, url, "", map[string]string{"If-None-Match": etag})
+	}
+	if r := again(); r.code != http.StatusNotModified || r.body != "" || r.headers.Get("ETag") != etag {
+		t.Errorf("unchanged: %d %q etag %q", r.code, r.body, r.headers.Get("ETag"))
+	}
+	// A note of another project, and the body of one of this project, leave
+	// its tree as it was.
+	f.seedNote(t, "beta/c.md", "z")
+	f.seedNote(t, "alpha/a.md", "another body")
+	if r := again(); r.code != http.StatusNotModified {
+		t.Errorf("after writes that do not change it: %d", r.code)
+	}
+	f.seedNote(t, "alpha/new.md", "# New")
+	r := again()
+	if r.code != http.StatusOK || !strings.Contains(r.body, `"alpha/new.md"`) || r.headers.Get("ETag") == etag {
+		t.Errorf("a new note: %d etag %q", r.code, r.headers.Get("ETag"))
+	}
+}
+
 func TestTree_AnnotatesProjectFlags(t *testing.T) {
 	f := newNotesFixture(t)
 	f.seedNote(t, "private/secret.md", "s")

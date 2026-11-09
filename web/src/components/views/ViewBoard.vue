@@ -21,22 +21,36 @@
  * the ranks and the limits, answers with a warning when the card took a
  * column past its limit. A new card starts in a column of backlog or
  * submitted, with its state, at its bottom.
+ *
+ * Phase 2: the board's head (BoardHead) shows its iteration, its
+ * retrospectives to write and the measures of its flow, and a card stale
+ * in its column says for how long, in its name too. "Move to…" is a menu:
+ * the arrows choose, Enter moves, Esc closes without moving (F-12). When
+ * columns are out of view, a shadow and an arrow at the edge say so and
+ * scroll by one, and a line says how many show (F-28).
  */
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { FieldValue } from '@/api/notes'
 import type { PatchFrontmatterBody } from '@/api/notes'
 import type { ViewColumn, ViewData, ViewLane, ViewRow } from '@/api/preview'
 import { cellValue } from './cellValue'
 import { announce } from '@/composables/useAnnounce'
+import { useBoardCatalog } from '@/composables/useBoardCatalog'
 import { saveBody, saveField } from './fieldSave'
+import BoardHead from './BoardHead.vue'
 import FieldValueView from './FieldValue.vue'
 import NewRowForm from './NewRowForm.vue'
-import { MoveRight, Plus } from 'lucide-vue-next'
+import { ChevronLeft, ChevronRight, Clock, MoveRight, Plus } from 'lucide-vue-next'
 import { noteHref } from '@/composables/planciaKey'
+import { useFieldNames } from './fieldNames'
 
 const props = defineProps<{ view: ViewData }>()
 const { t } = useI18n()
+// Columns, fields and values in the reader's language (IMP-220, F-23).
+const { fieldName, valueName } = useFieldNames()
+// The words of the head, of the stale cards and of the columns out of view.
+const { ready } = useBoardCatalog()
 
 const rows = ref<ViewRow[]>([])
 watch(
@@ -59,6 +73,30 @@ const lanes = computed<ViewLane[]>(() => props.view.lanes ?? [])
 const isCards = computed(() => lanes.value.length > 0)
 const laneOf = (value: string) => lanes.value.find((l) => l.name === value)
 const showClosed = ref(false)
+
+// The board's state (phase 2): its note, its stale cards by path, and the
+// switch that leaves only the cards of its iteration in progress.
+const state = computed(() => (isCards.value ? props.view.board : undefined))
+const boardNote = computed(() => linkPath(String(props.view.defaults?.board ?? '')))
+const staleDays = computed(() => new Map((state.value?.flow.stale ?? []).map((c) => [c.path, c.days])))
+const onlyIteration = ref(false)
+const iterationPath = computed(() => state.value?.iteration?.path)
+watch(iterationPath, (p) => {
+  if (!p) onlyIteration.value = false
+})
+
+/** The note a wikilink names, as the server writes them: [[p/x]] → p/x.md. */
+function linkPath(v: string): string {
+  const target = v.trim().replace(/^\[\[/, '').replace(/\]\]$/, '').split(/[|#]/)[0]!.trim()
+  return !target || /\.\w+$/.test(target) ? target : `${target}.md`
+}
+function inIteration(row: ViewRow): boolean {
+  const link = row.links?.iteration?.[0]?.path
+  const v = row.fields.iteration
+  return (link || linkPath(String((Array.isArray(v) ? v[0] : v) ?? ''))) === iterationPath.value
+}
+/** The cards a column shows: all of them, or its iteration's. */
+const shown = (rs: ViewRow[]) => (onlyIteration.value && iterationPath.value ? rs.filter(inIteration) : rs)
 
 /** The column a row is in: the first value of its group_by field; a card's lane in any case. */
 function groupOf(row: ViewRow): string {
@@ -101,7 +139,9 @@ const over = ref<string | null>(null)
 const moving = ref<string | null>(null) // the card whose "Move to…" menu is open
 const addingIn = ref<string | null>(null) // the column whose new-row form is open
 
-const label = (value: string) => value || (isCards.value ? t('views.closed') : t('views.no_value'))
+// A board block's columns are named by their block; a view's by the value.
+const label = (value: string) =>
+  !value ? (isCards.value ? t('views.closed') : t('views.no_value')) : isCards.value ? value : valueName(group.value, value)
 const canMove = (row: ViewRow) => row.writable && !!group.value.type && saving.value === null
 // A new card starts in a column of backlog or submitted, as with the task tools.
 const canAdd = (value: string) =>
@@ -269,9 +309,89 @@ function onDragEnd() {
   over.value = null
 }
 
-function focusOnMount(el: unknown) {
-  if (el instanceof HTMLElement) el.focus()
+// The menu of "Move to…" (F-12): opened on the card's column, the arrows
+// choose, Enter or a click moves, Esc closes without moving, and the focus
+// goes back to the card's button.
+function focusMenu(el: unknown) {
+  if (!(el instanceof HTMLElement)) return
+  const items = [...el.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+  ;(items.find((i) => i.getAttribute('aria-current') === 'true') ?? items[0])?.focus()
 }
+function onMenuKey(e: KeyboardEvent, row: ViewRow) {
+  const items = [...((e.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('[role="menuitem"]'))]
+  const i = items.indexOf(document.activeElement as HTMLElement)
+  let next = -1
+  switch (e.key) {
+    case 'ArrowDown':
+      next = (i + 1) % items.length
+      break
+    case 'ArrowUp':
+      next = (i - 1 + items.length) % items.length
+      break
+    case 'Home':
+      next = 0
+      break
+    case 'End':
+      next = items.length - 1
+      break
+    case 'Escape':
+      e.preventDefault()
+      void closeMenu(row)
+      return
+    case 'Tab':
+      moving.value = null
+      return
+    default:
+      return
+  }
+  e.preventDefault()
+  items[next]?.focus()
+}
+async function closeMenu(row: ViewRow) {
+  moving.value = null
+  await nextTick()
+  rootEl.value?.querySelector<HTMLElement>(`li[data-card="${CSS.escape(row.path)}"] button`)?.focus()
+}
+function onMenuBlur(e: FocusEvent) {
+  const to = e.relatedTarget as Node | null
+  if (!to || !(e.currentTarget as HTMLElement).contains(to)) moving.value = null
+}
+
+// The columns out of view (F-28): a shadow and an arrow at each edge that
+// hides some, which scrolls by one column; how many show, of all.
+const scroller = ref<HTMLElement | null>(null)
+const edges = ref({ left: false, right: false, shown: 0 })
+function measure() {
+  const el = scroller.value
+  if (!el) return
+  const left = el.scrollLeft
+  const right = left + el.clientWidth
+  const lanesEl = [...el.children] as HTMLElement[]
+  edges.value = {
+    left: left > 1,
+    right: right < el.scrollWidth - 1,
+    shown: lanesEl.filter((c) => c.offsetLeft - el.offsetLeft >= left - 1 && c.offsetLeft - el.offsetLeft + c.offsetWidth <= right + 1).length,
+  }
+}
+function scrollColumns(by: -1 | 1) {
+  const el = scroller.value
+  const first = el?.children[0] as HTMLElement | undefined
+  if (!el || !first) return
+  el.scrollBy({ left: by * (first.offsetWidth + 12), behavior: 'smooth' })
+}
+let resize: ResizeObserver | null = null
+onMounted(() => {
+  measure()
+  if (typeof ResizeObserver !== 'undefined' && scroller.value) {
+    resize = new ResizeObserver(measure)
+    resize.observe(scroller.value)
+  }
+})
+onBeforeUnmount(() => resize?.disconnect())
+watch(
+  () => columns.value.length,
+  () => void nextTick(measure),
+)
 </script>
 
 <template>
@@ -279,113 +399,188 @@ function focusOnMount(el: unknown) {
     ref="rootEl"
     class="not-prose"
   >
-    <div class="flex gap-3 overflow-x-auto pb-2" role="list" :aria-label="field">
-      <div
-        v-for="col in columns"
-        :key="col.value"
-        role="listitem"
-        class="flex w-56 shrink-0 flex-col rounded border bg-bg-elevated p-2 text-sm"
-        :class="over === col.value ? 'border-accent' : 'border-border'"
-        :data-group="col.value"
-        :aria-label="label(col.value)"
-        @dragover="onDragOver($event, col.value)"
-        @dragleave="over === col.value && (over = null)"
-        @drop="onDrop($event, col.value)"
-      >
-        <header class="mb-2 flex items-baseline gap-2 px-1">
-          <span class="font-semibold" :class="{ 'text-text-muted': !col.value }">{{
-            label(col.value)
-          }}</span>
-          <span
-            class="ml-auto text-xs"
-            :class="pastLimit(col) ? 'font-semibold text-danger' : 'text-text-muted'"
-            data-wip
-            >{{ count(col) }}</span
-          >
-          <button
-            v-if="canAdd(col.value) && addingIn !== col.value"
-            type="button"
-            class="self-center rounded p-0.5 text-text-muted hover:bg-surface-hover hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
-            :aria-label="t('views.new_row_in', { column: label(col.value) })"
-            data-new-row-button
-            @click="addingIn = col.value"
-          >
-            <Plus class="h-3.5 w-3.5" aria-hidden="true" />
-          </button>
-        </header>
-        <NewRowForm
-          v-if="addingIn === col.value && view.database"
-          class="mt-0"
-          :database="view.database"
-          :values="newRowValues(col.value)"
-          @done="addingIn = null"
-        />
-        <ul class="m-0 flex min-h-[2.5rem] list-none flex-col gap-2 p-0">
-          <li
-            v-for="row in col.rows"
-            :key="row.path"
-            class="rounded border border-border bg-bg p-2"
-            :class="{
-              'cursor-grab': canMove(row),
-              'opacity-60': saving === row.path || dragged === row.path,
-            }"
-            :draggable="canMove(row)"
-            :data-card="row.path"
-            :aria-keyshortcuts="isCards && canMove(row) ? 'Alt+ArrowUp Alt+ArrowDown' : undefined"
-            @dragstart="onDragStart($event, row)"
-            @dragend="onDragEnd"
-            @dragover="onDragOver($event, col.value)"
-            @drop.stop="onDrop($event, col.value, isCards ? row.path : undefined)"
-            @keydown.alt.up.prevent="nudge(row, -1)"
-            @keydown.alt.down.prevent="nudge(row, 1)"
-          >
-            <div class="flex items-start justify-between gap-1">
-              <a
-                class="wikilink font-medium"
-                :href="noteHref(row.path)"
-                :data-preview-path="row.path"
-                >{{ row.title }}</a
-              >
-              <button
-                v-if="canMove(row) && moving !== row.path"
-                type="button"
-                class="rounded p-0.5 text-text-muted hover:bg-surface-hover hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
-                :aria-label="t('views.move_to', { title: row.title })"
-                @click="moving = row.path"
-              >
-                <MoveRight class="h-3.5 w-3.5" aria-hidden="true" />
-              </button>
-            </div>
-            <select
-              v-if="moving === row.path"
-              :ref="focusOnMount"
-              class="mt-1 w-full rounded border-border bg-bg-elevated py-0.5 text-xs text-text"
-              :aria-label="t('views.move_to', { title: row.title })"
-              :value="col.value"
-              @change="move(row, ($event.target as HTMLSelectElement).value)"
-              @blur="moving = null"
-              @keydown.esc.prevent="moving = null"
+    <BoardHead
+      v-if="state && ready"
+      v-model:only-iteration="onlyIteration"
+      :state="state"
+      :board="boardNote"
+      :can-create="!!view.creatable"
+    />
+    <p v-if="ready && (edges.left || edges.right)" class="m-0 mb-1 text-xs text-text-muted" data-columns-shown>
+      {{ t('board.head.columns_shown', { shown: edges.shown, total: columns.length }) }}
+    </p>
+    <div class="relative">
+      <div ref="scroller" class="flex gap-3 overflow-x-auto pb-2" role="list" :aria-label="field" @scroll.passive="measure">
+        <div
+          v-for="col in columns"
+          :key="col.value"
+          role="listitem"
+          class="flex w-56 shrink-0 flex-col rounded border bg-bg-elevated p-2 text-sm"
+          :class="over === col.value ? 'border-accent' : 'border-border'"
+          :data-group="col.value"
+          :aria-label="label(col.value)"
+          @dragover="onDragOver($event, col.value)"
+          @dragleave="over === col.value && (over = null)"
+          @drop="onDrop($event, col.value)"
+        >
+          <header class="mb-2 flex items-baseline gap-2 px-1">
+            <span class="font-semibold" :class="{ 'text-text-muted': !col.value }">{{
+              label(col.value)
+            }}</span>
+            <span
+              class="ml-auto text-xs"
+              :class="pastLimit(col) ? 'font-semibold text-danger' : 'text-text-muted'"
+              data-wip
+              >{{ count(col) }}</span
             >
-              <option v-for="c in targets" :key="c.value" :value="c.value">
-                {{ label(c.value) }}
-              </option>
-            </select>
-            <dl v-if="cardColumns.length" class="m-0 mt-1 text-xs">
-              <template v-for="c in cardColumns" :key="c.name">
-                <div v-if="cellValue(row, c)?.length" class="flex gap-1">
-                  <dt class="text-text-muted">{{ c.name }}:</dt>
-                  <dd class="m-0">
-                    <FieldValueView :value="cellValue(row, c)" :links="row.links?.[c.name]" />
-                  </dd>
-                </div>
-              </template>
-            </dl>
-          </li>
-        </ul>
-        <p v-if="!col.rows.length" class="m-0 px-1 text-xs text-text-muted">
-          {{ t('views.column_empty') }}
-        </p>
+            <button
+              v-if="canAdd(col.value) && addingIn !== col.value"
+              type="button"
+              class="self-center rounded p-0.5 text-text-muted hover:bg-surface-hover hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+              :aria-label="t('views.new_row_in', { column: label(col.value) })"
+              data-new-row-button
+              @click="addingIn = col.value"
+            >
+              <Plus class="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          </header>
+          <NewRowForm
+            v-if="addingIn === col.value && view.database"
+            class="mt-0"
+            :database="view.database"
+            :values="newRowValues(col.value)"
+            @done="addingIn = null"
+          />
+          <ul class="m-0 flex min-h-[2.5rem] list-none flex-col gap-2 p-0">
+            <li
+              v-for="row in shown(col.rows)"
+              :key="row.path"
+              class="rounded border border-border bg-bg p-2"
+              :class="{
+                'cursor-grab': canMove(row),
+                'opacity-60': saving === row.path || dragged === row.path,
+              }"
+              :draggable="canMove(row)"
+              :data-card="row.path"
+              :aria-keyshortcuts="isCards && canMove(row) ? 'Alt+ArrowUp Alt+ArrowDown' : undefined"
+              @dragstart="onDragStart($event, row)"
+              @dragend="onDragEnd"
+              @dragover="onDragOver($event, col.value)"
+              @drop.stop="onDrop($event, col.value, isCards ? row.path : undefined)"
+              @keydown.alt.up.prevent="nudge(row, -1)"
+              @keydown.alt.down.prevent="nudge(row, 1)"
+            >
+              <div class="flex items-start justify-between gap-1">
+                <a
+                  class="wikilink font-medium"
+                  :href="noteHref(row.path)"
+                  :data-preview-path="row.path"
+                  >{{ row.title
+                  }}<span v-if="ready && staleDays.get(row.path)" class="sr-only"
+                    >, {{ t('board.head.stale_card_long', { n: staleDays.get(row.path) }, staleDays.get(row.path)!) }}</span
+                  ></a
+                >
+                <button
+                  v-if="canMove(row) && moving !== row.path"
+                  type="button"
+                  class="rounded p-0.5 text-text-muted hover:bg-surface-hover hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+                  :aria-label="t('views.move_to', { title: row.title })"
+                  @click="moving = row.path"
+                >
+                  <MoveRight class="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+              </div>
+              <span
+                v-if="ready && staleDays.get(row.path)"
+                class="mt-1 inline-flex items-center gap-1 text-xs font-medium text-warning"
+                aria-hidden="true"
+                data-stale
+              >
+                <Clock class="h-3 w-3" />{{ t('board.head.stale_card', { n: staleDays.get(row.path) }) }}
+              </span>
+              <ul
+                v-if="moving === row.path"
+                :ref="focusMenu"
+                role="menu"
+                class="m-0 mt-1 flex list-none flex-col rounded border border-border-input bg-bg-elevated p-0.5 text-xs"
+                :aria-label="t('views.move_to', { title: row.title })"
+                data-move-menu
+                @keydown="onMenuKey($event, row)"
+                @focusout="onMenuBlur"
+              >
+                <li v-for="c in targets" :key="c.value" role="none">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    tabindex="-1"
+                    class="w-full rounded px-1 py-0.5 text-left hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+                    :class="{ 'font-semibold': c.value === col.value }"
+                    :aria-current="c.value === col.value ? 'true' : undefined"
+                    :data-move-to="c.value"
+                    @click="move(row, c.value)"
+                  >
+                    {{ label(c.value) }}
+                  </button>
+                </li>
+              </ul>
+              <dl v-if="cardColumns.length" class="m-0 mt-1 text-xs">
+                <template v-for="c in cardColumns" :key="c.name">
+                  <div v-if="cellValue(row, c)?.length" class="flex gap-1">
+                    <dt
+                      class="text-text-muted"
+                      :title="c.name"
+                    >
+                      {{ fieldName(c) }}:
+                    </dt>
+                    <dd class="m-0">
+                      <FieldValueView
+                        :value="cellValue(row, c)"
+                        :links="row.links?.[c.name]"
+                        :column="c"
+                      />
+                    </dd>
+                  </div>
+                </template>
+              </dl>
+            </li>
+          </ul>
+          <p v-if="!shown(col.rows).length" class="m-0 px-1 text-xs text-text-muted">
+            {{ t('views.column_empty') }}
+          </p>
+        </div>
       </div>
+      <template v-if="ready">
+        <div
+          v-if="edges.left"
+          class="pointer-events-none absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-bg to-transparent"
+          aria-hidden="true"
+        />
+        <div
+          v-if="edges.right"
+          class="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-bg to-transparent"
+          aria-hidden="true"
+        />
+        <button
+          v-if="edges.left"
+          type="button"
+          class="absolute left-0 top-1/2 -translate-y-1/2 rounded-full border border-border bg-bg-elevated p-0.5 shadow hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+          :aria-label="t('board.head.prev_column')"
+          data-scroll-prev
+          @click="scrollColumns(-1)"
+        >
+          <ChevronLeft class="h-4 w-4" aria-hidden="true" />
+        </button>
+        <button
+          v-if="edges.right"
+          type="button"
+          class="absolute right-0 top-1/2 -translate-y-1/2 rounded-full border border-border bg-bg-elevated p-0.5 shadow hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+          :aria-label="t('board.head.next_column')"
+          data-scroll-next
+          @click="scrollColumns(1)"
+        >
+          <ChevronRight class="h-4 w-4" aria-hidden="true" />
+        </button>
+      </template>
     </div>
     <button
       v-if="closed"

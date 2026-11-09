@@ -97,7 +97,10 @@ their note (or the section a `#Heading` subpath names) and a title that
 opens it, images, web links, groups behind the cards they hold, and the
 connections as curves with their arrows, colors and labels. Drag the
 background to move around, Ctrl + wheel (or a pinch) zooms, the buttons
-zoom and fit the canvas. `memory_get` reads it for agents with
+zoom and fit the canvas; with the focus on the canvas the arrows move it
+(Shift for longer steps), + and − zoom and 0 fits. **List** says it as
+text: its cards by the group that holds them, then its connections,
+`A → B: label`, in the reader's language (IMP-224, F-32). `memory_get` reads it for agents with
 `kind: "canvas"`: its cards as text, the notes of its file cards as
 wikilinks, its connections as `A → B: label` lines, and with `raw:true`
 its JSON in `source`.

@@ -16,14 +16,19 @@
  * either the bare type (singleton) or `type:<encodeURIComponent(arg)>`; parsing
  * splits on the FIRST `:` so an encoded path (no raw `:`) round-trips cleanly.
  */
-import { createArgCodec, type ArgTypeSpec, type PlanciaCodec } from 'plancia'
+import { createArgCodec, type ArgTypeSpec, type PlanciaCodec, type WindowInstance } from 'plancia'
 import { i18n } from '@/locales'
 
 // Window titles in the user's language (IMP-155, M2), read when a window
-// is rebuilt from the address.
-const tr = (key: string, named: Record<string, unknown> = {}) => i18n.global.t(key, named)
+// is rebuilt from the address; in another one while retitle asks for it.
+// The catalogue types know only it and en; de, es and fr come when chosen.
+type Lang = typeof i18n.global.locale.value
+let titleLocale: Lang | undefined
+const tr = (key: string, named: Record<string, unknown> = {}) =>
+  i18n.global.t(key, named, { locale: titleLocale ?? i18n.global.locale.value })
 // A section the catalogue does not know keeps its own name.
-const trOr = (key: string, fallback: string) => (i18n.global.te(key) ? i18n.global.t(key) : fallback)
+const trOr = (key: string, fallback: string) =>
+  i18n.global.te(key, titleLocale) ? tr(key) : fallback
 import { queryArgFromProps, queryPropsFromArg } from './queryArg'
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null)
@@ -70,7 +75,10 @@ function graphArgFromProps(p: Record<string, unknown>): string | null {
   if (p.global !== true && focus && !project && !tag && !minDegree && !limit && (depth ?? 1) <= 1)
     return focus
   const parts: string[] = []
+  // `p=*`: every project, chosen by hand (BUG-158). Without it a graph with
+  // no project opens on the most recent one.
   if (project) parts.push('p=' + encodeURIComponent(project))
+  else if (p.allProjects === true) parts.push('p=*')
   if (tag) parts.push('t=' + encodeURIComponent(tag))
   if (focus) parts.push('f=' + encodeURIComponent(focus))
   if (focus && depth !== null && depth !== 2) parts.push('d=' + depth)
@@ -85,7 +93,8 @@ function graphPropsFromArg(a: string | null): Record<string, unknown> {
   const sp = new URLSearchParams(a)
   const props: Record<string, unknown> = { global: true }
   const p = sp.get('p')
-  if (p) props.project = p
+  if (p === '*') props.allProjects = true
+  else if (p) props.project = p
   const t = sp.get('t')
   if (t) props.tag = t
   const f = sp.get('f')
@@ -111,70 +120,137 @@ function graphKeyForProps(props: Record<string, unknown>): string {
   return project ? `graph:project:${project}` : planciaKey('graph')
 }
 
+/**
+ * Creation window arg (BUG-154): `<folder>/<name>` from a missing note's
+ * link, `<folder>/` from a folder's +. A name has no `/`, so the last one
+ * splits them.
+ */
+function createArgFromProps(p: Record<string, unknown>): string | null {
+  const folder = str(p.path) ?? ''
+  const name = str(p.name)
+  if (name) return `${folder}/${name}`
+  return folder ? `${folder}/` : null
+}
+
+function createPropsFromArg(a: string | null): Record<string, unknown> {
+  if (!a) return {}
+  const i = a.lastIndexOf('/')
+  if (i < 0) return { path: a }
+  const name = a.slice(i + 1)
+  return name ? { path: a.slice(0, i), name } : { path: a.slice(0, i) }
+}
+
+/** The key the openers give a creation window: the folder, or the note
+ *  to create when there is a name. */
+function createKeyForProps(props: Record<string, unknown>): string {
+  const folder = str(props.path) ?? ''
+  const name = str(props.name)
+  return planciaKey('create', name ? `${folder}/${name}` : folder)
+}
+
 /** gosidian's per-type URL scheme, expressed for `createArgCodec`. */
+const types: Record<string, ArgTypeSpec> = {
+  note: PATH_TYPE(),
+  edit: PATH_TYPE(),
+  history: { ...PATH_TYPE(), title: (a) => (a ? `${tr('history.title')} · ${base(a)}` : '') },
+  // A diagram of a note (IMP-169): `<path>#<index>`, the index of its
+  // block in the note's text.
+  diagram: {
+    arg: (p) => (str(p.path) && Number.isInteger(p.index) ? `${p.path}#${p.index}` : null),
+    props: (a) => {
+      const i = a?.lastIndexOf('#') ?? -1
+      return a && i > 0 ? { path: a.slice(0, i), index: Number(a.slice(i + 1)) || 0 } : {}
+    },
+    title: (a) => (a ? tr('diagram.window_title', { name: base(a.slice(0, a.lastIndexOf('#'))) }) : ''),
+  },
+  // A pipeline note in the pipeline editor (IMP-169, F4): its path.
+  pipeline: {
+    arg: (p) => str(p.path) || null,
+    props: (a) => (a ? { path: a } : {}),
+    title: (a) => (a ? tr('pipeline_editor.window_title', { name: base(a) }) : ''),
+  },
+  // A note in the app a plugin offers for its type (IMP-226): its path.
+  app: {
+    arg: (p) => str(p.path) || null,
+    props: (a) => (a ? { path: a } : {}),
+    title: (a) => (a ? tr('plugin_app.window_title', { name: base(a) }) : ''),
+  },
+  // A project's IN folder (IMP-172): the project.
+  in: {
+    arg: (p) => str(p.project) || null,
+    props: (a) => (a ? { project: a } : {}),
+    title: (a) => (a ? tr('in.window_title', { name: a }) : ''),
+  },
+  // Who has access to a project (BUG-154): the project.
+  'project-members': {
+    arg: (p) => str(p.project),
+    props: (a) => (a ? { project: a } : {}),
+    title: (a) => (a ? tr('members.title', { project: a }) : ''),
+  },
+  // A new note (IMP-058, BUG-154): the folder, and the name when it
+  // comes from a missing note's link.
+  create: {
+    arg: createArgFromProps,
+    props: createPropsFromArg,
+    title: (a) => {
+      const folder = String(createPropsFromArg(a).path ?? '')
+      return tr('note_create.window_title', { name: folder.split('/').pop() || '/' })
+    },
+  },
+  graph: {
+    arg: graphArgFromProps,
+    props: graphPropsFromArg,
+    title: (a) => {
+      if (!a) return tr('nav.graph')
+      if (!a.includes('=')) return tr('graph.links_title', { name: base(a) })
+      const p = new URLSearchParams(a).get('p')
+      return p && p !== '*' ? `${tr('nav.graph')} · ${p}` : tr('nav.graph')
+    },
+  },
+  tags: {
+    arg: (p) => str(p.tag),
+    props: (a) => (a ? { tag: a } : {}),
+    title: (a) => (a ? `#${a}` : tr('nav.tags')),
+  },
+  // The query window keeps its whole query in the URL (queryArg.ts); it
+  // stays one window, keyed `query`, whatever the query.
+  query: {
+    arg: queryArgFromProps,
+    props: queryPropsFromArg,
+    title: () => tr('nav.query'),
+  },
+  // The admin is one window (IMP-224): its section, and after a `?` the
+  // audit's filter (auditFilter.ts), which the window sets as they change.
+  admin: {
+    arg: (p) => {
+      const section = str(p.section)
+      return section && str(p.audit) ? `${section}?${p.audit}` : section
+    },
+    props: (a) => {
+      const i = a?.indexOf('?') ?? -1
+      return !a ? {} : i < 0 ? { section: a } : { section: a.slice(0, i), audit: a.slice(i + 1) }
+    },
+    title: (a) => {
+      const section = a?.split('?')[0]
+      return section ? `${tr('nav.admin')} · ${trOr(`admin.tab.${section}`, section)}` : tr('nav.admin')
+    },
+  },
+  // Singletons with a fixed display title.
+  search: { arg: () => null, title: () => tr('nav.search') },
+  projects: { arg: () => null, title: () => tr('nav.projects') },
+  settings: { arg: () => null, title: () => tr('nav.settings') },
+  trash: { arg: () => null, title: () => tr('nav.trash') },
+  runs: { arg: () => null, title: () => tr('nav.runs') },
+  uploads: { arg: () => null, title: () => tr('uploads.window_title') },
+}
+
+/** The window types the codec knows: any other comes back from the
+ *  address as a bare singleton, without its props (BUG-154). */
+export const codecTypes: readonly string[] = Object.keys(types)
+
 const baseCodec: PlanciaCodec = createArgCodec({
   bareToken: 'type',
-  types: {
-    note: PATH_TYPE(),
-    edit: PATH_TYPE(),
-    history: PATH_TYPE(),
-    // A diagram of a note (IMP-169): `<path>#<index>`, the index of its
-    // block in the note's text.
-    diagram: {
-      arg: (p) => (str(p.path) && Number.isInteger(p.index) ? `${p.path}#${p.index}` : null),
-      props: (a) => {
-        const i = a?.lastIndexOf('#') ?? -1
-        return a && i > 0 ? { path: a.slice(0, i), index: Number(a.slice(i + 1)) || 0 } : {}
-      },
-      title: (a) => (a ? tr('diagram.window_title', { name: base(a.slice(0, a.lastIndexOf('#'))) }) : ''),
-    },
-    // A pipeline note in the pipeline editor (IMP-169, F4): its path.
-    pipeline: {
-      arg: (p) => str(p.path) || null,
-      props: (a) => (a ? { path: a } : {}),
-      title: (a) => (a ? tr('pipeline_editor.window_title', { name: base(a) }) : ''),
-    },
-    // A project's IN folder (IMP-172): the project.
-    in: {
-      arg: (p) => str(p.project) || null,
-      props: (a) => (a ? { project: a } : {}),
-      title: (a) => (a ? tr('in.window_title', { name: a }) : ''),
-    },
-    graph: {
-      arg: graphArgFromProps,
-      props: graphPropsFromArg,
-      title: (a) => {
-        if (!a) return tr('nav.graph')
-        if (!a.includes('=')) return tr('graph.links_title', { name: base(a) })
-        const p = new URLSearchParams(a).get('p')
-        return p ? `${tr('nav.graph')} · ${p}` : tr('nav.graph')
-      },
-    },
-    tags: {
-      arg: (p) => str(p.tag),
-      props: (a) => (a ? { tag: a } : {}),
-      title: (a) => (a ? `#${a}` : tr('nav.tags')),
-    },
-    // The query window keeps its whole query in the URL (queryArg.ts); it
-    // stays one window, keyed `query`, whatever the query.
-    query: {
-      arg: queryArgFromProps,
-      props: queryPropsFromArg,
-      title: () => tr('nav.query'),
-    },
-    admin: {
-      arg: (p) => str(p.section),
-      props: (a) => (a ? { section: a } : {}),
-      title: (a) => (a ? `${tr('nav.admin')} · ${trOr(`admin.tab.${a}`, a)}` : tr('nav.admin')),
-    },
-    // Singletons with a fixed display title.
-    search: { arg: () => null, title: () => tr('nav.search') },
-    projects: { arg: () => null, title: () => tr('nav.projects') },
-    settings: { arg: () => null, title: () => tr('nav.settings') },
-    trash: { arg: () => null, title: () => tr('nav.trash') },
-    runs: { arg: () => null, title: () => tr('nav.runs') },
-    uploads: { arg: () => null, title: () => tr('uploads.window_title') },
-  },
+  types,
   // Unlisted types are bare singletons titled by their type.
   default: { arg: () => null },
 })
@@ -194,7 +270,8 @@ export const codec: PlanciaCodec = {
     if (spec.type === 'graph' && spec.props?.global === true) {
       return graphKeyForProps(spec.props)
     }
-    if (spec.type === 'query') return planciaKey('query')
+    if (spec.type === 'query' || spec.type === 'admin') return planciaKey(spec.type)
+    if (spec.type === 'create') return createKeyForProps(spec.props ?? {})
     return baseCodec.key(spec)
   },
   encode: baseCodec.encode,
@@ -212,7 +289,42 @@ export const codec: PlanciaCodec = {
     if (spec?.type === 'graph' && spec.props?.global === true) {
       return { ...spec, key: graphKeyForProps(spec.props) }
     }
-    if (spec?.type === 'query') return { ...spec, key: planciaKey('query') }
+    if (spec?.type === 'query' || spec?.type === 'admin') return { ...spec, key: planciaKey(spec.type) }
+    if (spec?.type === 'create') return { ...spec, key: createKeyForProps(spec.props ?? {}) }
     return spec
   },
+}
+
+/** The title the address gives a window, in lang. */
+function addressTitle(win: WindowInstance, lang: string): string {
+  titleLocale = lang as Lang
+  try {
+    const token = codec.encode(win)
+    return (token && codec.decode(token)?.title) || ''
+  } finally {
+    titleLocale = undefined
+  }
+}
+
+/** The kind of a «kind · name» title, with its separator; '' for another. */
+const kind = (title: string): string => {
+  const i = title.indexOf(' · ')
+  return i < 0 ? '' : title.slice(0, i + 3)
+}
+
+/**
+ * A window's title in the language `to`, or null to keep it (BUG-155): the
+ * plancia keeps titles as text, translated when the window opened. A title
+ * the address gives in `from` is given again in `to`; a «kind · name» one
+ * keeps its name, the note's title in the links and the history, and
+ * changes its kind. A title a view gave, the title of a note, is kept.
+ */
+export function retitle(win: WindowInstance, from: string, to: string): string | null {
+  const was = addressTitle(win, from)
+  if (!was) return null
+  if (win.title === was) return addressTitle(win, to)
+  const k = kind(was)
+  return k && win.title.startsWith(k)
+    ? kind(addressTitle(win, to)) + win.title.slice(k.length)
+    : null
 }

@@ -5,13 +5,21 @@ import enUI from '@catalogs/ui.en.json'
 import type { CommandPaletteData } from '@/api/commandPalette'
 
 vi.mock('@/api/commandPalette', () => ({ fetchCommandPalette: vi.fn() }))
-const windows = vi.hoisted(() => ({ open: vi.fn((): string => ''), identify: vi.fn() }))
+const windows = vi.hoisted(() => ({
+  open: vi.fn((): string => ''),
+  identify: vi.fn(),
+  focused: null as null | { type: string; props: Record<string, unknown> },
+}))
 vi.mock('plancia', async (orig) => ({
   ...(await orig<typeof import('plancia')>()),
   useWindowsStore: () => windows,
   usePlanciaFocus: () => ({ focusWindow: vi.fn(async () => true) }),
 }))
-vi.mock('@/composables/useRecentlyViewed', () => ({ useRecentlyViewed: () => ({ entries: { value: [] } }) }))
+const recent = vi.hoisted(() => ({ entries: { value: [] as { path: string }[] } }))
+vi.mock('@/composables/useRecentlyViewed', () => ({ useRecentlyViewed: () => recent }))
+// The app a plugin offers for a page layout (IMP-226): none unless a test says.
+const apps = vi.hoisted(() => ({ forType: vi.fn(async (_type: string): Promise<unknown> => null) }))
+vi.mock('@/composables/pluginApps', () => ({ appForType: apps.forType }))
 
 import { fetchCommandPalette } from '@/api/commandPalette'
 import CommandPalette from '@/components/layout/CommandPalette.vue'
@@ -195,6 +203,21 @@ describe('CommandPalette, the text looked for in the notes (IMP-218, F-06)', () 
     expect(windows.identify).toHaveBeenCalledWith('w-search', key, { q: 'zzz', qAt: expect.any(Number) })
     w.unmount()
   })
+
+  it('hands the project chosen to the Projects window, open already or not (BUG-160)', async () => {
+    vi.mocked(fetchCommandPalette).mockResolvedValue({ ...data(), projects: [{ name: 'alpha', noteCount: 2 }] })
+    windows.open.mockReturnValue('w-projects')
+    const w = mount(CommandPalette, { global: { plugins: [i18n()] }, attachTo: document.body })
+    ctrlK()
+    await flushPromises()
+    await type('alpha')
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }))
+    await flushPromises()
+    const key = planciaKey('projects')
+    expect(windows.open).toHaveBeenCalledWith(expect.objectContaining({ type: 'projects', key, props: { project: 'alpha' } }))
+    expect(windows.identify).toHaveBeenCalledWith('w-projects', key, { project: 'alpha', projectAt: expect.any(Number) })
+    w.unmount()
+  })
 })
 
 describe('CommandPalette as a combobox (IMP-218, F-05)', () => {
@@ -298,6 +321,73 @@ describe('CommandPalette as a combobox (IMP-218, F-05)', () => {
     expect(document.body.querySelector('[role="listbox"]')).toBeNull()
     expect(input().getAttribute('aria-expanded')).toBe('false')
     expect(input().hasAttribute('aria-activedescendant')).toBe(false)
+    w.unmount()
+  })
+})
+
+describe('CommandPalette, a new page layout (IMP-226)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    recent.entries.value = []
+    apps.forType.mockReset().mockResolvedValue(null)
+  })
+  const type = async (text: string) => {
+    const input = document.body.querySelector('input')!
+    input.value = text
+    input.dispatchEvent(new Event('input'))
+    await flushPromises()
+  }
+
+  it('offers it when an app opens it, in the folder of the note in view (IMP-232)', async () => {
+    apps.forType.mockResolvedValue({ note_type: 'layout', status: 'ok' })
+    recent.entries.value = [{ path: 'rivista/numeri/n1.md' }]
+    windows.focused = { type: 'app', props: { path: 'rivista/libretti/uno.md' } }
+    vi.mocked(fetchCommandPalette).mockResolvedValue(data('Bravo'))
+    const w = mount(CommandPalette, { global: { plugins: [i18n()] }, attachTo: document.body })
+    ctrlK()
+    await flushPromises()
+    await type('new page')
+    const option = [...document.body.querySelectorAll('[role="option"]')].find((o) =>
+      o.textContent?.includes('New page layout'),
+    ) as HTMLElement
+    option.click()
+    await flushPromises()
+    expect(windows.open).toHaveBeenCalledWith(
+      expect.objectContaining({ key: planciaKey('create', 'rivista/libretti'), props: { path: 'rivista/libretti', startKind: 'layout' } }),
+    )
+    windows.focused = null
+    w.unmount()
+  })
+
+  it('offers it when an app opens it, in the folder of the last note', async () => {
+    apps.forType.mockResolvedValue({ note_type: 'layout', status: 'ok' })
+    recent.entries.value = [{ path: 'rivista/n1.md' }]
+    vi.mocked(fetchCommandPalette).mockResolvedValue(data('Bravo'))
+    const w = mount(CommandPalette, { global: { plugins: [i18n()] }, attachTo: document.body })
+    ctrlK()
+    await flushPromises()
+    await type('new page')
+    const option = [...document.body.querySelectorAll('[role="option"]')].find((o) =>
+      o.textContent?.includes('New page layout'),
+    ) as HTMLElement
+    expect(option.textContent).toContain('rivista')
+    option.click()
+    await flushPromises()
+    expect(windows.open).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'create', key: planciaKey('create', 'rivista'), props: { path: 'rivista', startKind: 'layout' } }),
+    )
+    w.unmount()
+  })
+
+  it('has no such entry when no app opens it', async () => {
+    vi.mocked(fetchCommandPalette).mockResolvedValue(data('Bravo'))
+    const w = mount(CommandPalette, { global: { plugins: [i18n()] }, attachTo: document.body })
+    ctrlK()
+    await flushPromises()
+    await type('new page')
+    expect(document.body.textContent).not.toContain('New page layout')
+    ctrlK()
+    await flushPromises()
     w.unmount()
   })
 })

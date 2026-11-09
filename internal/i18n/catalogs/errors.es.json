@@ -1,7 +1,39 @@
 {
-  "_stub": "Scaffolding v1.10 — file vuoto, tutte le chiavi cadono in fallback EN. Contribuisci aggiungendo traduzioni: vedi CONTRIBUTING.md Translating gosidian section.",
+  "tokens": {
+    "name_required": "el nombre es obligatorio",
+    "scope_required": "se necesita al menos un permiso (read o write)",
+    "ttl_invalid": "TTL no válido",
+    "unknown_action": "acción desconocida",
+    "id_required": "el id es obligatorio",
+    "revoke_not_found": "revocar: token no encontrado",
+    "revoke_not_owner": "revocar: no puedes revocar tokens de otros usuarios",
+    "create_prefix": "crear: %s",
+    "revoke_prefix": "revocar: %s",
+    "created_success": "Token creado. Copia el texto en claro ahora: no se volverá a mostrar.",
+    "revoked_success": "Token revocado: %s"
+  },
+  "users": {
+    "forbidden": "prohibido: se necesita el rol de administrador",
+    "auth_disabled": "autenticación desactivada: no hay nada que administrar",
+    "unknown_action": "acción desconocida",
+    "token_required": "el token es obligatorio",
+    "id_required": "el id es obligatorio",
+    "invite_created": "Invitación creada. Copia el enlace ahora: no se volverá a mostrar.",
+    "invite_revoked": "Invitación revocada.",
+    "user_disabled": "Usuario desactivado. Se revocaron sus tokens MCP.",
+    "create_invite_prefix": "crear invitación: %s",
+    "revoke_invite_prefix": "revocar invitación: %s",
+    "disable_prefix": "desactivar: %s"
+  },
   "login": {
     "bad_credentials": "Credenciales no válidas.",
     "rate_limited": "Demasiados intentos fallidos, inténtalo más tarde."
+  },
+  "signup": {
+    "username_required": "El nombre de usuario es obligatorio.",
+    "password_too_short": "La contraseña debe tener al menos 8 caracteres.",
+    "password_mismatch": "Las contraseñas no coinciden.",
+    "invite_invalid": "Invitación no válida o caducada.",
+    "signup_failed_prefix": "No se pudo completar el registro: %s"
   }
 }

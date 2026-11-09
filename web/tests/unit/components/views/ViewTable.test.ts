@@ -3,6 +3,8 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import { AxiosError, AxiosHeaders } from 'axios'
 import enUI from '@catalogs/ui.en.json'
+import itUI from '@catalogs/ui.it.json'
+import { i18n as appI18n } from '@/locales'
 import type { ViewData } from '@/api/preview'
 
 vi.mock('@/api/notes', () => ({ patchFrontmatter: vi.fn() }))
@@ -56,6 +58,13 @@ function httpError(status: number, error: unknown) {
   })
 }
 
+// The status cell's text as seen: without what only a screen reader gets.
+function shownStatus(w: ReturnType<typeof mountTable>): string {
+  const copy = w.find('tbody tr td[data-field="status"]').element.cloneNode(true) as Element
+  copy.querySelectorAll('.sr-only').forEach((n) => n.remove())
+  return (copy.textContent ?? '').trim()
+}
+
 describe('ViewTable', () => {
   beforeEach(() => {
     patch.mockReset()
@@ -87,7 +96,7 @@ describe('ViewTable', () => {
       set: { status: 'done' },
       expect: { status: 'todo' },
     })
-    expect(w.find('tbody tr td[data-field="status"]').text()).toBe('done')
+    expect(shownStatus(w)).toBe('done')
   })
 
   it('toggles a checkbox at once', async () => {
@@ -113,7 +122,7 @@ describe('ViewTable', () => {
     await w.find('tbody tr td[data-field="status"] button').trigger('click')
     await w.find('select').setValue('done')
     await flushPromises()
-    expect(w.find('tbody tr td[data-field="status"]').text()).toBe('doing')
+    expect(shownStatus(w)).toBe('doing')
     expect(w.find('[data-view-message]').text()).toContain(
       'status was changed meanwhile and is now “doing”',
     )
@@ -133,7 +142,7 @@ describe('ViewTable', () => {
     await w.find('tbody tr td[data-field="status"] button').trigger('click')
     await w.find('select').setValue('done')
     await flushPromises()
-    expect(w.find('tbody tr td[data-field="status"]').text()).toBe('todo')
+    expect(shownStatus(w)).toBe('todo')
     expect(w.find('[data-view-message]').text()).toContain('Not saved: status: "x" is not one of')
   })
 
@@ -187,5 +196,49 @@ describe('ViewTable', () => {
     const v = view()
     v.total = 5
     expect(mountTable(v).text()).toContain('Showing 2 of 5 notes.')
+  })
+})
+
+// What a screen reader says for an element: its text, without what is hidden from it.
+function spokenName(el: Element): string {
+  const copy = el.cloneNode(true) as Element
+  copy.querySelectorAll('[aria-hidden="true"]').forEach((n) => n.remove())
+  return (copy.textContent ?? '').replace(/\s+/g, ' ').trim()
+}
+
+describe('ViewTable, the name of an editable cell (IMP-220, F-22)', () => {
+  it('starts with the value it shows, then says what a click does', () => {
+    const v = view()
+    v.columns!.push({ name: 'owner', type: 'text' })
+    const w = mountTable(v)
+    const status = w.find('tbody tr td[data-field="status"] button')
+    expect(status.attributes('aria-label')).toBeUndefined()
+    expect(spokenName(status.element)).toBe('todo (edit Status)')
+    // An empty cell says so, not its dash.
+    expect(spokenName(w.find('tbody tr td[data-field="owner"] button').element)).toBe('empty (edit Owner)')
+  })
+})
+
+describe("ViewTable in the reader's language (IMP-220, F-23)", () => {
+  it('names its columns and the values of a select, the codes in the tooltips, dates as read', () => {
+    appI18n.global.locale.value = 'it'
+    const i18n = createI18n({ legacy: false, locale: 'it', fallbackLocale: 'en', messages: { en: enUI, it: itUI } })
+    const v: ViewData = {
+      as: 'table',
+      total: 1,
+      columns: [
+        { name: 'title' },
+        { name: 'status', type: 'select', options: ['submitted', 'working'] },
+        { name: 'due', type: 'date' },
+      ],
+      rows: [{ path: 'p/t/T-1.md', title: 'Uno', modified: '', fields: { status: 'submitted', due: '2026-11-03' }, writable: false }],
+    }
+    const w = mount(ViewTable, { props: { view: v }, global: { plugins: [i18n] } })
+    const heads = w.findAll('th')
+    expect(heads.map((h) => h.text())).toEqual(['Titolo', 'Stato', 'Scadenza'])
+    expect(heads[1]!.attributes('title')).toBe('status')
+    expect(w.find('td[data-field="status"]').text()).toBe('inviato')
+    expect(w.find('td[data-field="due"] time').text()).toBe('3 nov 2026')
+    appI18n.global.locale.value = 'en'
   })
 })

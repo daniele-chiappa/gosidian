@@ -9,24 +9,30 @@
  *   - Diagram:  a note `type: diagram` (IMP-169) holding an empty template
  *               of the kind chosen or a ready one (an Eisenhower, a SWOT, a
  *               project…), opened in the diagram window.
+ *   - Layout:   a note `type: layout` (IMP-226), opened in the app a plugin
+ *               offers for it: the kind shows only when there is one.
  *
  * Restores manual note creation, which the v2.0 HTMX→Vue migration never
  * ported (IMP-058); the backend (POST /notes, POST /attach) was already there.
  */
-import { ref, computed, inject, nextTick, useId } from 'vue'
+import { ref, computed, inject, nextTick, onMounted, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import axios from 'axios'
 import { createNote } from '@/api/notes'
+import { runQuery } from '@/api/query'
 import { attachFile } from '@/api/attach'
-import { useTreeStore } from '@/stores/tree'
+import { projectOfPath, useTreeStore } from '@/stores/tree'
 import { useWindowsStore, type OpenSpec } from 'plancia'
-import { planciaKey } from '@/composables/planciaKey'
+import { base, planciaKey } from '@/composables/planciaKey'
+import { appForType } from '@/composables/pluginApps'
 import { noteFrontmatter } from './noteFrontmatter'
 import { errorText } from '@/api/errors'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
 import { DIAGRAM_KINDS, READY_IDS, useDiagramLabels } from '@/components/domain/diagramLabels'
 
 // name: the note's name to start from (a missing note's "create it here").
-const props = defineProps<{ path?: string; name?: string }>()
+// startKind: the kind to start on (the palette's new page layout).
+const props = defineProps<{ path?: string; name?: string; startKind?: 'layout' }>()
 const emit = defineEmits<{ close: [] }>()
 
 const { t } = useI18n()
@@ -34,8 +40,40 @@ const treeStore = useTreeStore()
 const store = useWindowsStore()
 const openWindow = inject<(spec: OpenSpec) => string>('openWindow', (s) => store.open(s))
 
-type Kind = 'markdown' | 'image' | 'diagram'
+type Kind = 'markdown' | 'image' | 'diagram' | 'layout'
 const kind = ref<Kind>('markdown')
+const canLayout = ref(false)
+onMounted(async () => {
+  canLayout.value = (await appForType('layout')) !== null
+  if (canLayout.value && props.startKind) kind.value = props.startKind
+})
+
+// What a new page layout starts from (IMP-232): a page of the editor's, or a
+// size in millimetres, or another page layout's styles, parents and page.
+const LAYOUT_PAGES = ['A4', 'A5', 'A6', 'B5', 'Letter', 'Letter - Half'] as const
+const layoutPage = ref<string>('A4')
+const pageWidth = ref(148)
+const pageHeight = ref(210)
+const layoutTemplate = ref('')
+const layoutNotes = ref<{ path: string; title: string }[]>([])
+let layoutsAsked = false
+watch(
+  kind,
+  async (k) => {
+    if (k !== 'layout' || layoutsAsked) return
+    layoutsAsked = true
+    const found = await runQuery({ where: [{ field: 'type', op: 'eq', value: 'layout' }], sort: 'path', limit: 500 }).catch(
+      () => null,
+    )
+    layoutNotes.value = (found?.notes ?? []).map((n) => ({ path: n.path, title: n.title || n.path }))
+  },
+  { immediate: true },
+)
+function layoutStart(): [string, string][] {
+  if (layoutTemplate.value) return [['layout_template', layoutTemplate.value]]
+  const custom = layoutPage.value === 'custom'
+  return [['layout_page', custom ? `${pageWidth.value}x${pageHeight.value}mm` : layoutPage.value]]
+}
 // A kind (its empty template) or `tpl:<id>`, a ready template.
 const diagramKind = ref<(typeof DIAGRAM_KINDS)[number] | `tpl:${(typeof READY_IDS)[number]}`>('flow')
 const diagramWords = useDiagramLabels()
@@ -108,12 +146,24 @@ async function submit() {
           )?.source ?? '')
         : diagramTemplate(choice as (typeof DIAGRAM_KINDS)[number], diagramWords.template.value)
       content = frontmatter([['type', 'diagram']]) + '```diagram\n' + yaml + '```\n'
+    } else if (kind.value === 'layout') {
+      content = frontmatter([['type', 'layout'], ...layoutStart()])
     } else {
       content = frontmatter()
       mode = 'edit'
     }
-    const created = await createNote(notePath.value, content)
-    treeStore.refresh()
+    let created: Awaited<ReturnType<typeof createNote>>
+    try {
+      created = await createNote(notePath.value, content)
+    } catch (e) {
+      // The name is taken (IMP-220, F-24): which file, not the server's English.
+      if (axios.isAxiosError(e) && e.response?.status === 409) {
+        fail(t('note_create.err_exists', { path: notePath.value }), 'name')
+        return
+      }
+      throw e
+    }
+    treeStore.refresh(projectOfPath(notePath.value))
     // This window closes first, then the new one opens: with one window on
     // screen, plancia closes the focused window, which would be the new one.
     emit('close')
@@ -124,6 +174,15 @@ async function submit() {
         key: planciaKey('diagram', `${created.path}#0`),
         title: t('diagram.window_title', { name: created.title || created.path }),
         props: { path: created.path, index: 0 },
+      })
+      return
+    }
+    if (kind.value === 'layout') {
+      openWindow({
+        type: 'app',
+        key: planciaKey('app', created.path),
+        title: t('plugin_app.window_title', { name: base(created.path) }),
+        props: { path: created.path },
       })
       return
     }
@@ -177,6 +236,14 @@ async function submit() {
         :class="kind === 'diagram' ? 'bg-accent text-accent-fg' : 'hover:bg-surface-hover'"
         @click="kind = 'diagram'"
       >{{ t('note_create.kind_diagram') }}</button>
+      <button
+        v-if="canLayout"
+        type="button"
+        class="px-3"
+        data-kind-layout
+        :class="kind === 'layout' ? 'bg-accent text-accent-fg' : 'hover:bg-surface-hover'"
+        @click="kind = 'layout'"
+      >{{ t('note_create.kind_layout') }}</button>
     </div>
 
     <form
@@ -192,21 +259,28 @@ async function submit() {
           :aria-invalid="errorAt === 'name' || undefined"
           :aria-describedby="errorAt === 'name' ? errorId : undefined"
           :placeholder="t('note_create.name_placeholder')"
-          class="mt-1 h-control py-0 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
+          class="mt-1 h-control py-0 w-full rounded bg-bg-elevated border border-border-input px-3 focus:outline-none focus:ring-2 focus:ring-focus"
         >
         <span
           v-if="slug"
           class="mt-1 block text-xs text-text-muted font-mono"
         >{{ notePath }}</span>
       </label>
+      <!-- The reason the name is refused, under its field (IMP-220, F-24). -->
+      <ErrorMessage
+        v-if="error && errorAt === 'name'"
+        :id="errorId"
+        :text="error"
+        class="text-sm"
+      />
 
       <label class="block">
-        <span class="text-sm text-text-muted">{{ t('note_create.title_label') }} <span class="opacity-60">{{ t('note_create.optional') }}</span></span>
+        <span class="text-sm text-text-muted">{{ t('note_create.title_label') }} <span class="text-xs">{{ t('note_create.optional') }}</span></span>
         <input
           v-model="title"
           type="text"
           :placeholder="slug || t('note_create.title_placeholder')"
-          class="mt-1 h-control py-0 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
+          class="mt-1 h-control py-0 w-full rounded bg-bg-elevated border border-border-input px-3 focus:outline-none focus:ring-2 focus:ring-focus"
         >
       </label>
 
@@ -215,7 +289,7 @@ async function submit() {
         <select
           v-model="diagramKind"
           data-diagram-kind
-          class="mt-1 h-control py-0 w-full rounded bg-bg-elevated border border-border px-3 focus:outline-none focus:ring-2 focus:ring-focus"
+          class="mt-1 h-control py-0 w-full rounded bg-bg-elevated border border-border-input px-3 focus:outline-none focus:ring-2 focus:ring-focus"
         >
           <optgroup :label="t('diagram.template_empty')">
             <option v-for="k in DIAGRAM_KINDS" :key="k" :value="k">{{ diagramWords.kinds.value[k] }}</option>
@@ -227,6 +301,63 @@ async function submit() {
           </optgroup>
         </select>
       </label>
+
+      <template v-if="kind === 'layout'">
+        <label class="block">
+          <span class="text-sm text-text-muted">{{ t('note_create.layout_template') }}</span>
+          <select
+            v-model="layoutTemplate"
+            data-layout-template
+            class="mt-1 h-control py-0 w-full rounded bg-bg-elevated border border-border-input px-3 focus:outline-none focus:ring-2 focus:ring-focus"
+          >
+            <option value="">{{ t('note_create.layout_template_none') }}</option>
+            <option v-for="n in layoutNotes" :key="n.path" :value="n.path">{{ n.title }} — {{ n.path }}</option>
+          </select>
+          <span
+            v-if="layoutTemplate"
+            class="mt-1 block text-xs text-text-muted"
+          >{{ t('note_create.layout_template_hint') }}</span>
+        </label>
+        <label v-if="!layoutTemplate" class="block">
+          <span class="text-sm text-text-muted">{{ t('note_create.layout_page') }}</span>
+          <select
+            v-model="layoutPage"
+            data-layout-page
+            class="mt-1 h-control py-0 w-full rounded bg-bg-elevated border border-border-input px-3 focus:outline-none focus:ring-2 focus:ring-focus"
+          >
+            <option v-for="p in LAYOUT_PAGES" :key="p" :value="p">{{ p }}</option>
+            <option value="custom">{{ t('note_create.layout_page_custom') }}</option>
+          </select>
+        </label>
+        <div v-if="!layoutTemplate && layoutPage === 'custom'" class="flex gap-3">
+          <label class="block flex-1">
+            <span class="text-sm text-text-muted">{{ t('note_create.layout_width_mm') }}</span>
+            <input
+              v-model.number="pageWidth"
+              type="number"
+              min="10"
+              max="5000"
+              step="1"
+              required
+              data-layout-width
+              class="mt-1 h-control py-0 w-full rounded bg-bg-elevated border border-border-input px-3 focus:outline-none focus:ring-2 focus:ring-focus"
+            >
+          </label>
+          <label class="block flex-1">
+            <span class="text-sm text-text-muted">{{ t('note_create.layout_height_mm') }}</span>
+            <input
+              v-model.number="pageHeight"
+              type="number"
+              min="10"
+              max="5000"
+              step="1"
+              required
+              data-layout-height
+              class="mt-1 h-control py-0 w-full rounded bg-bg-elevated border border-border-input px-3 focus:outline-none focus:ring-2 focus:ring-focus"
+            >
+          </label>
+        </div>
+      </template>
 
       <template v-if="kind === 'image'">
         <label class="block">
@@ -242,18 +373,18 @@ async function submit() {
           >
         </label>
         <label class="block">
-          <span class="text-sm text-text-muted">{{ t('note_create.caption_label') }} <span class="opacity-60">{{ t('note_create.caption_hint') }}</span></span>
+          <span class="text-sm text-text-muted">{{ t('note_create.caption_label') }} <span class="text-xs">{{ t('note_create.caption_hint') }}</span></span>
           <textarea
             v-model="caption"
             rows="3"
             :placeholder="t('note_create.caption_placeholder')"
-            class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
+            class="mt-1 w-full rounded bg-bg-elevated border border-border-input px-3 py-2 focus:outline-none focus:ring-2 focus:ring-focus"
           />
         </label>
       </template>
 
       <ErrorMessage
-        v-if="error"
+        v-if="error && errorAt !== 'name'"
         :id="errorId"
         :text="error"
         class="text-sm"

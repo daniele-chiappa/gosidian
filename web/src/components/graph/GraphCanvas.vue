@@ -39,6 +39,8 @@ import { makeGroupColor, resolveTheme, withAlpha } from './theme'
 interface Props {
   nodes: GraphNode[]
   edges: GraphEdge[]
+  /** The picture's name, its counts (IMP-224, F-32). */
+  label?: string
 }
 const props = defineProps<Props>()
 const emit = defineEmits<{
@@ -267,5 +269,7 @@ watch(
   <div
     ref="host"
     class="w-full h-full bg-bg overflow-hidden"
+    role="img"
+    :aria-label="label"
   />
 </template>

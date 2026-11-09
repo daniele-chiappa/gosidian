@@ -42,10 +42,35 @@ func (r *Registry) Tools() []PluginTool {
 			continue
 		}
 		for _, t := range a.Manifest.Tools {
-			out = append(out, PluginTool{Name: ToolName(name, t.Name), Plugin: name, Spec: t, SHA: a.SHA})
+			if !t.Internal {
+				out = append(out, PluginTool{Name: ToolName(name, t.Name), Plugin: name, Spec: t, SHA: a.SHA})
+			}
 		}
 	}
 	return out
+}
+
+// AppTool is the plugin, the first in the config's order, whose accepted
+// manifest has an app for the notes of noteType and the internal tool: a
+// plugin earns gosidian's data by the app the owner accepted it for.
+func (r *Registry) AppTool(noteType, tool string) (string, bool) {
+	acc, _ := r.store.all()
+	for _, name := range r.order {
+		a, ok := acc[name]
+		if !ok {
+			continue
+		}
+		t, ok := a.Manifest.Tool(tool)
+		if !ok || !t.Internal {
+			continue
+		}
+		for _, app := range a.Manifest.Apps {
+			if app.NoteType == noteType {
+				return name, true
+			}
+		}
+	}
+	return "", false
 }
 
 // Expose shows a plugin's tools to the agents of a project, and its graphs
