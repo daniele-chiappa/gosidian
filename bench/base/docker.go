@@ -68,6 +68,8 @@ type server struct {
 	port  int
 	vault volume
 	state volume
+	// mounts are further volume:path pairs (git sync's remote).
+	mounts []string
 }
 
 // freePort asks the kernel for a free loopback port.
@@ -91,6 +93,9 @@ func (s *server) create(env []string) error {
 	args := []string{"create", "--name", s.name, "--cpus=" + serverCPUs, "--memory=" + serverMemory,
 		"-p", fmt.Sprintf("127.0.0.1:%d:8080", port),
 		"-e", "GOSIDIAN_STATE_DIR=/data", "-v", string(s.vault) + ":/vault", "-v", string(s.state) + ":/data"}
+	for _, m := range s.mounts {
+		args = append(args, "-v", m)
+	}
 	for _, e := range env {
 		args = append(args, "-e", e)
 	}

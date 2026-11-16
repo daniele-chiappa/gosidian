@@ -210,7 +210,7 @@ func (h pipelineHost) Tasks(project string) ([]fleet.Task, error) { return h.s.f
 func (h pipelineHost) ReadTask(rel string) (fleet.Task, []byte, error) { return h.s.fleetRead(rel) }
 
 func (h pipelineHost) UpdateTask(rel string, build func(fleet.Task, []byte) ([]byte, error), actor string) (fleet.Task, error) {
-	t, err := h.s.fleetUpdate(context.Background(), taskWrite{actor: actor}, rel, build)
+	t, err := h.s.engineUpdate(context.Background(), taskWrite{actor: actor}, rel, build)
 	var werr *writeError
 	if errors.As(err, &werr) {
 		return t, errors.New(werr.msg)
@@ -219,7 +219,13 @@ func (h pipelineHost) UpdateTask(rel string, build func(fleet.Task, []byte) ([]b
 }
 
 func (h pipelineHost) CreateTask(project string, n fleet.NewTask, actor string) (fleet.Task, error) {
-	t, err := h.s.fleetCreate(context.Background(), taskWrite{actor: actor}, project, n)
+	w := taskWrite{actor: actor}
+	in, ranks, unlock := h.s.subCard(context.Background(), project, &n)
+	defer unlock()
+	t, err := h.s.fleetCreate(context.Background(), w, project, n)
+	if err == nil {
+		err = h.s.renumber(context.Background(), w, in, ranks)
+	}
 	var werr *writeError
 	if errors.As(err, &werr) {
 		return t, errors.New(werr.msg)

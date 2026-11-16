@@ -1,7 +1,9 @@
 package index
 
 import (
+	"database/sql"
 	"encoding/json"
+	"slices"
 	"strings"
 )
 
@@ -39,10 +41,11 @@ type partialSearch struct {
 	most   int // the notes a word is in at most to be less common; -1 until counted
 	common map[string]bool
 	parts  map[string][]queryPart // each query's, for label
+	held   map[string]int         // the part every partial hit of a query holds, its only rare one
 }
 
 func (i *Index) partialSearch(opts SearchOptions) *partialSearch {
-	return &partialSearch{i: i, opts: opts, most: -1, common: map[string]bool{}, parts: map[string][]queryPart{}}
+	return &partialSearch{i: i, opts: opts, most: -1, common: map[string]bool{}, parts: map[string][]queryPart{}, held: map[string]int{}}
 }
 
 // hits returns the partial hits of q (its parts) that fit in limit after
@@ -53,21 +56,24 @@ func (s *partialSearch) hits(q string, parts []queryPart, limit int, full []rank
 	}
 	s.parts[q] = parts
 	var rare []queryPart
-	for _, p := range parts {
-		common, err := s.isCommon(p.word)
+	for k, p := range parts {
+		common, err := s.isCommon(p)
 		if err != nil {
 			return nil, err
 		}
 		if !common {
 			rare = append(rare, p)
+			s.held[q] = k
 		}
 	}
 	if len(rare) == 0 {
 		return nil, nil
 	}
-	// Every snippet waits: most candidates are no hit. A waiting snippet
-	// also keeps the query its hit came from, for label.
-	cands, err := s.i.rankedMatch(joinParts(rare, " OR "), q, s.opts, limit, 0)
+	if len(rare) > 1 {
+		delete(s.held, q)
+	}
+	// A candidate keeps the query its hit came from, for label.
+	cands, err := s.i.rankedMatch(joinParts(rare, " OR "), q, s.opts, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -87,8 +93,16 @@ func (s *partialSearch) hits(q string, parts []queryPart, limit int, full []rank
 	return partial, nil
 }
 
-// isCommon reports whether word is in more than commonPercent of the notes.
-func (s *partialSearch) isCommon(word string) (bool, error) {
+// isCommon reports whether the word of p is in more than commonPercent of
+// the notes its expression matches. A word's own is an upper bound from the
+// vocabulary. A word the tokenizer cuts in several tokens ("2026-05") is a
+// phrase, in no more notes than its rarest token; the inflections the
+// expression adds ("name", "names" to "naming") count too. For those two
+// the bound is loose (a date's tokens are each common, the date rare): past
+// most, the notes are counted. Counted on the word alone, as before, the
+// first was in no note and the second in its prefix's only: both rare, and
+// their hundreds of notes scored at every partial search.
+func (s *partialSearch) isCommon(p queryPart) (bool, error) {
 	if s.most < 0 {
 		var notes int
 		if err := s.i.db.QueryRow(`SELECT COUNT(*) FROM notes`).Scan(&notes); err != nil {
@@ -96,20 +110,90 @@ func (s *partialSearch) isCommon(word string) (bool, error) {
 		}
 		s.most = notes * commonPercent / 100
 	}
-	key := foldWord(word)
-	if common, ok := s.common[key]; ok {
+	if common, ok := s.common[p.expr]; ok {
 		return common, nil
 	}
-	common, err := s.i.common(key, s.most)
+	docs, err := s.i.phraseDocs(p.word, s.most)
+	for _, f := range p.forms {
+		if err != nil || docs > s.most {
+			break
+		}
+		var n int
+		n, err = s.i.termDocs(f, false, s.most-docs)
+		docs += n
+	}
+	if err == nil && docs > s.most && (len(tokenize(p.word)) > 1 || len(p.forms) > 0) {
+		docs, err = s.i.matchDocs(p.expr, s.most)
+	}
 	if err != nil {
 		return false, err
 	}
-	s.common[key] = common
+	common := docs > s.most
+	s.common[p.expr] = common
 	return common, nil
 }
 
+// phraseDocs bounds the notes that word, as a search matches it (a phrase
+// of its tokens, the last one a prefix), is in: the fewest of any token's,
+// counted up to past most.
+func (i *Index) phraseDocs(word string, most int) (int, error) {
+	toks := tokenize(word)
+	fewest := -1
+	for k, t := range toks {
+		n, err := i.termDocs(fold(word[t.start:t.end]), k == len(toks)-1, most)
+		if err != nil {
+			return 0, err
+		}
+		if fewest < 0 || n < fewest {
+			fewest = n
+		}
+	}
+	return max(fewest, 0), nil
+}
+
+// matchDocs counts the notes expr matches, up to one past most.
+func (i *Index) matchDocs(expr string, most int) (int, error) {
+	var n int
+	err := prepDB{i.stmts}.QueryRow(`SELECT COUNT(*) FROM (SELECT 1 FROM notes_fts WHERE notes_fts MATCH ? LIMIT ?)`, expr, most+1).Scan(&n)
+	return n, err
+}
+
+// termDocs counts the notes of term in the vocabulary, or as a prefix the
+// documents of the terms it starts, summed (an upper bound): until they pass
+// most, or maxCandidates terms, which count as past most.
+func (i *Index) termDocs(term string, prefix bool, most int) (int, error) {
+	if !prefix {
+		var n int
+		err := prepDB{i.stmts}.QueryRow(`SELECT doc FROM notes_vocab WHERE term = ?`, term).Scan(&n)
+		if err == sql.ErrNoRows {
+			return 0, nil
+		}
+		return n, err
+	}
+	rows, err := prepDB{i.stmts}.Query(`SELECT doc FROM notes_vocab WHERE term >= ? AND term < ?`, term, term+"￿")
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	docs, terms := 0, 0
+	for rows.Next() {
+		var doc int
+		if err := rows.Scan(&doc); err != nil {
+			return 0, err
+		}
+		docs += doc
+		terms++
+		if docs > most || terms == maxCandidates {
+			return most + 1, nil
+		}
+	}
+	return docs, rows.Err()
+}
+
 // label marks each partial hit with the words of its query its note does
-// not hold: only the hits a response keeps.
+// not hold: only the hits a response keeps. With one rare word the hits all
+// hold it, matched by it alone, and of two words they lack the other, being
+// no full hits: neither is matched again.
 func (s *partialSearch) label(hits []rankedHit) error {
 	byQuery := map[string][]int{}
 	var queries []string
@@ -124,9 +208,22 @@ func (s *partialSearch) label(hits []rankedHit) error {
 		for n, k := range byQuery[q] {
 			group[n] = hits[k]
 		}
-		missing, err := s.i.missingWords(s.parts[q], group)
-		if err != nil {
-			return err
+		ask := s.parts[q]
+		k, held := s.held[q]
+		if held {
+			ask = slices.Delete(slices.Clone(ask), k, k+1)
+		}
+		var missing [][]string
+		if held && len(ask) == 1 {
+			missing = make([][]string, len(group))
+			for n := range missing {
+				missing[n] = []string{ask[0].word}
+			}
+		} else {
+			var err error
+			if missing, err = s.i.missingWords(ask, group); err != nil {
+				return err
+			}
 		}
 		for n, k := range byQuery[q] {
 			hits[k].Why = append([]string{`partial: without "` + strings.Join(missing[n], `", "`) + `"`}, hits[k].Why...)
@@ -150,30 +247,6 @@ func scoreAfter(full, partial []rankedHit) []rankedHit {
 		partial[k].Score = min(relativeScore(partial[k].score, best), ceiling)
 	}
 	return partial
-}
-
-// common reports whether prefix, a folded word as a search matches it, is in
-// more than most notes: the documents of the indexed terms it starts, summed
-// (an upper bound), until they pass most or maxCandidates terms.
-func (i *Index) common(prefix string, most int) (bool, error) {
-	rows, err := prepDB{i.stmts}.Query(`SELECT doc FROM notes_vocab WHERE term >= ? AND term < ?`, prefix, prefix+"￿")
-	if err != nil {
-		return false, err
-	}
-	defer rows.Close()
-	docs, terms := 0, 0
-	for rows.Next() {
-		var doc int
-		if err := rows.Scan(&doc); err != nil {
-			return false, err
-		}
-		docs += doc
-		terms++
-		if docs > most || terms == maxCandidates {
-			return true, nil
-		}
-	}
-	return false, rows.Err()
 }
 
 // missingWords lists, for each hit, the words of parts its note does not

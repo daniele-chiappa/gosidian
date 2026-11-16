@@ -249,7 +249,7 @@ repositories). The JSON Schema is
 | `files` | files by reference ([above](#files-by-reference)), in the agent's `in/` |
 | `access` | what the agent may do, within its preset: `read` (read and search the files), `edit` (also write them), `exec` (also run commands) |
 | `tools` | the plugin's own names of the tools, for finer control; they narrow `access` |
-| `max_turns`, `max_seconds`, `max_tokens`, `max_cost` | the limits of the step (`max_cost` in US dollars), within the preset's and the run's tokens left |
+| `max_turns`, `max_seconds`, `max_tokens`, `max_cost` | the limits of the step (`max_cost` in US dollars), within the preset's and the run's tokens left. `max_tokens` counts every token the endpoint bills, those read again from its cache too: on a long step they are most of the count and little of the cost, so `max_cost` is the limit that follows the money |
 | `json`, `schema` | the answer as JSON, checked against `schema` when given |
 | `repo` | a repository of the preset to work on: `name`, `base`, `branch`, `push`, `pr` (`title`, `body`). The plugin clones and commits; the agent only edits |
 | `mcp` | `none`, `read`, `write`: gosidian's MCP for the call ([above](#gosidians-mcp-for-a-call)) |
@@ -269,7 +269,17 @@ repositories). The JSON Schema is
 | `executor` | `plugin`, `version` |
 
 A step that hits a limit (turns, time, tokens, cost) or whose answer is
-not the JSON asked for fails the node, with the reason.
+not the JSON asked for fails the node, with the reason. The error's
+structured content says what the step spent before (`cost`, `usage`).
+
+A step that could not work for a limit outside it and its settings (the
+provider's key reached its limit, the subscription has no quota left)
+says so in the error's structured content, with `wait`: `{"wait":
+{"reason": "...", "until": "2026-11-16T00:00:00Z"}}`, `until` when the
+plugin knows when the limit ends, else `{"wait": {}}`. In the run of a
+[team's task](agents.md#limits) gosidian then holds the step instead of
+failing it: it tries again later, in the same attempt. Elsewhere the
+node fails as with any other error.
 
 An agent plugin may also have a node `pr` (`repo`, `url` or `number`,
 `action`: `merge` or `close`, `delete_branch`), which merges or closes a

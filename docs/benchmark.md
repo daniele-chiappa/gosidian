@@ -583,8 +583,8 @@ large vault (5.7 s, ≤ 3.5 s), the search of 5,087 notes at the p95
 (4.3 ms, ≤ 3 ms), the web UI's first load (590 KB sent, ≤ 200 KB, which
 compressing it reaches), the bootstrap (25.2 KB, ≤ 20 KB), the full tool
 list (85.8 KB, ≤ 80 KB), the search with one query (R@5 0.71, ≥ 0.76, the
-two lexical questions it misses) and with variants (R@1 0.73, ≥ 0.80;
-3 misses, ≤ 2). Under 5 ms a call's time is lost in the model's seconds:
+two lexical questions it misses) and with variants (R@1 0.73, ≥ 0.80,
+dropped on the 14th of November; 3 misses, ≤ 2). Under 5 ms a call's time is lost in the model's seconds:
 those numbers are kept, not chased.
 
 ### The web UI gzipped (2026-10-29)
@@ -1004,6 +1004,146 @@ The paths are the same. 602 hits, in 48 notes of 256 KB or more, have
 another snippet, each with matches marked. Of the 143 in searches
 without variants, by a rough count 21 mark more words of the query than
 FTS5's and the others as many.
+
+### Git sync, the web UI's first paint, the incremental index (2026-11-14)
+
+The roadmap's M1 named three measures level B did not have. They are in
+it from the 14th of November, and in the guard.
+
+- **A round of git sync.** A server of its own with git sync on, pushing
+  to a bare repository in a volume, the debounce at 100 ms. A round runs
+  from the reply of a `memory_create` to the server counting a commit
+  (`gosidian_git_sync_commits_total` of `/metrics`), less the debounce.
+  The first round commits and pushes the whole vault, 88 files; then ten
+  rounds of one note, their median. At the end every note written must be
+  in the remote, or the bench reports an error: the counter also counts a
+  flush with nothing to commit.
+- **The web UI's first paint.** Chromium, headless, in Playwright's image,
+  inside the server's network and with the server's limits (2 CPUs, 2 GB).
+  Seven visits to `/`, each in a new context, so with an empty cache; the
+  first warms the browser up and is left out. The numbers are the medians
+  of the first paint with content and of the load event.
+- **The incremental index.** On the large vault, with the server down, a
+  line more at the end of 100 notes; then the start, to set against the
+  warm start where nothing changed. The word the notes gained must then be
+  found by `memory_search`. A note changed while the server runs is in the
+  index in less than a `docker exec` takes, and is not measured from
+  outside.
+
+Six measures of three runs each of main at `0963426` (v2.160.0), at a load
+of 1.6 to 3.5 (`bench/results/base-2026-11-14-m14-*.json`):
+
+| | Median | Min–max | Noise | Worse past |
+|---|---|---|---|---|
+| Git sync, a round: the whole vault | 191 ms | 191–196 | 2% | +15% |
+| Git sync, a round: one note | 129 ms | 128–131 | 2% | +15% |
+| Web UI, first paint | 73 ms | 68–86 | 25% | +40% |
+| Web UI, load event | 44 ms | 43–53 | 22% | not guarded |
+| Large vault: start after 100 notes changed | 322 ms | 321–326 | 2% | +25% |
+| Large vault: start, warm (for comparison) | 275 ms | 263–281 | 6% | +15% |
+
+The browser is the measure the machine's load moves most: in a first set
+of six, one measure that ended with the load at 8.5 had a first paint of
+198 ms and a load event of 127. Hence its room, and the guard measures a
+second time before it fails. The rooms were decided on that first set
+(noise of 7%, 4%, 13% and 12%, the loaded measure apart). None of the
+three has an objective: they are kept. On v2.42.0, one run at a load of
+5: 172 and 146 ms a round, 52 ms the first paint, 424 ms the restart.
+
+The browser's visits are the last thing of a run: before the memory at
+rest was read they raised it from 17.9 to 22.7 MB, past its limit.
+
+### R@1 with variants: the objective dropped (2026-11-14)
+
+The objective of 0.80 for R@1 with `any_of` is dropped without being
+reached. 0.73 stays as a number not to go below, which the guard already
+holds like every other search figure. On v2.163.0, with variants, the
+gold note is first in 33 questions of 45 (0.733), with R@5 0.956, MRR 0.83
+and one miss: 0.80 needs three more at the top.
+
+In most of the twelve questions where the gold note is not first, what is
+ahead of it is a sister: a skill on the same subject, a plan that cites
+the same bug, a tie at the same fused score, decided by the order of the
+paths. Two ways of reordering were tried and dropped: credit from the
+lists where a note has only some of the words, and other ways of breaking
+ties. Each reached 0.756 at best, and both took R@5 from 0.956 to 0.93.
+Two signals would bring one question each, 35 of 45 (0.78) together:
+section headings, at the cost of a new index schema, and the file name
+among the searched words. If section headings come for another reason,
+they will be measured on the 1,257 questions of the real data, not on
+these 45.
+
+### The search on the large vault, the partial hits (2026-11-15)
+
+Since the partial hits of the 31st of October the p95 of a search on the
+large vault was back at 4.3–4.8 ms, against the 3 of the objective: the
+cost of their second query, accepted then. Taken in the process, on the
+index of the large vault, the 150 searches of level B put the 8th
+slowest call on five queries: `cdn`, `comp tickets` and `redis streams`,
+found in hundreds of notes, and `incident 2026-05` and `migration
+naming`, whose partial search cost about 2.8 ms alone. A CPU profile of
+those five: 28% the snippets, 28% bm25 (half of it reading each note's
+column sizes), and the partial search 30%.
+
+- **A common word counted by its expression.** The partial hits leave
+  out a word in more than a tenth of the notes, but the count looked the
+  word up as one term of the vocabulary. `2026-05`, which the tokenizer
+  cuts in two, was in no note, though 940 of the 5,087 (18.5%) have it;
+  `naming` was counted without the `name`, `named` and `names` its
+  search adds, 734 notes (14.4%). Both were rare, and the partial search
+  scored their notes. A word's tokens now make a phrase, in no more notes
+  than its rarest, and its inflections count with it; for those two the
+  bound is loose (each token of a date is common, the date rare), so past
+  the tenth the notes are counted, up to one past it. `2026-04-02`, in two
+  notes, still brings them.
+- **Every snippet waits for the hits.** The pool cut the snippets of the
+  notes under 8 KB, also of the rows pushed out later: about a hundred for
+  the ten hits of `cdn`. The threshold of [the search among long
+  documents](#the-search-among-long-documents-2026-10-30) kept them there
+  because the second statement, which runs the match again over the hits
+  only, cost more for a prefix such as `2*`; the prefixes of one to three
+  letters have had an index since 2.121.0. The snippets are the same: the
+  golden files of the search, written with the pool's, hold.
+- **The label asks only what it does not know.** With one rare word the
+  partial search matches that word alone, so every partial hit holds it,
+  and of two words it lacks the other, being no full hit: the label no
+  longer matches either again. Two words with one common is the most
+  frequent query of level B.
+
+In the process, the four versions in turn, 30 runs of the 150 searches
+each:
+
+| | median | p95 |
+|---|---|---|
+| v2.164.0 | 0.924 ms | 3.21 ms |
+| a common word by its expression | 0.945 ms | 2.73 ms |
+| every snippet waits | 0.994 ms | 2.39 ms |
+| the label | 0.976 ms | 2.33 ms |
+
+Through MCP, the guard on v2.164.0 and on the change in turn, the runs at
+a load under 4 (five each):
+
+| | v2.164.0 | the change |
+|---|---|---|
+| large vault: search, p95 | 4.65 ms (4.27–4.90) | 3.49 ms (3.21–3.56) |
+| large vault: search, median | 1.63 ms | 1.77 ms |
+| the benchmark vault: search, median | 1.13 ms | 1.18 ms |
+
+The p95 is a quarter shorter and still half a millisecond past the
+objective: a call through MCP costs about 0.45 ms besides the search, and
+the server's search runs a quarter to a third slower than in the process,
+its CPU caches cold between one request and the next. The median is 5–8%
+longer, the second statement of the snippets on a search of few notes:
+inside the guard's room, and a tenth of a millisecond.
+
+On the 1,257 questions of the lab's data (IMP-215, a copy of its index
+without the notes that hold the questions), the hits change in 14
+searches of the query and one with variants, never ranking the expected
+note lower; one expected note missed is found. R@1, R@5 and MRR are the
+same, and level R too. Their time is the same, in turn twice: a mean of
+35–36 ms with the query, 54–56 with variants. Their notes are long
+converted documents, whose snippets already waited, and their slow
+searches are the short words' (a short word in a query, 2026-10-30).
 
 ## Limits
 

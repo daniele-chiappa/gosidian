@@ -152,19 +152,30 @@ func (n node) Run(ctx context.Context, env *pipeline.Env, with map[string]any) (
 	}
 	sess, err := n.r.session(ctx, c, acc)
 	if err != nil {
-		return nil, err
+		// The plugin is away, or serves a manifest nobody accepted yet:
+		// neither is the step's fault, a task's run waits for it.
+		return nil, away(ctx, err)
 	}
 	defer sess.Close()
 	res, err := callToolMeta(ctx, sess, spec.Tool, args, meta)
 	if err != nil {
-		return nil, fmt.Errorf("plugin %s, %s: %w", c.Name, spec.Tool, err)
+		return nil, away(ctx, fmt.Errorf("plugin %s, %s: %w", c.Name, spec.Tool, err))
 	}
 	if res.IsError {
 		err := fmt.Errorf("plugin %s, %s: %s", c.Name, spec.Tool, strings.TrimSpace(resultText(res)))
+		spent := errorOutput(res)
+		if until, ok := waitOf(spent); ok {
+			// The plugin says it waits for something outside it (the
+			// provider's limit, the subscription's quota).
+			if len(spent) > 1 {
+				err = pipeline.FailedWith{Output: spent, Err: err}
+			}
+			return nil, pipeline.Hold{Until: until, Err: err}
+		}
 		// A step that fails after spending (an agent stopped at its
 		// limits) says what it spent in the error's structured content:
 		// the step and its task keep it (IMP-195).
-		if spent := errorOutput(res); spent != nil {
+		if spent != nil {
 			return nil, pipeline.FailedWith{Output: spent, Err: err}
 		}
 		return nil, err
@@ -214,6 +225,28 @@ func (n node) Takes(path ...string) bool {
 		}
 	}
 	return true
+}
+
+// Maximum is the most the node's accepted input schema lets the setting
+// at path be (its "maximum"), when it says one: a caller that passes a
+// number of its own (a task's budget) keeps it within.
+func (n node) Maximum(path ...string) (float64, bool) {
+	_, _, spec, ok := n.r.accepted(n.use)
+	if !ok || len(spec.Input) == 0 {
+		return 0, false
+	}
+	var schema map[string]any
+	if json.Unmarshal(spec.Input, &schema) != nil {
+		return 0, false
+	}
+	for _, k := range path {
+		props, _ := schema["properties"].(map[string]any)
+		if schema, _ = props[k].(map[string]any); schema == nil {
+			return 0, false
+		}
+	}
+	most, ok := schema["maximum"].(float64)
+	return most, ok
 }
 
 // runToken mints the MCP token of a call whose setting mcp asks for
@@ -462,4 +495,29 @@ func optionalFiles(spec NodeSpec) map[string]bool {
 		delete(out, r)
 	}
 	return out
+}
+
+// away makes of a call that did not reach its plugin a pipeline.Hold,
+// unless the step's own time ended.
+func away(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return err
+	}
+	return pipeline.Hold{Err: err}
+}
+
+// waitOf reads the "wait" of a tool error's structured content: the
+// plugin could not work for a limit outside it. {"wait": {"until":
+// "<RFC 3339>"}} says when the limit ends, {"wait": {}} or true that it
+// does not know.
+func waitOf(out map[string]any) (time.Time, bool) {
+	switch w := out["wait"].(type) {
+	case bool:
+		return time.Time{}, w
+	case map[string]any:
+		s, _ := w["until"].(string)
+		t, _ := time.Parse(time.RFC3339, s)
+		return t, true
+	}
+	return time.Time{}, false
 }

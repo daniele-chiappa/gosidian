@@ -10,6 +10,131 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.164.1] — 2026-11-16 — "agent teams on boards"
+
+The releases from 2.159.0 to 2.164.1 in one: a team of agents takes the
+cards of a board, waits out a provider's limit instead of failing, keeps
+its agents' whole reports, counts a review's verdict and keeps its
+coordinator's plan in order; a reader's token no longer receives the
+tools that write, and the slowest searches of a large vault are faster.
+Pull the image and restart; nothing to migrate. A team made before has
+no `<team>-alert` pipeline, and two of its tasks on the same repository
+now wait one for the other unless their `paths` are apart: coming from
+2.158.0, read the entries 2.159.0 to 2.163.0 of
+[docs/upgrading.md](docs/upgrading.md).
+
+### Added
+- **A team's cards on a board** ([docs/board.md](docs/board.md#teams)):
+  a card with `team` and `assignee` (`memory_task_create` with `board`
+  and both, or the two fields in the web UI) is that team's task. Its
+  runs take the ready cards in the board's order, into the first column
+  of `working` within its limit: at a full column of a board `hard` for
+  agents the card waits, and `memory_tasks` says why. The card follows
+  its run from column to column, with its dates; given back, it goes to
+  the top of the first column of `submitted`. An objective's sub-tasks
+  are cards of its board, and an objective that waits for them takes no
+  place of its column's limit. After the team's own gate, a card done by
+  a person goes to review for the person to close. A person who takes
+  back or closes a card a run holds cancels the run, and the web UI asks
+  first. No new tool.
+- **A team that waits says so**
+  ([docs/agents.md](docs/agents.md#limits)): in the run of a team's
+  task, a step whose plugin is away (unreachable, restarting, a manifest
+  not accepted yet) or says it waits for a limit outside it (`wait` in
+  the error of an agent-run node: a provider's key, a subscription's
+  quota) is held. It goes back to the queue in the same attempt and
+  tries again after a minute, then twice as long each time up to
+  `[agents] hold_max` (`GOSIDIAN_AGENTS_HOLD_MAX`, an hour); the task's
+  attempts do not grow. A team with open-weight models lost three
+  attempts of five tasks in seconds to a 403 before. `memory_tasks` says
+  why a task at work waits, the events `budget` and `waiting` carry the
+  team's `alert` and a message, and `memory_create_team` writes a
+  pipeline `<team>-alert` that sends it. An objective whose open
+  sub-tasks all wait behind one that failed or was canceled goes to
+  `input-required` with the reason.
+- **A task keeps its agent's whole report**
+  ([docs/agents.md](docs/agents.md#the-pipelines-of-a-team)): the gate
+  cut the report at 3,000 bytes and a prompt read 4 KiB of another
+  task's, so long reviews reached neither the note nor the coordinator
+  whole. The note now keeps up to `[agents] max_report` (64 KiB), a
+  prompt up to `max_prompt_report` (16 KiB), and a cut says so with the
+  note that holds the rest. The gate also says when an answer was cut at
+  the model's output limit and why a node of the checks or of the
+  preview failed; it sends back a role whose work is its report when the
+  answer is empty or cut; and it counts the notes written by an attempt
+  that ended at a limit.
+- **A review's verdict, counted**
+  ([docs/agents.md](docs/agents.md#a-team)): a role with `review: true`
+  is asked to end its report with its open problems, each `[serious]` or
+  `[minor]`, and a line `VERDICT: passed` or `VERDICT: to correct`. The
+  gate counts them among its findings and sends back a review without
+  the line. A team's `reopen_on` (`serious`, the default, or `any`) is
+  what the coordinator is told: with `serious` it gives no task for
+  minor problems, lists them in its summary, and brings derived work in
+  line once, after the review that leaves no serious problem.
+
+### Changed
+- **A reader's token does not see the tools that write**
+  ([docs/mcp/authentication.md](docs/mcp/authentication.md#scopes)): a
+  token without the `write` scope received the schemas of the 37 tools
+  that write at every call, which could only refuse it. With the
+  branches off, its agent now receives 37 tools and 47 KB instead of 66
+  and 82 KB; with the `core` profile 14 tools and 21 KB instead of 27
+  and 38. The hidden ones answer `tool not found`, like a tool outside
+  the profile. The tools that also read stay, such as `memory_versions`
+  and the dry runs of `memory_gc_attachments`.
+- **Searches cut only their hits' snippets**
+  ([docs/benchmark.md](docs/benchmark.md#the-search-on-the-large-vault-the-partial-hits-2026-11-15)):
+  the pool of candidates cut the snippets of the notes under 8 KB, also
+  of those it then left out, about a hundred for the ten hits of a word
+  found in a fifth of the notes. Every snippet now waits for the hits.
+  The snippets are the same; on the benchmark's large vault the p95 of a
+  search over MCP goes from 4.65 to about 3.4 ms.
+
+### Fixed
+- **A search's partial hits leave out a common date or inflected word**:
+  a word in more than a tenth of the notes brings no partial hits, but
+  the count missed a word the index cuts in several tokens ("2026-05",
+  in a fifth of the benchmark's large vault, counted as in none) and the
+  inflections a word's search adds ("name", "names" to "naming"). Their
+  notes followed as partial hits, and scoring them was most of the
+  slowest searches. A date such as "2026-04-02", rare though each of its
+  tokens is common, still brings its notes. On 1,257 questions of our
+  test data the hits change in 15 searches, never ranking the expected
+  note lower.
+- **A coordinator's plan kept in order**
+  ([docs/agents.md](docs/agents.md#the-coordinator)): `task.plan` takes
+  `replaces` on a task given in the place of one that failed or was
+  canceled, and points to it the tasks that waited for that one; it does
+  not write again a task with the role and title of one still open (a
+  small model repeated three); and it makes two open tasks on the same
+  repository wait one for the other unless their `paths` are apart (two
+  side by side made pull requests in conflict). An objective sent to a
+  person at `max_rounds` gets its rounds back, so that putting it to
+  `working` runs the coordinator again.
+- **A task's budget within its team's and its preset's**: `task.run`
+  passed the task's budget as `max_cost` whatever the executor's preset
+  allowed, so a budget above it failed every attempt at the plugin's
+  door, and a preset of a free endpoint (`max_cost` 0) took no task with
+  a budget at all. It now keeps `max_cost` within the `maximum` of the
+  executor's input schema, and sends none when that is 0. `task.plan`
+  lowers a `budget_usd` above the team's `task_usd` to it and says so
+  (`lowered`). A task's note says what each failed attempt spent and
+  what the closing one did, apart from the total.
+
+### Security
+- **The image built from fresh bases** (2.163.1): the image had git
+  2.54.0 (CVE-2026-105437, high) after Alpine shipped 2.54.1, and a
+  binary of Go 1.27.3, whose GO-2026-6859 the code calls, after 1.27.4
+  was out: the build kept the bases and the runtime's packages its cache
+  had. It now takes the bases fresh and builds the runtime stage again
+  every time. Nothing changes in the code.
+- **A serious advisory past its days keeps the nightly check red**: once
+  its fix is out, a serious advisory has the days
+  [SECURITY.md](SECURITY.md) gives it, from none to fourteen; past them
+  the night's check is red every night until it is fixed or accepted,
+  and says by how many days.
+
 ## [2.158.0] — 2026-11-09 — "page layouts and iterations"
 
 The releases from 2.134.0 to 2.158.0 in one: notes laid out as pages in

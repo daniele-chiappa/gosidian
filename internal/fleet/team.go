@@ -78,13 +78,17 @@ type Team struct {
 	Path string `json:"path"`
 	// Coordinator is the role that receives the objectives and splits
 	// them; "" for a team whose tasks are written by hand.
-	Coordinator string   `json:"coordinator,omitempty"`
-	Split       string   `json:"split"`
-	Budget      Budget   `json:"budget"`
-	MaxAgents   int      `json:"max_agents,omitempty"`
-	MaxRounds   int      `json:"max_rounds"`
-	Alert       []string `json:"alert,omitempty"`
-	Approvers   []string `json:"approvers,omitempty"`
+	Coordinator string `json:"coordinator,omitempty"`
+	Split       string `json:"split"`
+	Budget      Budget `json:"budget"`
+	MaxAgents   int    `json:"max_agents,omitempty"`
+	MaxRounds   int    `json:"max_rounds"`
+	// ReopenOn is which problems of a review reopen the work: ReopenSerious
+	// (the default: the minor ones go to the objective's summary) or
+	// ReopenAny.
+	ReopenOn  string   `json:"reopen_on"`
+	Alert     []string `json:"alert,omitempty"`
+	Approvers []string `json:"approvers,omitempty"`
 	// Roles in the order the block writes them.
 	Roles []Role `json:"roles"`
 }
@@ -139,7 +143,53 @@ type Role struct {
 	// Approve is ApproveMerge, ApproveOps or ApproveNone; Parse fills it
 	// from Repo and Host when the block says none.
 	Approve string `json:"approve"`
+	// Review: the role judges the work of others. Its report ends with a
+	// verdict and its problems, each serious or minor, which the gate
+	// counts (ReviewOf).
+	Review bool `json:"review,omitempty"`
 }
+
+// Which problems of a review reopen the work (Team.ReopenOn).
+const (
+	ReopenSerious = "serious"
+	ReopenAny     = "any"
+)
+
+// Verdict is what a reviewer's report says, as ReviewOf reads it.
+type Verdict struct {
+	// Verdict is "passed" or "to correct"; "" when the report has none.
+	Verdict        string
+	Serious, Minor int
+}
+
+var (
+	verdictLine = regexp.MustCompile(`(?mi)^[\s>*_#-]*VERDICT[*_]*\s*:[*_\s]*(passed|to correct)\b`)
+	problemLine = regexp.MustCompile(`(?mi)^\s*(?:[-*+]|\d+[.)])\s*[*_]*\[(serious|minor)\]`)
+)
+
+// ReviewOf reads the verdict line and the problems of a reviewer's
+// report: "VERDICT: passed" or "VERDICT: to correct" (the last one
+// counts), and the list items that start with [serious] or [minor].
+func ReviewOf(report string) Verdict {
+	var r Verdict
+	if m := verdictLine.FindAllStringSubmatch(report, -1); len(m) > 0 {
+		r.Verdict = strings.ToLower(m[len(m)-1][1])
+	}
+	for _, m := range problemLine.FindAllStringSubmatch(report, -1) {
+		if strings.EqualFold(m[1], "serious") {
+			r.Serious++
+		} else {
+			r.Minor++
+		}
+	}
+	return r
+}
+
+// ReviewInstructions end the prompt of a role that reviews.
+const ReviewInstructions = "You review: you judge, you do not correct. End your report with these lines, in English as written, whatever the language of the rest:\n" +
+	"- one list item for each problem you leave open, starting with `[serious]` or `[minor]`: `- [serious] where, what is wrong, what it should be`. Serious: wrong, unsafe, against what the sources or the task say, or failing how the work is accepted. Minor: wording, a preference, a remark that asks no change, something to verify that you could not;\n" +
+	"- then one line, `VERDICT: passed` when you leave no serious problem open, else `VERDICT: to correct`.\n" +
+	"The pipeline counts these lines: a report without the verdict line goes back to you."
 
 // Role returns the role named name.
 func (t Team) Role(name string) (Role, bool) {
@@ -219,6 +269,7 @@ type rawRole struct {
 	Writes      []string `yaml:"writes"`
 	DelegatesTo []string `yaml:"delegates_to"`
 	Approve     string   `yaml:"approve"`
+	Review      bool     `yaml:"review"`
 }
 
 type rawTeam struct {
@@ -230,12 +281,13 @@ type rawTeam struct {
 	} `yaml:"budget"`
 	MaxAgents int       `yaml:"max_agents"`
 	MaxRounds int       `yaml:"max_rounds"`
+	ReopenOn  string    `yaml:"reopen_on"`
 	Alert     []string  `yaml:"alert"`
 	Approvers []string  `yaml:"approvers"`
 	Roles     yaml.Node `yaml:"roles"`
 }
 
-const teamFields = "coordinator, split, budget, max_agents, max_rounds, alert, approvers, roles"
+const teamFields = "coordinator, split, budget, max_agents, max_rounds, reopen_on, alert, approvers, roles"
 
 // Parse reads a block of the team note at notePath. A block that does not
 // read still gives what it could, with its problems.
@@ -272,6 +324,13 @@ func Parse(src, notePath string) (Team, []Problem) {
 	}
 	if t.MaxRounds < 1 || t.MaxRounds > maxRoundsCap {
 		bad(0, "max_rounds: 1 to %d", maxRoundsCap)
+	}
+	switch t.ReopenOn = strings.TrimSpace(r.ReopenOn); t.ReopenOn {
+	case "":
+		t.ReopenOn = ReopenSerious
+	case ReopenSerious, ReopenAny:
+	default:
+		bad(0, "reopen_on: %s (only the serious problems of a review reopen the work, the default) or %s", ReopenSerious, ReopenAny)
 	}
 	t.Alert = trimList(r.Alert)
 	t.Approvers = trimList(r.Approvers)
@@ -340,7 +399,7 @@ func parseRoles(n *yaml.Node, project string) ([]Role, []Problem) {
 		}
 		var rr rawRole
 		if err := decodeKnown(v, &rr); err != nil {
-			p := yamlProblem(err, "a role: agent, run, model, effort, max_turns, max_seconds, max_tokens, access, repo, host, paths, forbid, checks, preview, writes, delegates_to, approve")
+			p := yamlProblem(err, "a role: agent, run, model, effort, max_turns, max_seconds, max_tokens, access, repo, host, paths, forbid, checks, preview, writes, delegates_to, approve, review")
 			if p.Line == 0 {
 				p.Line = k.Line
 			}
@@ -353,7 +412,7 @@ func parseRoles(n *yaml.Node, project string) ([]Role, []Problem) {
 			MaxTurns: rr.MaxTurns, MaxSeconds: rr.MaxSeconds, MaxTokens: rr.MaxTokens, Access: strings.TrimSpace(rr.Access),
 			Repo: strings.TrimSpace(rr.Repo), Host: strings.TrimSpace(rr.Host),
 			Checks: strings.TrimSpace(rr.Checks), Preview: strings.Trim(strings.TrimSpace(rr.Preview), "/"), DelegatesTo: trimList(rr.DelegatesTo),
-			Approve: strings.TrimSpace(rr.Approve)}
+			Approve: strings.TrimSpace(rr.Approve), Review: rr.Review}
 		if !runName.MatchString(ro.Run) {
 			bad("run %q: the node that runs it, a plugin's <name>.run (claude.run, pi.run)", ro.Run)
 		}

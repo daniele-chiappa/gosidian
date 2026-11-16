@@ -1,0 +1,67 @@
+{
+ "variant": "modelli-aperti",
+ "dates": ["2026-11-12", "2026-11-13"],
+ "gosidian": "v2.159.0",
+ "plugins": {"pi": "0.4.1", "claude": "0.4.1"},
+ "trial": {
+  "note_provider": [
+   {"model": "mimo-v2.6-pro", "attempts": 1, "cost_usd": 0.012, "tokens": 137000, "quotes_exact": 12, "quotes": 16},
+   {"model": "deepseek-v4.1-flash", "attempts": 1, "cost_usd": 0.020, "tokens": 176000, "quotes_exact": 12, "quotes": 14},
+   {"model": "qwen3.8-max", "attempts": 2, "cost_usd": 0.340, "tokens": 496000, "quotes_exact": 32, "quotes": 32},
+   {"model": "glm-5.3", "attempts": 3, "cost_usd": 0.293, "tokens": 199000, "quotes_exact": 15, "quotes": 17},
+   {"model": "glm-5.3-flash", "attempts": 3, "cost_usd": 0.057, "tokens": 449000, "quotes_exact": 15, "quotes": 24}
+  ],
+  "note_gpu": [
+   {"model": "qwen3:14b", "attempts": 1, "minutes": 3.5, "tokens": 84000, "quotes_exact": 1, "quotes": 8},
+   {"model": "gemma4:12b", "attempts": 1, "minutes": 1.3, "tokens": 99000, "quotes_exact": 7, "quotes": 8}
+  ],
+  "repository": [
+   {"model": "deepseek-v4.1-flash", "attempts": 1, "cost_usd": 0.007, "tests_green": 10, "tests": 10},
+   {"model": "mimo-v2.6-pro", "attempts": 1, "cost_usd": 0.015, "tests_green": 10, "tests": 10},
+   {"model": "qwen3.8-max", "attempts": 1, "cost_usd": 0.069, "tests_green": 11, "tests": 11}
+  ],
+  "cost_usd": 0.81
+ },
+ "runs": [
+  {
+   "team": "squadre/mista.yaml",
+   "objective": "obiettivo.md",
+   "closed_by": "nobody: stopped at the coordinator's rounds",
+   "tasks": {"completed": 14, "failed": 7, "canceled": 3},
+   "cost_usd": 8.88,
+   "approvals": 2,
+   "review": {"by": "claude.run opus", "cost_usd": 1.62, "minutes": 4, "quotes_exact": 21, "quotes": 24, "open_problems": 8, "dangerous": 0}
+  },
+  {
+   "team": "squadre/locale.yaml",
+   "objective": "ridotto/obiettivo.md",
+   "closed_by": "nobody: stopped",
+   "minutes": 42,
+   "cost_usd": 0,
+   "approvals": 0,
+   "review": {"by": "claude.run opus", "cost_usd": 0.49, "verdict": "to correct", "open_problems": 5, "dangerous": 0}
+  },
+  {
+   "team": "squadre/ridotta-openrouter.yaml",
+   "objective": "ridotto/obiettivo.md",
+   "closed_by": "coordinator",
+   "rounds": 4,
+   "minutes": 215,
+   "tasks": {"completed": 13, "first_attempt": 12},
+   "cost_usd": 3.16,
+   "approvals": 4,
+   "roles": [
+    {"role": "coordinatore", "tasks": 1, "cost_usd": 0.14},
+    {"role": "conoscenza", "tasks": 4, "cost_usd": 1.09},
+    {"role": "sviluppo", "tasks": 4, "cost_usd": 0.39},
+    {"role": "revisore", "tasks": 4, "cost_usd": 1.54}
+   ],
+   "reviews": [
+    {"verdict": "to correct", "open_problems": 10},
+    {"verdict": "to correct", "open_problems": 2},
+    {"verdict": "to correct", "open_problems": 1},
+    {"verdict": "passed", "open_problems": 0}
+   ]
+  }
+ ]
+}

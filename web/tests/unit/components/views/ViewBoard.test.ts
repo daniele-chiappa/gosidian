@@ -15,6 +15,7 @@ vi.mock('@/api/notes', () => ({
 vi.mock('@/composables/useAnnounce', () => ({ announce: vi.fn() }))
 import { patchFrontmatter } from '@/api/notes'
 import { announce } from '@/composables/useAnnounce'
+import { answer as answerConfirm, confirmQueue } from '@/composables/useConfirm'
 import ViewBoard from '@/components/views/ViewBoard.vue'
 import NewRowForm from '@/components/views/NewRowForm.vue'
 
@@ -590,5 +591,53 @@ describe('ViewBoard, the columns out of view (IMP-216, F-28)', () => {
     expect(w.find('[data-scroll-next]').attributes('aria-label')).toBe('Next column')
     expect(w.find('[data-scroll-prev]').exists()).toBe(false)
     w.unmount()
+  })
+})
+
+describe('ViewBoard, the cards of a team (IMP-216 phase 3)', () => {
+  beforeEach(() => {
+    patch.mockReset()
+    confirmQueue.splice(0)
+  })
+
+  it('counts no objective that waits for its sub-tasks, and says it waits', async () => {
+    const v = withState()
+    v.board!.waiting = ['p/tasks/c.md']
+    const w = mountBoard(v)
+    await headReady(w)
+    expect(column(w, 'Analisi').find('[data-wip]').text()).toBe('0/1')
+    expect(w.find('li[data-card="p/tasks/c.md"] [data-waiting]').text()).toBe('waits for its sub-tasks')
+    expect(w.find('li[data-card="p/tasks/a.md"] [data-waiting]').exists()).toBe(false)
+  })
+
+  it('asks before a move that cancels the run holding the card', async () => {
+    patch.mockResolvedValue({} as never)
+    const v = withState()
+    v.rows![2]!.fields.claimed_by = 'run-abc'
+    const w = mountBoard(v)
+    await headReady(w)
+    await moveWithMenu(w, 'p/tasks/c.md', 'Pronto')
+    expect(confirmQueue).toHaveLength(1)
+    expect(confirmQueue[0]!.message).toContain('cancels the run')
+    answerConfirm(confirmQueue[0]!.id, false)
+    await flushPromises()
+    expect(patch).not.toHaveBeenCalled()
+    expect(column(w, 'Analisi').find('li[data-card="p/tasks/c.md"]').exists()).toBe(true)
+
+    await moveWithMenu(w, 'p/tasks/c.md', 'Pronto')
+    answerConfirm(confirmQueue[0]!.id, true)
+    await flushPromises()
+    expect(patch).toHaveBeenCalledWith('p/tasks/c.md', { set: { column: 'Pronto' }, expect: { column: 'Analisi' } })
+  })
+
+  it('asks nothing for a card an agent in a session holds', async () => {
+    patch.mockResolvedValue({} as never)
+    const v = withState()
+    v.rows![2]!.fields.claimed_by = 'claude@laptop'
+    const w = mountBoard(v)
+    await headReady(w)
+    await moveWithMenu(w, 'p/tasks/c.md', 'Pronto')
+    expect(confirmQueue).toHaveLength(0)
+    expect(patch).toHaveBeenCalled()
   })
 })

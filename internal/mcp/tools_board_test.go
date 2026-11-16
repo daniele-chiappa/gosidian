@@ -83,17 +83,20 @@ func TestBoardTools_CreateACard(t *testing.T) {
 	}
 	seedFleet(t, s, ctx, fleetTask("submitted", ""))
 	for name, args := range map[string]map[string]any{
-		"a team on a board": {"project": "p", "board": "board", "team": "squadra", "assignee": "dev", "title": "x"},
-		"neither":           {"project": "p", "title": "x"},
-		"a team, no role":   {"project": "p", "team": "squadra", "title": "x"},
-		"no board":          {"project": "p", "board": "[[p/nessuna]]", "title": "x"},
-		"not a board":       {"project": "p", "board": "[[p/docs/IMP-1]]", "title": "x"},
-		"no column":         {"project": "p", "board": "board", "column": "Rilascio", "title": "x"},
-		"a column at work":  {"project": "p", "board": "board", "column": "Sviluppo", "title": "x"},
-		"bad done_by":       {"project": "p", "board": "board", "done_by": "robot", "title": "x"},
-		"for no note":       {"project": "p", "board": "board", "for": []any{"[[p/docs/IMP-9]]"}, "title": "x"},
-		"hold":              {"project": "p", "board": "board", "hold": true, "title": "x"},
-		"parent":            {"project": "p", "board": "board", "parent": "p/tasks/a.md", "title": "x"},
+		"a team, no role, on a board": {"project": "p", "board": "board", "team": "squadra", "title": "x"},
+		"a role, no team, on a board": {"project": "p", "board": "board", "assignee": "dev", "title": "x"},
+		"no such role on a board":     {"project": "p", "board": "board", "team": "squadra", "assignee": "ops", "title": "x"},
+		"no such team on a board":     {"project": "p", "board": "board", "team": "altra", "assignee": "dev", "title": "x"},
+		"neither":                     {"project": "p", "title": "x"},
+		"a team, no role":             {"project": "p", "team": "squadra", "title": "x"},
+		"no board":                    {"project": "p", "board": "[[p/nessuna]]", "title": "x"},
+		"not a board":                 {"project": "p", "board": "[[p/docs/IMP-1]]", "title": "x"},
+		"no column":                   {"project": "p", "board": "board", "column": "Rilascio", "title": "x"},
+		"a column at work":            {"project": "p", "board": "board", "column": "Sviluppo", "title": "x"},
+		"bad done_by":                 {"project": "p", "board": "board", "done_by": "robot", "title": "x"},
+		"for no note":                 {"project": "p", "board": "board", "for": []any{"[[p/docs/IMP-9]]"}, "title": "x"},
+		"hold":                        {"project": "p", "board": "board", "hold": true, "title": "x"},
+		"parent":                      {"project": "p", "board": "board", "parent": "p/tasks/a.md", "title": "x"},
 	} {
 		if res := mustCall(s.handleTaskCreate(ctx, call(args))); !res.IsError {
 			t.Errorf("%s: created", name)

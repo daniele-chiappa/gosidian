@@ -696,6 +696,27 @@ func (e *Engine) Step(ctx context.Context, run jobs.Run, st jobs.Step, steps []j
 	if errors.As(err, &wait) {
 		return jobs.Outcome{Status: jobs.Waiting, WaitUntil: wait.Until}
 	}
+	var hold Hold
+	if run.Task != "" && errors.As(err, &hold) {
+		// A task's step held by something outside it waits in its
+		// attempt (IMP-195 phase 3d): the task keeps its own.
+		now := e.now()
+		at := now.Add(holdDelay(st.Holds, e.cfg.Tasks.HoldMax))
+		if hold.Until.After(now) && hold.Until.Before(at) {
+			at = hold.Until
+		}
+		e.KickTasks()
+		out := jobs.Outcome{Status: jobs.Queued, Held: true, Error: err.Error(), RetryAt: at}
+		var fw FailedWith
+		if errors.As(err, &fw) {
+			// What it spent before it was held counts.
+			if b, merr := json.Marshal(fw.Output); merr == nil && len(b) <= e.cfg.MaxOutputBytes {
+				e.addTaskCost(run, b)
+				out.Output = b
+			}
+		}
+		return out
+	}
 	if err != nil {
 		if st.Attempt < node.Retry.Attempts {
 			delay := node.Retry.Backoff << (st.Attempt - 1)
@@ -1017,8 +1038,10 @@ func (e *Engine) Ended(run jobs.Run, steps []jobs.Step) {
 		e.stopChildren(run)
 	}
 	e.startOnRun(run, steps)
+	// The run's writes go to its task before the task is given back: the
+	// next attempt may start at once.
+	e.forgetRunWrites(run)
 	e.taskRunEnded(run)
-	e.forgetRunWrites(run.ID)
 }
 
 // OnAttachment starts the ingest pipelines of a project that take a

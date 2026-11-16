@@ -136,3 +136,39 @@ func TestPrintTable_OneColumnPerResult(t *testing.T) {
 		}
 	}
 }
+
+func TestParseSyncCommits(t *testing.T) {
+	text := "# HELP gosidian_git_sync_commits_total Auto commits\n" +
+		"gosidian_git_sync_commits_total{outcome=\"failure\"} 2\n" +
+		"gosidian_git_sync_commits_total{outcome=\"success\"} 11\n"
+	if got := parseSyncCommits(strings.NewReader(text)); got != 11 {
+		t.Errorf("commits = %v, want 11", got)
+	}
+	if got := parseSyncCommits(strings.NewReader("# nothing yet\n")); got != 0 {
+		t.Errorf("before the first commit = %v, want 0", got)
+	}
+}
+
+func TestParseSPALoad(t *testing.T) {
+	// The first visit warms the browser up and is left out.
+	fcp, load, err := parseSPALoad([]byte(`[{"fcp":300,"load":200},{"fcp":80,"load":44},{"fcp":92,"load":46},{"fcp":76,"load":50}]` + "\n"))
+	if err != nil || fcp != 80 || load != 46 {
+		t.Errorf("got %v, %v, %v; want 80, 46", fcp, load, err)
+	}
+	for _, bad := range []string{`[]`, `[{"fcp":1,"load":1}]`, `[{"fcp":1,"load":1},{"fcp":0,"load":40}]`, `not json`} {
+		if _, _, err := parseSPALoad([]byte(bad)); err == nil {
+			t.Errorf("%s: no error", bad)
+		}
+	}
+}
+
+func TestPlaywrightDep(t *testing.T) {
+	for in, want := range map[string]string{
+		`"@playwright/test": "1.59.1",`:  "1.59.1",
+		`"@playwright/test": "^1.64.0",`: "1.64.0",
+	} {
+		if m := playwrightDep.FindStringSubmatch(in); m == nil || m[1] != want {
+			t.Errorf("%s: got %v, want %s", in, m, want)
+		}
+	}
+}

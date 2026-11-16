@@ -20,11 +20,12 @@ objective, the people, the questions and the checks are in Italian.
 | `obiettivo.md` | The objective the team's coordinator receives: what to build and how it is accepted. |
 | `ruoli/` | The agent note of each role (its system prompt): `coordinatore`, `conoscenza`, `sviluppo`, `revisore`. |
 | `squadre/` | The ```team block of each team that ran the pilot. |
+| `ridotto/` | A reduced objective for small models and small budgets: one new person (`persona.json`), one plan from the knowledge already in the vault, the person in the app's data, a review. It runs in a project that already holds a run's knowledge and app. |
 | `domande.jsonl` | 20 questions on the corpus with the expected answer, the source and the passage that holds it. |
 | `verifiche.json` | For each person, the checks a good plan meets (safety, progression, the guidelines, fitting the person, sources), each with its source. |
 | `pipelines/` | The benchmark's pipelines: `converti-fonte` (a PDF into a note, with docling), `rispondi` and `giudica` (the questions), `giudica-scheda` (the plans), `prova-app` (the app). |
 | `pilota.py` | Sets the project up, gives the objective, follows the team, measures (standard library). |
-| `results/` | One JSON per run of the pilot. |
+| `results/` | One JSON and one page per run of the pilot. |
 
 ## What you need
 
@@ -75,6 +76,7 @@ runs started after the objective.
 | [2026-10-25, third](results/claude-sonnet-giro3.md) | the same, on gosidian v2.117.0 | 2.0–3.0 / 7.6–7.8 | 33–35 of 40 | 24/24 steps, computer and phone | 8.98 USD and 29.3 M tokens counted (15.6 M in failed steps, unpriced), 105 min, 2 approvals |
 | [2026-10-25, fourth](results/claude-sonnet-giro4.md) | the same, on gosidian v2.118.0 | 4.4–6.0 / 7.6–7.8 | 38–39 of 40 | 24/24 steps, computer and phone | 12.99 USD and 21.6 M tokens counted, 82 min of work (587 with a night's wait), 5 approvals; closed by the coordinator |
 | [2026-10-27, fifth](results/claude-sonnet-giro5.md) | the same with the developer in `exec`, on gosidian v2.119.0 | 1.3–4.2 / 7.6–7.8 | 37.5 of 40 | 24/24 steps, computer and phone | 7.73 USD and 13.7 M tokens counted, 39 min, 5 approvals; closed by the coordinator, every developer's task at the first attempt |
+| [2026-11-12 and 13, open-weight models](results/modelli-aperti.md) | pi with models from a provider and on a local GPU; the reviewer on Claude Code with opus | not measured: the mixed team did not close the whole pilot | reviewed by opus: 8 open problems in the mixed team's five, none dangerous | the reduced objective's app on `main`, tests green | whole pilot, mixed: 8.88 USD, stopped at its rounds; reduced objective: local 0 USD, not closed; provider 3.16 USD, 4 approvals, closed by the coordinator |
 
 ## The measures
 

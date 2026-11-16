@@ -250,6 +250,11 @@ func TestLayoutTools_OnlyWhereTheEngineIsExposed(t *testing.T) {
 	if names := listToolNames(t, s, ctxWithToken(reader)); !has(names, "layout_open") || !has(names, "layout_run") {
 		t.Fatal("not offered to a reader of the project")
 	}
+	for name := range listToolNames(t, s, ctxWithToken(reader)) {
+		if writeTools[name] {
+			t.Errorf("%s, which always writes, is offered to a reader", name)
+		}
+	}
 	if !has(listToolNames(t, s, ctxWithToken(core)), "layout_save") {
 		t.Fatal("not offered to a worker of the project")
 	}

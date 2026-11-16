@@ -1,0 +1,60 @@
+# The mixed team (IMP-195 phase 3b, 2026-11-12): the coordinator on Claude
+# Code with sonnet, the other roles on pi with open-weight models from a
+# provider (the lab's preset pi-lab, on OpenRouter): qwen3.8-max where the
+# quotes count (knowledge, review), deepseek-v4.1-flash for the app. The
+# models come from a short trial of seven (results/modelli-aperti.md). The
+# developer runs commands (access: exec, bash allowed in the lab's pi
+# preset since 2026-11-13: without it the data task failed three times,
+# writing by hand the JSON its script should generate); the pipeline runs
+# its checks again after it. One agent at a
+# time: the roles on one pi plugin work one after the other anyway, and a
+# step that waits for its plugin spends its timeout. max_tokens is the
+# preset's most: its default of 500,000 stopped the first knowledge task.
+# 2026-11-13: knowledge and review get 30 minutes, 80 and 60 turns, six
+# million tokens (the lab's pi preset raised to that, the work pipeline's
+# agent step to 35m): at 13 minutes qwen3.8-max was still reading its
+# sources, after 27-32 turns and up to 1.7 million tokens.
+coordinator: coordinatore
+split: context
+budget: {day_usd: 15, task_usd: 3}
+max_agents: 1
+max_rounds: 5
+alert: ["#lab/fitness"]
+approvers: [daniele]
+roles:
+  coordinatore:
+    agent: "[[fitness/agents/coordinatore]]"
+    run: claude.run
+    model: sonnet
+    max_turns: 30
+    delegates_to: [conoscenza, sviluppo, revisore]
+  conoscenza:
+    agent: "[[fitness/agents/conoscenza]]"
+    run: pi-lab.run
+    model: qwen3.8-max
+    max_turns: 80
+    max_seconds: 1800
+    max_tokens: 6000000
+    writes: [fitness/conoscenza]
+  sviluppo:
+    agent: "[[fitness/agents/sviluppo]]"
+    run: pi-lab.run
+    model: deepseek-v4.1-flash
+    access: exec
+    max_turns: 80
+    max_seconds: 1800
+    max_tokens: 20000000
+    repo: agents-fitness
+    paths: [web/, data/, test/]
+    forbid: [package.json, build.js]
+    checks: npm test && npm run build
+    preview: dist
+    approve: merge
+  revisore:
+    agent: "[[fitness/agents/revisore]]"
+    run: pi-lab.run
+    model: qwen3.8-max
+    max_turns: 60
+    max_seconds: 1800
+    max_tokens: 6000000
+    review: true

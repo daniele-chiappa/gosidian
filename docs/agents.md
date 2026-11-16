@@ -17,8 +17,9 @@ change the team by editing a note.
 
 `memory_create_team` writes a team to start from: its note, an agent
 note per role, the [pipelines](#the-pipelines-of-a-team) that give its
-tasks to their agents and its objectives to its coordinator, the
-database of the tasks and a note that shows them.
+tasks to their agents and its objectives to its coordinator and tell its
+alert when it stops by itself, the database of the tasks and a note that
+shows them.
 
 ## A team
 
@@ -57,6 +58,7 @@ roles:
 | `budget` | `day_usd`: what the team may spend in a day of the server's [time zone](configuration.md#time-zone); `task_usd`: the budget of a task that gives none. 0: no limit |
 | `max_agents` | the team's agents at work at once; 0: no limit of the team |
 | `max_rounds` | how many times the coordinator runs on one objective after its sub-tasks closed (default 5): then a person decides |
+| `reopen_on` | which problems of a review (a role with `review: true`) reopen the work. `serious` (default): the coordinator is told to give no task for a review that leaves only minor problems open, to list them in its summary as left open, and to bring what is made from the reviewed work in line with it once, after the review that leaves no serious problem. `any`: every problem reopens it. It changes what the coordinator is told: the plan stays its agent's |
 | `alert`, `approvers` | for the pipelines: where they tell, who approves |
 | `roles` | the roles, by name |
 
@@ -75,6 +77,7 @@ A role:
 | `writes` | the folders of the vault its MCP token may write. Without, a run of the role gets no write token. A role that writes must write: a task whose agent wrote no note there goes back, as a repository's that changed nothing |
 | `delegates_to` | the roles it may give tasks to. One level: a role that receives from another gives to none |
 | `approve` | `merge` (a person approves before its pull request is merged), `ops` (before a command runs on a host) or `none`; default `merge` with `repo`, `ops` with `host`, else `none` |
+| `review` | `true`: the role judges the work of others. Its prompt asks it to end its report with a list item for each problem left open, starting with `[serious]` or `[minor]`, and a line `VERDICT: passed` or `VERDICT: to correct`. The gate counts them among the pipeline's findings (`The review: to correct, 2 serious and 1 minor problems left open.`, and `review` in its output: `verdict`, `serious`, `minor`); a report without the verdict line, empty or cut goes back |
 
 A role with `checks` or `preview` needs a `repo`, `approve: merge` too,
 and a role whose work a person approves needs the team's `alert`. The
@@ -154,7 +157,8 @@ others', on its `events`:
 |---|---|---|
 | `ready` (default) | a task is `submitted`, every task it depends on is `completed`, nobody holds it and its team has budget left | `event`, `task`, `title`, `team`, `role`, `project`, `attempt` |
 | `children_done` | an objective (a task with sub-tasks), `working` and held by nobody, has all its sub-tasks closed, or one `failed` or `input-required`: once for each state of those (of all the sub-tasks once they are all closed; while some are at work, of the ones that failed or wait for a person, so a failed one calls the coordinator once, not again each time another starts or closes), at most `max_rounds` times | as `ready`, with `round` and `children` (`path`, `title`, `status`, `assignee`, `cost_usd`) |
-| `budget` | the team spent its `day_usd`: once a day | `event`, `team`, `project`, `day`, `spent_usd`, `budget_usd` |
+| `budget` | the team spent its `day_usd`: once a day | `event`, `team`, `project`, `day`, `spent_usd`, `budget_usd`, `alert` (the team's), `title` and `text` (a message ready to send) |
+| `waiting` | a run of the team is [held](#limits) by something outside it: once, until none of its runs is held | `event`, `team`, `project`, `task`, `why`, `retry_at`, `alert`, `title`, `text` |
 
 The first pipeline of the project, in the order of the paths, that takes
 a task's event starts it. The server reads the tasks every minute, and a
@@ -185,10 +189,10 @@ person set back by hand gets a new run, not its old one.
 | `task.update` | `task`, `status` (`working`, `input-required`, `review`, `submitted`), `message` (a dated section of the task), `branch` (the branch the next attempt continues, `{{ verdict.branch }}`; empty for none) | `task` |
 | `task.complete` | `task`, `status` (`completed`, the default, `failed`, `canceled`), `report` | `task` |
 | `task.run` | `task`, `prompt` (added at the end), `plan` (for a coordinator: ask for a plan); any other setting goes to the executor and wins | the executor's output: it runs the role's `run` node with the prompt of `task.context`, the agent note as `system`, the role's model, effort and limits, the task's budget as `max_cost`, the role's `access`, the role's `repo` (with `access: edit` unless the role says another, a pull request titled as the task, and the task's `branch` with `resume` when an attempt sent back left one and the executor's plugin takes it) and `mcp: write` when the role `writes`, `read` otherwise; and `next`: `checks` and `preview`, true when the role has them and the agent pushed a branch, for the `when` of the nodes that run them |
-| `task.gate` | `agent` (`{{ agent }}`), `checks` (`{{ checks }}`, exec.run's output), `preview` (`{{ look }}`, preview.check's), `choices` (the labels of `approve`, `redo`, `discard`) | `ok`, and what follows: `close` (no approval needed), `ask` (a person approves), `redo` (another attempt is left), `fail`; `files`, `outside`, `forbidden` (the files the agent changed against the role's and task's paths and forbid), `notes` (the notes the run wrote in the role's `writes`), `pr_url`, `branch`, `resume` (another attempt may continue the branch: the agent pushed it, within its paths), `image` (the preview's screenshot), `link`, `title`, `text` (for the person and the report), `feedback` (for another attempt), `choices` |
+| `task.gate` | `agent` (`{{ agent }}`), `checks` (`{{ checks }}`, exec.run's output), `preview` (`{{ look }}`, preview.check's), `choices` (the labels of `approve`, `redo`, `discard`) | `ok`, and what follows: `close` (no approval needed), `ask` (a person approves), `redo` (another attempt is left), `fail`; `files`, `outside`, `forbidden` (the files the agent changed against the role's and task's paths and forbid), `notes` (the notes the run wrote in the role's `writes`), `pr_url`, `branch`, `resume` (another attempt may continue the branch: the agent pushed it, within its paths), `image` (the preview's screenshot), `link`, `title`, `text` (for the person: the pipeline's findings and the beginning of the agent's report), `report` (the same with the whole report, for the task's note; `task.verdict` reads it), `feedback` (for another attempt), `choices` |
 | `task.verdict` | `gate`, `answer` (wait.call's: `choice`, `by`, `comment`) | `close` with `status`, `merge`, `close_pr`, `redo`, `report`, `feedback`; `branch` (the branch the next attempt continues, for `task.update`; empty when it starts from the base) and `delete_branch` (for `task.pr`: closing the pull request deletes its branch) |
 | `task.pr` | `url`, `action` (`merge`, `close`), `delete_branch` (default true) | the output of the executor plugin's `pr` node, which merges or closes with its preset's credentials |
-| `task.plan` | `plan` (`{{ plan.json }}`) | `action`, `close`, `ask`, `wait`, `summary`, `question`, `created` (`key`, `path`, `assignee`, `title`) |
+| `task.plan` | `plan` (`{{ plan.json }}`) | `action`, `close`, `ask`, `wait`, `summary`, `question`, `created` (`key`, `path`, `assignee`, `title`), `repointed`, `skipped`, `ordered` and `ignored` (a `replaces` that names no failed or canceled sub-task) when it [put the plan in order](#the-coordinator), `lowered` (the tasks whose `budget_usd` was above the team's `task_usd`: `key`, `asked_usd`, `budget_usd`) |
 
 **The report.** What the gate says, and the task's `## Report` after it,
 starts with what the pipeline found after the agent (the files, the notes
@@ -199,6 +203,15 @@ and then the pipeline runs them again: the coordinator and the tasks that
 depend on one read the pipeline's part as facts, and their prompt says
 so. The agent of a role with `checks` is told the command, and whether it
 may run it.
+
+The task's note keeps the agent's whole report, up to `[agents]
+max_report` (64 KiB); the message to a person and the feedback for
+another attempt carry its first 3,000 bytes. A task that depends on
+another, and a coordinator, read the other task's report up to `[agents]
+max_prompt_report` (16 KiB): one cut says so, with the note that holds
+the rest. An answer cut at the model's output limit (`stop: length`) is
+said among the pipeline's findings, and so is why a node of the checks
+or of the preview failed.
 
 Only the run that holds a task moves or closes it, with these nodes: the
 agent of the run moves no task with the MCP tools, its own neither, so it
@@ -213,8 +226,13 @@ note and gives its body as `system`, before the node's own.
 
 ## The pipelines of a team
 
-`memory_create_team` writes two pipelines, which a team changes as it
+`memory_create_team` writes three pipelines, which a team changes as it
 likes.
+
+**`pipelines/<team>-alert.md`** takes `budget` and `waiting` and sends
+the event's `title` and `text` to the team's `alert` (`notify.send`): a
+team that stops by itself says so once. A team without `alert` sends
+nothing.
 
 **`pipelines/<team>-work.md`** takes the ready tasks of every role but
 the coordinator (`coordinator: false`):
@@ -231,7 +249,11 @@ the coordinator (`coordinator: false`):
    open;
 3. `task.gate` looks at what the agent did: a file in `forbid` or
    outside `paths`, a role with a repo whose agent changed nothing, a role
-   that writes in the vault whose agent wrote no note there, checks that
+   that writes in the vault whose agent wrote no note there (the notes
+   of an attempt before, ended at a limit, count: the server remembers
+   them until the task closes or it restarts), a role with neither a
+   repository nor `writes` whose answer is empty or cut (its report is
+   its work), checks that
    fail (an exit code other than 0, a signal, the time out) or did not
    run, a preview that was not published or does not open, and the work
    goes back;
@@ -276,7 +298,18 @@ takes its role's `ready` and `children_done`:
    `wait` when the sub-tasks at work are enough (one failed and the others
    cover it), or `done` with a summary, or `ask` with a question. `task.plan` checks the
    whole plan (the roles, one level, `[agents] max_tasks`, the keys) and
-   only then writes the tasks, as the server: the agent writes none;
+   only then writes the tasks, as the server: the agent writes none. It
+   also keeps the plan in order by itself, and its output says what it
+   did:
+   - a task with `replaces` (the path of a sub-task that failed or was
+     canceled) takes the tasks that waited for that one (`repointed`);
+   - a task with the role and the title of a sub-task still open is not
+     written again: the open one stands for its key (`skipped`);
+   - two open tasks of roles on the same repository whose `paths` may
+     meet (always, when one of them names none) work one after the
+     other: the later waits for the earlier, unless one already waits
+     for the other (`ordered`). Side by side, each from the base, their
+     pull requests would conflict;
 3. the run ends: the objective waits for its sub-tasks, held by nobody;
 4. when they closed (or one failed or asks for input), the coordinator
    runs again with their reports: it gives more tasks, closes the
@@ -289,6 +322,9 @@ for the roles it delegates to, under its own task.
 
 A coordinator's run that neither closes the objective nor gives it new
 tasks puts it in `input-required`, and so does the `max_rounds`-th round.
+There the rounds start again from none: the person who puts the
+objective back to `working` gives it `max_rounds` more, and the
+coordinator runs on what is there.
 
 ## Limits
 
@@ -298,9 +334,34 @@ tasks puts it in `input-required`, and so does the `max_rounds`-th round.
   `max_tokens`) counts too when its plugin says what it spent in the
   error's structured content (claude and pi 0.3.2). A team's
   spend is the sum over its runs in the day; a ready task does not start
-  while the team spent its `day_usd` (`memory_tasks` says so), and the
-  event `budget` starts once a day. A run already at work ends: the
+  while the team spent its `day_usd`, nor does the coordinator of an
+  objective whose sub-tasks closed (`memory_tasks` says so for both), and
+  the event `budget` starts once a day. A run already at work ends: the
   task's budget reaches its agent as `max_cost`, which the plugin keeps.
+  The budget a coordinator's agent gives a task in its plan is at most
+  the team's `task_usd` (a person may write more in the task's note),
+  and `max_cost` is at most what the executor's preset lets a step spend
+  (the `maximum` of `max_cost` in its input schema; none is sent to a
+  preset that lets it spend nothing, a free endpoint). A task's
+  `cost_usd` counts every attempt: its note says what each attempt that
+  failed spent, and what the one that closed it did.
+- **Held, not failed.** In a task's run, a step whose plugin is away
+  (unreachable, restarting, serving a manifest nobody accepted yet) or
+  says it waits for a limit outside it (the provider's key, the
+  subscription's quota: `wait` in the
+  [agent-run contract](plugins.md#agent-nodes-agent-run1)) does not
+  fail: it goes back to the queue in the same attempt and tries again
+  after a minute, then twice as long each time, at most `[agents]
+  hold_max` (an hour), or when the plugin says the limit ends, if
+  sooner. The task stays `working`, its attempts do not grow, what the
+  step spent before counts; `memory_tasks` says why it waits and when it
+  tries again, and the event `waiting` starts once. Canceling the run
+  ends the wait: the task then asks a person.
+- **A queue that cannot move.** An objective whose open sub-tasks all
+  wait behind one that failed, was canceled or is no task goes to
+  `input-required` with the reason, once its coordinator had its say on
+  the failed one: a person points the dependencies elsewhere, cancels
+  what is overtaken or closes it.
 - **Agents at once.** The steps of a task's run that run an agent take a
   place in `team:<project>/<team>` (`max_agents`) and in `agents`
   (`[agents] max_running`, for the whole server) of the
@@ -328,8 +389,8 @@ tasks over MCP with its token:
 - `memory_task_create`: gives a task to a role.
 
 The task tools are in the `core` profile of the tokens. They also work
-on the cards of a [board](board.md), which have no team: there an agent
-takes the board's next card instead of a role's task.
+on the cards of a [board](board.md): there an agent takes the board's
+next card without a team instead of a role's task.
 
 ## The board
 
@@ -343,4 +404,6 @@ A note `type: board` is another way to work on a project's tasks
 ([boards](board.md)): its columns, each a state with a limit of cards at
 work, and the order of the cards in each. Its cards are tasks without a
 team, which an agent in a session takes one after the other and a person
-drags in the web UI. A team takes no card yet: its tasks stay its own.
+drags in the web UI. A card with a team and a role is that team's task
+too: its runs take it in the board's order and within its limits, and an
+objective's sub-tasks go on its board ([Teams](board.md#teams)).

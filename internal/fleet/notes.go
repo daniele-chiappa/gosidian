@@ -265,6 +265,41 @@ func CoordinatePath(project, team string) string {
 	return project + "/pipelines/" + team + "-coordinate.md"
 }
 
+// AlertPath is the pipeline that tells the team's alert when the team
+// stops by itself.
+func AlertPath(project, team string) string { return project + "/pipelines/" + team + "-alert.md" }
+
+// AlertPipeline tells the alert of team (its note's path) when the team
+// spent its budget of the day and when a run of its is held by something
+// outside it.
+func AlertPipeline(team string) []byte {
+	return []byte(fmt.Sprintf(`---
+title: %[2]s
+description: "Tells the alert of %[1]s when the team stops by itself: the day's budget spent, a run held by its plugin or its provider (IMP-195)."
+type: pipeline
+---
+
+# %[2]s
+
+The team's alert hears once when the team spent its budget of the day
+(budget), and once each time a run of its is held by something outside
+it (waiting): its plugin away, a limit of the provider or of the
+subscription. A held run tries again by itself.
+
+`+"```pipeline"+`
+trigger: {on: task, team: "%[1]s", events: [budget, waiting]}
+nodes:
+  - id: tell
+    use: notify.send
+    when: "{{ trigger.alert }}"
+    with:
+      to: "{{ trigger.alert }}"
+      title: "{{ trigger.title }}"
+      text: "{{ trigger.text }}"
+`+"```"+`
+`, Link(team), strings.TrimSuffix(path.Base(team), ".md")+"-alert"))
+}
+
 // WorkPipeline gives the ready tasks of the roles of team (its note's
 // path), but its coordinator's, to their agents: the agent works, the
 // role's checks and preview run, the gate looks at the files it touched,

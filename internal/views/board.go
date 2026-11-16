@@ -16,13 +16,14 @@ import (
 // whose board is the note, as a view `as: board` would, grouped by their
 // column instead of a select's options.
 
-// boardColumns are the fields a card shows: who holds it, the notes it is
-// for, who closes it. The rank orders the cards without showing.
-var boardColumns = []string{"title", fleet.KeyClaimedBy, "for", "done_by"}
+// boardColumns are the fields a card shows: the role of the team it is
+// for (phase 3), who holds it, the notes it is for, who closes it. The
+// rank orders the cards without showing.
+var boardColumns = []string{"title", "assignee", fleet.KeyClaimedBy, "for", "done_by"}
 
 // boardRead are the fields of a card its board reads without showing: its
 // rank, and what its flow needs (IMP-216 phase 2).
-var boardRead = []string{fleet.KeyRank, fleet.KeyStatus, fleet.KeyColumnSince, fleet.KeyStarted, fleet.KeyFinished, fleet.KeyIteration}
+var boardRead = []string{fleet.KeyRank, fleet.KeyStatus, fleet.KeyColumnSince, fleet.KeyStarted, fleet.KeyFinished, fleet.KeyIteration, "parent"}
 
 // BoardState is what a board shows above its columns (IMP-216 phase 2):
 // its flow, the days a card waits before it is stale, its iteration in
@@ -32,6 +33,9 @@ type BoardState struct {
 	StaleDays int                  `json:"stale_days"`
 	Iteration *fleet.IterationInfo `json:"iteration,omitempty"`
 	Retro     []fleet.Iteration    `json:"retro,omitempty"`
+	// Waiting are the objectives that wait for their sub-tasks on the
+	// board (phase 3): they take no place of their column's limit.
+	Waiting []string `json:"waiting,omitempty"`
 }
 
 // computeBoard computes the board block src of the note in c.
@@ -68,6 +72,10 @@ func computeBoard(src string, c Context, q QueryFunc) (*Result, error) {
 		cards = append(cards, cardOf(h, note, project))
 	}
 	r.Board = &BoardState{Flow: b.Flow(cards, now), StaleDays: b.Stale}
+	for p := range fleet.Waiting(cards) {
+		r.Board.Waiting = append(r.Board.Waiting, p)
+	}
+	slices.Sort(r.Board.Waiting)
 	if its, err := iterationsOf(q, project); err == nil {
 		if it, ok := fleet.Current(its, note, now); ok {
 			info := b.Info(it, cards, now)
@@ -148,7 +156,8 @@ func field(h index.QueryHit, k string) string {
 func cardOf(h index.QueryHit, board, project string) fleet.Task {
 	return fleet.Task{Path: h.Path, Title: rowTitle(h), Board: board, Status: field(h, fleet.KeyStatus), Column: field(h, fleet.KeyColumn),
 		ColumnSince: field(h, fleet.KeyColumnSince), Started: field(h, fleet.KeyStarted), Finished: field(h, fleet.KeyFinished),
-		Iteration: fleet.LinkPath(field(h, fleet.KeyIteration), project)}
+		Iteration: fleet.LinkPath(field(h, fleet.KeyIteration), project),
+		ClaimedBy: field(h, fleet.KeyClaimedBy), Parent: fleet.LinkPath(field(h, "parent"), project)}
 }
 
 // iterationsOf are the iterations of project the reader sees.

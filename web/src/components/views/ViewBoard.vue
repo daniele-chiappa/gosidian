@@ -28,6 +28,11 @@
  * the arrows choose, Enter moves, Esc closes without moving (F-12). When
  * columns are out of view, a shadow and an arrow at the edge say so and
  * scroll by one, and a line says how many show (F-28).
+ *
+ * Phase 3: a card of a team shows its role; an objective that waits for
+ * its sub-tasks says so and takes no place of its column's limit; and a
+ * card a run holds asks before a move that cancels the run (back to a
+ * column of backlog or submitted, or closed).
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -36,6 +41,7 @@ import type { PatchFrontmatterBody } from '@/api/notes'
 import type { ViewColumn, ViewData, ViewLane, ViewRow } from '@/api/preview'
 import { cellValue } from './cellValue'
 import { announce } from '@/composables/useAnnounce'
+import { confirmAction } from '@/composables/useConfirm'
 import { useBoardCatalog } from '@/composables/useBoardCatalog'
 import { saveBody, saveField } from './fieldSave'
 import BoardHead from './BoardHead.vue'
@@ -79,6 +85,9 @@ const showClosed = ref(false)
 const state = computed(() => (isCards.value ? props.view.board : undefined))
 const boardNote = computed(() => linkPath(String(props.view.defaults?.board ?? '')))
 const staleDays = computed(() => new Map((state.value?.flow.stale ?? []).map((c) => [c.path, c.days])))
+// The objectives that wait for their sub-tasks (phase 3).
+const waiting = computed(() => new Set(state.value?.waiting ?? []))
+const working = (rs: ViewRow[]) => rs.filter((r) => !waiting.value.has(r.path)).length
 const onlyIteration = ref(false)
 const iterationPath = computed(() => state.value?.iteration?.path)
 watch(iterationPath, (p) => {
@@ -125,12 +134,20 @@ const targets = computed(() => columns.value.filter((c) => !isCards.value || c.v
 /** A column's count, against its limit when it has one. */
 function count(col: { value: string; rows: ViewRow[] }): string {
   const wip = laneOf(col.value)?.wip
-  return wip ? `${col.rows.length}/${wip}` : `${col.rows.length}`
+  return wip ? `${working(col.rows)}/${wip}` : `${col.rows.length}`
 }
 const pastLimit = (col: { value: string; rows: ViewRow[] }) => {
   const wip = laneOf(col.value)?.wip
-  return !!wip && col.rows.length > wip
+  return !!wip && working(col.rows) > wip
 }
+
+/** The run that holds a card, which a move back or a close cancels. */
+function heldByRun(row: ViewRow): boolean {
+  const v = row.fields.claimed_by
+  return String((Array.isArray(v) ? v[0] : v) ?? '').startsWith('run-')
+}
+const cancelsRun = (row: ViewRow, to: string) =>
+  heldByRun(row) && !['working', 'input-required', 'review'].includes(laneOf(to)?.status ?? '')
 
 const saving = ref<string | null>(null)
 const message = ref('')
@@ -200,6 +217,12 @@ function sayMoved(row: ViewRow, to: string) {
 async function moveCard(row: ViewRow, to: string, before?: string) {
   const from = groupOf(row)
   if (before === row.path || to === '' || !canMove(row)) return
+  if (to !== from && ready.value && cancelsRun(row, to)) {
+    const ok = await confirmAction(t('board.card.cancel_run', { title: row.title, column: label(to) }), {
+      confirmLabel: t('board.card.cancel_run_ok'),
+    })
+    if (!ok) return
+  }
   const inTo = rows.value.filter((r) => groupOf(r) === to && r.path !== row.path)
   let at = before ? inTo.findIndex((r) => r.path === before) : -1
   if (to === from) {
@@ -490,6 +513,12 @@ watch(
                   <MoveRight class="h-3.5 w-3.5" aria-hidden="true" />
                 </button>
               </div>
+              <span
+                v-if="ready && waiting.has(row.path)"
+                class="mt-1 block text-xs text-text-muted"
+                data-waiting
+                >{{ t('board.card.waiting') }}</span
+              >
               <span
                 v-if="ready && staleDays.get(row.path)"
                 class="mt-1 inline-flex items-center gap-1 text-xs font-medium text-warning"

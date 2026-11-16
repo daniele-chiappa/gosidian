@@ -325,6 +325,19 @@ func TestTaskTrigger_MaxRoundsCallsAPerson(t *testing.T) {
 	if o.Status != fleet.InputRequired || !strings.Contains(host.note(o.Path), "ran 5 rounds") {
 		t.Fatalf("o: %+v\n%s", o, host.note(o.Path))
 	}
+	// The person who puts it back to working gives it its rounds again:
+	// the coordinator runs, where the objective went back to the person
+	// at once (the pilot's rounds were lowered by hand three times).
+	if o.Rounds != 0 {
+		t.Fatalf("the rounds stay at %d for the person", o.Rounds)
+	}
+	host.mu.Lock()
+	host.notes["p/tasks/o.md"] = strings.Replace(host.notes["p/tasks/o.md"], "status: input-required", "status: working", 1)
+	host.mu.Unlock()
+	o = waitTask(t, e, host, "p/tasks/o.md", func(x fleet.Task) bool { return x.Rounds == 1 }, "the coordinator runs again")
+	if o.Status != fleet.Working {
+		t.Fatalf("o after the person: %+v", o)
+	}
 }
 
 func TestTaskNodes_OnlyTheHolderMovesATask(t *testing.T) {

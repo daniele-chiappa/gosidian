@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,28 +18,38 @@ type inFixture struct {
 	host *fakeHost
 	v    *vault.Vault
 	svc  *infolder.Service
-	now  time.Time
+	mu   sync.Mutex
+	now  time.Time // the IN service's clock, read by the runner's goroutines too (BUG-136)
 }
 
+// newINFixture opens the IN service before the engine: the cleanups run
+// last first, so the service closes after the runner has stopped, and no
+// run of the test reads the files of a closed service.
 func newINFixture(t *testing.T) *inFixture {
 	t.Helper()
-	e, host := newEngine(t, Config{})
 	v := vault.New(t.TempDir())
 	v.SetINProjects(func(p string) bool { return p == "p" })
 	if err := os.MkdirAll(filepath.Join(v.Root, "p", "IN"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	f := &inFixture{e: e, host: host, v: v, now: time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)}
+	f := &inFixture{v: v, now: time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)}
 	svc, err := infolder.Open(filepath.Join(t.TempDir(), "in.db"), v, func() []string { return []string{"p"} },
-		infolder.Options{Now: func() time.Time { return f.now }})
+		infolder.Options{Now: f.clock})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { svc.Close() })
-	e.SetIN(svc)
-	svc.SetSink(e)
+	f.e, f.host = newEngine(t, Config{})
+	f.e.SetIN(svc)
+	svc.SetSink(f.e)
 	f.svc = svc
 	return f
+}
+
+func (f *inFixture) clock() time.Time {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.now
 }
 
 func (f *inFixture) write(t *testing.T, rel, content string) {
@@ -58,7 +69,9 @@ func (f *inFixture) arrive(t *testing.T) {
 	if err := f.svc.Scan("p"); err != nil {
 		t.Fatal(err)
 	}
+	f.mu.Lock()
 	f.now = f.now.Add(61 * time.Second)
+	f.mu.Unlock()
 	if err := f.svc.Scan("p"); err != nil {
 		t.Fatal(err)
 	}

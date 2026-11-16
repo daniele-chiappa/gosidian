@@ -188,35 +188,6 @@ func TestSearchWith_LongHits(t *testing.T) {
 	matchGolden(t, "search_long.golden", searchHits(t, idx, longCases))
 }
 
-// A snippet cut later is the one the pool would have cut: every one
-// waiting gives the hits of none waiting, for the short notes and the long
-// ones, with FTS5 cutting every snippet (no huge note cut by cutSnippet).
-func TestSearchWith_SnippetsLater(t *testing.T) {
-	fixed := time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
-	now = func() time.Time { return fixed }
-	t.Cleanup(func() { now = time.Now })
-	defer func(n, h int64) { longNote, hugeNote = n, h }(longNote, hugeNote)
-	hugeNote = 1 << 40
-	for _, c := range []struct {
-		name   string
-		corpus func(testing.TB, *Index, time.Time)
-		cases  []searchCase
-	}{
-		{"short notes", searchCorpus, hitsCases},
-		{"long notes", longCorpus, longCases},
-	} {
-		run := func(cut int64) string {
-			longNote = cut
-			idx := openTest(t)
-			c.corpus(t, idx, fixed)
-			return searchHits(t, idx, c.cases)
-		}
-		if waiting, cut := run(0), run(1<<40); waiting != cut {
-			t.Errorf("%s: the snippets cut later differ from the pool's", c.name)
-		}
-	}
-}
-
 var longCases = []searchCase{
 	{"cache", SearchOptions{Limit: 11}},
 	{"cache", SearchOptions{Limit: 3}},

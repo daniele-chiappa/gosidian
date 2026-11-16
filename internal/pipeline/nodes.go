@@ -169,6 +169,34 @@ type RetryAfter struct {
 func (r RetryAfter) Error() string { return r.Err.Error() }
 func (r RetryAfter) Unwrap() error { return r.Err }
 
+// Hold is returned by a node that could not work for something outside
+// it and its settings: its plugin is away or serves a manifest nobody
+// accepted yet, the provider or the subscription behind it reached a
+// limit. In a task's run the step goes back to the queue in the same
+// attempt and tries again, each time later (up to [agents] hold_max), or
+// at Until when that is sooner; elsewhere it is the failure Err says.
+type Hold struct {
+	// Until is when what holds it ends, when the node knows.
+	Until time.Time
+	Err   error
+}
+
+func (h Hold) Error() string { return h.Err.Error() }
+func (h Hold) Unwrap() error { return h.Err }
+
+// holdDelay is how long a step held n times before waits now: a minute,
+// then twice as long each time, at most max.
+func holdDelay(n int, max time.Duration) time.Duration {
+	if max <= 0 {
+		max = time.Hour
+	}
+	d := time.Minute
+	for i := 0; i < n && d < max; i++ {
+		d *= 2
+	}
+	return min(d, max)
+}
+
 // --- settings ---
 
 func str(with map[string]any, key string) string {

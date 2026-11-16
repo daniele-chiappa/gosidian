@@ -41,6 +41,11 @@
       "retro": "Retrospective",
       "went_well": "What went well?",
       "change": "What do we change?"
+    },
+    "card": {
+      "waiting": "waits for its sub-tasks",
+      "cancel_run": "A run is working on “{title}”. Moving it to {column} cancels the run.",
+      "cancel_run_ok": "Move and cancel the run"
     }
   }
 }

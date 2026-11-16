@@ -172,6 +172,17 @@ func TestBoardCountAndFull(t *testing.T) {
 	if n := b.Count(cards, "Verifica", ""); n != 1 {
 		t.Fatalf("Verifica holds %d", n)
 	}
+	// An objective that waits for its sub-tasks takes no place (phase 3);
+	// one a run holds, or without sub-tasks, does.
+	obj := []Task{
+		{Path: "fitness/tasks/o.md", Board: "fitness/board.md", Status: Working, Column: "Analisi"},
+		{Path: "fitness/tasks/k.md", Board: "fitness/board.md", Status: Working, Column: "Analisi", Parent: "fitness/tasks/o.md", ClaimedBy: "run-1"},
+		{Path: "fitness/tasks/h.md", Board: "fitness/board.md", Status: Working, Column: "Analisi", ClaimedBy: "run-2"},
+		{Path: "fitness/tasks/j.md", Board: "fitness/board.md", Status: Submitted, Column: "Pronto", Parent: "fitness/tasks/h.md"},
+	}
+	if n := b.Count(obj, "Analisi", ""); n != 2 || !Waiting(obj)["fitness/tasks/o.md"] || len(Waiting(obj)) != 1 {
+		t.Fatalf("Analisi with a waiting objective holds %d (%v)", n, Waiting(obj))
+	}
 	analisi, _ := b.Column("Analisi")
 	pronto, _ := b.Column("Pronto")
 	if !analisi.Full(2) || analisi.Full(1) || pronto.Full(1000) {

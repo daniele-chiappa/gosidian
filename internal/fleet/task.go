@@ -448,6 +448,13 @@ func Update(t Task, content []byte, holder, status, message string, at time.Time
 // report: the section Report, which the tasks after it and the coordinator
 // read. No attempt follows: the branch to continue goes.
 func Complete(t Task, content []byte, holder, status, report string, at time.Time) ([]byte, error) {
+	return CompleteAttempt(t, content, holder, status, report, at, -1, 0)
+}
+
+// CompleteAttempt is Complete that also says what the attempt that closes
+// the task spent (cost under 0: not known), apart from the task's total,
+// which counts the attempts that failed too.
+func CompleteAttempt(t Task, content []byte, holder, status, report string, at time.Time, cost float64, tokens int64) ([]byte, error) {
 	if err := held(t, holder); err != nil {
 		return nil, err
 	}
@@ -465,8 +472,14 @@ func Complete(t Task, content []byte, holder, status, report string, at time.Tim
 	if r == "" {
 		r = "(no report)"
 	}
-	r += fmt.Sprintf("\n\n%s by %s at %s, attempt %d, %s USD, %d tokens.", status, holder, at.Format("2006-01-02 15:04"), t.Attempts,
-		strconv.FormatFloat(t.CostUSD, 'f', -1, 64), t.Tokens)
+	usd := func(v float64) string { return strconv.FormatFloat(float64(int64(v*10000+0.5))/10000, 'f', -1, 64) }
+	if cost >= 0 && t.Attempts > 1 {
+		r += fmt.Sprintf("\n\n%s by %s at %s, attempt %d: this attempt %s USD, %d tokens; the task in all, with the attempts before, %s USD, %d tokens.",
+			status, holder, at.Format("2006-01-02 15:04"), t.Attempts, usd(cost), tokens, usd(t.CostUSD), t.Tokens)
+	} else {
+		r += fmt.Sprintf("\n\n%s by %s at %s, attempt %d, %s USD, %d tokens.", status, holder, at.Format("2006-01-02 15:04"), t.Attempts,
+			strconv.FormatFloat(t.CostUSD, 'f', -1, 64), t.Tokens)
+	}
 	return AppendSection(out, "Report", r), nil
 }
 
@@ -504,7 +517,8 @@ func ToReview(t Task, content []byte, holder, report string, at time.Time) ([]by
 	if err := held(t, holder); err != nil {
 		return nil, err
 	}
-	if !CanMove(t.Status, Review) {
+	// A team's card may wait there already, for its team's approval.
+	if t.Status != Review && !CanMove(t.Status, Review) {
 		return nil, fmt.Errorf("the task is %s: it does not go to review", t.Status)
 	}
 	out, err := Set(content, map[string]any{KeyStatus: Review, KeyUpdated: at.Format(time.RFC3339)}, KeyClaimedBy, KeyLeaseUntil)

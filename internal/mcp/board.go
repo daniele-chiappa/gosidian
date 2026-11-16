@@ -1,9 +1,11 @@
 package mcp
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -135,6 +137,171 @@ func (s *Server) moveCard(ctx context.Context, w taskWrite, b fleet.Board, cards
 	return t, warning, s.renumber(ctx, w, in, ranks)
 }
 
+// engineUpdate is a write of the pipelines on the task at rel (IMP-216
+// phase 3): a team's task as fleetUpdate writes it, and a card of a board
+// under its board's lock, its column, rank and dates made to follow the
+// state build gives it. A card that starts (submitted to working) enters
+// the bottom of the first column of working within its limit, and a full
+// column of a board hard for agents refuses the start: the card waits. The
+// other moves of a run are never refused, since a run cannot stay halfway;
+// given back to submitted, the card goes to the top of its column, as
+// after a lease.
+func (s *Server) engineUpdate(ctx context.Context, w taskWrite, rel string, build func(fleet.Task, []byte) ([]byte, error)) (fleet.Task, error) {
+	cur, _, err := s.fleetRead(rel)
+	if err != nil || cur.Board == "" {
+		return s.fleetUpdate(ctx, w, rel, build)
+	}
+	b, _, err := s.fleetBoard(cur.Board)
+	if err != nil {
+		// A board that does not read: memory_lint says so, the task goes on.
+		return s.fleetUpdate(ctx, w, rel, build)
+	}
+	unlock := s.lockBoard(b.Path)
+	defer unlock()
+	project, _, _ := strings.Cut(rel, "/")
+	cards, err := s.boardCards(ctx, b, project)
+	if err != nil {
+		return fleet.Task{}, err
+	}
+	var in []fleet.Task
+	var ranks []float64
+	t, err := s.fleetUpdate(ctx, w, rel, func(c fleet.Task, content []byte) ([]byte, error) {
+		in, ranks = nil, nil
+		out, err := build(c, content)
+		if err != nil {
+			return nil, err
+		}
+		next := fleet.ReadTask(rel, out)
+		target, err := b.Target(c, "", next.Status)
+		if err != nil {
+			return out, nil // no column for the state: the lint's
+		}
+		set, unset := fleet.Dates(c, target.Status, time.Now())
+		switch from := b.ColumnOf(c); {
+		case target.Name == "":
+			if c.Column != "" {
+				unset = append(unset, fleet.KeyColumn, fleet.KeyRank)
+			}
+		case !strings.EqualFold(from, target.Name):
+			if c.Status == fleet.Submitted && target.Status == fleet.Working {
+				if _, err := wip(b, cards, target, c.Path, false); err != nil {
+					return nil, err
+				}
+			}
+			var at *int
+			if target.Status == fleet.Submitted {
+				top := 0
+				at = &top
+			}
+			var rank float64
+			in = columnCards(b, cards, target.Name, c.Path)
+			rank, ranks = place(in, at)
+			set[fleet.KeyColumn], set[fleet.KeyRank], set[fleet.KeyColumnSince] = target.Name, rank, time.Now().Format(time.RFC3339)
+		case c.Column != target.Name:
+			set[fleet.KeyColumn] = target.Name
+		}
+		if len(set) == 0 && len(unset) == 0 {
+			return out, nil
+		}
+		return fleet.Set(out, set, unset...)
+	})
+	if err != nil {
+		return t, err
+	}
+	return t, s.renumber(ctx, w, in, ranks)
+}
+
+// subCard makes the new sub-task n a card when its parent is one (IMP-216
+// phase 3): of the parent's board and iteration, at the bottom of the
+// board's first column of its state, submitted or input-required for one
+// that waits for a person. It gives back the cards whose ranks change
+// with theirs, for renumber after the write, and the function that lets
+// the board's lock go. A parent on no board, or whose board does not
+// read or has no column for the state, leaves n a team's task.
+func (s *Server) subCard(ctx context.Context, project string, n *fleet.NewTask) (in []fleet.Task, ranks []float64, unlock func()) {
+	unlock = func() {}
+	if n.Parent == "" || n.Board != "" {
+		return nil, nil, unlock
+	}
+	parent, _, err := s.fleetRead(n.Parent)
+	if err != nil || parent.Board == "" {
+		return nil, nil, unlock
+	}
+	b, _, err := s.fleetBoard(parent.Board)
+	if err != nil {
+		return nil, nil, unlock
+	}
+	status := cmp.Or(n.Status, fleet.Submitted)
+	c, ok := b.First(status)
+	if !ok {
+		return nil, nil, unlock
+	}
+	unlock = s.lockBoard(b.Path)
+	cards, err := s.boardCards(ctx, b, project)
+	if err != nil || s.cardsDatabase(ctx, project) != nil {
+		return nil, nil, unlock
+	}
+	in = columnCards(b, cards, c.Name, "")
+	n.Board, n.Column, n.Status, n.Iteration = b.Path, c.Name, status, parent.Iteration
+	n.Rank, ranks = place(in, nil)
+	return in, ranks, unlock
+}
+
+// DoneByPerson says whether a person closes the card t: its done_by, or
+// its board's done (pipeline.Boards).
+func (h pipelineHost) DoneByPerson(t fleet.Task) bool {
+	if t.Board == "" {
+		return false
+	}
+	b, _, err := h.s.fleetBoard(t.Board)
+	if err != nil {
+		return false
+	}
+	_, review := b.First(fleet.Review)
+	return review && cmp.Or(t.DoneBy, b.Done) == fleet.DonePerson
+}
+
+// OrderTasks puts the cards among tasks in the order their boards start
+// them: each board's columns in their order, each column by rank. The
+// tasks on no board keep their places, before the cards (pipeline.Boards).
+func (h pipelineHost) OrderTasks(tasks []fleet.Task) []fleet.Task {
+	boards := map[string]map[string]int{}
+	col := func(t fleet.Task) int {
+		if t.Board == "" {
+			return -1
+		}
+		cols, ok := boards[t.Board]
+		if !ok {
+			cols = map[string]int{}
+			if b, _, err := h.s.fleetBoard(t.Board); err == nil {
+				for i, c := range b.Columns {
+					cols[strings.ToLower(c.Name)] = i
+				}
+			}
+			boards[t.Board] = cols
+		}
+		if i, ok := cols[strings.ToLower(t.Column)]; ok {
+			return i
+		}
+		return len(cols)
+	}
+	out := slices.Clone(tasks)
+	slices.SortStableFunc(out, func(a, b fleet.Task) int {
+		if a.Board == "" || b.Board == "" {
+			return cmp.Compare(btoi(a.Board != ""), btoi(b.Board != ""))
+		}
+		return cmp.Or(strings.Compare(a.Board, b.Board), cmp.Compare(col(a), col(b)), fleet.Order(a, b))
+	})
+	return out
+}
+
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 // MoveCard moves the card at rel for the person actor, from the web UI
 // (IMP-216): under its board's lock and within its limits for people, as
 // the task tools move a card for an agent. A person moves a card to any
@@ -142,33 +309,48 @@ func (s *Server) moveCard(ctx context.Context, w taskWrite, b fleet.Board, cards
 // it ends its hold. A move to where the card is writes nothing. A refusal
 // is a *fleet.MoveError.
 func (s *Server) MoveCard(ctx context.Context, actor, rel string, m fleet.CardMove) (string, error) {
+	warning, run, err := s.movePerson(ctx, actor, rel, m)
+	// The run that held a card a person took back or closed is canceled
+	// (phase 3), the board's lock let go: its end writes nothing on the
+	// card, which it holds no more.
+	if err == nil && run != "" && s.pipelines != nil {
+		if cerr := s.pipelines.Runner().CancelFor(run, "its card "+rel+" was moved by "+actor); cerr != nil {
+			slog.Warn("board: canceling the run of a moved card", "run", run, "card", rel, "err", cerr)
+		}
+	}
+	return warning, err
+}
+
+// movePerson is MoveCard's move; run is the run that held the card and
+// holds it no more, "" for none.
+func (s *Server) movePerson(ctx context.Context, actor, rel string, m fleet.CardMove) (warning, run string, err error) {
 	cur, _, err := s.fleetRead(rel)
 	if err != nil || cur.Board == "" {
-		return "", &fleet.MoveError{Msg: rel + " is no card of a board"}
+		return "", "", &fleet.MoveError{Msg: rel + " is no card of a board"}
 	}
 	b, _, err := s.fleetBoard(cur.Board)
 	if err != nil {
-		return "", &fleet.MoveError{Msg: err.Error()}
+		return "", "", &fleet.MoveError{Msg: err.Error()}
 	}
 	unlock := s.lockBoard(b.Path)
 	defer unlock()
 	project, _, _ := strings.Cut(rel, "/")
 	cards, err := s.boardCards(ctx, b, project)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if cur, _ = taskIn(cards, rel); cur.Path == "" {
-		return "", &fleet.MoveError{Msg: rel + " is no task of the project"}
+		return "", "", &fleet.MoveError{Msg: rel + " is no task of the project"}
 	}
 	target, err := b.Target(cur, m.Column, m.Status)
 	switch {
 	case err != nil:
-		return "", &fleet.MoveError{Msg: err.Error()}
+		return "", "", &fleet.MoveError{Msg: err.Error()}
 	case m.At == nil && target.Status == cur.Status && target.Name == cur.Column:
-		return "", nil
+		return "", "", nil
 	}
 	now := clock.NoteTime(time.Now())
-	_, warning, err := s.moveCard(ctx, taskWrite{actor: actor, person: true, ifMatch: m.IfMatch}, b, cards, cur, m.Column, m.Status, m.At,
+	_, warning, err = s.moveCard(ctx, taskWrite{actor: actor, person: true, ifMatch: m.IfMatch}, b, cards, cur, m.Column, m.Status, m.At,
 		func(c fleet.Task, content []byte, status string) ([]byte, error) {
 			if m.Check != nil {
 				if err := m.Check(content); err != nil {
@@ -176,24 +358,28 @@ func (s *Server) MoveCard(ctx context.Context, actor, rel string, m fleet.CardMo
 				}
 			}
 			var unset []string
+			run = ""
 			switch {
 			case fleet.Ended(status):
 				unset = []string{fleet.KeyClaimedBy, fleet.KeyLeaseUntil, fleet.KeyBranch}
 			case status == fleet.Backlog || status == fleet.Submitted:
 				unset = []string{fleet.KeyClaimedBy, fleet.KeyLeaseUntil}
 			}
+			if id, ok := strings.CutPrefix(c.ClaimedBy, "run-"); ok && unset != nil {
+				run = id
+			}
 			return fleet.Set(content, map[string]any{fleet.KeyStatus: status, fleet.KeyUpdated: now}, unset...)
 		})
 	var werr *writeError
 	switch {
 	case errors.As(err, &werr) && werr.kind == writePrecondition:
-		return "", &fleet.MoveError{Msg: werr.msg, Stale: true}
+		return "", "", &fleet.MoveError{Msg: werr.msg, Stale: true}
 	case errors.As(err, &werr) && werr.kind == writeFailed:
-		return "", err
+		return "", "", err
 	case err != nil:
-		return "", &fleet.MoveError{Msg: err.Error()}
+		return "", "", &fleet.MoveError{Msg: err.Error()}
 	}
-	return warning, nil
+	return warning, run, nil
 }
 
 // boardCards reads the tasks of project, the cards of b among them, after

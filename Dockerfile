@@ -3,7 +3,12 @@
 # Multi-stage build for gosidian v2.0:
 #   1. node:24-alpine builds the Vue 3 SPA (`npm run build`).
 #   2. golang:1.27-alpine compiles the binary, embedding the dist/.
-#   3. alpine:3.20 runtime with git on PATH for gitsync.
+#   3. alpine:3.24 runtime with git on PATH for gitsync (stage `runtime`).
+#
+# Build it with `--pull --no-cache-filter runtime`, as the CI does: the
+# bases come fresh, and the runtime's packages are those of the build's
+# day, not of the layer a cache kept (git 2.54.0 in v2.163.0, after
+# Alpine shipped the fix).
 #
 # Final image is ~35 MB and runs as nonroot UID 65532. The
 # distroless→alpine switch is documented in ADR-003 (gitsync
@@ -65,7 +70,7 @@ RUN CGO_ENABLED=0 GOOS=linux \
 # -----------------------------------------------------------------
 # 3. Runtime
 # -----------------------------------------------------------------
-FROM alpine:3.24
+FROM alpine:3.24 AS runtime
 RUN apk add --no-cache git ca-certificates \
     && addgroup -g 65532 -S nonroot \
     && adduser -u 65532 -S nonroot -G nonroot \

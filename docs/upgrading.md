@@ -7,6 +7,66 @@ one, newest first, and do what each one says. MCP clients keep the tool list
 they read when they connected, so reconnect them after an upgrade to see new
 tools and arguments. The full notes of every release are in `CHANGELOG.md`.
 
+## 2.163.0 — A coordinator's plan kept in order, a review's verdict counted
+
+- `task.plan` now adds dependencies of its own: two open tasks of roles
+  on the same repository wait one for the other unless their `paths` are
+  apart. A team that counted on such tasks at work side by side gives
+  them `paths` that do not meet.
+- An objective sent to a person at `max_rounds` has its `rounds` back at
+  0: put back to `working`, its coordinator runs again. Before, it came
+  back to the person until `rounds` was lowered by hand.
+- A role may say `review: true`: its agent is asked for a verdict line
+  and for its problems marked serious or minor, which the gate counts.
+  A team's `reopen_on` (default `serious`) tells the coordinator that
+  minor problems do not reopen the work. Nothing changes for a team
+  without a role that reviews; to have it, add `review: true` to the
+  reviewer's role.
+
+## 2.162.0 — A task's budget within its team's and its preset's
+
+- A budget above what the executor's preset lets a step spend no longer
+  fails the attempt (`with/max_cost must be <= …`): the agent gets the
+  preset's most. A plan's `budget_usd` above the team's `task_usd` is
+  lowered to it.
+
+## 2.161.0 — A task keeps its agent's whole report
+
+- A task's `## Report` holds the agent's whole report (up to `[agents]
+  max_report`, 64 KiB), where it kept 3,000 bytes; a prompt carries 16
+  KiB of another task's report, where it carried 4. The prompts of
+  coordinators and of tasks with dependencies grow with long reports:
+  lower `max_prompt_report` to keep them short.
+- A role with neither a repository nor `writes` (a reviewer) whose agent
+  answers nothing, or an answer cut at its model's output limit, gets
+  another attempt; its task closed before.
+- Nothing to change in a team's pipelines: `task.verdict` reads the new
+  `report` of `task.gate` by itself.
+
+## 2.160.0 — A team that waits says so
+
+- In the run of a team's task, a step whose plugin is away or says it
+  waits for a provider's limit is [held](agents.md#limits) and tries
+  again by itself, where it failed and used an attempt before. A run
+  held for long is ended by canceling it.
+- `memory_create_team` writes a third pipeline, `<team>-alert`, which
+  tells the team's `alert` when the day's budget is spent and when a run
+  is held. A team made before has none: copy it from a new team, or
+  write a pipeline on `events: [budget, waiting]` that sends
+  `{{ trigger.title }}` and `{{ trigger.text }}` to `{{ trigger.alert }}`.
+- An objective whose open sub-tasks can never start now goes to
+  `input-required`; it stayed `working` before.
+
+## 2.159.0 — A team's cards on a board
+
+- A [board](board.md#teams)'s card may have `team` and `assignee`: with
+  the pipelines on, that team's runs take it when it is ready, in the
+  board's order and within its limits. A card written by hand with both
+  fields, which nothing took before, now starts.
+- An objective that waits for its sub-tasks no longer counts against its
+  column's limit, and a person who takes back or closes a card a run
+  holds cancels that run.
+
 ## 2.158.0 — Cards with dates, boards with iterations
 
 - A [board](board.md)'s cards get `started` and `finished`, which the

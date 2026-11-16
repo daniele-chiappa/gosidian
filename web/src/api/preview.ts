@@ -93,6 +93,8 @@ export interface ViewBoardState {
   iteration?: ViewIteration & { days_left: number; cards: { done: number; total: number } }
   /** The iterations whose retrospective waits. */
   retro?: ViewIteration[]
+  /** The objectives that wait for their sub-tasks: no place of their column's limit (phase 3). */
+  waiting?: string[]
 }
 
 /** A column of a board's block: its cards are in status; wip is its limit. */

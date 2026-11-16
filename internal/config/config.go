@@ -489,6 +489,17 @@ type AgentsConfig struct {
 	// MaxTasks is the most sub-tasks an objective may have; default 50,
 	// from 1 to 1000.
 	MaxTasks int `toml:"max_tasks"`
+	// HoldMax is the longest a task's step held by something outside it
+	// (a plugin away, a provider's limit) waits before it tries again;
+	// default 1h, from 1m to 24h.
+	HoldMax time.Duration `toml:"hold_max"`
+	// MaxReport is the most bytes of an agent's report a task's note
+	// keeps; default 65536, from 4096 to 1048576. MaxPromptReport the
+	// most of another task's report a prompt carries (the tasks a task
+	// depends on, an objective's sub-tasks); default 16384, from 1024 to
+	// MaxReport.
+	MaxReport       int `toml:"max_report"`
+	MaxPromptReport int `toml:"max_prompt_report"`
 }
 
 // CategoryConfig is the rules of a category of pipelines.
@@ -1294,6 +1305,15 @@ func (c *Config) applyDefaults() {
 	if c.Agents.MaxTasks == 0 {
 		c.Agents.MaxTasks = 50
 	}
+	if c.Agents.HoldMax == 0 {
+		c.Agents.HoldMax = time.Hour
+	}
+	if c.Agents.MaxReport == 0 {
+		c.Agents.MaxReport = 64 << 10
+	}
+	if c.Agents.MaxPromptReport == 0 {
+		c.Agents.MaxPromptReport = min(16<<10, c.Agents.MaxReport)
+	}
 	if c.Webauth.SessionTTL == 0 {
 		c.Webauth.SessionTTL = 24 * time.Hour
 	}
@@ -1732,9 +1752,11 @@ var resourceName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 // checks [agents], from the file too.
 func (c *Config) applyAgentsEnv() error {
 	for env, dst := range map[string]*int{
-		"GOSIDIAN_AGENTS_MAX_RUNNING":  &c.Agents.MaxRunning,
-		"GOSIDIAN_AGENTS_MAX_ATTEMPTS": &c.Agents.MaxAttempts,
-		"GOSIDIAN_AGENTS_MAX_TASKS":    &c.Agents.MaxTasks,
+		"GOSIDIAN_AGENTS_MAX_RUNNING":       &c.Agents.MaxRunning,
+		"GOSIDIAN_AGENTS_MAX_ATTEMPTS":      &c.Agents.MaxAttempts,
+		"GOSIDIAN_AGENTS_MAX_TASKS":         &c.Agents.MaxTasks,
+		"GOSIDIAN_AGENTS_MAX_REPORT":        &c.Agents.MaxReport,
+		"GOSIDIAN_AGENTS_MAX_PROMPT_REPORT": &c.Agents.MaxPromptReport,
 	} {
 		v := os.Getenv(env)
 		if v == "" {
@@ -1752,6 +1774,13 @@ func (c *Config) applyAgentsEnv() error {
 			return fmt.Errorf("GOSIDIAN_AGENTS_LEASE: %q is no duration", v)
 		}
 		c.Agents.Lease = d
+	}
+	if v := os.Getenv("GOSIDIAN_AGENTS_HOLD_MAX"); v != "" {
+		d, err := time.ParseDuration(strings.TrimSpace(v))
+		if err != nil {
+			return fmt.Errorf("GOSIDIAN_AGENTS_HOLD_MAX: %q is no duration", v)
+		}
+		c.Agents.HoldMax = d
 	}
 	return checkAgents(c.Agents)
 }
@@ -1786,6 +1815,12 @@ func checkAgents(a AgentsConfig) error {
 		return fmt.Errorf("[agents] max_attempts (GOSIDIAN_AGENTS_MAX_ATTEMPTS): %d is not between 1 and 20", a.MaxAttempts)
 	case a.MaxTasks < 1 || a.MaxTasks > 1000:
 		return fmt.Errorf("[agents] max_tasks (GOSIDIAN_AGENTS_MAX_TASKS): %d is not between 1 and 1000", a.MaxTasks)
+	case a.HoldMax < time.Minute || a.HoldMax > 24*time.Hour:
+		return fmt.Errorf("[agents] hold_max (GOSIDIAN_AGENTS_HOLD_MAX): %s is not between 1m and 24h", a.HoldMax)
+	case a.MaxReport < 4<<10 || a.MaxReport > 1<<20:
+		return fmt.Errorf("[agents] max_report (GOSIDIAN_AGENTS_MAX_REPORT): %d is not between 4096 and 1048576", a.MaxReport)
+	case a.MaxPromptReport < 1<<10 || a.MaxPromptReport > a.MaxReport:
+		return fmt.Errorf("[agents] max_prompt_report (GOSIDIAN_AGENTS_MAX_PROMPT_REPORT): %d is not between 1024 and max_report (%d)", a.MaxPromptReport, a.MaxReport)
 	}
 	return nil
 }

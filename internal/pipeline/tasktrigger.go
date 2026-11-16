@@ -30,6 +30,8 @@ import (
 //     failed or asks for input, starts its coordinator's pipeline again,
 //     once for each state of those that call it (childrenState), at most
 //     max_rounds times.
+//   - waiting: a run of the team is held by something outside it (its
+//     plugin away, a provider's limit); once, until none is held.
 //   - budget: the team spent its budget of the day; once a day, for a
 //     pipeline that tells someone.
 //
@@ -53,6 +55,18 @@ type Fleet interface {
 	CreateTask(project string, n fleet.NewTask, actor string) (fleet.Task, error)
 }
 
+// Boards is the host's side of the boards a team's cards are on (IMP-216
+// phase 3). The host's UpdateTask keeps a card's column, rank and dates
+// with its state, and refuses the start of one whose column of working is
+// full; its CreateTask puts a card's sub-tasks on its board.
+type Boards interface {
+	// OrderTasks puts the cards among tasks in the order their boards
+	// start them, after the tasks on no board.
+	OrderTasks(tasks []fleet.Task) []fleet.Task
+	// DoneByPerson says whether a person closes the card t, after its run.
+	DoneByPerson(t fleet.Task) bool
+}
+
 // ErrTaskSkip, returned by an UpdateTask's build, writes nothing.
 var ErrTaskSkip = errors.New("the task stays as it is")
 
@@ -61,10 +75,11 @@ const (
 	EventReady        = "ready"
 	EventChildrenDone = "children_done"
 	EventBudget       = "budget"
+	EventWaiting      = "waiting"
 )
 
 // taskEvents are the events a task trigger may take.
-var taskEvents = []string{EventReady, EventChildrenDone, EventBudget}
+var taskEvents = []string{EventReady, EventChildrenDone, EventBudget, EventWaiting}
 
 // The resources of the agents of the teams (IMP-195): the steps of a task's
 // run that run an agent take a place in their team's and in the
@@ -84,6 +99,28 @@ type TaskConfig struct {
 	Lease       time.Duration
 	MaxAttempts int
 	MaxTasks    int
+	// HoldMax is the longest a held step of a task's run waits before it
+	// tries again (Hold); 0: an hour.
+	HoldMax time.Duration
+	// MaxReport is the most bytes of an agent's report a task's note
+	// keeps (0: 64 KiB); MaxPromptReport the most of another task's
+	// report in a prompt (0: 16 KiB).
+	MaxReport       int
+	MaxPromptReport int
+}
+
+func (c TaskConfig) maxReport() int {
+	if c.MaxReport <= 0 {
+		return 64 << 10
+	}
+	return c.MaxReport
+}
+
+func (c TaskConfig) maxPromptReport() int {
+	if c.MaxPromptReport <= 0 {
+		return min(16<<10, c.maxReport())
+	}
+	return c.MaxPromptReport
 }
 
 // taskLoop is the state of the task trigger.
@@ -96,9 +133,17 @@ type taskLoop struct {
 	waits map[string]string
 	// budget is the day each team's budget event was sent.
 	budget map[string]string
+	// holding are the teams with a held run, told of once (the waiting
+	// event), with the number of the episode.
+	holding map[string]int
+	holds   int
 	// wrote is what the MCP tokens of each run at work wrote, by run id:
 	// the notes task.gate looks for. Kept in memory until the run ends.
 	wrote map[string]map[string]bool
+	// taskWrote is what the runs of a task that ended wrote, by task: an
+	// attempt that finds the notes of the one before written did its
+	// task. Kept in memory until the task closes.
+	taskWrote map[string]map[string]bool
 }
 
 // RunWrote records a vault path the MCP token of a run wrote, moved or
@@ -131,10 +176,41 @@ func (e *Engine) RunWrites(runID string) []string {
 	return out
 }
 
-func (e *Engine) forgetRunWrites(runID string) {
+// forgetRunWrites drops what an ended run wrote; a task's run hands it to
+// its task first, for the attempts after it.
+func (e *Engine) forgetRunWrites(run jobs.Run) {
 	e.tasks.mu.Lock()
 	defer e.tasks.mu.Unlock()
-	delete(e.tasks.wrote, runID)
+	if run.Task != "" && len(e.tasks.wrote[run.ID]) > 0 {
+		if e.tasks.taskWrote == nil {
+			e.tasks.taskWrote = map[string]map[string]bool{}
+		}
+		if e.tasks.taskWrote[run.Task] == nil {
+			e.tasks.taskWrote[run.Task] = map[string]bool{}
+		}
+		for p := range e.tasks.wrote[run.ID] {
+			e.tasks.taskWrote[run.Task][p] = true
+		}
+	}
+	delete(e.tasks.wrote, run.ID)
+}
+
+// TaskWrites are the vault paths the ended runs of a task wrote, sorted.
+func (e *Engine) TaskWrites(task string) []string {
+	e.tasks.mu.Lock()
+	defer e.tasks.mu.Unlock()
+	out := make([]string, 0, len(e.tasks.taskWrote[task]))
+	for p := range e.tasks.taskWrote[task] {
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (e *Engine) forgetTaskWrites(task string) {
+	e.tasks.mu.Lock()
+	defer e.tasks.mu.Unlock()
+	delete(e.tasks.taskWrote, task)
 }
 
 // TakesTask says whether a task trigger takes event for a task of team
@@ -266,6 +342,8 @@ func (e *Engine) tickProject(fl Fleet, project string, pipes []Pipeline, teams m
 		return
 	}
 	now := e.now()
+	// The first held run of each team, by the team's path.
+	held := map[string]heldTask{}
 	// The holds whose holder is gone: a run that ended without the engine
 	// hearing of it (a restart), an outside agent past its lease.
 	released := false
@@ -277,6 +355,16 @@ func (e *Engine) tickProject(fl Fleet, project string, pipes []Pipeline, teams m
 			if run, err := e.runner.Store().Run(id); err == nil && run.Status.Terminal() {
 				e.giveBack(fl, t.Path, run, tasks)
 				released = true
+			} else if err == nil {
+				why, at, trying := e.heldStep(id)
+				if why != "" {
+					waits[t.Path] = "its run is held and tries again at " + at.In(clock.Location()).Format("15:04") + ": " + why
+					if h, ok := held[t.Team]; !ok || h.why == "" {
+						held[t.Team] = heldTask{t, why, at}
+					}
+				} else if _, ok := held[t.Team]; trying && !ok {
+					held[t.Team] = heldTask{task: t}
+				}
 			}
 			continue
 		}
@@ -315,7 +403,12 @@ func (e *Engine) tickProject(fl Fleet, project string, pipes []Pipeline, teams m
 		}
 		return true, ""
 	}
-	for _, t := range tasks {
+	// A board's cards start in its order: its columns, then their rank.
+	ready := tasks
+	if bs, ok := e.host.(Boards); ok {
+		ready = bs.OrderTasks(tasks)
+	}
+	for _, t := range ready {
 		if t.Status != fleet.Submitted || t.ClaimedBy != "" && !t.LeaseUntil.IsZero() && now.Before(t.LeaseUntil) {
 			continue
 		}
@@ -356,11 +449,14 @@ func (e *Engine) tickProject(fl Fleet, project string, pipes []Pipeline, teams m
 			continue
 		}
 		kids := children[parent]
-		if !childrenDone(kids) {
-			continue
-		}
 		state := childrenState(kids)
-		if state == obj.ChildrenState {
+		if !childrenDone(kids) || state == obj.ChildrenState {
+			// Nothing new for the coordinator. Sub-tasks that can never
+			// start (behind one that failed or was canceled) would leave
+			// the objective at work for ever: a person decides.
+			if why := stuck(kids, byPath, now); why != "" {
+				e.askPerson(fl, obj.Path, state, why)
+			}
 			continue
 		}
 		team, ok := teams[obj.Team]
@@ -372,7 +468,9 @@ func (e *Engine) tickProject(fl Fleet, project string, pipes []Pipeline, teams m
 			continue
 		}
 		if obj.Rounds >= team.MaxRounds {
-			e.askPerson(fl, obj.Path, state, fmt.Sprintf("The coordinator ran %d rounds on this objective, the team's max_rounds: a person decides how it goes on.", obj.Rounds))
+			// The person who puts it back to working gives it its rounds
+			// again, and the coordinator runs on what is there.
+			e.askPersonAfterRounds(fl, obj.Path, fmt.Sprintf("The coordinator ran %d rounds on this objective, the team's max_rounds: a person decides how it goes on. Back to working, the coordinator runs again, with %d rounds more.", obj.Rounds, team.MaxRounds))
 			continue
 		}
 		if ok, why := budgetOK(team); !ok {
@@ -383,6 +481,7 @@ func (e *Engine) tickProject(fl Fleet, project string, pipes []Pipeline, teams m
 			waits[obj.Path] = err.Error()
 		}
 	}
+	e.tellHeld(project, pipes, teams, held)
 	day := e.dayStart(now).Format("2006-01-02")
 	for _, team := range sortedTeams(teams) {
 		if !spent[team.Path] {
@@ -402,7 +501,9 @@ func (e *Engine) tickProject(fl Fleet, project string, pipes []Pipeline, teams m
 		}
 		s, _ := e.TeamSpend(project, team.Path)
 		input := map[string]any{"event": EventBudget, "team": team.Path, "project": project, "day": day,
-			"spent_usd": s.CostUSD, "budget_usd": team.Budget.DayUSD}
+			"spent_usd": s.CostUSD, "budget_usd": team.Budget.DayUSD, "alert": anyList(team.Alert),
+			"title": "Team " + team.Name() + ": the day's budget is spent",
+			"text":  fmt.Sprintf("The team spent %.2f of %.2f USD today: its tasks wait for tomorrow, or for a higher budget.day_usd in %s.", s.CostUSD, team.Budget.DayUSD, team.Path)}
 		for _, p := range pipes {
 			if !p.Spec.Trigger.TakesTask(EventBudget, team.Path, "", team.Coordinator) {
 				continue
@@ -412,6 +513,83 @@ func (e *Engine) tickProject(fl Fleet, project string, pipes []Pipeline, teams m
 			}
 		}
 	}
+}
+
+// heldTask is a task whose run is held: why, and when it tries again;
+// without why, its held step is trying again right now.
+type heldTask struct {
+	task fleet.Task
+	why  string
+	at   time.Time
+}
+
+// heldStep says why and until when the run is held: its step that went
+// back to the queue held and did not start again yet. trying: a step
+// held before runs again, and may be held again.
+func (e *Engine) heldStep(runID string) (why string, at time.Time, trying bool) {
+	steps, err := e.runner.Store().Steps(runID)
+	if err != nil {
+		return "", time.Time{}, false
+	}
+	for _, st := range steps {
+		if st.Holds == 0 {
+			continue
+		}
+		switch {
+		case st.Status == jobs.Queued && st.Error != "":
+			return st.Error, st.NotBefore, false
+		case st.Status == jobs.Queued || st.Status == jobs.Running:
+			trying = true
+		}
+	}
+	return "", time.Time{}, trying
+}
+
+// tellHeld starts the waiting event of the teams that have a held run
+// and had none at the last tick: once for each time a team stops.
+func (e *Engine) tellHeld(project string, pipes []Pipeline, teams map[string]fleet.Team, held map[string]heldTask) {
+	for _, team := range sortedTeams(teams) {
+		h, ok := held[team.Path]
+		e.tasks.mu.Lock()
+		n, told := e.tasks.holding[team.Path]
+		switch {
+		case !ok:
+			delete(e.tasks.holding, team.Path)
+		case !told && h.why != "":
+			if e.tasks.holding == nil {
+				e.tasks.holding = map[string]int{}
+			}
+			e.tasks.holds++
+			n = e.tasks.holds
+			e.tasks.holding[team.Path] = n
+		}
+		e.tasks.mu.Unlock()
+		if !ok || told || h.why == "" {
+			continue
+		}
+		at := h.at.In(clock.Location()).Format("15:04")
+		input := map[string]any{"event": EventWaiting, "team": team.Path, "project": project, "task": h.task.Path,
+			"why": h.why, "retry_at": clock.NoteTime(h.at), "alert": anyList(team.Alert),
+			"title": "Team " + team.Name() + " waits",
+			"text":  fmt.Sprintf("The run of %q is held and tries again by itself at %s, then at longer intervals; its attempt does not count. Why: %s", h.task.Title, at, clipHead(h.why, 600))}
+		for _, p := range pipes {
+			if !p.Spec.Trigger.TakesTask(EventWaiting, team.Path, "", team.Coordinator) {
+				continue
+			}
+			key := fmt.Sprintf("waiting:%s:%s:%d", team.Path, e.now().Format("20060102150405"), n)
+			if _, _, err := e.Start(StartRequest{Path: p.Path, Trigger: TriggerTask, Input: input, Actor: "task", IdemKey: key}); err != nil {
+				e.log.Warn("pipeline: a team's waiting run", "pipeline", p.Path, "err", err)
+			}
+		}
+	}
+}
+
+func anyList(l []string) []any {
+	out := make([]any, 0, len(l))
+	for _, s := range l {
+		out = append(out, s)
+	}
+	return out
 }
 
 func sortedTeams(teams map[string]fleet.Team) []fleet.Team {
@@ -447,6 +625,59 @@ func childrenDone(kids []fleet.Task) bool {
 		}
 	}
 	return all
+}
+
+// stuck says why no open sub-task of an objective can ever start: each
+// one is submitted behind a task that failed, was canceled or is no
+// task, or behind another one that is; "" while one works, waits for a
+// person, or may still start.
+func stuck(kids []fleet.Task, byPath map[string]fleet.Task, now time.Time) string {
+	blocked := map[string]string{}
+	var behind func(t fleet.Task, depth int) string
+	behind = func(t fleet.Task, depth int) string {
+		if why, ok := blocked[t.Path]; ok {
+			return why
+		}
+		why := ""
+		if t.Status == fleet.Submitted && depth < 50 {
+			for _, d := range t.DependsOn {
+				dt, ok := byPath[d]
+				switch {
+				case !ok:
+					why = d + ", which is no task"
+				case dt.Status == fleet.Failed || dt.Status == fleet.Canceled:
+					why = d + " (" + dt.Status + ")"
+				case dt.Status == fleet.Submitted:
+					why = behind(dt, depth+1)
+				}
+				if why != "" {
+					break
+				}
+			}
+		}
+		blocked[t.Path] = why
+		return why
+	}
+	first, open := "", 0
+	kids = slices.Clone(kids)
+	sort.Slice(kids, func(i, j int) bool { return kids[i].Path < kids[j].Path })
+	for _, k := range kids {
+		if fleet.Ended(k.Status) {
+			continue
+		}
+		open++
+		why := behind(k, 0)
+		if why == "" {
+			return ""
+		}
+		if first == "" {
+			first = fmt.Sprintf("%s waits for %s", k.Path, why)
+		}
+	}
+	if open == 0 {
+		return ""
+	}
+	return fmt.Sprintf("None of the %d open sub-tasks of this objective can start: %s. A person decides: point the dependencies to the tasks that replace those, cancel what is overtaken, or close the objective; then the objective goes back to working.", open, first)
 }
 
 // childrenState is a digest of what calls the coordinator: all the
@@ -578,6 +809,9 @@ func (e *Engine) taskRunEnded(run jobs.Run) {
 		return
 	}
 	e.giveBack(fl, run.Task, run, tasks)
+	if t, _, err := fl.ReadTask(run.Task); err == nil && fleet.Ended(t.Status) {
+		e.forgetTaskWrites(run.Task)
+	}
 	e.KickTasks()
 }
 
@@ -604,6 +838,11 @@ func (e *Engine) giveBack(fl Fleet, path string, run jobs.Run, tasks []fleet.Tas
 		set := map[string]any{fleet.KeyUpdated: clock.NoteTime(now)}
 		unset := []string{fleet.KeyClaimedBy, fleet.KeyLeaseUntil}
 		var note string
+		// What the attempt that failed spent, apart from the task's total.
+		spent := ""
+		if c, tk := e.runSpend(run.ID); c > 0 || tk > 0 {
+			spent = fmt.Sprintf(" This attempt spent %s USD, %d tokens.", strconv.FormatFloat(float64(int64(c*10000+0.5))/10000, 'f', -1, 64), tk)
+		}
 		switch {
 		case fleet.Ended(cur.Status) || cur.Status == fleet.InputRequired:
 		case cur.Status == fleet.Review:
@@ -615,10 +854,10 @@ func (e *Engine) giveBack(fl Fleet, path string, run jobs.Run, tasks []fleet.Tas
 			set[fleet.KeyStatus] = fleet.Working
 		case run.Status == jobs.Failed && cur.Attempts >= max:
 			set[fleet.KeyStatus] = fleet.Failed
-			note = fmt.Sprintf("Attempt %d of %d failed, the last one: run %s failed: %s", cur.Attempts, max, run.ID, clipHead(run.Error, 1000))
+			note = fmt.Sprintf("Attempt %d of %d failed, the last one: run %s failed: %s", cur.Attempts, max, run.ID, clipHead(run.Error, 1000)) + spent
 		case run.Status == jobs.Failed:
 			set[fleet.KeyStatus] = fleet.Submitted
-			note = fmt.Sprintf("Attempt %d of %d: run %s failed: %s", cur.Attempts, max, run.ID, clipHead(run.Error, 1000))
+			note = fmt.Sprintf("Attempt %d of %d: run %s failed: %s", cur.Attempts, max, run.ID, clipHead(run.Error, 1000)) + spent
 		case run.Status == jobs.Canceled:
 			set[fleet.KeyStatus] = fleet.InputRequired
 			note = "Run " + run.ID + " was canceled: a person decides how the task goes on."
@@ -661,6 +900,25 @@ func (e *Engine) leaseEnded(fl Fleet, t fleet.Task) {
 	}
 }
 
+// askPersonAfterRounds is askPerson at the team's max_rounds: the rounds
+// start again from none, for the person who lets the objective go on.
+func (e *Engine) askPersonAfterRounds(fl Fleet, path, why string) {
+	now := e.now()
+	_, err := fl.UpdateTask(path, func(cur fleet.Task, content []byte) ([]byte, error) {
+		if cur.Status != fleet.Working || cur.ClaimedBy != "" {
+			return nil, ErrTaskSkip
+		}
+		out, err := fleet.Set(content, map[string]any{fleet.KeyStatus: fleet.InputRequired, fleet.KeyRounds: 0, fleet.KeyUpdated: clock.NoteTime(now)}, fleet.KeyChildrenState)
+		if err != nil {
+			return nil, err
+		}
+		return fleet.AppendSection(out, now.In(clock.Location()).Format("2006-01-02 15:04")+" — input-required", why), nil
+	}, "task")
+	if err != nil && !errors.Is(err, ErrTaskSkip) {
+		e.log.Warn("pipeline: an objective to a person", "task", path, "err", err)
+	}
+}
+
 // askPerson puts an objective in input-required with why.
 func (e *Engine) askPerson(fl Fleet, path, state, why string) {
 	now := e.now()
@@ -677,6 +935,21 @@ func (e *Engine) askPerson(fl Fleet, path, state, why string) {
 	if err != nil && !errors.Is(err, ErrTaskSkip) {
 		e.log.Warn("pipeline: an objective to a person", "task", path, "err", err)
 	}
+}
+
+// runSpend is what the steps of a run spent so far.
+func (e *Engine) runSpend(runID string) (float64, int64) {
+	steps, err := e.runner.Store().Steps(runID)
+	if err != nil {
+		return 0, 0
+	}
+	var cost float64
+	var tokens int64
+	for _, st := range steps {
+		cost += st.CostUSD
+		tokens += st.Tokens
+	}
+	return cost, tokens
 }
 
 // addTaskCost adds what a step of a task's run cost to the task.

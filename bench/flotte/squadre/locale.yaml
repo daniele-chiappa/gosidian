@@ -1,0 +1,52 @@
+# The local team (IMP-195 phase 3c, 2026-11-13): every role that produces
+# on pi with an open-weight model on the lab's GPU (preset pi-gpu, Ollama,
+# gemma4:12b with 32K of context: of the two local models of the short
+# trial, the one that wrote a usable note), the reviewer on Claude Code
+# with opus, as the judge. It works on the reduced objective
+# (ridotto/obiettivo.md): one person, one plan from the knowledge already
+# in the vault, the app's data for it. Ten minutes an agent, one at a
+# time (one GPU). The costs of the local models are nominal.
+coordinator: coordinatore
+split: context
+budget: {day_usd: 20, task_usd: 2}
+max_agents: 1
+max_rounds: 5
+alert: ["#lab/fitness"]
+approvers: [daniele]
+roles:
+  coordinatore:
+    agent: "[[fitness/agents/coordinatore]]"
+    run: pi-gpu.run
+    model: gemma4-12b
+    max_turns: 20
+    max_seconds: 600
+    delegates_to: [conoscenza, sviluppo, revisore]
+  conoscenza:
+    agent: "[[fitness/agents/conoscenza]]"
+    run: pi-gpu.run
+    model: gemma4-12b
+    max_turns: 30
+    max_seconds: 600
+    max_tokens: 1500000
+    writes: [fitness/conoscenza]
+  sviluppo:
+    agent: "[[fitness/agents/sviluppo]]"
+    run: pi-gpu.run
+    model: gemma4-12b
+    access: exec
+    max_turns: 40
+    max_seconds: 600
+    max_tokens: 1500000
+    repo: agents-fitness
+    paths: [web/, data/, test/]
+    forbid: [package.json, build.js]
+    checks: npm test && npm run build
+    preview: dist
+    approve: merge
+  revisore:
+    agent: "[[fitness/agents/revisore]]"
+    run: claude.run
+    model: opus
+    max_turns: 40
+    max_seconds: 840
+    review: true

@@ -2,6 +2,7 @@ package index
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -119,6 +120,44 @@ func TestSearchWith_NoPartialHits(t *testing.T) {
 	}
 }
 
+// A word is common by the notes its expression matches: a word the
+// tokenizer cuts in several tokens is a phrase, a date common as a whole
+// ("2026-05" in a third of the notes) or rare though each of its tokens is
+// common ("2026-04-02" in one note); and a word's inflections count with it
+// ("retry" and the "retries" of a third of the notes). Counted on the word
+// alone, "2026-05" was in no note and "retry" in its own: rare, both, and
+// the notes of the date and of "retries" followed as partial hits.
+func TestSearchWith_PartialCommonPhrasesAndInflections(t *testing.T) {
+	idx := openTest(t)
+	for k := 0; k < 40; k++ {
+		upsert(t, idx, fmt.Sprintf("p/w%02d.md", k), "", fmt.Sprintf("# Note %d\n\nSomething about the weather.", k))
+	}
+	for k := 0; k < 20; k++ {
+		upsert(t, idx, fmt.Sprintf("p/r%02d.md", k), "", fmt.Sprintf("# Release %d\n\nShipped on 2026-05-%02d after two retries.", k, k+1))
+	}
+	upsert(t, idx, "p/incident.md", "", "# Incident\n\nThe incident of 2026-05-03.")
+	upsert(t, idx, "p/review.md", "", "# Review\n\nThe incident review is open.")
+	upsert(t, idx, "p/rollout.md", "", "# Rollout\n\nThe rollout of 2026-04-02.")
+	upsert(t, idx, "p/webhook.md", "", "# Webhook\n\nThe webhook of the payments.")
+	for _, c := range []struct{ q, want string }{
+		{"incident 2026-05", "p/incident.md,p/review.md"},       // the date, common, brings none
+		{"retrospective 2026-04-02", "p/rollout.md"},            // the date, rare, brings its note
+		{"webhook retry", "p/webhook.md"},                       // retry, with retries, common
+		{"webhook rollout", "p/rollout.md,p/webhook.md"},        // two rare words, as before
+		{"incident retrospective", "p/incident.md,p/review.md"}, // and a word in no note
+	} {
+		hits, err := idx.SearchWith(c.q, SearchOptions{Limit: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := paths(hits)
+		slices.Sort(got)
+		if strings.Join(got, ",") != c.want {
+			t.Errorf("%q: hits %v, want %s", c.q, paths(hits), c.want)
+		}
+	}
+}
+
 // The full hits stay what they were, field by field: the partial ones only
 // follow them.
 func TestSearchWith_PartialKeepsTheFullHits(t *testing.T) {
@@ -176,7 +215,7 @@ func fullOnly(t *testing.T, idx *Index, q string, opts SearchOptions) []SearchHi
 	queries := distinctQueries(q, opts.Variants)
 	var hits []rankedHit
 	if len(queries) == 1 {
-		full, err := idx.rankedMatch(idx.matchExpr(q), q, opts, opts.Limit, longNote)
+		full, err := idx.rankedMatch(idx.matchExpr(q), q, opts, opts.Limit)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -185,7 +224,7 @@ func fullOnly(t *testing.T, idx *Index, q string, opts SearchOptions) []SearchHi
 		depth := min(max(opts.Limit*3, minFusedDepth), maxPool)
 		var lists [][]rankedHit
 		for _, query := range queries {
-			full, err := idx.rankedMatch(idx.matchExpr(query), query, opts, depth, longNote)
+			full, err := idx.rankedMatch(idx.matchExpr(query), query, opts, depth)
 			if err != nil {
 				t.Fatal(err)
 			}

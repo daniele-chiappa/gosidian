@@ -29,6 +29,7 @@ type result struct {
 	Resources resources          `json:"resources"`
 	Sizes     sizes              `json:"sizes"`
 	SPA       *spaSize           `json:"spa,omitempty"`
+	Sync      *syncTimes         `json:"git_sync,omitempty"`
 	Large     *large             `json:"large,omitempty"`
 	Code      *codeSize          `json:"code,omitempty"`
 	Errors    []string           `json:"errors,omitempty"`
@@ -114,6 +115,21 @@ type spaSize struct {
 	Bytes     int64 `json:"bytes"`      // as the server sends them, gzipped when it does
 	GzipBytes int64 `json:"gzip_bytes"` // the same, gzipped here: what a compressing proxy sends
 	Served    bool  `json:"served_gzip"`
+	// A headless browser's first visit, a new cache each time, one value
+	// per run (the median of its visits): the first paint with content,
+	// and the load event. Empty where the browser was not at hand.
+	FCPMS  []float64 `json:"fcp_ms,omitempty"`
+	LoadMS []float64 `json:"load_ms,omitempty"`
+}
+
+// syncTimes are git sync's rounds towards a bare repository in a volume,
+// milliseconds from a write's reply to the commit pushed, less the
+// debounce; one value per run.
+type syncTimes struct {
+	DebounceMS float64   `json:"debounce_ms"`
+	Rounds     int       `json:"rounds"`   // rounds of one note behind round_ms
+	FirstMS    []float64 `json:"first_ms"` // the first round: the whole vault
+	RoundMS    []float64 `json:"round_ms"` // a round of one note, the median of the run's
 }
 
 // large is the same image on a vault grown with bench/scale.
@@ -125,6 +141,10 @@ type large struct {
 	IndexDB   int64     `json:"index_db"`
 	State     int64     `json:"state"`
 	SearchLat latency   `json:"search"`
+	// A restart after ChangedNotes notes changed while the server was
+	// down: the incremental index, next to WarmMS where nothing changed.
+	ChangedNotes int       `json:"changed_notes,omitempty"`
+	ChangedMS    []float64 `json:"changed_ms,omitempty"`
 }
 
 type codeSize struct {

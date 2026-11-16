@@ -44,6 +44,13 @@ catalogue, or Go code that calls it; and of a fix for one we already
 know. One in a package of an image's distribution with no fix yet is
 told when the distribution fixes it.
 
+Once a fix is out we take it within a number of days, counted from the
+fix, or from the night that first saw the advisory when that is later:
+none for one exploited, or critical where our code may reach it; three
+for a high one; fourteen for the rest, and for one only among the
+dependencies of development. Past them the nightly run is red every
+night until the fix is in or the advisory is evaluated.
+
 An advisory we evaluated and keep open, because the code does not reach
 it or no fix exists yet, is in [`osv-scanner.toml`](osv-scanner.toml)
 with the reason and a date: after the date it is told again.

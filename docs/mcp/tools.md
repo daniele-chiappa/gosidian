@@ -12,8 +12,10 @@ same way `memory_create_table_note` and `memory_create_media_note` are
 listed only while `table_notes` and `media_notes` are on: off, they could
 only refuse, and `memory_ingest` stores a `.csv` or an image as an
 attachment. The nine `layout_*` show where the owner exposed the plugin
-with the page-layout engine. Hidden, these tools are also unknown to
-`tools/call`.
+with the page-layout engine. A token without the `write` scope does not
+see the 37 tools that write at every call, from `memory_create` to
+`layout_save` ([scopes](authentication.md#scopes)). Hidden, these tools
+are also unknown to `tools/call`.
 
 Consult each tool's `description` via your client's `tools/list` call
 for precise schemas; the groupings below are the conceptual map.
@@ -454,7 +456,8 @@ the cards of its [boards](../board.md) (IMP-216): notes in
 `backlog`, `submitted`, `working`, `input-required`, `review`,
 `completed`, `failed`, `canceled`. A pipeline's run moves and closes its
 task with the task nodes; the agent of a run (a run token) reads the tasks
-and creates sub-tasks, but moves none and takes no card. An outside agent
+and creates sub-tasks (cards of its own card's board), but moves none and
+takes no card. An outside agent
 moves and closes the tasks and cards it claimed; a card goes to the
 columns of its board, within their limits.
 All but `memory_create_team` are in the `core` profile.

@@ -90,11 +90,29 @@ func printTable(w io.Writer, rs []*result) error {
 		}
 		return fmt.Sprintf("%s · %s", msStr(median(r.Large.ColdMS)), msStr(median(r.Large.WarmMS)))
 	})
+	row("Large vault: start after notes changed", func(r *result) string {
+		if r.Large == nil || len(r.Large.ChangedMS) == 0 {
+			return "—"
+		}
+		return fmt.Sprintf("%s (%d notes)", msStr(median(r.Large.ChangedMS)), r.Large.ChangedNotes)
+	})
 	row("Large vault: search, p50 · p95", func(r *result) string {
 		if r.Large == nil || r.Large.SearchLat.N == 0 {
 			return "—"
 		}
 		return fmt.Sprintf("%s · %s", msStr(r.Large.SearchLat.P50), msStr(r.Large.SearchLat.P95))
+	})
+	row("Git sync, a round: the whole vault · one note", func(r *result) string {
+		if r.Sync == nil {
+			return "—"
+		}
+		return fmt.Sprintf("%s · %s", msStr(median(r.Sync.FirstMS)), msStr(median(r.Sync.RoundMS)))
+	})
+	row("Web UI, first load: first paint · load", func(r *result) string {
+		if r.SPA == nil || len(r.SPA.FCPMS) == 0 {
+			return "—"
+		}
+		return fmt.Sprintf("%s · %s", msStr(median(r.SPA.FCPMS)), msStr(median(r.SPA.LoadMS)))
 	})
 	section("Resources")
 	row("Memory at rest: own · page cache", func(r *result) string {

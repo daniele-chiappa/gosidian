@@ -57,13 +57,36 @@ var coreToolSet = map[string]struct{}{
 	"memory_task_complete":  {},
 }
 
+// writeTools are the tools every call of which writes: to a token without
+// the write scope they could only answer "token lacks write scope", so it
+// does not see them (roadmap M2.3), as it does not see the plugins' tools
+// of access write. The tools that also read stay: memory_versions (its
+// list), the dry runs of memory_gc_attachments and memory_automations, and
+// a layout session, which stays in memory until layout_save. A token whose
+// account writes none of its projects has no write scope either
+// (authz.NarrowToken).
+var writeTools = map[string]bool{
+	"memory_create": true, "memory_update": true, "memory_edit": true, "memory_append": true,
+	"memory_delete": true, "memory_move_note": true, "memory_rename_note": true, "memory_compact": true,
+	"memory_ingest": true, "memory_upload_attachment": true, "memory_upload_resource": true,
+	"memory_create_media_note": true, "memory_create_table_note": true, "memory_delete_attachment": true,
+	"memory_in_upload": true, "memory_snapshot": true, "memory_ask": true, "memory_refresh_hot": true,
+	"memory_self_improve": true, "memory_promote_agent": true, "memory_project_scaffold": true,
+	"memory_create_project": true, "memory_delete_project": true, "memory_rename_project": true,
+	"memory_create_handoff": true, "memory_claim_handoff": true, "memory_complete_handoff": true,
+	"memory_task_create": true, "memory_task_claim": true, "memory_task_heartbeat": true,
+	"memory_task_update": true, "memory_task_complete": true, "memory_create_team": true, "memory_pipeline_run": true,
+	"layout_save": true, "layout_add_piece": true, "layout_number_pieces": true,
+}
+
 // filterToolsByProfile is the ToolFilterFunc wired into the MCPServer. The
 // token travels in ctx for every client→server message (WithSSEContextFunc),
 // so the same decision applies to tools/list and tools/call. Beyond the
 // static core set, memory_self_improve is admitted dynamically for tokens
 // opted into that loop. The media/table creators no longer have a dynamic
 // admission: memory_ingest routes to them internally, so a core worker gets
-// table/media notes without ever seeing their schemas (ADR-018).
+// table/media notes without ever seeing their schemas (ADR-018). A token
+// without the write scope sees none of writeTools, in either profile.
 //
 // The plugins' tools (IMP-182) pass for every profile, core included, but
 // only to a token of a project the owner exposed their plugin in; the layout
@@ -71,9 +94,13 @@ var coreToolSet = map[string]struct{}{
 func (s *Server) filterToolsByProfile(ctx context.Context, tools []mcp.Tool) []mcp.Tool {
 	tok := s.tokenFromContext(ctx)
 	core := tok != nil && tok.IsCoreProfile()
+	reader := tok != nil && !tok.HasScope(auth.ScopeWrite)
 	out := make([]mcp.Tool, 0, len(tools))
 	var layoutShown *bool
 	for _, t := range tools {
+		if reader && writeTools[t.Name] {
+			continue
+		}
 		if pt, ok := s.pluginToolOf(t.Name); ok {
 			if s.pluginToolVisible(tok, pt) {
 				out = append(out, t)

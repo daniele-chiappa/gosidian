@@ -29,6 +29,8 @@ func TestLint_BoardInvalid(t *testing.T) {
 	seed(t, v, idx, "p/tasks/drift.md", lintCard("Pronto", "working"))
 	seed(t, v, idx, "p/tasks/gone.md", lintCard("Rilascio", "submitted"))
 	seed(t, v, idx, "p/tasks/team.md", "---\ntitle: T\ntype: task\nstatus: submitted\nteam: \"[[p/squadra]]\"\nassignee: dev\n---\n")
+	seed(t, v, idx, "p/tasks/role.md", strings.Replace(lintCard("Pronto", "submitted"), "type: task\n", "type: task\nteam: \"[[p/squadra]]\"\nassignee: dev\n", 1))
+	seed(t, v, idx, "p/tasks/norole.md", strings.Replace(lintCard("Pronto", "submitted"), "type: task\n", "type: task\nteam: \"[[p/squadra]]\"\n", 1))
 	seed(t, v, idx, "p/tasks/noboard.md", strings.Replace(lintCard("Pronto", "submitted"), "[[p/board]]", "[[p/nessuna]]", 1))
 	seed(t, v, idx, "p/empty-type.md", "---\ntitle: B\ntype: board\n---\n\nNo block.\n")
 	// The unknown state on line 3 of the block, which starts on line 3.
@@ -56,7 +58,10 @@ func TestLint_BoardInvalid(t *testing.T) {
 	if is := got["p/tasks/noboard.md"]; !strings.Contains(is.Message, "p/nessuna.md is no board") {
 		t.Errorf("no board: %+v", is)
 	}
-	if len(got) != 5 || len(issues) != 5 {
+	if is := got["p/tasks/norole.md"]; !strings.Contains(is.Message, "a team or an assignee, not both") {
+		t.Errorf("a team without a role: %+v", is)
+	}
+	if len(got) != 6 || len(issues) != 6 {
 		t.Errorf("issues: %+v", issues)
 	}
 }

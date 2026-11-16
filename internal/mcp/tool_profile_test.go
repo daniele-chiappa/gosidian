@@ -146,6 +146,51 @@ func TestToolProfile_FormatToolsFollowTheirFormat(t *testing.T) {
 	lists(t, true, true)
 }
 
+// A token without the write scope does not see the tools that always write
+// (roadmap M2.3), in either profile, and they are "not found" on tools/call;
+// the tools that also read stay. A writer sees every one of them, so a name
+// in writeTools is a tool's, or a layout tool's.
+func TestToolProfile_AReaderSeesNoToolThatAlwaysWrites(t *testing.T) {
+	s := inUploadServer(t)
+	s.SetPipelinesSwitch(true)
+	s.vault.SetTableNotes(true)
+	s.vault.SetMediaNotes(true)
+	all := listToolNames(t, s, context.Background())
+	for name := range writeTools {
+		if !has(all, name) && !layoutTools[name] {
+			t.Errorf("%s is in writeTools but no tool of the server", name)
+		}
+	}
+	writer := &auth.Token{ID: "w1", Name: "writer", Project: "p", Scopes: []string{auth.ScopeRead, auth.ScopeWrite}}
+	writes := listToolNames(t, s, ctxWithToken(writer))
+	for _, name := range []string{"memory_create", "memory_in_upload", "memory_pipeline_run", "memory_task_update"} {
+		if !has(writes, name) {
+			t.Errorf("%s is not listed to a writer", name)
+		}
+	}
+	for _, profile := range []string{"", auth.ToolProfileCore} {
+		reader := &auth.Token{ID: "r1", Name: "reader", Project: "p", Scopes: []string{auth.ScopeRead}, ToolProfile: profile}
+		names := listToolNames(t, s, ctxWithToken(reader))
+		for name := range names {
+			if writeTools[name] {
+				t.Errorf("profile %q: %s, which always writes, is listed to a reader", profile, name)
+			}
+		}
+		keep := []string{"memory_bootstrap", "memory_get", "memory_search", "memory_wait_changes"}
+		if profile == "" {
+			keep = append(keep, "memory_versions", "memory_gc_attachments", "memory_automations", "memory_pipelines")
+		}
+		for _, name := range keep {
+			if !has(names, name) {
+				t.Errorf("profile %q: %s is not listed to a reader", profile, name)
+			}
+		}
+		if out := rpcMessage(t, s, ctxWithToken(reader), "tools/call", `{"name":"memory_create","arguments":{"path":"p/x.md","content":"x"}}`); !strings.Contains(out, "not found") {
+			t.Errorf("profile %q: memory_create answers a reader: %s", profile, out)
+		}
+	}
+}
+
 // A branch off costs no schema (roadmap M2.2): its tools are listed only
 // while it is on, and are "not found" on tools/call while it is off.
 func TestToolProfile_BranchToolsFollowTheirBranch(t *testing.T) {

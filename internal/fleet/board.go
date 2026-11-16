@@ -331,15 +331,38 @@ func (b Board) ColumnOf(t Task) string {
 }
 
 // Count is the cards of b among cards in its column column, but the one at
-// except.
+// except, and but the objectives that wait for their sub-tasks (Waiting):
+// nobody works on those, and their sub-tasks need the column's places.
 func (b Board) Count(cards []Task, column, except string) int {
+	waiting := Waiting(cards)
 	n := 0
 	for _, t := range cards {
-		if t.Board == b.Path && t.Path != except && strings.EqualFold(b.ColumnOf(t), column) {
+		if t.Board == b.Path && t.Path != except && !waiting[t.Path] && strings.EqualFold(b.ColumnOf(t), column) {
 			n++
 		}
 	}
 	return n
+}
+
+// Waiting are the objectives among tasks that wait for their sub-tasks:
+// working, held by nobody, with sub-tasks.
+func Waiting(tasks []Task) map[string]bool {
+	var out map[string]bool
+	parents := map[string]bool{}
+	for _, t := range tasks {
+		if t.Parent != "" {
+			parents[t.Parent] = true
+		}
+	}
+	for _, t := range tasks {
+		if parents[t.Path] && t.Status == Working && t.ClaimedBy == "" {
+			if out == nil {
+				out = map[string]bool{}
+			}
+			out[t.Path] = true
+		}
+	}
+	return out
 }
 
 // Next is the card an agent takes from b: in b's columns of submitted, in

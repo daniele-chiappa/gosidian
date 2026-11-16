@@ -654,7 +654,20 @@ func (r *Result) Markdown() string {
 			case g.Value == "":
 				fmt.Fprintf(&b, "**(closed)** (%d)\n\n", len(g.Hits))
 			case lane >= 0 && r.Spec.Lanes[lane].WIP > 0:
-				fmt.Fprintf(&b, "**%s** (%d, wip %d)\n\n", tableSafe(name), len(g.Hits), r.Spec.Lanes[lane].WIP)
+				// The objectives that wait for their sub-tasks take no place.
+				waiting := 0
+				if r.Board != nil {
+					for _, h := range g.Hits {
+						if slices.Contains(r.Board.Waiting, h.Path) {
+							waiting++
+						}
+					}
+				}
+				if waiting > 0 {
+					fmt.Fprintf(&b, "**%s** (%d, %d waiting for sub-tasks, wip %d)\n\n", tableSafe(name), len(g.Hits), waiting, r.Spec.Lanes[lane].WIP)
+				} else {
+					fmt.Fprintf(&b, "**%s** (%d, wip %d)\n\n", tableSafe(name), len(g.Hits), r.Spec.Lanes[lane].WIP)
+				}
 			default:
 				fmt.Fprintf(&b, "**%s** (%d)\n\n", tableSafe(name), len(g.Hits))
 			}

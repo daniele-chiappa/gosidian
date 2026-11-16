@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -35,6 +36,10 @@ const (
 	idleWait   = 5 * time.Second
 	idleCPU    = 10 * time.Second
 	benchProj  = "tidewater" // the benchmark vault's main project
+	// The incremental index: how many notes change before a restart, and
+	// the word they gain, which no note of the vault has.
+	nChanged    = 100
+	changedWord = "benchincremental"
 )
 
 // writesEnv lifts the per-session write limit (60 a minute by default) so
@@ -56,6 +61,11 @@ type bench struct {
 	errs      map[string]int
 	largeLat  [][]time.Duration
 	largeErrs int
+	// browser is the image of the headless browser and webDir where its
+	// client library is (web/node_modules); empty: the web UI's load is
+	// not timed.
+	browser string
+	webDir  string
 }
 
 func (b *bench) fail(format string, args ...any) {
@@ -73,6 +83,9 @@ func (b *bench) run() error {
 		b.log("run %d of %d", i, b.runs)
 		if err := b.one(i); err != nil {
 			return fmt.Errorf("run %d: %w", i, err)
+		}
+		if err := b.oneSync(i); err != nil {
+			b.fail("git sync, run %d: %v", i, err)
 		}
 		if b.largeDir != "" {
 			if err := b.oneLarge(i); err != nil {
@@ -158,6 +171,17 @@ func (b *bench) one(i int) error {
 	r.LoadAnon, r.Peak = append(r.LoadAnon, after.Anon), append(r.Peak, after.Peak)
 	if calls > 0 {
 		r.CPUPerCallUs = append(r.CPUPerCallUs, round(float64(after.CPUUsec-idle2.CPUUsec)/float64(calls), 1))
+	}
+
+	// Last, so that the browser's visits are not in the memory and CPU
+	// the run measured.
+	if b.res.SPA != nil && b.browser != "" {
+		if fcp, load, err := spaLoad(s, b.browser, b.webDir); err != nil {
+			b.fail("spa load, run %d: %v", i, err)
+		} else {
+			b.res.SPA.FCPMS, b.res.SPA.LoadMS = append(b.res.SPA.FCPMS, fcp), append(b.res.SPA.LoadMS, load)
+			b.log("  web UI: first paint %.0f ms, load %.0f ms", fcp, load)
+		}
 	}
 
 	if err := s.stop(); err != nil {
@@ -439,7 +463,42 @@ func (b *bench) oneLarge(i int) error {
 	}
 	L.WarmMS = append(L.WarmMS, ms(warm))
 	b.log("  large vault: warm start %.0f ms", ms(warm))
+
+	// The incremental index: the same restart after some notes changed.
+	if err := s.stop(); err != nil {
+		return err
+	}
+	n, err := changeNotes(vault, nChanged)
+	if err != nil {
+		return err
+	}
+	changed, err := s.start()
+	if err != nil {
+		return err
+	}
+	if c, err = newMCPClient(s.url(), tok); err != nil {
+		return err
+	}
+	if r, _, err := c.call("memory_search", map[string]any{"query": changedWord, "limit": 5}); err != nil || len(hitPaths(r)) == 0 {
+		return fmt.Errorf("the changed notes are not in the index after the restart (%v)", err)
+	}
+	L.ChangedNotes = n
+	L.ChangedMS = append(L.ChangedMS, ms(changed))
+	b.log("  large vault: start after %d notes changed %.0f ms", n, ms(changed))
 	return nil
+}
+
+// changeNotes appends a line to the first n notes of a volume, by path,
+// and returns how many it changed. The server is down: the next start
+// finds them changed.
+func changeNotes(v volume, n int) (int, error) {
+	list := fmt.Sprintf("find /v -name '*.md' -not -path '*/.*' | sort | head -n %d", n)
+	out, err := docker("run", "--rm", "--cpus=1", "-v", string(v)+":/v", helperImage, "sh", "-c",
+		list+` | while read -r f; do printf '\n`+changedWord+`\n' >> "$f"; done; `+list+" | wc -l")
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(strings.TrimSpace(out))
 }
 
 func ms(d time.Duration) float64 { return round(float64(d.Microseconds())/1000, 1) }

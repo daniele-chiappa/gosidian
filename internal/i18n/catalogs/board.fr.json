@@ -41,6 +41,11 @@
       "retro": "Rétrospective",
       "went_well": "Qu'est-ce qui a bien marché ?",
       "change": "Que changer ?"
+    },
+    "card": {
+      "waiting": "attend ses sous-tâches",
+      "cancel_run": "Une exécution travaille sur « {title} ». La déplacer vers {column} annule l'exécution.",
+      "cancel_run_ok": "Déplacer et annuler l'exécution"
     }
   }
 }

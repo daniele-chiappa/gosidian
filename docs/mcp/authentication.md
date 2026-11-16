@@ -42,6 +42,17 @@ An admin token (no `--project` scope) can also call
 `memory_create_project` / `memory_delete_project` /
 `memory_rename_project`.
 
+A token without `write` does not see the tools that write at every
+call: they are absent from `tools/list` and answer `tool not found`, so
+on a server with its branches off a reader's agent receives 37 tools
+instead of 66, about 47 KB of schemas instead of 82. The tools that also read stay: `memory_versions`
+lists the versions, `memory_gc_attachments` and `memory_automations`
+make their dry runs, and a page-layout session opens, runs and draws in
+memory up to `layout_save`. The token of an account that writes none of
+its projects has no `write` either: gosidian drops it on every request.
+The plugins' tools that write are shown only where the token writes,
+in the same way.
+
 ## Tool profiles
 
 `--tool-profile` controls which slice of the MCP tool catalogue the

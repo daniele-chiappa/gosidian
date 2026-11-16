@@ -8,10 +8,12 @@ import (
 	"maps"
 	"path"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/gosidian/gosidian/internal/fleet"
+	"github.com/gosidian/gosidian/internal/jobs"
 )
 
 // The nodes of a team's pipelines (IMP-195 phase 1b): task.run runs the
@@ -28,6 +30,7 @@ const planSchema = `{"type": "object", "required": ["action"], "properties": {
 		"key": {"type": "string"}, "assignee": {"type": "string"}, "title": {"type": "string"}, "body": {"type": "string"},
 		"depends_on": {"type": "array", "items": {"type": "string"}},
 		"paths": {"type": "array", "items": {"type": "string"}},
+		"replaces": {"type": "string"},
 		"budget_usd": {"type": "number"}}}},
 	"summary": {"type": "string"},
 	"question": {"type": "string"}}}`
@@ -40,7 +43,10 @@ const planInstructions = `Answer with JSON, as the schema says:
   and "depends_on": the keys of tasks of this answer, or the paths of tasks
   there are, that must be completed first. A task that checks the work of
   others (a review) depends on every task whose work it checks: it then
-  sees their result, not what was there before them;
+  sees their result, not what was there before them. A task given in the
+  place of one that failed or was canceled names it in "replaces" (its
+  path): the tasks that waited for that one then wait for this. Do not
+  give again a task that is still open;
 - "action": "wait", when the sub-tasks at work are enough and there is
   nothing to give yet (one failed, and the others will do its part): the
   objective waits for them;
@@ -95,7 +101,16 @@ func taskRun(ctx context.Context, env *Env, with map[string]any) (any, error) {
 	set("max_turns", c.role.MaxTurns, c.role.MaxTurns > 0)
 	set("max_seconds", c.role.MaxSeconds, c.role.MaxSeconds > 0)
 	set("max_tokens", c.role.MaxTokens, c.role.MaxTokens > 0)
-	set("max_cost", c.maxCost, c.maxCost > 0)
+	// The task's budget, within what the executor's preset lets a step
+	// spend: a budget above it would fail every attempt at the plugin's
+	// door (a coordinator on a small model gave budgets of 10 to 100
+	// USD), and a preset that lets a step spend nothing (a free
+	// endpoint) takes no max_cost at all.
+	maxCost := c.maxCost
+	if most, ok := maximum(t, "max_cost"); ok && maxCost > most {
+		maxCost = most
+	}
+	set("max_cost", maxCost, maxCost > 0)
 	// A role that writes in the vault gets a token for its folders; the
 	// others read.
 	args["mcp"] = "read"
@@ -142,6 +157,17 @@ func taskRun(ctx context.Context, env *Env, with map[string]any) (any, error) {
 // takes says whether a node type has the setting at path, for a type
 // that says (a plugin's, from its accepted manifest); another takes what
 // it takes.
+// maximum is the most the executor's input schema lets the setting at
+// path be, when it says one.
+func maximum(t Type, path ...string) (float64, bool) {
+	if s, ok := t.(interface {
+		Maximum(path ...string) (float64, bool)
+	}); ok {
+		return s.Maximum(path...)
+	}
+	return 0, false
+}
+
 func takes(t Type, path ...string) bool {
 	if s, ok := t.(interface{ Takes(path ...string) bool }); ok {
 		return s.Takes(path...)
@@ -219,9 +245,22 @@ func taskGate(_ context.Context, env *Env, with map[string]any) (any, error) {
 				notes = append(notes, p)
 			}
 		}
+		// An attempt that ended before (out of time, of tokens) may have
+		// written them already: this one, which found them, wrote none.
+		var before []string
+		if len(notes) == 0 {
+			for _, p := range env.Engine.TaskWrites(c.task.Path) {
+				if slices.ContainsFunc(c.role.Writes, func(w string) bool { return p == w || strings.HasPrefix(p, strings.TrimSuffix(w, "/")+"/") }) {
+					before = append(before, p)
+				}
+			}
+		}
 		switch {
 		case len(notes) > 0:
 			lines = append(lines, fmt.Sprintf("Notes written (%d): %s.", len(notes), strings.Join(clipList(notes, 20), ", ")))
+		case len(before) > 0:
+			notes = before
+			lines = append(lines, fmt.Sprintf("Notes written by an attempt before this one (%d), none by this one: %s.", len(before), strings.Join(clipList(before, 20), ", ")))
 		case c.role.Repo == "":
 			ok = false
 			lines = append(lines, "The agent wrote no note in "+strings.Join(c.role.Writes, ", ")+".")
@@ -241,7 +280,7 @@ func taskGate(_ context.Context, env *Env, with map[string]any) (any, error) {
 	if want, _ := next["checks"].(bool); want && ch == nil {
 		// Its node failed (on_error: continue): the run's steps say why.
 		checksOK, ok = false, false
-		lines = append(lines, "The checks did not run: their node failed (the run's steps say why).")
+		lines = append(lines, "The checks did not run: their node failed."+failedSteps(env))
 	}
 	if ch != nil {
 		// exec.run with fail_on_error false: an exit code, or none after a
@@ -277,7 +316,7 @@ func taskGate(_ context.Context, env *Env, with map[string]any) (any, error) {
 		// The checks passed and nothing was looked at: the preview's nodes
 		// failed (they go on after an error) and the run's steps say why.
 		ok = false
-		lines = append(lines, "The preview was not published or not looked at: its nodes failed (the run's steps say why).")
+		lines = append(lines, "The preview was not published or not looked at: its nodes failed."+failedSteps(env))
 	}
 	if pv != nil {
 		if good, _ := pv["ok"].(bool); good {
@@ -295,6 +334,37 @@ func taskGate(_ context.Context, env *Env, with map[string]any) (any, error) {
 			}
 		}
 	}
+	// An answer cut at the model's output limit, or none at all: a role
+	// judged on its words alone (no repository, no folder to write in)
+	// did not do its task; for the others it is a fact of the report.
+	answer, _ := agent["text"].(string)
+	answer = strings.TrimSpace(answer)
+	words := c.role.Review || c.role.Repo == "" && len(c.role.Writes) == 0 && len(c.role.DelegatesTo) == 0
+	if stop, _ := agent["stop"].(string); stop == "length" {
+		lines = append(lines, "The agent's answer was cut at its model's output limit (stop: length): it is not whole.")
+		if words {
+			ok = false
+		}
+	} else if answer == "" && words {
+		ok = false
+		lines = append(lines, "The agent gave no report: its answer is empty, and this role's work is its report.")
+	}
+	// A reviewer's verdict and problems, counted for the coordinator: a
+	// review that gives no verdict line is not one.
+	var review map[string]any
+	if c.role.Review && answer != "" {
+		rv := fleet.ReviewOf(answer)
+		review = map[string]any{"verdict": rv.Verdict, "serious": rv.Serious, "minor": rv.Minor}
+		switch {
+		case rv.Verdict == "":
+			ok = false
+			lines = append(lines, "The review has no verdict line (`VERDICT: passed` or `VERDICT: to correct`): the pipeline cannot count it.")
+		case rv.Verdict == "passed" && rv.Serious > 0:
+			lines = append(lines, fmt.Sprintf("The review: it says passed, and lists %d serious and %d minor problems open: it counts as to correct.", rv.Serious, rv.Minor))
+		default:
+			lines = append(lines, fmt.Sprintf("The review: %s, %d serious and %d minor problems left open.", rv.Verdict, rv.Serious, rv.Minor))
+		}
+	}
 	// What the pipeline found comes first, as its own: an agent may run no
 	// checks (a coordinator or a reviewer that reads only its words takes
 	// «I ran nothing» for checks never run), or run them on its side; the
@@ -307,9 +377,19 @@ func taskGate(_ context.Context, env *Env, with map[string]any) (any, error) {
 	if len(lines) == 0 {
 		facts = "What the pipeline found, after the agent: nothing to check for this role."
 	}
-	report := facts
-	if text, _ := agent["text"].(string); strings.TrimSpace(text) != "" {
-		report += "\n\nThe agent's report:\n" + clipHead(strings.TrimSpace(text), 3000)
+	// The note keeps the whole report ([agents] max_report); a message to
+	// a person or back to the agent its beginning.
+	report, whole := facts, facts
+	if answer != "" {
+		report += "\n\nThe agent's report:\n" + clipHead(answer, 3000)
+		if len(answer) > 3000 {
+			report += "\n(The beginning: the whole report is in the task's note when it closes.)"
+		}
+		max := env.Engine.cfg.Tasks.maxReport()
+		whole += "\n\nThe agent's report:\n" + clipHead(answer, max)
+		if len(answer) > max {
+			whole += fmt.Sprintf("\n(Cut at %d of %d bytes, [agents] max_report.)", max, len(answer))
+		}
 	}
 	labels := maps.Clone(defaultChoices)
 	if m, _ := with["choices"].(map[string]any); m != nil {
@@ -329,9 +409,10 @@ func taskGate(_ context.Context, env *Env, with map[string]any) (any, error) {
 		choices = []string{labels["approve"], labels["redo"], labels["discard"]}
 	}
 	needs := c.role.Approve != fleet.ApproveNone
-	text := report
+	text, prLine := report, ""
 	if prURL != "" {
-		text += "\n\nPR: " + prURL
+		prLine = "\n\nPR: " + prURL
+		text += prLine
 	}
 	link := prURL
 	if link == "" {
@@ -346,10 +427,29 @@ func taskGate(_ context.Context, env *Env, with map[string]any) (any, error) {
 	// change starts again from base, which the agent cannot restore.
 	resume := c.role.Repo != "" && branch != "" && (pushed || resumed) && len(forbidden) == 0 && len(outside) == 0
 	return map[string]any{"ok": ok, "checks_ok": checksOK, "files": nonNil(files), "outside": nonNil(outside), "forbidden": nonNil(forbidden),
-		"notes": nonNil(notes), "pr_url": prURL, "branch": branch, "resume": resume, "image": img, "link": link, "text": text, "feedback": report,
+		"notes": nonNil(notes), "pr_url": prURL, "branch": branch, "resume": resume, "image": img, "link": link, "text": text, "feedback": report, "report": whole + prLine, "review": review,
 		"title": fmt.Sprintf("%s: %s (attempt %d)", c.role.Name, c.task.Title, c.task.Attempts),
 		"ask":   ok && needs, "close": ok && !needs, "redo": !ok && again, "fail": !ok && !again,
 		"approve": c.role.Approve, "choices": choices, "labels": labels}, nil
+}
+
+// failedSteps says why the nodes of the run that failed and let it go on
+// (on_error: continue) failed: what the agent of the next attempt reads.
+func failedSteps(env *Env) string {
+	steps, err := env.Engine.runner.Store().Steps(env.Run.ID)
+	if err != nil {
+		return " The run's steps say why."
+	}
+	var out []string
+	for _, st := range steps {
+		if st.Status == jobs.Failed && strings.TrimSpace(st.Error) != "" {
+			out = append(out, fmt.Sprintf("Step %s: %s", st.Name, clipHead(strings.TrimSpace(st.Error), 600)))
+		}
+	}
+	if len(out) == 0 {
+		return " The run's steps say why."
+	}
+	return "\n" + strings.Join(out, "\n")
 }
 
 func asList(v any) []any {
@@ -370,7 +470,12 @@ func taskVerdict(_ context.Context, env *Env, with map[string]any) (any, error) 
 		return nil, errors.New("with.gate: the output of task.gate ({{ gate }})")
 	}
 	flag := func(k string) bool { b, _ := gate[k].(bool); return b }
-	text, _ := gate["text"].(string)
+	// The whole report closes the task; a gate of before 2.161 gives the
+	// message only.
+	text, _ := gate["report"].(string)
+	if text == "" {
+		text, _ = gate["text"].(string)
+	}
 	feedback, _ := gate["feedback"].(string)
 	prURL, _ := gate["pr_url"].(string)
 	approve, _ := gate["approve"].(string)
@@ -532,8 +637,30 @@ func taskPlan(_ context.Context, env *Env, with map[string]any) (any, error) {
 		key  string
 		task fleet.NewTask
 		deps []string
+		// same is the open sub-task this one repeats, which stands for it;
+		// replaces the failed or canceled one it takes the place of.
+		same     string
+		replaces string
 	}
+	byPath := map[string]fleet.Task{}
+	var open []fleet.Task
+	for _, t := range tasks {
+		byPath[t.Path] = t
+		if t.Parent == c.task.Path && !fleet.Ended(t.Status) {
+			open = append(open, t)
+		}
+	}
+	sort.Slice(open, func(i, j int) bool { return open[i].Path < open[j].Path })
+	sameWork := func(role, title string) string {
+		return role + "\x00" + strings.ToLower(strings.Join(strings.Fields(title), " "))
+	}
+	given := map[string]string{}
+	for _, t := range open {
+		given[sameWork(t.Assignee, t.Title)] = t.Path
+	}
+	var skipped, ignored []map[string]any
 	var plans []item
+	var lowered []map[string]any
 	keys := map[string]bool{}
 	for i, x := range items {
 		m, _ := x.(map[string]any)
@@ -557,6 +684,12 @@ func taskPlan(_ context.Context, env *Env, with map[string]any) (any, error) {
 			}
 		}
 		if b, _ := m["budget_usd"].(float64); b > 0 {
+			// A coordinator's agent gives no more than its team gives a
+			// task: a person may, in the task's note.
+			if most := c.team.Budget.TaskUSD; most > 0 && b > most {
+				lowered = append(lowered, map[string]any{"key": it.key, "asked_usd": b, "budget_usd": most})
+				b = most
+			}
 			it.task.BudgetUSD = b
 		}
 		for _, d := range asList(m["depends_on"]) {
@@ -570,12 +703,136 @@ func taskPlan(_ context.Context, env *Env, with map[string]any) (any, error) {
 				return nil, fmt.Errorf("plan.tasks[%d]: depends_on %q is neither a key before it nor a task of the project", i, s)
 			}
 		}
+		// A task given twice (a small model repeats its plan) is one task:
+		// the open one stands for the key.
+		if p, ok := given[sameWork(it.task.Assignee, it.task.Title)]; ok {
+			it.same = p
+			skipped = append(skipped, map[string]any{"key": it.key, "title": it.task.Title, "same_as": strings.TrimPrefix(p, "key:")})
+		} else {
+			given[sameWork(it.task.Assignee, it.task.Title)] = "key:" + it.key
+		}
+		if r := str("replaces"); r != "" && it.same == "" {
+			old, ok := byPath[fleet.LinkPath(r, env.Project)]
+			switch {
+			case !ok || old.Parent != c.task.Path:
+				ignored = append(ignored, map[string]any{"key": it.key, "replaces": r, "why": "no sub-task of this objective"})
+			case old.Status != fleet.Failed && old.Status != fleet.Canceled:
+				ignored = append(ignored, map[string]any{"key": it.key, "replaces": r, "why": "it is " + old.Status + ", neither failed nor canceled"})
+			default:
+				it.replaces = old.Path
+			}
+		}
 		keys[it.key] = true
 		plans = append(plans, it)
+	}
+	// Two open tasks on the same repository whose paths may meet work one
+	// after the other: side by side, each from the base, their pull
+	// requests conflict (the pilot's site and its check). The later one
+	// waits for the earlier, unless one already waits for the other.
+	id := func(it item) string {
+		if it.same != "" {
+			return it.same
+		}
+		return "key:" + it.key
+	}
+	replaced := map[string]string{}
+	for _, it := range plans {
+		if it.replaces != "" {
+			replaced[it.replaces] = id(it)
+		}
+	}
+	depsOf := map[string][]string{}
+	for _, t := range tasks {
+		for _, d := range t.DependsOn {
+			if n, ok := replaced[d]; ok && !fleet.Ended(t.Status) {
+				d = n
+			}
+			depsOf[t.Path] = append(depsOf[t.Path], d)
+		}
+	}
+	keyID := map[string]string{}
+	for _, it := range plans {
+		keyID["key:"+it.key] = id(it)
+	}
+	for _, it := range plans {
+		if it.same != "" {
+			continue
+		}
+		for _, d := range it.deps {
+			if n, ok := keyID[d]; ok {
+				d = n
+			}
+			depsOf[id(it)] = append(depsOf[id(it)], d)
+		}
+	}
+	var reaches func(from, to string, seen map[string]bool) bool
+	reaches = func(from, to string, seen map[string]bool) bool {
+		if from == to {
+			return true
+		}
+		if seen[from] {
+			return false
+		}
+		seen[from] = true
+		for _, d := range depsOf[from] {
+			if reaches(d, to, seen) {
+				return true
+			}
+		}
+		return false
+	}
+	type work struct {
+		id, repo string
+		paths    []string
+	}
+	meet := func(a, b []string) bool {
+		if len(a) == 0 || len(b) == 0 {
+			return true
+		}
+		for _, x := range a {
+			for _, y := range b {
+				if matchPath(x, y) || matchPath(y, x) || strings.HasPrefix(x, strings.TrimSuffix(y, "/")+"/") || strings.HasPrefix(y, strings.TrimSuffix(x, "/")+"/") {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	var works []work
+	for _, t := range open {
+		if r, ok := c.team.Role(t.Assignee); ok && r.Repo != "" {
+			works = append(works, work{t.Path, r.Repo, t.Paths})
+		}
+	}
+	var ordered []map[string]any
+	for i := range plans {
+		it := &plans[i]
+		r, ok := c.team.Role(it.task.Assignee)
+		if it.same != "" || !ok || r.Repo == "" {
+			continue
+		}
+		me := id(*it)
+		for j := len(works) - 1; j >= 0; j-- {
+			w := works[j]
+			if w.repo != r.Repo || !meet(w.paths, it.task.Paths) || reaches(me, w.id, map[string]bool{}) || reaches(w.id, me, map[string]bool{}) {
+				continue
+			}
+			it.deps = append(it.deps, w.id)
+			depsOf[me] = append(depsOf[me], w.id)
+			ordered = append(ordered, map[string]any{"key": it.key, "after": strings.TrimPrefix(w.id, "key:")})
+		}
+		works = append(works, work{me, r.Repo, it.task.Paths})
 	}
 	paths := map[string]string{}
 	var created []map[string]any
 	for _, it := range plans {
+		if it.same != "" {
+			paths[it.key] = strings.TrimPrefix(it.same, "key:")
+			if k, ok := strings.CutPrefix(it.same, "key:"); ok {
+				paths[it.key] = paths[k]
+			}
+			continue
+		}
 		for _, d := range it.deps {
 			if k, ok := strings.CutPrefix(d, "key:"); ok {
 				d = paths[k]
@@ -589,7 +846,44 @@ func taskPlan(_ context.Context, env *Env, with map[string]any) (any, error) {
 		paths[it.key] = t.Path
 		created = append(created, map[string]any{"key": it.key, "path": t.Path, "assignee": t.Assignee, "title": t.Title})
 	}
+	// The tasks that waited for a task now replaced wait for the one in
+	// its place.
+	var repointed []map[string]any
+	for _, it := range plans {
+		if it.replaces == "" || it.same != "" {
+			continue
+		}
+		for _, t := range tasks {
+			if fleet.Ended(t.Status) || !slices.Contains(t.DependsOn, it.replaces) {
+				continue
+			}
+			_, err := fl.UpdateTask(t.Path, func(cur fleet.Task, content []byte) ([]byte, error) {
+				var deps []string
+				for _, d := range cur.DependsOn {
+					if d == it.replaces {
+						d = paths[it.key]
+					}
+					if !slices.Contains(deps, fleet.Link(d)) {
+						deps = append(deps, fleet.Link(d))
+					}
+				}
+				return fleet.Set(content, map[string]any{"depends_on": deps})
+			}, Actor(env.Run.Ref))
+			if err != nil {
+				return nil, fmt.Errorf("pointing %s to the task in the place of %s: %w", t.Path, it.replaces, err)
+			}
+			repointed = append(repointed, map[string]any{"task": t.Path, "from": it.replaces, "to": paths[it.key]})
+		}
+	}
 	out["created"] = created
+	for k, v := range map[string][]map[string]any{"skipped": skipped, "ignored": ignored, "ordered": ordered, "repointed": repointed} {
+		if len(v) > 0 {
+			out[k] = v
+		}
+	}
+	if len(lowered) > 0 {
+		out["lowered"] = lowered
+	}
 	env.Engine.KickTasks()
 	return out, nil
 }

@@ -117,6 +117,9 @@ type Step struct {
 	// when it finished (IMP-195, CostOf): an agent's cost and tokens.
 	CostUSD float64 `json:"cost_usd,omitempty"`
 	Tokens  int64   `json:"tokens,omitempty"`
+	// Holds are the times the step went back to the queue held (Outcome
+	// Held): it waited for something outside it, in the same attempt.
+	Holds int `json:"holds,omitempty"`
 }
 
 // ErrNotFound: no such run or step.
@@ -211,6 +214,7 @@ func Open(path string) (*Store, error) {
 		{"runs", "team", "TEXT NOT NULL DEFAULT ''"},
 		{"steps", "cost_usd", "REAL NOT NULL DEFAULT 0"},
 		{"steps", "tokens", "INTEGER NOT NULL DEFAULT 0"},
+		{"steps", "holds", "INTEGER NOT NULL DEFAULT 0"},
 	} {
 		if err := addColumn(db, c.table, c.col, c.def); err != nil {
 			db.Close()
@@ -476,13 +480,13 @@ func (s *Store) Runs(f RunFilter) ([]Run, error) {
 	return out, rows.Err()
 }
 
-const stepCols = `run_id, name, deps, status, attempt, output, error, started, finished, not_before, lease_until, wait_until, resources, queued_at, cost_usd, tokens`
+const stepCols = `run_id, name, deps, status, attempt, output, error, started, finished, not_before, lease_until, wait_until, resources, queued_at, cost_usd, tokens, holds`
 
 func scanStep(sc scanner) (Step, error) {
 	var st Step
 	var deps, output, resources string
 	var started, finished, notBefore, lease, wait, queued int64
-	err := sc.Scan(&st.RunID, &st.Name, &deps, &st.Status, &st.Attempt, &output, &st.Error, &started, &finished, &notBefore, &lease, &wait, &resources, &queued, &st.CostUSD, &st.Tokens)
+	err := sc.Scan(&st.RunID, &st.Name, &deps, &st.Status, &st.Attempt, &output, &st.Error, &started, &finished, &notBefore, &lease, &wait, &resources, &queued, &st.CostUSD, &st.Tokens, &st.Holds)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Step{}, ErrNotFound
 	}
@@ -738,6 +742,9 @@ type StepChange struct {
 	// set, is when it entered the queue.
 	Resources []string
 	Queued    time.Time
+	// Held: the step goes back to the queue in the attempt it was in, and
+	// counts one hold more.
+	Held bool
 }
 
 // RunChange is the run's new status, when it changes.
@@ -761,17 +768,25 @@ func (s *Store) apply(runID string, changes []StepChange, rc *RunChange) error {
 	for _, c := range changes {
 		// A step that finishes with an output keeps what it spent
 		// (IMP-195).
-		spent := len(c.Output) > 0 && !c.Finished.IsZero()
+		// A held step that spent before it was held adds it: the cost of
+		// the step is the sum of those and of its end.
+		heldSpend := c.Held && c.Status == Queued && len(c.Output) > 0
+		spent := len(c.Output) > 0 && (!c.Finished.IsZero() || heldSpend)
 		var cost float64
 		var tokens int64
 		if spent {
 			cost, tokens = CostOf(c.Output)
 		}
-		_, err := tx.Exec(`UPDATE steps SET status = ?, output = CASE WHEN ? = '' THEN output ELSE ? END, error = ?, not_before = ?, wait_until = ?, finished = ?, lease_until = 0,
+		held := 0
+		if c.Held && c.Status == Queued {
+			held = 1
+		}
+		_, err := tx.Exec(`UPDATE steps SET attempt = MAX(attempt - ?, 0), holds = holds + ?, status = ?, output = CASE WHEN ? = '' OR ? THEN output ELSE ? END, error = ?, not_before = ?, wait_until = ?, finished = ?, lease_until = 0,
 			resources = CASE WHEN ? THEN ? ELSE resources END, queued_at = CASE WHEN ? > 0 THEN ? ELSE queued_at END,
-			cost_usd = CASE WHEN ? THEN ? ELSE cost_usd END, tokens = CASE WHEN ? THEN ? ELSE tokens END
+			cost_usd = CASE WHEN ? THEN ? + CASE WHEN holds > 0 THEN cost_usd ELSE 0 END ELSE cost_usd END,
+			tokens = CASE WHEN ? THEN ? + CASE WHEN holds > 0 THEN tokens ELSE 0 END ELSE tokens END
 			WHERE run_id = ? AND name = ? AND status NOT IN (?, ?, ?, ?)`,
-			c.Status, string(c.Output), string(c.Output), c.Error, ms(c.NotBefore), ms(c.WaitUntil), ms(c.Finished),
+			held, held, c.Status, string(c.Output), heldSpend, string(c.Output), c.Error, ms(c.NotBefore), ms(c.WaitUntil), ms(c.Finished),
 			c.Resources != nil, strings.Join(c.Resources, ","), ms(c.Queued), ms(c.Queued),
 			spent, cost, spent, tokens,
 			runID, c.Name, Done, Failed, Skipped, Canceled)

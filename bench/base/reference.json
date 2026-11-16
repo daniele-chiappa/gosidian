@@ -75,18 +75,18 @@
     {
       "name": "Tools, core",
       "metric": "surface.tools_core",
-      "ref": 27
+      "ref": 14
     },
     {
       "name": "tools/list, full (bytes)",
       "metric": "surface.tools_list_bytes_full",
-      "ref": 81691,
+      "ref": 81690,
       "target": 80000
     },
     {
       "name": "tools/list, core (bytes)",
       "metric": "surface.tools_list_bytes_core",
-      "ref": 38145
+      "ref": 21388
     },
     {
       "name": "Bootstrap of the project (bytes)",
@@ -211,6 +211,12 @@
       "pct": 15
     },
     {
+      "name": "Large vault: start after 100 notes changed (ms)",
+      "metric": "large.changed_ms",
+      "ref": 322.4,
+      "pct": 25
+    },
+    {
       "name": "Large vault: search, p50 (ms)",
       "metric": "large.search.p50_ms",
       "ref": 1.56,
@@ -226,10 +232,28 @@
       "target": 3
     },
     {
+      "name": "Git sync, a round: the whole vault (ms)",
+      "metric": "git_sync.first_ms",
+      "ref": 191.2,
+      "pct": 15
+    },
+    {
+      "name": "Git sync, a round: one note (ms)",
+      "metric": "git_sync.round_ms",
+      "ref": 128.9,
+      "pct": 15
+    },
+    {
       "name": "Web UI, first load (bytes sent)",
       "metric": "spa.bytes",
-      "ref": 153892,
+      "ref": 153899,
       "target": 200000
+    },
+    {
+      "name": "Web UI, first load: first paint (ms)",
+      "metric": "spa.fcp_ms",
+      "ref": 73.0,
+      "pct": 40
     },
     {
       "name": "Memory at rest, own (bytes)",
@@ -737,6 +761,47 @@
       "metrics": [
         "spa.bytes",
         "surface.tools_list_bytes_full",
+        "surface.tools_list_bytes_core"
+      ]
+    },
+    {
+      "set": "2026-11-12",
+      "why": "v2.159.0, IMP-216 phase 3: the first load goes from 153,892 to 153,899 bytes sent (+7) with the board asking before a move that cancels a run, a cost the user accepted on 2026-11-12; the shorter description of memory_task_create's board takes tools/list from 81,691 to 81,690 bytes (full) and from 38,145 to 38,144 (core)",
+      "from": [
+        "base-2026-11-12-v2.159.0.json"
+      ],
+      "metrics": [
+        "spa.bytes",
+        "surface.tools_list_bytes_full",
+        "surface.tools_list_bytes_core"
+      ]
+    },
+    {
+      "set": "2026-11-14",
+      "why": "The three measures the roadmap's M1.4 lacked, new in the bench: a round of git sync, the web UI's first paint in a headless browser, the restart of the large vault after 100 notes changed. The medians of six measures of three runs of main at 0963426 (v2.160.0) on 2026-11-14, at a load of 1.6-3.5; the rooms the user decided the same day, with nothing to reach but to keep them",
+      "from": [
+        "base-2026-11-14-m14-1.json",
+        "base-2026-11-14-m14-2.json",
+        "base-2026-11-14-m14-3.json",
+        "base-2026-11-14-m14-4.json",
+        "base-2026-11-14-m14-5.json",
+        "base-2026-11-14-m14-6.json"
+      ],
+      "metrics": [
+        "git_sync.first_ms",
+        "git_sync.round_ms",
+        "spa.fcp_ms",
+        "large.changed_ms"
+      ]
+    },
+    {
+      "set": "2026-11-15",
+      "why": "A token without the write scope does not see the 37 tools that write at every call (roadmap M2.3, v2.164.0), and the bench's core token reads only: its tools from 27 to 14, its tools/list from 38,144 bytes to 21,388. The guard of main at ff2698d (v2.164.0) on 2026-11-15, three runs at a load under 4; the user moved the reference the same day",
+      "from": [
+        "base-2026-11-15-v2.164.0.json"
+      ],
+      "metrics": [
+        "surface.tools_core",
         "surface.tools_list_bytes_core"
       ]
     }

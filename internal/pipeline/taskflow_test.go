@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gosidian/gosidian/internal/fleet"
 	"github.com/gosidian/gosidian/internal/jobs"
@@ -35,11 +36,12 @@ type crew struct {
 	execErr bool             // exec.run fails (the repository is not there)
 	soft    []any            // exec.run's fail_on_error, call by call
 	notify  []map[string]any
+	most    *float64 // the most x.run's preset lets a step spend
 }
 
 func (c *crew) Known(use string) bool {
 	switch use {
-	case "x.run", "x.pr", "exec.run", "preview.publish", "preview.check", "notify.ask":
+	case "x.run", "x.pr", "exec.run", "preview.publish", "preview.check", "notify.ask", "notify.send":
 		return true
 	}
 	return false
@@ -57,7 +59,21 @@ type picky struct{ Type }
 
 func (picky) Takes(...string) bool { return false }
 
+// capped is an executor whose preset lets a step spend at most most.
+type capped struct {
+	Type
+	most float64
+}
+
+func (c capped) Maximum(path ...string) (float64, bool) {
+	return c.most, len(path) == 1 && path[0] == "max_cost"
+}
+
 func (c *crew) Type(use string) (Type, bool) {
+	if use == "x.run" && c.most != nil {
+		t, _ := c.typ(use)
+		return capped{t, *c.most}, true
+	}
 	if use == "x.run" && c.old {
 		t, _ := c.typ(use)
 		return picky{t}, true
@@ -76,13 +92,22 @@ func (c *crew) typ(use string) (Type, bool) {
 			if len(c.answers) > 1 {
 				c.answers = c.answers[1:]
 			}
-			// An agent stopped at its limits fails with what it spent.
-			if msg, ok := out["fail"].(string); ok {
-				return nil, FailedWith{Output: out["spent"], Err: errors.New(msg)}
+			// An agent held by its provider's limit says so, with what it
+			// spent before, when it did.
+			if msg, ok := out["hold"].(string); ok {
+				err := errors.New(msg)
+				if out["spent"] != nil {
+					err = FailedWith{Output: out["spent"], Err: err}
+				}
+				return nil, Hold{Until: time.Now().Add(300 * time.Millisecond), Err: err}
 			}
 			// The notes the agent writes go through the run's MCP token.
 			for _, p := range toStrings(out["wrote"]) {
 				env.Engine.RunWrote(env.Run.ID, p)
+			}
+			// An agent stopped at its limits fails with what it spent.
+			if msg, ok := out["fail"].(string); ok {
+				return nil, FailedWith{Output: out["spent"], Err: errors.New(msg)}
 			}
 			return maps.Clone(out), nil
 		case "x.pr":
@@ -107,7 +132,7 @@ func (c *crew) typ(use string) (Type, bool) {
 			return map[string]any{"id": "pv1"}, nil
 		case "preview.check":
 			return map[string]any{"ok": true, "files": []any{map[string]any{"path": "p/attachments/shot.png"}}}, nil
-		case "notify.ask":
+		case "notify.ask", "notify.send":
 			c.notify = append(c.notify, with)
 			return map[string]any{"sent": 1}, nil
 		}
@@ -120,7 +145,8 @@ const flowTeam = "---\ntitle: squadra\ntype: team\n---\n\n```team\ncoordinator: 
 	"  dev:\n    run: x.run\n    repo: sandbox\n    paths: [web/]\n    forbid: [web/plan.js]\n    checks: npm test\n" +
 	"  doc:\n    run: x.run\n    max_tokens: 4000000\n    writes: [p/kb]\n" +
 	"  web:\n    run: x.run\n    repo: sandbox\n    checks: npm run build\n    preview: dist\n    approve: none\n" +
-	"  tester:\n    run: x.run\n    repo: sandbox\n    access: exec\n    checks: npm test\n    approve: none\n```\n"
+	"  tester:\n    run: x.run\n    repo: sandbox\n    access: exec\n    checks: npm test\n    approve: none\n" +
+	"  rev:\n    run: x.run\n```\n"
 
 func flowEngine(t *testing.T) (*Engine, *fakeHost, *crew) {
 	e, host := newEngine(t, Config{Tasks: TaskConfig{MaxAttempts: 2}})

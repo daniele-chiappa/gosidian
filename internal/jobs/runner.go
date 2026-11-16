@@ -19,6 +19,10 @@ type Outcome struct {
 	Error     string
 	RetryAt   time.Time
 	WaitUntil time.Time
+	// Held, with Queued: the step waited for something outside it (a
+	// plugin away, a provider's limit). It tries again from RetryAt in
+	// the same attempt.
+	Held bool
 }
 
 // Executor runs the steps of one kind of run.
@@ -565,7 +569,7 @@ func (r *Runner) runStep(ctx context.Context, st Step) {
 	case Done, Failed:
 		c.Finished = now
 	case Queued:
-		c.NotBefore, c.Queued = out.RetryAt, now
+		c.NotBefore, c.Queued, c.Held = out.RetryAt, now, out.Held
 	case Waiting:
 		c.WaitUntil = out.WaitUntil
 	default:

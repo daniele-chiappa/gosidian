@@ -138,7 +138,8 @@ func startPipelines(ctx context.Context, cfg *config.Config, sdir string, runner
 		MaxSyncWait:    pc.MaxSyncWait,
 		RunTokenRate:   pc.RunTokenRate,
 		Categories:     categories(pc.Categories),
-		Tasks:          pipeline.TaskConfig{Lease: cfg.Agents.Lease, MaxAttempts: cfg.Agents.MaxAttempts, MaxTasks: cfg.Agents.MaxTasks},
+		Tasks: pipeline.TaskConfig{Lease: cfg.Agents.Lease, MaxAttempts: cfg.Agents.MaxAttempts, MaxTasks: cfg.Agents.MaxTasks, HoldMax: cfg.Agents.HoldMax,
+			MaxReport: cfg.Agents.MaxReport, MaxPromptReport: cfg.Agents.MaxPromptReport},
 	}, sec, slog.Default())
 	reg, err := newPlugins(pc, sdir, sec, slog.Default())
 	if err != nil {

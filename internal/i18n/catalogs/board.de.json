@@ -41,6 +41,11 @@
       "retro": "Retrospektive",
       "went_well": "Was lief gut?",
       "change": "Was ändern wir?"
+    },
+    "card": {
+      "waiting": "wartet auf ihre Teilaufgaben",
+      "cancel_run": "Ein Lauf arbeitet an „{title}“. Das Verschieben nach {column} bricht den Lauf ab.",
+      "cancel_run_ok": "Verschieben und Lauf abbrechen"
     }
   }
 }

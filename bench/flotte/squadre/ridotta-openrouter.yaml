@@ -1,0 +1,52 @@
+# The reduced objective (ridotto/obiettivo.md) on open-weight models from a
+# provider (IMP-195 phase 3c, 2026-11-13), to compare with the local team
+# (locale.yaml) on the same bench: the coordinator and the developer on
+# deepseek-v4.1-flash, the knowledge on qwen3.8-max (the lab's preset
+# pi-lab, on OpenRouter), the reviewer on Claude Code with opus, the same
+# judge as the local round. Ten minutes an agent, fifteen for the
+# knowledge (qwen3.8-max lost two attempts at the plan on ten), one at a
+# time. The day's budget counts what the team spent earlier in the day.
+coordinator: coordinatore
+split: context
+budget: {day_usd: 13, task_usd: 1}
+max_agents: 1
+max_rounds: 5
+alert: ["#lab/fitness"]
+approvers: [daniele]
+roles:
+  coordinatore:
+    agent: "[[fitness/agents/coordinatore]]"
+    run: pi-lab.run
+    model: deepseek-v4.1-flash
+    max_turns: 20
+    max_seconds: 600
+    delegates_to: [conoscenza, sviluppo, revisore]
+  conoscenza:
+    agent: "[[fitness/agents/conoscenza]]"
+    run: pi-lab.run
+    model: qwen3.8-max
+    max_turns: 30
+    max_seconds: 900
+    max_tokens: 3000000
+    writes: [fitness/conoscenza]
+  sviluppo:
+    agent: "[[fitness/agents/sviluppo]]"
+    run: pi-lab.run
+    model: deepseek-v4.1-flash
+    access: exec
+    max_turns: 60
+    max_seconds: 600
+    max_tokens: 6000000
+    repo: agents-fitness
+    paths: [web/, data/, test/]
+    forbid: [package.json, build.js]
+    checks: npm test && npm run build
+    preview: dist
+    approve: merge
+  revisore:
+    agent: "[[fitness/agents/revisore]]"
+    run: claude.run
+    model: opus
+    max_turns: 40
+    max_seconds: 840
+    review: true

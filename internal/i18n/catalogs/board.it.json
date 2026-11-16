@@ -41,6 +41,11 @@
       "retro": "Retrospettiva",
       "went_well": "Cosa è andato bene?",
       "change": "Cosa cambiare?"
+    },
+    "card": {
+      "waiting": "aspetta i sotto-task",
+      "cancel_run": "Una run sta lavorando su «{title}». Spostarla in {column} annulla la run.",
+      "cancel_run_ok": "Sposta e annulla la run"
     }
   }
 }

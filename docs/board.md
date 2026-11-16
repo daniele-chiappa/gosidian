@@ -12,9 +12,9 @@ rules: the limits, the order, the columns of each state.
   the note says, in its own words, what done means on this board and how
   the work goes: every agent that takes a card reads it.
 - **A card** is a task of the project's `tasks/` folder, a row of the
-  database `tasks.md`, with `board`, `column` and `rank`. It has no team:
-  the [teams of agents](agents.md) work on their own tasks, and take no
-  card yet.
+  database `tasks.md`, with `board`, `column` and `rank`. Without a team,
+  an agent in a session or a person works on it; with a team and a role,
+  the [team's runs](#teams) take it on the server.
 
 There is no default board: write the note, as below, where the project
 wants it.
@@ -122,9 +122,8 @@ What to do, and how it is accepted.
 
 A card is a task, with the task's other fields: `depends_on` (a card
 starts when they are completed), `claimed_by`, `lease_until` and
-`attempts` (kept by the server), `paths`, `forbid`, `budget_usd`. A card
-has no `team` or `assignee`: the teams take no card yet, and
-`memory_task_create` refuses a card with them.
+`attempts` (kept by the server), `paths`, `forbid`, `budget_usd`. With
+`team` and `assignee`, both or neither, it is a [team's card](#teams).
 
 The first card of a project rewrites the `fields` of its `tasks.md`, as
 the server: `backlog` goes first among the options of `status`, `team`
@@ -232,7 +231,9 @@ The answer of each tool on a card holds the board's text (`board.text`,
 for a token that reads): its note without the frontmatter and the board
 and view blocks, the first 8 KB of it; the board's stale cards
 (`board.stale`), and a `warning` when the card took a column past its
-limit. The agent of a team's run creates and takes no card.
+limit. An agent in a session takes no card of a team with
+`memory_task_claim(board)`; the agent of a team's run takes none, and the
+sub-tasks it creates go on its own card's board ([Teams](#teams)).
 
 `memory_get` of the board's note with `render_views: true` shows the
 cards under the block: first its flow, its iteration and the
@@ -256,6 +257,47 @@ _Iteration [[myproject/iterations/12\|Iteration 12]]: Sign in with passkeys, 202
 
 - [[myproject/tasks/20261029-090000-the-old-form\|The old form]]
 ```
+
+## Teams
+
+With the pipelines on, a card with `team` and `assignee` is a task of
+that [team's role](agents.md): `memory_task_create(project, board, team,
+assignee, title, …)` writes one, and a person gives a card to a team with
+the two fields. The team's pipelines take it as any of its tasks, by the
+board's rules:
+
+- **The order.** The ready cards of a board start in its order: its
+  columns of `submitted` in their order, each by rank. A card in a column
+  of `backlog` does not start.
+- **The start.** The run that takes a card puts it at the bottom of the
+  board's first column of `working`. When that column is at its limit and
+  the board is `hard` for agents, the card waits in its place, as a task
+  waits for its team's budget: `memory_tasks` says why, and it starts
+  when a place is free.
+- **The run's moves.** As the run moves the task (`input-required`,
+  `review`, closed, back to `submitted` for another attempt), the card
+  goes to the first column of that state, with its dates. These moves are
+  never refused, since a run cannot stay halfway: a column past its limit
+  shows so. A card given back goes to the top of the first column of
+  `submitted`.
+- **Objectives.** A card for the team's coordinator is an objective: its
+  sub-tasks are cards of the same board and iteration, at the bottom of
+  the first column of `submitted` (one that waits for a person, of
+  `input-required`; a board without that column leaves it a task off the
+  board). An objective that waits for its sub-tasks, `working` and held
+  by nobody, takes no place of its column's limit, for agents and people
+  alike: its sub-tasks need the places.
+- **Done.** The team's own gate comes first: its checks and, for a role
+  that asks one, a person's approval of the pull request. Then a card
+  done by a person (`done_by`, or the board's `done`) goes to the column
+  of `review` with its report, and a person closes it; one done by an
+  agent closes with its run.
+- **People.** A person who moves a card a run holds back to a column of
+  `backlog` or `submitted`, or closes it, cancels the run: the web UI
+  asks first. The card stays where the person put it; a pull request the
+  run opened stays open, for the person to close.
+
+With the pipelines off, a team's card waits: nothing takes it.
 
 ## The web UI
 
@@ -291,6 +333,9 @@ each of the block's, empty ones too, with its count against its limit
   (85%: 4 d)", "Closed: 3 · 5 · 2 · 4 a week", "Stale: 2". A stale card
   says for how long ("stale for 5 d"), in its name too for a screen
   reader.
+- A [team's card](#teams) shows its role. An objective that waits for its
+  sub-tasks says so, and its column counts the others against its limit.
+  A move that cancels the run holding a card asks first.
 
 `PATCH /api/v1/notes/<card>/frontmatter` moves a card when it touches its
 place, as the web UI does:
@@ -338,3 +383,4 @@ card's fields). And an iteration without its board, start or end, with
 its end before its start, or whose days meet another's of its board; a
 card whose `iteration` is none of its board's; a `started` or `finished`
 that is no time, a `finished` on a card not closed, or before its start.
+And a card with a `team` and no `assignee`, or the other way.

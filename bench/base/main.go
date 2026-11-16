@@ -75,6 +75,8 @@ func runCmd(args []string) error {
 	repo := fs.String("repo", ".", "the gosidian repository, for the code at the version")
 	ref := fs.String("ref", "", "the git ref of the image's code (default: the version, when it is a tag)")
 	out := fs.String("out", "", "results file (default bench/results/base-<date>-<label>.json)")
+	webDir := fs.String("web", "web", "the web UI's sources with node_modules installed, for the browser that times the first load; without playwright-core there, it is not timed")
+	browser := fs.String("browser", "", "the image of the headless browser (default: Playwright's, at the version of -web's package.json)")
 	var env envList
 	fs.Var(&env, "env", "KEY=VALUE for the server, repeatable: a setting to measure against the default")
 	fs.Parse(args)
@@ -118,6 +120,9 @@ func runCmd(args []string) error {
 	}
 	logf := func(format string, a ...any) { fmt.Fprintf(os.Stderr, format+"\n", a...) }
 	b := &bench{image: *image, vaultDir: absVault, largeDir: absLarge, runs: *runs, env: env, questions: qs, queries: byID, res: res, log: logf}
+	if b.browser, b.webDir, err = browserFor(*webDir, *browser); err != nil {
+		logf("web UI: the first load is not timed: %v", err)
+	}
 	if err := b.run(); err != nil {
 		return err
 	}

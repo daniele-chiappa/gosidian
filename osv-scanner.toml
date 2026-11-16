@@ -19,8 +19,8 @@ reason = "gosidian's one MCP client, to its plugins, passes its own http.Client,
 # Alpine's zlib, in every Alpine image.
 [[IgnoredVulns]]
 id = "CVE-2026-4738"
-ignoreUntil = 2026-11-21
-reason = "The flaw is in GDAL's bundled copy of zlib's contrib/infback9 (inftree9.c), which Alpine's libz does not build, and nothing in the images uses infback9. Alpine's zlib 1.4-r0 (2026-11-06) comes with the images built once it is two weeks old."
+ignoreUntil = 2026-11-24
+reason = "The flaw is in GDAL's bundled copy of zlib's contrib/infback9 (inftree9.c), which Alpine's libz does not build, and nothing in the images uses infback9. Alpine's zlib 1.4-r0 (2026-11-06), two weeks old on 2026-11-20, comes with the images built that day and released on 2026-11-23."
 
 # zip 3.0.0, in the crates of the page-layout editor that read EPUB, IDML
 # and its own files.

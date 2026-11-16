@@ -9,7 +9,8 @@ package mcp
 // memory_task_claim, keeps it with heartbeats, and moves and closes the
 // tasks it holds (name@id). The same tools work on a board's cards, which
 // have no team (IMP-216, board.go): an agent takes the board's next card,
-// moves it between columns and closes it, within the board's limits.
+// moves it between columns and closes it, within the board's limits. A
+// card with a team (phase 3) its team's runs take, as any of its tasks.
 
 import (
 	"cmp"
@@ -38,11 +39,11 @@ func (s *Server) registerTaskTools() {
 	), s.handleTasks)
 
 	s.impl.AddTool(mcp.NewTool("memory_task_create",
-		mcp.WithDescription("Create a task (IMP-195) for a team's role: submitted, its dependencies completed, it starts the role's pipeline; a run token gives tasks only to roles yours delegates to, under your task. Or a board's card, no team (IMP-216)."),
+		mcp.WithDescription("Create a task (IMP-195) for a team's role: submitted, its dependencies completed, it starts the role's pipeline; a run token gives tasks only to roles yours delegates to, under your task. Or a board's card (IMP-216)."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("The project. "+scopedProjectNote)),
 		mcp.WithString("team", mcp.Description("The team ([[p/squadra]]), with assignee.")),
 		mcp.WithString("assignee", mcp.Description("The team's role doing it.")),
-		mcp.WithString("board", mcp.Description("Or a card's board.")),
+		mcp.WithString("board", mcp.Description("Card's board; team or not.")),
 		mcp.WithString("column", mcp.Description("A card's column (backlog or submitted); default the first.")),
 		mcp.WithString("iteration", mcp.Description("A card's iteration, of its board.")),
 		mcp.WithString("title", mcp.Required(), mcp.Description("What to do, one line.")),
@@ -193,7 +194,9 @@ func (s *Server) handleTasks(ctx context.Context, req mcp.CallToolRequest) (*mcp
 			continue
 		}
 		r := row{Task: t}
-		if t.Status == fleet.Submitted {
+		if t.Status == fleet.Submitted || t.Status == fleet.Working {
+			// A task at work waits too: its run held, its objective's
+			// coordinator without budget.
 			r.Waits = waits[t.Path]
 		}
 		rows = append(rows, r)
@@ -254,10 +257,10 @@ func (s *Server) handleTaskCreate(ctx context.Context, req mcp.CallToolRequest) 
 	teamPath := fleet.LinkPath(req.GetString("team", ""), project)
 	assignee := strings.TrimSpace(req.GetString("assignee", ""))
 	switch board := fleet.LinkPath(req.GetString("board", ""), project); {
-	case board != "" && (teamPath != "" || assignee != ""):
-		return mcp.NewToolResultError("a card of a board has no team: the fleet works on boards with a later phase (IMP-216). Leave out board, or team and assignee"), nil
+	case board != "" && (teamPath == "") != (assignee == ""):
+		return mcp.NewToolResultError("team and assignee together, for a card a team's role works on, or neither"), nil
 	case board != "":
-		return s.createCard(ctx, tok, req, project, board, title)
+		return s.createCard(ctx, tok, req, project, board, title, teamPath, assignee)
 	case teamPath == "" || assignee == "":
 		return mcp.NewToolResultError("team and assignee for a task of a team's role, or board for a card"), nil
 	}
@@ -341,7 +344,14 @@ func (s *Server) handleTaskCreate(ctx context.Context, req mcp.CallToolRequest) 
 		return res, nil
 	}
 	n.DependsOn = deps
-	t, err := s.fleetCreate(ctx, taskWrite{tok: tok}, project, n)
+	// The sub-task of a card is a card of its board.
+	w := taskWrite{tok: tok}
+	in, ranks, unlock := s.subCard(ctx, project, &n)
+	defer unlock()
+	t, err := s.fleetCreate(ctx, w, project, n)
+	if err == nil {
+		err = s.renumber(ctx, w, in, ranks)
+	}
 	if err != nil {
 		return taskError(err), nil
 	}
@@ -364,10 +374,10 @@ func dependsOn(req mcp.CallToolRequest, project string, tasks []fleet.Task) ([]s
 // createCard creates a card of the board at board (IMP-216): in its
 // column, of backlog or submitted, at the bottom and within its limit. The
 // first card of a project makes its database of the tasks hold cards.
-func (s *Server) createCard(ctx context.Context, tok *auth.Token, req mcp.CallToolRequest, project, board, title string) (*mcp.CallToolResult, error) {
+func (s *Server) createCard(ctx context.Context, tok *auth.Token, req mcp.CallToolRequest, project, board, title, teamPath, assignee string) (*mcp.CallToolResult, error) {
 	switch {
 	case tok.Kind == auth.KindRun:
-		return mcp.NewToolResultError("the agent of a run creates no card: its tasks are its team's"), nil
+		return mcp.NewToolResultError("the agent of a run creates no card: its sub-tasks go on its own card's board"), nil
 	case req.GetBool("hold", false), req.GetString("parent", "") != "":
 		return mcp.NewToolResultError("hold and parent are for a team's task: a card waits in its column"), nil
 	case !strings.HasPrefix(board, project+"/"):
@@ -400,7 +410,22 @@ func (s *Server) createCard(ctx context.Context, tok *auth.Token, req mcp.CallTo
 	default:
 		return mcp.NewToolResultErrorf("done_by %q: agent or person", doneBy), nil
 	}
+	// A card for a team's role (phase 3): ready, the role's pipeline takes it.
+	if teamPath != "" {
+		teams, err := s.fleetTeams(project)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		team, ok := teams[teamPath]
+		if !ok {
+			return mcp.NewToolResultErrorf("team %s is no team of project %s, or its block does not read (memory_lint, rule team-invalid)", teamPath, project), nil
+		}
+		if _, ok := team.Role(assignee); !ok {
+			return mcp.NewToolResultErrorf("role %q is no role of %s", assignee, teamPath), nil
+		}
+	}
 	n := fleet.NewTask{Title: title, Body: req.GetString("body", ""), Board: b.Path, Column: c.Name, Status: c.Status, DoneBy: doneBy,
+		Team: teamPath, Assignee: assignee,
 		Paths: req.GetStringSlice("paths", nil), Forbid: req.GetStringSlice("forbid", nil), BudgetUSD: req.GetFloat("budget_usd", 0)}
 	for _, f := range req.GetStringSlice("for", nil) {
 		fp := fleet.LinkPath(f, project)
@@ -777,6 +802,7 @@ func (s *Server) handleCreateTeam(ctx context.Context, req mcp.CallToolRequest) 
 		{project + "/" + fleet.Database, fleet.DatabaseNote(project), true},
 		{project + "/" + name + "-tasks.md", fleet.ViewNote(project, teamPath), false},
 		{fleet.WorkPath(project, name), fleet.WorkPipeline(teamPath), false},
+		{fleet.AlertPath(project, name), fleet.AlertPipeline(teamPath), false},
 	}
 	if coordinator != "" {
 		notes = append(notes, note{fleet.CoordinatePath(project, name), fleet.CoordinatePipeline(teamPath), false})

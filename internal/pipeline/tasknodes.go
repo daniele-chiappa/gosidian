@@ -18,9 +18,6 @@ import (
 // task.complete closes it with the report. Only the run that holds a task
 // moves or closes it.
 
-// maxReport caps a report of another task in a prompt.
-const maxReport = 4 << 10
-
 func taskFleet(env *Env) (Fleet, error) {
 	fl, ok := env.Engine.host.(Fleet)
 	if !ok {
@@ -67,7 +64,7 @@ func roleOutput(r fleet.Role) map[string]any {
 	return map[string]any{"name": r.Name, "agent": r.Agent, "run": r.Run, "model": r.Model, "effort": r.Effort,
 		"max_turns": r.MaxTurns, "max_seconds": r.MaxSeconds, "max_tokens": r.MaxTokens, "access": r.Access, "repo": r.Repo, "host": r.Host,
 		"paths": nonNil(r.Paths), "forbid": nonNil(r.Forbid), "checks": r.Checks, "writes": nonNil(r.Writes),
-		"preview": r.Preview, "delegates_to": nonNil(r.DelegatesTo), "approve": r.Approve}
+		"preview": r.Preview, "delegates_to": nonNil(r.DelegatesTo), "approve": r.Approve, "review": r.Review}
 }
 
 // body is a note's text below its frontmatter and its title.
@@ -105,9 +102,14 @@ func (env *Env) AgentPrompt(link string) (string, error) {
 	return untitled(nd.Body), nil
 }
 
-// report is the report a task closed with last ("" before it closed).
-func report(content []byte) string {
-	return clipHead(fleet.LastSection(content, "Report"), maxReport)
+// report is the report a task closed with last ("" before it closed), at
+// most max bytes: one cut says so, and where the whole of it is.
+func report(content []byte, path string, max int) string {
+	r := fleet.LastSection(content, "Report")
+	if len(r) <= max {
+		return r
+	}
+	return clipHead(r, max) + fmt.Sprintf("\n\n(Cut at %d of %d bytes: the whole report is in the note %s, section Report.)", max, len(r), path)
 }
 
 // taskCtx is a task with what its agent needs: its team, its role, the
@@ -169,7 +171,7 @@ func loadTaskCtx(env *Env, with map[string]any, extra string) (*taskCtx, error) 
 		if err != nil {
 			return ""
 		}
-		return report(rc)
+		return report(rc, x.Path, env.Engine.cfg.Tasks.maxPromptReport())
 	}
 	for _, d := range t.DependsOn {
 		if x, ok := byPath[d]; ok {
@@ -223,12 +225,16 @@ func (c *taskCtx) writePrompt(extra string) string {
 	if len(role.Writes) > 0 {
 		b.WriteString("You may write notes of the vault only in: " + strings.Join(role.Writes, ", ") + ".\n")
 	}
+	if role.Review {
+		b.WriteString("\n" + fleet.ReviewInstructions + "\n")
+	}
 	if len(c.deps) > 0 {
 		b.WriteString("\nThe tasks this one builds on, and what they reported. " + reportsNote + "\n")
 		for _, d := range c.deps {
 			fmt.Fprintf(&b, "\n### %s (%s, %s)\n\n%s\n", d["title"], d["assignee"], d["status"], orNone(d["report"].(string)))
 		}
 	}
+	reviews := false
 	if len(role.DelegatesTo) > 0 {
 		b.WriteString("\nYou coordinate. The roles you give tasks to:\n")
 		for _, name := range role.DelegatesTo {
@@ -257,6 +263,10 @@ func (c *taskCtx) writePrompt(extra string) string {
 			if r.Approve == fleet.ApproveMerge {
 				b.WriteString(", merged after a person approves")
 			}
+			if r.Review {
+				b.WriteString(", reviews: its report ends with a verdict and its problems, serious or minor, which the pipeline counts")
+				reviews = true
+			}
 			b.WriteString(")\n")
 		}
 		b.WriteString("The pipeline runs a role's checks on the agent's branch and merges after the approval: ask an agent for neither. An agent with a repository edits its files; only one that runs commands can run anything itself.\n")
@@ -265,6 +275,11 @@ func (c *taskCtx) writePrompt(extra string) string {
 			b.WriteString("Split the work along a chain of crafts, each task passing its result to the next.\n")
 		} else {
 			b.WriteString("Split the work by context: give each task a whole piece of it, with what it needs to know, rather than a step of a chain.\n")
+		}
+		if reviews && team.ReopenOn == fleet.ReopenSerious {
+			b.WriteString("A review's report says, among the pipeline's facts, its verdict and how many serious and minor problems it leaves open. Only the serious ones reopen the work: for a review with minor problems only give no task; the work is accepted, and your summary lists those problems as left open. Bring what is made from the reviewed work in line with it (an app's data built from a note) once, after the review that leaves no serious problem, not after each correction.\n")
+		} else if reviews {
+			b.WriteString("A review's report says, among the pipeline's facts, its verdict and how many serious and minor problems it leaves open: every problem reopens the work (the team's reopen_on: any).\n")
 		}
 	}
 	if len(c.kids) > 0 {
@@ -379,8 +394,15 @@ func taskComplete(_ context.Context, env *Env, with map[string]any) (any, error)
 	}
 	text, _ := with["report"].(string)
 	at := env.Engine.now().In(clock.Location())
+	// A card a person closes (its done_by, or its board's done) goes to
+	// review with the report, after its team's own gate: the run lets it go.
+	bs, _ := env.Engine.host.(Boards)
 	t, err := fl.UpdateTask(p, func(cur fleet.Task, content []byte) ([]byte, error) {
-		return fleet.Complete(cur, content, "run-"+env.Run.ID, status, text, at)
+		if status == fleet.Completed && bs != nil && bs.DoneByPerson(cur) {
+			return fleet.ToReview(cur, content, "run-"+env.Run.ID, text, at)
+		}
+		cost, tokens := env.Engine.runSpend(env.Run.ID)
+		return fleet.CompleteAttempt(cur, content, "run-"+env.Run.ID, status, text, at, cost, tokens)
 	}, Actor(env.Run.Ref))
 	if err != nil {
 		return nil, err

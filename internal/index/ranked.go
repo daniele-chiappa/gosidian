@@ -1,7 +1,6 @@
 package index
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -72,14 +71,6 @@ const (
 	archivedFactor = 0.7
 )
 
-// longNote is the size, in bytes, from which a candidate's snippet waits
-// until the candidate is a hit; tests lower it. FTS5 cuts a snippet from the
-// whole body, about 10 ms a megabyte, and on a vault of long documents the
-// snippets of candidates the search then left out were most of its time. A
-// snippet that waits costs the match one more run, which a shorter note
-// would not repay.
-var longNote int64 = 8 << 10
-
 var (
 	bm25Expr    = fmt.Sprintf("bm25(notes_fts, %.1f, %.1f, %.1f)", weightTitle, weightMeta, weightBody)
 	snippetExpr = fmt.Sprintf(`snippet(notes_fts, 2, '<mark>', '</mark>', '…', %d)`, snippetTokens)
@@ -131,7 +122,7 @@ func (i *Index) SearchWith(q string, opts SearchOptions) ([]SearchHit, error) {
 	}
 	if len(queries) == 1 {
 		parts := i.queryParts(queries[0])
-		hits, err := i.rankedMatch(joinParts(parts, " AND "), queries[0], opts, limit, longNote)
+		hits, err := i.rankedMatch(joinParts(parts, " AND "), queries[0], opts, limit)
 		if err != nil {
 			return nil, err
 		}
@@ -149,7 +140,7 @@ func (i *Index) SearchWith(q string, opts SearchOptions) ([]SearchHit, error) {
 	parts := make([][]queryPart, 0, len(queries))
 	for _, query := range queries {
 		ps := i.queryParts(query)
-		hits, err := i.rankedMatch(joinParts(ps, " AND "), query, opts, depth, longNote)
+		hits, err := i.rankedMatch(joinParts(ps, " AND "), query, opts, depth)
 		if err != nil {
 			return nil, err
 		}
@@ -216,23 +207,26 @@ type candidate struct {
 	score      float64 // text relevance, then × structural factors; unrounded
 }
 
-// rankedHit is a hit as one query ranks it, with what its snippet needs
-// when it waits (longNote): the note's id, that query's MATCH expression,
-// and for a huge note (hugeNote) the query itself. score is the unrounded
-// relevance its Score is relative to.
+// rankedHit is a hit as one query ranks it, with what its snippet needs:
+// the note's id, that query's MATCH expression, and for a huge note
+// (hugeNote) the query itself. score is the unrounded relevance its Score is
+// relative to.
 type rankedHit struct {
 	SearchHit
 	id    int64
 	size  int64
 	score float64
-	match string // set while the snippet waits
+	match string // set until withSnippets cuts the snippet
 	query string
 }
 
 // rankedMatch returns up to limit hits of the query q, best first: the notes
-// match finds. The snippets of the notes from snippetFrom bytes up are left
-// to withSnippets.
-func (i *Index) rankedMatch(match, q string, opts SearchOptions, limit int, snippetFrom int64) ([]rankedHit, error) {
+// match finds. Their snippets wait for withSnippets: with ORDER BY … LIMIT
+// SQLite computes the columns of every row that enters the best ones, even
+// those that then leave, and a snippet in the pool cost a search of the
+// large vault of level B more than the second statement that cuts the hits'
+// only, since the prefixes of one to three letters have an index.
+func (i *Index) rankedMatch(match, q string, opts SearchOptions, limit int) ([]rankedHit, error) {
 	if match == "" {
 		return nil, nil
 	}
@@ -241,14 +235,13 @@ func (i *Index) rankedMatch(match, q string, opts SearchOptions, limit int, snip
 	// Prepared once per scope shape: the text changes only with the number
 	// of projects in or out, never with the query.
 	rows, err := prepDB{i.stmts}.Query(`
-        SELECT n.id, n.path, n.title, n.mtime, n.importance, n.size, `+bm25Expr+`,
-               CASE WHEN n.size < ? THEN `+snippetExpr+` END
+        SELECT n.id, n.path, n.title, n.mtime, n.importance, n.size, `+bm25Expr+`
         FROM notes_fts
         JOIN notes n ON n.id = notes_fts.rowid
         WHERE notes_fts MATCH ?`+scope+`
         ORDER BY `+bm25Expr+`
         LIMIT ?
-    `, append(append([]any{snippetFrom, match}, args...), pool)...)
+    `, append(append([]any{match}, args...), pool)...)
 	if err != nil {
 		return nil, err
 	}
@@ -256,19 +249,14 @@ func (i *Index) rankedMatch(match, q string, opts SearchOptions, limit int, snip
 	// Scanned into once per search: declared in the loop, each row's would
 	// escape to the heap.
 	var bm25 float64
-	var snippet sql.NullString
 	for rows.Next() {
 		c := &candidate{}
-		if err := rows.Scan(&c.hit.id, &c.hit.Path, &c.hit.Title, &c.mtime, &c.importance, &c.hit.size, &bm25, &snippet); err != nil {
+		if err := rows.Scan(&c.hit.id, &c.hit.Path, &c.hit.Title, &c.mtime, &c.importance, &c.hit.size, &bm25); err != nil {
 			rows.Close()
 			return nil, err
 		}
 		c.score = -bm25 // bm25() is negative, lower = better
-		if snippet.Valid {
-			c.hit.Snippet = snippet.String
-		} else {
-			c.hit.match, c.hit.query = match, q
-		}
+		c.hit.match, c.hit.query = match, q
 		cands = append(cands, c)
 	}
 	rows.Close()
@@ -300,8 +288,8 @@ func (i *Index) rankedMatch(match, q string, opts SearchOptions, limit int, snip
 	return out, nil
 }
 
-// withSnippets cuts the snippets that waited, with one statement for the
-// hits of each query, and returns the hits. The statement runs the query's
+// withSnippets cuts the hits' snippets, with one statement for the hits of
+// each query, and returns the hits. The statement runs the query's
 // match again over the hits' rows only: the unary + keeps SQLite from
 // handing the list to FTS5, which would run the whole match once per row.
 // A huge note's snippet is cut from its body here (cutSnippet).

@@ -89,6 +89,11 @@ func checkBoards(_ context.Context, l *Linter, project string) ([]Issue, error) 
 		add(pair[1].Path, 0, fmt.Sprintf("the iteration's days meet those of %s, of the same board: one iteration at a time", pair[0].Path), itHint)
 	}
 	for _, t := range cards {
+		// A team's card (phase 3) names its team and its role.
+		if (t.Team == "") != (t.Assignee == "") {
+			add(t.Path, 0, "the card has a team or an assignee, not both: no run takes it, and no agent in a session",
+				"give it team and assignee, for a team's role, or neither")
+		}
 		for _, msg := range cardDates(t) {
 			add(t.Path, 0, msg, "the server writes started and finished as the card moves: take away what was written by hand")
 		}

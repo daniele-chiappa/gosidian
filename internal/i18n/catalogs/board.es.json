@@ -41,6 +41,11 @@
       "retro": "Retrospectiva",
       "went_well": "¿Qué salió bien?",
       "change": "¿Qué cambiamos?"
+    },
+    "card": {
+      "waiting": "espera a sus subtareas",
+      "cancel_run": "Una ejecución está trabajando en «{title}». Moverla a {column} cancela la ejecución.",
+      "cancel_run_ok": "Mover y cancelar la ejecución"
     }
   }
 }

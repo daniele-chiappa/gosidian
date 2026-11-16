@@ -44,3 +44,4 @@ roles:
     model: sonnet
     max_turns: 30
     max_seconds: 780
+    review: true

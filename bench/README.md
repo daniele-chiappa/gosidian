@@ -73,6 +73,15 @@ results record the load before and after. The vault is copied just before
 each start, so its files are in the host's page cache: a cold start
 measures building the index, not reading the disk.
 
+Three of its measures need more than the server. A round of git sync runs
+on a server of its own, pushing to a bare repository in a volume. The
+restart after 100 notes changed is on the large vault. The web UI's first
+paint is timed in Playwright's headless browser, inside the server's
+network: it needs `web/node_modules` (`npm ci` in `web/`, or `-web DIR`)
+and Playwright's image at the version of `web/package.json` already on the
+host (or `-browser IMAGE`). Without them the load is not timed, the bench
+says so, and the guard then counts that number missing.
+
 ### The guard
 
 ```bash

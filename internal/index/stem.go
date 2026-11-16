@@ -164,11 +164,12 @@ func (i *Index) matchExpr(q string) string {
 	return joinParts(i.queryParts(q), " AND ")
 }
 
-// queryPart is one word of a query: the word as typed, and its FTS5
-// expression.
+// queryPart is one word of a query: the word as typed, its FTS5
+// expression, and the inflections the expression matches exactly.
 type queryPart struct {
-	word string
-	expr string
+	word  string
+	expr  string
+	forms []string
 }
 
 // queryParts returns the words of q that are terms to the tokenizer, each
@@ -184,10 +185,11 @@ func (i *Index) queryParts(q string) []queryPart {
 			continue
 		}
 		part := `"` + t + `"*`
-		if forms := i.inflections(t); len(forms) > 0 {
+		forms := i.inflections(t)
+		if len(forms) > 0 {
 			part = `(` + part + ` OR "` + strings.Join(forms, `" OR "`) + `")`
 		}
-		parts = append(parts, queryPart{word: t, expr: part})
+		parts = append(parts, queryPart{word: t, expr: part, forms: forms})
 	}
 	return parts
 }
