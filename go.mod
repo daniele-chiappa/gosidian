@@ -15,8 +15,8 @@ require (
 	go.starlark.net v0.0.0-20261005163335-bcb1a1a55bf9
 	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/crypto v0.58.0
-	golang.org/x/sys v0.49.0
-	golang.org/x/term v0.47.0
+	golang.org/x/sys v0.50.0
+	golang.org/x/term v0.48.0
 	golang.org/x/text v0.43.0
 	modernc.org/sqlite v1.60.1
 )
