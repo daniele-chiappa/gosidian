@@ -621,9 +621,11 @@ var knownTagValues = map[string]map[string]struct{}{
 		"insight": {},
 		"image":   {},
 		"table":   {},
-		// The teams of agents and their tasks (IMP-195).
-		"team": {},
-		"task": {},
+		// The teams of agents and their tasks (IMP-195), the profiles of
+		// their roles (IMP-233).
+		"team":    {},
+		"task":    {},
+		"profile": {},
 	},
 	"status": {
 		"draft":       {},

@@ -25,7 +25,14 @@ func (h *fakeHost) Teams(project string) (map[string]fleet.Team, error) {
 			continue
 		}
 		for _, b := range fleet.Find([]byte(c)) {
-			if t, problems := fleet.Parse(b.Src, p); len(problems) == 0 {
+			profiles := fleet.ProfilesFrom(func(path string) ([]byte, error) {
+				n, ok := h.notes[path]
+				if !ok {
+					return nil, ErrNoNote
+				}
+				return []byte(n), nil
+			})
+			if t, problems := fleet.ParseWith(b.Src, p, profiles); len(problems) == 0 {
 				out[p] = t
 			}
 		}
@@ -431,6 +438,37 @@ func (fakeAgents) Contract(use string) string {
 		return AgentContract
 	}
 	return ""
+}
+
+// placesExt is an executor's plugin whose run has a limit of its own:
+// claude.run takes plugin:claude and plugin:claude/run, claude.pr only
+// plugin:claude.
+type placesExt struct{ fakeAgents }
+
+func (placesExt) Resources(use string) []string {
+	switch use {
+	case "claude.run":
+		return []string{"plugin:claude", "plugin:claude/run"}
+	case "claude.pr":
+		return []string{"plugin:claude"}
+	}
+	return nil
+}
+
+// TestTaskTrigger_TheMergeTakesNoAgentsPlace: task.run takes the places
+// of its role's run, the run's own limit too; task.pr those of its
+// plugin's pr, so a merge does not wait for an agent's run to end.
+func TestTaskTrigger_TheMergeTakesNoAgentsPlace(t *testing.T) {
+	e, host := taskEngine(t)
+	e.Types().Extend(placesExt{})
+	host.notes["p/tasks/a.md"] = taskNote("pagina", "dev", "submitted", "")
+	run := jobs.Run{Project: "p", Team: "p/squadra.md", Task: "p/tasks/a.md"}
+	if got := strings.Join(e.resources(run, &Node{Use: "task.run"}, scope{}), ","); got != "team:p/squadra,agents,plugin:claude,plugin:claude/run" {
+		t.Errorf("task.run takes %s", got)
+	}
+	if got := strings.Join(e.resources(run, &Node{Use: "task.pr"}, scope{}), ","); got != "plugin:claude" {
+		t.Errorf("task.pr takes %s", got)
+	}
 }
 
 func TestTaskTrigger_AgentsTakeTheirTeamsPlaces(t *testing.T) {

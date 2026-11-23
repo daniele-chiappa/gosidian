@@ -32,6 +32,35 @@ func (s *Store) TeamSpend(project, team string, since time.Time) (Spend, error) 
 	return sp, err
 }
 
+// TeamSpendByTask is TeamSpend by the task each run executed (IMP-233): the
+// office's map sums a role's from its tasks. A run with no task, as a
+// coordinator's without one, counts under "".
+func (s *Store) TeamSpendByTask(project, team string, since time.Time) (map[string]Spend, error) {
+	out := map[string]Spend{}
+	if team == "" {
+		return out, nil
+	}
+	rows, err := s.db.Query(`SELECT r.task, COALESCE(SUM(s.cost_usd), 0), COALESCE(SUM(s.tokens), 0), COUNT(*)
+		FROM runs r JOIN steps s ON s.run_id = r.id
+		WHERE r.project = ? AND r.team = ? AND r.team != '' AND (r.finished = 0 OR r.finished >= ?)
+		AND s.finished >= ? AND (s.cost_usd > 0 OR s.tokens > 0)
+		GROUP BY r.task`,
+		project, team, ms(since), ms(since))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var task string
+		var sp Spend
+		if err := rows.Scan(&task, &sp.CostUSD, &sp.Tokens, &sp.Steps); err != nil {
+			return nil, err
+		}
+		out[task] = sp
+	}
+	return out, rows.Err()
+}
+
 // CostOf reads what a step spent from its output (IMP-195): the cost in
 // USD and the usage.total_tokens of a JSON object, as the agent-run/1
 // contract writes them. Anything else reads 0: another output, a value

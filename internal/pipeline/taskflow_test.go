@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"os/exec"
@@ -146,7 +147,8 @@ const flowTeam = "---\ntitle: squadra\ntype: team\n---\n\n```team\ncoordinator: 
 	"  doc:\n    run: x.run\n    max_tokens: 4000000\n    writes: [p/kb]\n" +
 	"  web:\n    run: x.run\n    repo: sandbox\n    checks: npm run build\n    preview: dist\n    approve: none\n" +
 	"  tester:\n    run: x.run\n    repo: sandbox\n    access: exec\n    checks: npm test\n    approve: none\n" +
-	"  rev:\n    run: x.run\n```\n"
+	"  rev:\n    run: x.run\n" +
+	"  reader:\n    run: x.run\n    repo: sandbox\n    access: read\n    review: true\n```\n"
 
 func flowEngine(t *testing.T) (*Engine, *fakeHost, *crew) {
 	e, host := newEngine(t, Config{Tasks: TaskConfig{MaxAttempts: 2}})
@@ -294,6 +296,57 @@ func TestTaskFlow_AnExecutorTooOldStartsAgainFromBase(t *testing.T) {
 	if repo := c.asked[0]["repo"].(map[string]any); repo["branch"] != nil || repo["resume"] != nil {
 		t.Fatalf("repo %v", repo)
 	}
+}
+
+// A role that reads its repository gets a clone to read and pushes
+// nothing: its review closes the task, no pull request, nobody asked. An
+// attempt whose executor gave it no repository read nothing, and goes
+// back.
+func TestTaskFlow_ARoleThatReadsItsRepositoryClosesOnItsReport(t *testing.T) {
+	e, host, c := flowEngine(t)
+	review := "Read web/.\n\n- [minor] a label is in English\n\nVERDICT: passed"
+	c.answers = []map[string]any{{"text": review},
+		{"text": review, "repo": map[string]any{"name": "sandbox", "changed": 0, "files": []any{}, "pushed": false, "note": "nothing changed: no commit"}}}
+	host.notes["p/tasks/a.md"] = taskNote("revisione", "reader", "submitted", "paths: [web/]\n")
+	a := waitTask(t, e, host, "p/tasks/a.md", func(x fleet.Task) bool { return x.Status == fleet.Completed }, "a completed")
+	note := host.note(a.Path)
+	if a.Attempts != 2 || !strings.Contains(note, "The executor gave no repository: the agent could not read sandbox.") ||
+		!strings.Contains(note, "The review: passed, 0 serious and 1 minor problems left open.") || strings.Contains(note, "The agent changed no file.") {
+		t.Fatalf("a %+v\n%s", a, note)
+	}
+	asked := c.asked[1]
+	repo, _ := asked["repo"].(map[string]any)
+	if asked["access"] != "read" || repo["name"] != "sandbox" || repo["push"] != false || repo["pr"] != nil || repo["branch"] != nil {
+		t.Fatalf("asked %v", asked)
+	}
+	p := asked["prompt"].(string)
+	if !strings.Contains(p, "The repository sandbox is there for you to read, as its base branch has it") ||
+		!strings.Contains(p, "The paths of the repository this task is about: web/.") || strings.Contains(p, "Change only these paths") {
+		t.Fatalf("prompt:\n%s", p)
+	}
+	if len(c.notify) != 0 || len(c.prs) != 0 {
+		t.Fatalf("notify %v prs %v", c.notify, c.prs)
+	}
+}
+
+// The coordinator knows which role reads a repository, and that it reads
+// the work merged so far.
+func TestTaskFlow_TheCoordinatorKnowsARoleThatReadsItsRepository(t *testing.T) {
+	e, host, c := flowEngine(t)
+	host.notes["p/squadra.md"] = strings.Replace(flowTeam, "delegates_to: [dev, doc]", "delegates_to: [dev, doc, reader]", 1)
+	c.answers = []map[string]any{{"json": map[string]any{"action": "done", "summary": "Niente da fare."}}}
+	host.notes["p/tasks/o.md"] = taskNote("obiettivo", "capo", "submitted", "")
+	eventually(t, func() bool { e.TickTasks(); c.mu.Lock(); defer c.mu.Unlock(); return len(c.asked) > 0 }, "the coordinator's run")
+	c.mu.Lock()
+	p := c.asked[0]["prompt"].(string)
+	c.mu.Unlock()
+	for _, want := range []string{"- dev (x.run, repository sandbox, checks", "- reader (x.run, reads the repository sandbox and writes nothing, reviews:",
+		"A role that reads a repository sees its base branch, with the work merged so far: make its task depend on the tasks whose work it reads."} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("the prompt lacks %q:\n%s", want, p)
+		}
+	}
+	waitTask(t, e, host, "p/tasks/o.md", func(x fleet.Task) bool { return x.Status == fleet.Completed }, "o completed")
 }
 
 func TestTaskFlow_ARoleThatWritesNothingGoesBack(t *testing.T) {
@@ -536,4 +589,238 @@ func TestChecksScript_FailsWhenTheChecksFail(t *testing.T) {
 			t.Fatalf("checks %q: err %v, want ok %v", tc.checks, err, tc.ok)
 		}
 	}
+}
+
+// guidedTeam gives the team a guide and the role doc an agent, a guide of
+// its own and a skill (IMP-233).
+func guidedTeam(host *fakeHost, skill string) {
+	team := strings.Replace(flowTeam, "```team\n", "```team\nguide: regole\n", 1)
+	team = strings.Replace(team, "  doc:\n    run: x.run\n", "  doc:\n    agent: agents/doc\n    run: x.run\n    guide: \"[[p/guide/scrivere]]\"\n    skills: [skills/fonti]\n", 1)
+	host.put("p/squadra.md", team)
+	host.put("p/agents/doc.md", "---\ntype: agent\n---\n\n# doc\n\nYou write notes.\n")
+	host.put("p/regole.md", "---\ntitle: Regole\n---\n\n# Regole\n\nNever invent a source.\n")
+	host.put("p/guide/scrivere.md", "# Scrivere\n\nShort sentences.\n")
+	host.put("p/skills/fonti.md", skill)
+}
+
+// A role's agent receives, after its agent note, the team's guide, its own
+// and its skills, whole; the coordinator knows a role's skills.
+func TestTaskFlow_ARoleReceivesItsGuidesAndSkills(t *testing.T) {
+	e, host, c := flowEngine(t)
+	guidedTeam(host, "---\ntype: skill\ndescription: How to cite a source.\n---\n\n# Fonti\n\n## Steps\n\nCite the page.\n")
+	c.answers = []map[string]any{{"text": "Wrote the note.", "wrote": []any{"p/kb/nota.md"}}}
+	host.put("p/tasks/a.md", taskNote("nota", "doc", "submitted", ""))
+	waitTask(t, e, host, "p/tasks/a.md", func(x fleet.Task) bool { return x.Status == fleet.Completed }, "a completed")
+	c.mu.Lock()
+	system, _ := c.asked[0]["system"].(string)
+	c.mu.Unlock()
+	want := "You write notes.\n\n# Guide: p/regole.md (p/regole.md)\n\nNever invent a source.\n\n" +
+		"# Guide: p/guide/scrivere.md (p/guide/scrivere.md)\n\nShort sentences.\n\n" +
+		"# Skill: p/skills/fonti.md (p/skills/fonti.md)\n\nHow to cite a source.\n\n## Steps\n\nCite the page."
+	if system != want {
+		t.Fatalf("system:\n%s\nwant:\n%s", system, want)
+	}
+
+	c.answers = []map[string]any{{"json": map[string]any{"action": "done", "summary": "Niente da fare."}}}
+	host.put("p/tasks/o.md", taskNote("obiettivo", "capo", "submitted", ""))
+	waitTask(t, e, host, "p/tasks/o.md", func(x fleet.Task) bool { return x.Status == fleet.Completed }, "o completed")
+	c.mu.Lock()
+	p, _ := c.asked[1]["prompt"].(string)
+	plan, _ := c.asked[1]["system"].(string)
+	c.mu.Unlock()
+	if !strings.Contains(p, "- doc (x.run, no repository nor host: it sees only the vault, writes p/kb/, skills fonti)") {
+		t.Fatalf("the coordinator's prompt:\n%s", p)
+	}
+	// The team's guide reaches every role, the coordinator too.
+	if plan != "# Guide: p/regole.md (p/regole.md)\n\nNever invent a source." {
+		t.Fatalf("the coordinator's system: %q", plan)
+	}
+}
+
+// A skill that is no note type: skill, and guides and skills over [agents]
+// max_prompt_notes, stop the run before its agent: the task fails with why.
+func TestTaskFlow_ASkillThatIsNoneOrTooLongStopsTheRun(t *testing.T) {
+	for name, tc := range map[string]struct{ skill, why string }{
+		"no skill": {"---\ntype: note\n---\n\n# Fonti\n\nCite.\n", "role doc: skill p/skills/fonti.md is no note type: skill"},
+		"too long": {"---\ntype: skill\n---\n\n# Fonti\n\n" + strings.Repeat("Cite the page. ", 5000) + "\n", "over [agents] max_prompt_notes (65536)"},
+		"missing":  {"", "role doc: skill p/skills/fonti.md is no note of the project"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e, host, c := flowEngine(t)
+			guidedTeam(host, tc.skill)
+			if tc.skill == "" {
+				host.mu.Lock()
+				delete(host.notes, "p/skills/fonti.md")
+				host.mu.Unlock()
+			}
+			c.answers = []map[string]any{{"text": "Wrote the note.", "wrote": []any{"p/kb/nota.md"}}}
+			host.put("p/tasks/a.md", taskNote("nota", "doc", "submitted", ""))
+			a := waitTask(t, e, host, "p/tasks/a.md", func(x fleet.Task) bool { return x.Status == fleet.Failed }, "a failed")
+			if note := host.note(a.Path); !strings.Contains(note, tc.why) {
+				t.Fatalf("the task does not say %q:\n%s", tc.why, note)
+			}
+			c.mu.Lock()
+			defer c.mu.Unlock()
+			if len(c.asked) != 0 {
+				t.Fatalf("the agent ran: %v", c.asked)
+			}
+		})
+	}
+}
+
+// A role's tools (IMP-233): the coordinator reads them, a run of the role
+// has them for its tokens, and a role without the field has no limit.
+func TestTaskFlow_ARolesToolsReachItsRunAndItsCoordinator(t *testing.T) {
+	e, host, c := flowEngine(t)
+	team := strings.Replace(flowTeam, "  doc:\n    run: x.run\n", "  doc:\n    run: x.run\n    tools: [vec-pg, layout_render]\n", 1)
+	team = strings.Replace(team, "  dev:\n    run: x.run\n", "  dev:\n    run: x.run\n    tools: []\n", 1)
+	host.put("p/squadra.md", team)
+	c.answers = []map[string]any{{"json": map[string]any{"action": "done", "summary": "Niente da fare."}}}
+	host.put("p/tasks/o.md", taskNote("obiettivo", "capo", "submitted", ""))
+	waitTask(t, e, host, "p/tasks/o.md", func(x fleet.Task) bool { return x.Status == fleet.Completed }, "o completed")
+	c.mu.Lock()
+	p, _ := c.asked[0]["prompt"].(string)
+	c.mu.Unlock()
+	for _, want := range []string{"- doc (x.run, no repository nor host: it sees only the vault, writes p/kb/, tools vec-pg, layout_render)",
+		"- dev (x.run, repository sandbox, checks `npm test` run by the pipeline, merged after a person approves, no plugin's tools)"} {
+		if !strings.Contains(p, want) {
+			t.Fatalf("the coordinator's prompt lacks %q:\n%s", want, p)
+		}
+	}
+
+	c.answers = []map[string]any{{"text": "Wrote the note.", "wrote": []any{"p/kb/nota.md"}}}
+	host.put("p/tasks/a.md", taskNote("nota", "doc", "submitted", ""))
+	waitTask(t, e, host, "p/tasks/a.md", func(x fleet.Task) bool { return x.Status == fleet.Completed }, "a completed")
+	runs, err := e.Runner().Store().Runs(jobs.RunFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"p/tasks/a.md": "true [vec-pg layout_render]", "p/tasks/o.md": "false []"}
+	for _, r := range runs {
+		w, ok := want[r.Task]
+		if !ok {
+			continue
+		}
+		delete(want, r.Task)
+		if tools, limited, err := e.RunTools(r.ID); err != nil || fmt.Sprint(limited, " ", tools) != w {
+			t.Errorf("the tools of %s's run: %v %v %v, want %s", r.Task, limited, tools, err, w)
+		}
+	}
+	if len(want) > 0 {
+		t.Fatalf("no run of %v", want)
+	}
+}
+
+// A role takes from its profile the fields it does not write (IMP-233):
+// the executor, the model, the effort, the guide and the tools reach its
+// run as the role's own.
+func TestTaskFlow_ARoleTakesItsProfile(t *testing.T) {
+	e, host, c := flowEngine(t)
+	host.put("p/profiles/scrittore.md", "---\ntype: profile\n---\n\n```profile\nrun: x.run\nmodel: m-grande\neffort: high\nmax_tokens: 100\nguide: regole\ntools: [vec-pg]\n```\n")
+	host.put("p/regole.md", "# Regole\n\nNever invent a source.\n")
+	host.put("p/squadra.md", strings.Replace(flowTeam, "  doc:\n    run: x.run\n", "  doc:\n    profile: scrittore\n", 1))
+	c.answers = []map[string]any{{"text": "Wrote the note.", "wrote": []any{"p/kb/nota.md"}}}
+	host.put("p/tasks/a.md", taskNote("nota", "doc", "submitted", ""))
+	waitTask(t, e, host, "p/tasks/a.md", func(x fleet.Task) bool { return x.Status == fleet.Completed }, "a completed")
+	c.mu.Lock()
+	asked := c.asked[0]
+	c.mu.Unlock()
+	// max_tokens is the role's own (4000000): the profile's 100 does not win.
+	if asked["model"] != "m-grande" || asked["effort"] != "high" || asked["max_tokens"] != 4000000 || asked["mcp"] != "write" ||
+		asked["system"] != "# Guide: p/regole.md (p/regole.md)\n\nNever invent a source." {
+		t.Fatalf("asked %v", asked)
+	}
+	runs, err := e.Runner().Store().Runs(jobs.RunFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range runs {
+		if r.Task == "p/tasks/a.md" {
+			if tools, limited, err := e.RunTools(r.ID); err != nil || !limited || fmt.Sprint(tools) != "[vec-pg]" {
+				t.Fatalf("the profile's tools: %v %v %v", tools, limited, err)
+			}
+		}
+	}
+}
+
+// roomTeam is a room of the team squadra (IMP-233): its coordinator lead
+// splits what it receives for ui.
+const roomTeam = "---\ntitle: front\ntype: team\n---\n\n```team\ncoordinator: lead\nbudget: {day_usd: 5}\nroles:\n" +
+	"  lead:\n    run: x.run\n    delegates_to: [ui]\n" +
+	"  ui:\n    run: x.run\n```\n"
+
+// withRoom gives squadra the room front, which capo delegates to.
+func withRoom(host *fakeHost, budget string) {
+	team := strings.Replace(flowTeam, "```team\n", "```team\nrooms:\n  front: \"[[p/front]]\"\n"+budget, 1)
+	host.put("p/squadra.md", strings.Replace(team, "delegates_to: [dev, doc]", "delegates_to: [dev, doc, front]", 1))
+	host.put("p/front.md", roomTeam)
+	host.put("p/pipelines/front-work.md", string(fleet.WorkPipeline("p/front.md")))
+	host.put("p/pipelines/front-coordinate.md", string(fleet.CoordinatePipeline("p/front.md")))
+}
+
+// A coordinator gives an objective to a room: the room's coordinator
+// receives it and splits it among its roles, and its summary comes back to
+// the objective of the team, whose coordinator then closes it (IMP-233).
+func TestTaskFlow_AnObjectiveGivenToARoom(t *testing.T) {
+	e, host, c := flowEngine(t)
+	withRoom(host, "")
+	c.answers = []map[string]any{
+		{"json": map[string]any{"action": "tasks", "tasks": []any{
+			map[string]any{"key": "page", "assignee": "front", "title": "La pagina", "body": "Fai la pagina."},
+		}}},
+		{"json": map[string]any{"action": "tasks", "tasks": []any{
+			map[string]any{"key": "button", "assignee": "ui", "title": "Il bottone", "body": "Fai il bottone."},
+		}}},
+		{"text": "Bottone fatto."},
+		{"json": map[string]any{"action": "done", "summary": "Pagina fatta, col bottone."}},
+		{"json": map[string]any{"action": "done", "summary": "Obiettivo raggiunto."}},
+	}
+	host.put("p/tasks/o.md", taskNote("obiettivo", "capo", "submitted", ""))
+	o := waitTask(t, e, host, "p/tasks/o.md", func(x fleet.Task) bool { return x.Status == fleet.Completed }, "o completed")
+	if !strings.Contains(host.note(o.Path), "Obiettivo raggiunto.") {
+		t.Fatalf("o:\n%s", host.note(o.Path))
+	}
+	tasks, _ := host.Tasks("p")
+	by := map[string]fleet.Task{}
+	for _, x := range tasks {
+		by[x.Title] = x
+	}
+	page, button := by["La pagina"], by["Il bottone"]
+	if page.Team != "p/front.md" || page.Assignee != "lead" || page.Parent != "p/tasks/o.md" || page.Status != fleet.Completed {
+		t.Fatalf("the room's objective: %+v", page)
+	}
+	if button.Team != "p/front.md" || button.Assignee != "ui" || button.Parent != page.Path || button.Status != fleet.Completed {
+		t.Fatalf("the room's task: %+v", button)
+	}
+	c.mu.Lock()
+	first, _ := c.asked[0]["prompt"].(string)
+	last, _ := c.asked[4]["prompt"].(string)
+	c.mu.Unlock()
+	if !strings.Contains(first, "- front (a room, the team p/front: give it a whole objective, which its coordinator splits among its roles ui; its summary comes back as the report)") {
+		t.Fatalf("the coordinator's prompt:\n%s", first)
+	}
+	if !strings.Contains(last, "Pagina fatta, col bottone.") {
+		t.Fatalf("the room's summary does not come back:\n%s", last)
+	}
+}
+
+// A room spends of its team's budget: once the team and its rooms spent
+// the team's day, the room's tasks wait too, and say why (IMP-233).
+func TestTaskFlow_ARoomSpendsOfItsTeamsBudget(t *testing.T) {
+	e, host, c := flowEngine(t)
+	withRoom(host, "budget: {day_usd: 1}\n")
+	host.put("p/pipelines/front-work.md", taskPipeline(`trigger: {on: task, team: "[[p/front]]", coordinator: false}`, "0.6"))
+	c.answers = []map[string]any{{"text": "unused"}}
+	host.put("p/tasks/a.md", strings.Replace(taskNote("uno", "ui", "submitted", ""), "p/squadra", "p/front", 1))
+	waitTask(t, e, host, "p/tasks/a.md", func(x fleet.Task) bool { return x.Status == fleet.Completed }, "a completed")
+	host.put("p/tasks/b.md", strings.Replace(taskNote("due", "ui", "submitted", ""), "p/squadra", "p/front", 1))
+	waitTask(t, e, host, "p/tasks/b.md", func(x fleet.Task) bool { return x.Status == fleet.Completed }, "b completed")
+	if s, err := e.TeamSpend("p", "p/squadra.md"); err != nil || s.CostUSD < 1.19 {
+		t.Fatalf("the team's spend counts its room's: %+v %v", s, err)
+	}
+	host.put("p/tasks/c.md", strings.Replace(taskNote("tre", "ui", "submitted", ""), "p/squadra", "p/front", 1))
+	eventually(t, func() bool {
+		e.TickTasks()
+		return strings.HasPrefix(e.TaskWaits("p")["p/tasks/c.md"], "it is a room of p/squadra: the team spent its budget of the day")
+	}, "c waits for the team's budget")
 }

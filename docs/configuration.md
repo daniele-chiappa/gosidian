@@ -105,6 +105,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_AGENTS_MAX_TASKS` | `agents.max_tasks` | `50` (the most sub-tasks an objective may have; from 1 to 1000) |
 | `GOSIDIAN_AGENTS_MAX_REPORT` | `agents.max_report` | `65536` (the bytes of an agent's report a task's note keeps; from 4096 to 1048576) |
 | `GOSIDIAN_AGENTS_MAX_PROMPT_REPORT` | `agents.max_prompt_report` | `16384` (the bytes of another task's report in an agent's prompt; from 1024 to `max_report`) |
+| `GOSIDIAN_AGENTS_MAX_PROMPT_NOTES` | `agents.max_prompt_notes` | `65536` (the bytes of a role's guides and skills in its agent's system prompt; from 1024 to 1048576) |
 | `GOSIDIAN_AGENTS_HOLD_MAX` | `agents.hold_max` | `1h` (the longest a task's step held by its plugin or its provider waits before it tries again; from `1m` to `24h`) |
 | `GOSIDIAN_WEB_GRAPH_DEFAULT_NODES` | `web.graph_default_nodes` | `2000` (the most linked nodes a graph asked without a limit keeps; at most `graph_max_nodes`) |
 | `GOSIDIAN_WEB_GRAPH_MAX_NODES` | `web.graph_max_nodes` | `5000` (the most nodes a graph, a `graph` block or a plugin's graph may have) |
@@ -246,12 +247,15 @@ max_tasks = 50     # the sub-tasks of an objective
 hold_max = "1h"    # the longest wait between two tries of a held step
 max_report = 65536         # bytes of an agent's report in its task's note
 max_prompt_report = 16384  # bytes of another task's report in a prompt
+max_prompt_notes = 65536   # bytes of a role's guides and skills in its system prompt
 ```
 
 A value out of range (a negative `max_running`, a `lease` under `1m` or
 over `24h`, `max_attempts` outside 1 to 20, `max_tasks` outside 1 to
 1000, a `hold_max` under `1m` or over `24h`, a `max_report` outside 4096
-to 1048576, a `max_prompt_report` under 1024 or over `max_report`) stops the server at start, with a line that names the setting.
+to 1048576, a `max_prompt_report` under 1024 or over `max_report`, a
+`max_prompt_notes` outside 1024 to 1048576) stops the server at start,
+with a line that names the setting.
 
 ## Git maintenance
 

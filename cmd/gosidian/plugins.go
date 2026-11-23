@@ -73,12 +73,14 @@ func pluginMCPURL(pc config.PipelinesConfig, p config.PluginConfig, files string
 }
 
 // runTokens mints the MCP tokens of the plugins' calls in the server's
-// token store (IMP-193), a write one narrowed to writePaths when given
-// (IMP-195).
+// token store (IMP-193), a write one narrowed to its write paths when
+// given (IMP-195), each to its role's tools when the role names them
+// (IMP-233).
 type runTokens struct{ store *auth.Store }
 
-func (t runTokens) MintRun(name, project string, write bool, ttl time.Duration, runID string, writePaths []string) (string, string, error) {
-	secret, tok, err := t.store.CreateRun(name, project, write, ttl, runID, writePaths)
+func (t runTokens) MintRun(name, project string, write bool, ttl time.Duration, runID string, lim plugins.RunLimits) (string, string, error) {
+	secret, tok, err := t.store.CreateRunLimited(name, project, write, ttl, runID,
+		auth.RunLimits{WritePaths: lim.WritePaths, Tools: lim.Tools, LimitTools: lim.LimitTools})
 	return tok.ID, secret, err
 }
 

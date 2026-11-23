@@ -1048,14 +1048,14 @@ func TestWebauthLoginLimits(t *testing.T) {
 // The settings of the agent teams (IMP-195): their defaults, the file, the
 // environment over it, and the values refused, from either.
 func TestAgents(t *testing.T) {
-	if a := Default().Agents; a != (AgentsConfig{MaxRunning: 0, Lease: 15 * time.Minute, MaxAttempts: 3, MaxTasks: 50, HoldMax: time.Hour, MaxReport: 64 << 10, MaxPromptReport: 16 << 10}) {
+	if a := Default().Agents; a != (AgentsConfig{MaxRunning: 0, Lease: 15 * time.Minute, MaxAttempts: 3, MaxTasks: 50, HoldMax: time.Hour, MaxReport: 64 << 10, MaxPromptReport: 16 << 10, MaxPromptNotes: 64 << 10}) {
 		t.Fatalf("defaults %+v", a)
 	}
 	if err := Default().ApplyEnv(); err != nil {
 		t.Fatalf("the defaults are refused: %v", err)
 	}
 	path := filepath.Join(t.TempDir(), "config.toml")
-	if err := os.WriteFile(path, []byte("[agents]\nmax_running = 4\nlease = \"30m\"\nmax_attempts = 5\nmax_tasks = 200\nhold_max = \"20m\"\nmax_report = 8192\nmax_prompt_report = 2048\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte("[agents]\nmax_running = 4\nlease = \"30m\"\nmax_attempts = 5\nmax_tasks = 200\nhold_max = \"20m\"\nmax_report = 8192\nmax_prompt_report = 2048\nmax_prompt_notes = 4096\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	c, err := Load(path)
@@ -1065,7 +1065,7 @@ func TestAgents(t *testing.T) {
 	if err := c.ApplyEnv(); err != nil {
 		t.Fatal(err)
 	}
-	want := AgentsConfig{MaxRunning: 4, Lease: 30 * time.Minute, MaxAttempts: 5, MaxTasks: 200, HoldMax: 20 * time.Minute, MaxReport: 8192, MaxPromptReport: 2048}
+	want := AgentsConfig{MaxRunning: 4, Lease: 30 * time.Minute, MaxAttempts: 5, MaxTasks: 200, HoldMax: 20 * time.Minute, MaxReport: 8192, MaxPromptReport: 2048, MaxPromptNotes: 4096}
 	if c.Agents != want {
 		t.Errorf("from the file: %+v", c.Agents)
 	}
@@ -1083,10 +1083,11 @@ func TestAgents(t *testing.T) {
 	t.Setenv("GOSIDIAN_AGENTS_HOLD_MAX", "2h")
 	t.Setenv("GOSIDIAN_AGENTS_MAX_REPORT", "100000")
 	t.Setenv("GOSIDIAN_AGENTS_MAX_PROMPT_REPORT", "50000")
+	t.Setenv("GOSIDIAN_AGENTS_MAX_PROMPT_NOTES", "200000")
 	if err := c.ApplyEnv(); err != nil {
 		t.Fatal(err)
 	}
-	if want := (AgentsConfig{MaxRunning: 8, Lease: time.Hour, MaxAttempts: 1, MaxTasks: 1000, HoldMax: 2 * time.Hour, MaxReport: 100000, MaxPromptReport: 50000}); c.Agents != want {
+	if want := (AgentsConfig{MaxRunning: 8, Lease: time.Hour, MaxAttempts: 1, MaxTasks: 1000, HoldMax: 2 * time.Hour, MaxReport: 100000, MaxPromptReport: 50000, MaxPromptNotes: 200000}); c.Agents != want {
 		t.Errorf("from the environment: %+v", c.Agents)
 	}
 
@@ -1098,6 +1099,7 @@ func TestAgents(t *testing.T) {
 		"GOSIDIAN_AGENTS_HOLD_MAX":          {"0", "30s", "25h", "later"},
 		"GOSIDIAN_AGENTS_MAX_REPORT":        {"100", "2000000", "big"},
 		"GOSIDIAN_AGENTS_MAX_PROMPT_REPORT": {"10", "200000"},
+		"GOSIDIAN_AGENTS_MAX_PROMPT_NOTES":  {"10", "2000000", "lots"},
 	} {
 		for _, bad := range bads {
 			t.Run(k+"="+bad, func(t *testing.T) {

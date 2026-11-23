@@ -4,7 +4,9 @@ import { createI18n } from 'vue-i18n'
 import enUI from '@catalogs/ui.en.json'
 
 vi.mock('@/api/notes', () => ({ getNote: vi.fn() }))
-vi.mock('@/composables/useSSE', () => ({ useSSE: () => ({ on: vi.fn(), off: vi.fn() }) }))
+vi.mock('@/composables/useSSE', () => ({ useSSE: () => ({ on: vi.fn(() => () => {}), off: vi.fn() }) }))
+vi.mock('@/api/fleet', () => ({ getFleetTeam: vi.fn(), editFleetTeam: vi.fn() }))
+vi.mock('@/stores/ui', () => ({ useUIStore: () => ({ preset: 'catppuccin-latte' }) }))
 const windows = vi.hoisted(() => ({ open: vi.fn(() => 'win-1'), identify: vi.fn() }))
 vi.mock('plancia', async (orig) => ({
   ...(await orig<typeof import('plancia')>()),
@@ -49,6 +51,7 @@ import {
   saveLayout,
   type PluginApp,
 } from '@/api/layouts'
+import { editFleetTeam, getFleetTeam, type FleetTeamView } from '@/api/fleet'
 import PluginAppWindow from '@/views/PluginAppWindow.vue'
 
 // A note in the app a plugin offers for its type (IMP-226).
@@ -63,6 +66,16 @@ const layoutApp: PluginApp = {
   note_type: 'layout',
   bridge: 'layout/2',
   engine: 'designcraft v0.17.0',
+  status: 'ok',
+}
+const officeApp: PluginApp = {
+  plugin: 'office',
+  name: 'office',
+  title: 'Ufficio',
+  url: 'https://office.example.com/app/',
+  origin: 'https://office.example.com',
+  note_type: 'team',
+  bridge: 'office/1',
   status: 'ok',
 }
 const note = (content: string): Note => ({
@@ -142,6 +155,76 @@ describe('PluginAppWindow', () => {
       expect(w.find('[data-app-problem]').text()).toContain(says)
       w.unmount()
     }
+  })
+
+  // IMP-233: a team of agents in the office's map, which reads it.
+  it("opens a team in the office's map, which the window answers with the team", async () => {
+    const team = { path: 'rivista/n1.md', title: 'n1', roles: {} } as unknown as FleetTeamView
+    vi.mocked(listPluginApps).mockResolvedValue([layoutApp, officeApp])
+    vi.mocked(getNote).mockResolvedValue(note('---\ntype: team\n---\n'))
+    vi.mocked(getFleetTeam).mockResolvedValue(team)
+    const w = mountWindow()
+    await flushPromises()
+    expect(w.find('[data-office-app]').exists()).toBe(true)
+    const src = new URL(w.find('iframe[data-app-frame]').attributes('src')!)
+    expect(src.origin).toBe(officeApp.origin)
+    const frameWin = frameWindow(w)
+    window.dispatchEvent(
+      new MessageEvent('message', { data: { bridge: 'office/1', type: 'ready' }, origin: officeApp.origin, source: frameWin }),
+    )
+    await flushPromises()
+    expect(getFleetTeam).toHaveBeenCalledWith('rivista/n1.md')
+    expect(frameWin.postMessage).toHaveBeenCalledWith(
+      { bridge: 'office/1', type: 'team', team, theme: 'light', lang: 'en' },
+      officeApp.origin,
+    )
+    expect(openLayout).not.toHaveBeenCalled()
+    w.unmount()
+  })
+
+  it("saves the office's draft from its bar, and only there (IMP-233, phase C)", async () => {
+    const team = { path: 'rivista/n1.md', title: 'n1', roles: {}, etag: 'e1', editable: true } as unknown as FleetTeamView
+    vi.mocked(listPluginApps).mockResolvedValue([layoutApp, officeApp])
+    vi.mocked(getNote).mockResolvedValue(note('---\ntype: team\n---\n'))
+    vi.mocked(getFleetTeam).mockResolvedValue(team)
+    vi.mocked(editFleetTeam).mockImplementation(async (_p, body) => ({
+      view: { path: 'rivista/n1.md' }, block: '', line: 4, etag: body.save ? 'e2' : 'e1', changed: false,
+      creates: [], problems: [], saved: body.save,
+    }))
+    const w = mountWindow()
+    await flushPromises()
+    const frameWin = frameWindow(w)
+    const page = (data: Record<string, unknown>) =>
+      window.dispatchEvent(new MessageEvent('message', { data: { bridge: 'office/1', ...data }, origin: officeApp.origin, source: frameWin }))
+    page({ type: 'ready' })
+    await flushPromises()
+    page({ type: 'editing', on: true })
+    await flushPromises()
+    expect(w.find('[data-office-save]').exists()).toBe(false)
+    page({ type: 'edit', op: { op: 'add_role', role: 'verifica' } })
+    await flushPromises()
+    expect(w.find('[data-unsaved]').text()).toBe('Unsaved changes')
+    expect(w.emitted('dirty')?.at(-1)).toEqual([true])
+    page({ type: 'save' })
+    await flushPromises()
+    expect(editFleetTeam).not.toHaveBeenCalledWith('rivista/n1.md', expect.objectContaining({ save: true }))
+    await w.find('[data-office-save]').trigger('click')
+    await flushPromises()
+    expect(editFleetTeam).toHaveBeenCalledWith('rivista/n1.md', { etag: 'e1', ops: [{ op: 'add_role', role: 'verifica' }], save: true })
+    expect(w.find('[data-office-save]').exists()).toBe(false)
+    expect(w.find('[data-office-saved]').exists()).toBe(true)
+    expect(w.emitted('dirty')?.at(-1)).toEqual([false])
+    w.unmount()
+  })
+
+  it("never opens a note of another type in the office's app", async () => {
+    vi.mocked(listPluginApps).mockResolvedValue([officeApp])
+    vi.mocked(getNote).mockResolvedValue(note('---\ntype: plan\n---\n# Testo\n'))
+    const w = mountWindow()
+    await flushPromises()
+    expect(w.find('[data-office-app]').exists()).toBe(false)
+    expect(w.find('[data-app-problem]').text()).toContain('No app opens the notes of type “plan”')
+    w.unmount()
   })
 
   it('opens the note when its frame says ready, and only then', async () => {

@@ -174,6 +174,42 @@ func TestPluginTools_OnlyWhereExposed(t *testing.T) {
 	}
 }
 
+// A run token of a role that names its tools sees only those, by the
+// plugin's name or the tool's, on tools/list and tools/call; one that names
+// none sees no plugin's tool; one without the field sees them all
+// (IMP-233). The memory tools stay.
+func TestPluginTools_TheRolesTools(t *testing.T) {
+	s, reg := vecServer(t)
+	if _, err := reg.Expose("vec", "p", "test"); err != nil {
+		t.Fatal(err)
+	}
+	run := func(id string, tools []string, limit bool) *auth.Token {
+		return &auth.Token{ID: id, Name: "run-" + id, Project: "p", Scopes: []string{auth.ScopeRead, auth.ScopeWrite},
+			ToolProfile: auth.ToolProfileCore, Kind: auth.KindRun, Tools: tools, LimitTools: limit}
+	}
+	for _, c := range []struct {
+		tok              *auth.Token
+		search, put, get bool
+	}{
+		{run("all", nil, false), true, true, true},
+		{run("plugin", []string{"vec"}, true), true, true, true},
+		{run("one", []string{"vec_search", "other"}, true), true, false, true},
+		{run("none", []string{}, true), false, false, true},
+	} {
+		names := listToolNames(t, s, ctxWithToken(c.tok))
+		if has(names, "vec_search") != c.search || has(names, "vec_put") != c.put || has(names, "memory_get") != c.get {
+			t.Errorf("%s sees search %v, put %v, memory_get %v (want %v, %v, %v)", c.tok.Name,
+				has(names, "vec_search"), has(names, "vec_put"), has(names, "memory_get"), c.search, c.put, c.get)
+		}
+	}
+	if out := rpcMessage(t, s, ctxWithToken(run("one", []string{"vec_search"}, true)), "tools/call", `{"name":"vec_put","arguments":{"id":"a"}}`); !strings.Contains(out, "not found") {
+		t.Errorf("a role's token called a tool its role does not name: %s", out)
+	}
+	if out := rpcMessage(t, s, ctxWithToken(run("one", []string{"vec_search"}, true)), "tools/call", `{"name":"vec_search","arguments":{"query":"x"}}`); strings.Contains(out, "isError\":true") {
+		t.Errorf("a role's token could not call its tool: %s", out)
+	}
+}
+
 func TestPluginTools_Schema(t *testing.T) {
 	s, reg := vecServer(t)
 	if _, err := reg.Expose("vec", "p", "test"); err != nil {

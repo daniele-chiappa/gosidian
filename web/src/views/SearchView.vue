@@ -38,8 +38,22 @@ const lastSubmitted = ref('')
 // replaced the one typed after (BUG-116, S6-10).
 let gen = 0
 
+// The window keeps what it searches, as Query and Graph do: in tabs mode
+// the plancia keeps five windows alive, and a Search let go came back with
+// its field empty (BUG-161); the address keeps it across a reload too. Each
+// search writes it back, not each key.
+let written: string | undefined
+function syncWindow(q: string, p: string) {
+  const w = store.windows?.find((x) => x.type === 'search' && x.key === planciaKey('search'))
+  if (!w) return
+  written = q.trim() ? q : undefined
+  // undefined when empty: identify merges the props (BUG-158).
+  store.identify(w.id, w.key, { q: written, project: p.trim() || undefined })
+}
+
 async function run(q: string, p: string) {
   const mine = ++gen
+  syncWindow(q, p)
   if (!q.trim()) {
     hits.value = []
     error.value = null
@@ -71,12 +85,15 @@ watch([query, project], debounced)
 // The text asked replaces the field, even the same text over what was typed.
 // The text the field already holds searches again: the field's own watch
 // does not see it, and a note written since may hold it (BUG-159).
+// The text Search wrote back to its window (syncWindow) is no text asked:
+// only a new qAt, or another text, is.
 watch(
-  () => [props.q, props.qAt],
-  () => {
-    const q = props.q ?? ''
-    if (query.value === q) void debounced()
-    else query.value = q
+  () => [props.q, props.qAt] as const,
+  ([q, at], [, oldAt]) => {
+    if (at === oldAt && q === written) return
+    const text = q ?? ''
+    if (query.value === text) void debounced()
+    else query.value = text
   },
 )
 

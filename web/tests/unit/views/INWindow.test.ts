@@ -21,6 +21,11 @@ vi.mock('@/api/pipelines', async (orig) => ({
   listPipelines: vi.fn(),
 }))
 vi.mock('@/api/folders', () => ({ exportFolder: vi.fn(async () => {}) }))
+// No upload left open by an earlier visit (IMP-172 phase 5).
+vi.mock('@/api/inUpload', async (orig) => ({
+  ...(await orig<typeof import('@/api/inUpload')>()),
+  listUploads: vi.fn(async () => []),
+}))
 vi.mock('@/composables/useSSE', () => ({
   useSSE: () => ({ on: (topic: string, fn: (p: Record<string, unknown>) => void) => (sseListeners.set(topic, fn), () => {}) }),
 }))

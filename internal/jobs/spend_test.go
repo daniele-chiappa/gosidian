@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"maps"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -210,6 +211,58 @@ func TestStore_TeamSpend(t *testing.T) {
 	}
 	if p := strings.Join(plan, "; "); !strings.Contains(p, "runs_team") {
 		t.Errorf("plan %q does not use runs_team", p)
+	}
+}
+
+// TeamSpendByTask splits TeamSpend by the task of each run (IMP-233): the
+// same steps, and a run without a task under "".
+func TestStore_TeamSpendByTask(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "jobs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	now := time.Now().UTC()
+	since := now.Add(-time.Hour)
+	const team = "p/teams/a.md"
+	add := func(project, task string, finished time.Time, cost float64, tokens int) {
+		t.Helper()
+		out, _ := json.Marshal(map[string]any{"cost": cost, "usage": map[string]any{"total_tokens": tokens}})
+		run, _, err := st.CreateRun(Run{Kind: "test", Ref: "p/dev.md", Project: project, Team: team, Task: task},
+			[]Step{{Name: "agent", Status: Queued}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := st.apply(run.ID, []StepChange{{Name: "agent", Status: Done, Output: out, Finished: finished}},
+			&RunChange{Status: Done, Finished: finished}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add("p", "p/tasks/x.md", now, 1, 100)
+	add("p", "p/tasks/x.md", now, 0.5, 50)
+	add("p", "p/tasks/y.md", now, 2, 200)
+	add("p", "", now, 4, 400)
+	add("p", "p/tasks/x.md", since.Add(-time.Minute), 8, 800)
+	add("q", "q/tasks/x.md", now, 16, 1600)
+
+	got, err := st.TeamSpendByTask("p", team, since)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]Spend{
+		"p/tasks/x.md": {CostUSD: 1.5, Tokens: 150, Steps: 2},
+		"p/tasks/y.md": {CostUSD: 2, Tokens: 200, Steps: 1},
+		"":             {CostUSD: 4, Tokens: 400, Steps: 1},
+	}
+	if !maps.Equal(got, want) {
+		t.Errorf("TeamSpendByTask = %+v, want %+v", got, want)
+	}
+	total, err := st.TeamSpend("p", team, since)
+	if err != nil || total != (Spend{CostUSD: 7.5, Tokens: 750, Steps: 4}) {
+		t.Errorf("TeamSpend = %+v, %v: the split must sum to it", total, err)
+	}
+	if got, err := st.TeamSpendByTask("p", "", since); err != nil || len(got) != 0 {
+		t.Errorf("no team: %+v, %v", got, err)
 	}
 }
 

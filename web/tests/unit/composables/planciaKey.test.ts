@@ -39,6 +39,20 @@ describe('plancia codec round-trip', () => {
     })
   })
 
+  it('keeps one search window, its text and its project in the address (BUG-161)', () => {
+    const tok = codec.encode(win('search', { q: 'a b&c', project: 'agile', qAt: 5 }))!
+    expect(tok).toBe('search:' + encodeURIComponent('q=' + encodeURIComponent('a b&c') + '&p=agile'))
+    expect(codec.decode(tok)).toEqual({
+      type: 'search',
+      key: 'search',
+      title: 'Search',
+      props: { q: 'a b&c', project: 'agile' },
+    })
+    expect(codec.encode(win('search', { project: 'agile' }))).toBe('search:' + encodeURIComponent('p=agile'))
+    expect(codec.key({ type: 'search', props: { q: 'x' } })).toBe('search')
+    expect(codec.decode('search')).toEqual({ type: 'search', key: 'search', title: 'Search', props: {} })
+  })
+
   it('titles an admin section by the catalogue, an unknown one by its name (review)', () => {
     expect(codec.decode('admin:teams')?.title).toBe('Admin · Teams')
     expect(codec.decode('admin:foo')?.title).toBe('Admin · foo')

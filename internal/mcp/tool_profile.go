@@ -90,7 +90,8 @@ var writeTools = map[string]bool{
 //
 // The plugins' tools (IMP-182) pass for every profile, core included, but
 // only to a token of a project the owner exposed their plugin in; the layout
-// tools, which work with the engine of a plugin, the same.
+// tools, which work with the engine of a plugin, the same. A run token of a
+// role that names its tools sees only those (IMP-233).
 func (s *Server) filterToolsByProfile(ctx context.Context, tools []mcp.Tool) []mcp.Tool {
 	tok := s.tokenFromContext(ctx)
 	core := tok != nil && tok.IsCoreProfile()
@@ -102,7 +103,7 @@ func (s *Server) filterToolsByProfile(ctx context.Context, tools []mcp.Tool) []m
 			continue
 		}
 		if pt, ok := s.pluginToolOf(t.Name); ok {
-			if s.pluginToolVisible(tok, pt) {
+			if s.pluginToolVisible(tok, pt) && (tok == nil || tok.AllowsTool(pt.plugin, t.Name)) {
 				out = append(out, t)
 			}
 			continue
@@ -112,7 +113,7 @@ func (s *Server) filterToolsByProfile(ctx context.Context, tools []mcp.Tool) []m
 				shown := s.layoutVisible(tok)
 				layoutShown = &shown
 			}
-			if *layoutShown {
+			if *layoutShown && s.layoutToolAllowed(tok, t.Name) {
 				out = append(out, t)
 			}
 			continue

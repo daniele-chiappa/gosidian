@@ -192,6 +192,9 @@ func (s *Server) handlePluginTool(name string) server.ToolHandlerFunc {
 		if !s.pluginToolAllowed(tok, t, project) {
 			return mcp.NewToolResultErrorf("%s needs %s access to project %q, which this token lacks", name, t.access, project), nil
 		}
+		if tok != nil && !tok.AllowsTool(t.plugin, name) {
+			return mcp.NewToolResultErrorf("%s is not among the tools of this run's role (tools in the team)", name), nil
+		}
 		args := make(map[string]any, len(req.GetArguments()))
 		for k, v := range req.GetArguments() {
 			if k != "project" {
@@ -219,7 +222,7 @@ func (s *Server) handlePluginTool(name string) server.ToolHandlerFunc {
 		// The plugin's calls at once are the steps' and the agents' together
 		// (IMP-196): a full plugin makes the call wait, up to its timeout.
 		if gate := s.pluginGate(); gate != nil {
-			res := s.plugins.PluginResources(t.plugin)
+			res := s.plugins.ToolResources(t.plugin, t.tool)
 			if err := gate.Take(cctx, res); err != nil {
 				return mcp.NewToolResultErrorf("plugin %s is busy: its calls at once (max_concurrent) are all under way; try again in a while", t.plugin), nil
 			}

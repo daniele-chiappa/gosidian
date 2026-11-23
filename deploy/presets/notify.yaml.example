@@ -1,0 +1,44 @@
+# The questions of the agents preset (gosidian-notify): before a merge the
+# team's pipeline asks its approvers, on the channel of each, and resumes
+# with the answer. Copy it to notify.yaml, keep the channels you use and
+# name the people and the rooms of your teams (alert: and approvers: in a
+# team's block). Every field is in the plugin's README; a change of this
+# file changes the plugin's manifest, to accept again (gosidian plugin
+# accept --pending).
+name: notify                   # the plugin's name in gosidian: notify.send, notify.ask
+description: The questions and alerts of the teams
+
+# Where a person's browser reaches the reply page: NOTIFY_PUBLIC_URL of
+# .env, when this file gives none.
+# public_url: https://notify.example.com
+gosidian_url: http://localhost:8080   # the web UI, as the people reach it: the links
+gosidian_api: http://gosidian:8080    # where the plugin reaches gosidian
+time_zone: UTC
+store_dir: /var/lib/gosidian-notify
+
+# The credentials are files of ./notify-secrets, readable by uid 1000.
+channels:
+  telegram:
+    token_file: /run/secrets/telegram-bot-token   # BotFather's token
+    poll: true                 # the bot's buttons: one consumer a bot
+  # ntfy:
+  #   server: https://ntfy.example.com
+  #   token_file: /run/secrets/ntfy-token
+  # email:
+  #   host: smtp.example.com
+  #   port: 587
+  #   user_file: /run/secrets/smtp-user
+  #   password_file: /run/secrets/smtp-password
+  #   from: "gosidian <notify@example.com>"
+
+# A team's approvers by name (approvers: [alice]), its alert by room
+# (alert: ["#team/agents"]).
+people:
+  alice:
+    telegram: 123456789        # her user id: her chat with the bot
+    # email: alice@example.com
+rooms:
+  team:
+    telegram:
+      chat: -1001234567890     # a supergroup with topics, the bot an admin that manages them
+      auto_topics: true        # #team/agents is made the first time

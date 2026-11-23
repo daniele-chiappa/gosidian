@@ -1,0 +1,13 @@
+# What an install writes next to the presets: its settings, its data and
+# its credentials, never the repository's.
+.env
+.env.tmp
+vault/
+state/
+secrets/
+keys/
+notify-secrets/
+storage.yaml
+pi.yaml
+exec.yaml
+notify.yaml

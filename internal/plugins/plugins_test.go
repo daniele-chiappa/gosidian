@@ -776,7 +776,7 @@ type fakeRunTokens struct {
 	minted []string
 }
 
-func (f *fakeRunTokens) MintRun(name, project string, write bool, ttl time.Duration, runID string, writePaths []string) (string, string, error) {
+func (f *fakeRunTokens) MintRun(name, project string, write bool, ttl time.Duration, runID string, lim RunLimits) (string, string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.n++
@@ -785,7 +785,11 @@ func (f *fakeRunTokens) MintRun(name, project string, write bool, ttl time.Durat
 		f.live = map[string]string{}
 	}
 	f.live[id] = secret
-	f.minted = append(f.minted, fmt.Sprintf("%s %s write=%v ttl=%v run=%s paths=%v", name, project, write, ttl > runTokenSlack, runID, writePaths))
+	m := fmt.Sprintf("%s %s write=%v ttl=%v run=%s paths=%v", name, project, write, ttl > runTokenSlack, runID, lim.WritePaths)
+	if lim.LimitTools {
+		m += fmt.Sprintf(" tools=%v", lim.Tools)
+	}
+	f.minted = append(f.minted, m)
 	return id, secret, nil
 }
 
@@ -927,7 +931,8 @@ func TestNode_MCPToken(t *testing.T) {
 }
 
 // fakeRunScopes holds the role's folders of the runs of a team's tasks:
-// a run absent is not a task's; "broken" fails.
+// a run absent is not a task's; "broken" fails. The role of the run
+// "tools" names vec-pg and layout_render, that of "notools" none.
 type fakeRunScopes map[string][]string
 
 func (f fakeRunScopes) RunWritePaths(runID string) ([]string, bool, error) {
@@ -936,6 +941,18 @@ func (f fakeRunScopes) RunWritePaths(runID string) ([]string, bool, error) {
 	}
 	paths, ok := f[runID]
 	return paths, ok, nil
+}
+
+func (f fakeRunScopes) RunTools(runID string) ([]string, bool, error) {
+	switch runID {
+	case "broken":
+		return nil, false, errors.New("task not found")
+	case "tools":
+		return []string{"vec-pg", "layout_render"}, true, nil
+	case "notools":
+		return []string{}, true, nil
+	}
+	return nil, false, nil
 }
 
 // A write token of a run of a team's task writes only in its role's
@@ -948,7 +965,7 @@ func TestNode_RunTokenScopes(t *testing.T) {
 		t.Fatal(err)
 	}
 	reg.SetRunTokens(tokens)
-	reg.SetRunScopes(fakeRunScopes{"task": {"p/kb/", "p/out/"}, "mute": nil})
+	reg.SetRunScopes(fakeRunScopes{"task": {"p/kb/", "p/out/"}, "mute": nil, "tools": {"p/kb/"}, "notools": nil})
 	e, _ := newEngine(t, reg)
 	c := Config{Name: "coder", MCPURL: "http://gosidian.test/mcp"}
 	acc := Accepted{Manifest: Manifest{Permissions: Permissions{MCP: []string{AccessRead, AccessWrite}}}}
@@ -974,6 +991,10 @@ func TestNode_RunTokenScopes(t *testing.T) {
 		{"plain", "write", "run-plain p write=true ttl=true run=plain paths=[]"},
 		{"task", "read", "run-task p write=false ttl=true run=task paths=[]"},
 		{"mute", "read", "run-mute p write=false ttl=true run=mute paths=[]"},
+		// The tools of the role narrow its read and write tokens (IMP-233).
+		{"tools", "write", "run-tools p write=true ttl=true run=tools paths=[p/kb/] tools=[vec-pg layout_render]"},
+		{"tools", "read", "run-tools p write=false ttl=true run=tools paths=[] tools=[vec-pg layout_render]"},
+		{"notools", "read", "run-notools p write=false ttl=true run=notools paths=[] tools=[]"},
 	} {
 		if got, err := mint(tc.run, tc.level); err != nil || got != tc.want {
 			t.Errorf("%s %s: %q, %v; want %q", tc.run, tc.level, got, err, tc.want)
@@ -984,6 +1005,9 @@ func TestNode_RunTokenScopes(t *testing.T) {
 	}
 	if _, err := mint("broken", "write"); err == nil || !strings.Contains(err.Error(), "with.mcp write: task not found") {
 		t.Errorf("a failing lookup: %v", err)
+	}
+	if _, err := mint("broken", "read"); err == nil || !strings.Contains(err.Error(), "with.mcp read: task not found") {
+		t.Errorf("a failing lookup of the tools: %v", err)
 	}
 	if len(tokens.live) != 0 {
 		t.Errorf("%d tokens still live", len(tokens.live))

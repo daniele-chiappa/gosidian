@@ -1,0 +1,69 @@
+# The agents of the agents preset (gosidian-pi). Copy it to pi.yaml and
+# choose the models: they, the provider and its routing are yours. Every
+# field is in the plugin's README; a change of this file changes the
+# plugin's manifest, to accept again (gosidian plugin accept --pending).
+name: pi                       # the plugin's name in gosidian: pi.run, pi.pr
+description: The agents of the teams
+
+# An OpenAI-compatible endpoint, up to /v1. Its key is AGENTS_API_KEY in
+# .env (empty: a server without a key). Two examples:
+#   a provider of open-weight and closed models, OpenRouter:
+#     base_url: https://openrouter.ai/api/v1
+#     body: {provider: {quantizations: [fp8, bf16], data_collection: deny, require_parameters: true}}
+#   a model server on the host (Ollama, vLLM, llama.cpp):
+#     base_url: http://host.docker.internal:11434/v1
+endpoint:
+  base_url: https://openrouter.ai/api/v1
+  api_key_env: AGENTS_API_KEY
+
+# The models a role picks by name (model: in the team's block). An agent
+# needs one that calls tools reliably and a context that holds the files
+# it reads: a repository's role reads much. The cost is dollars per
+# million tokens, as the endpoint bills them: pi adds them up for a step's
+# max_cost and the team's budget (0: free, no budget counted).
+models:
+  - id: vendor/model-id        # as the endpoint names it
+    name: agent
+    context: 131072
+    max_output: 16000
+    reasoning: true
+    cost: {input: 1, output: 4}
+default_model: agent
+effort: "off"                  # off, minimal, low, medium, high, xhigh, max
+
+# What a step's access allows: read reads, edit also writes files, exec also
+# runs commands (bash), in the plugin's sandbox. A role gets exec only from
+# a team that asks for it, and only if it is here.
+tools:
+  allowed: [read, grep, find, ls, edit, write]
+  default: [read, grep, find, ls]
+
+# A step's limits, what a role may ask (max) and what it gets when it asks
+# nothing (default). The pipelines give an agent's step 15 minutes: keep
+# max_seconds within it, or raise the agent node's timeout with it.
+limits:
+  default: {max_turns: 40, max_seconds: 12m, max_tokens: 2000000, max_cost: 0.5}
+  max: {max_turns: 80, max_seconds: 14m, max_tokens: 6000000, max_cost: 3}
+
+system: |
+  Answer in the language of the task.
+
+# gosidian's MCP a step may ask for: a role reads the vault, and writes in
+# its team's writes folders.
+mcp: [read, write]
+
+# The repositories a role works on (repo: in the team's block): the plugin
+# clones, commits what the agent changed on a branch of its own, pushes it
+# and opens the pull request. The key and the token are files of ./keys,
+# root's with mode 600.
+repos:
+  - name: app
+    url: git@git.example.com:team/app.git
+    key_file: /run/secrets/agents/app_deploy_key   # a deploy key that may push
+    known_hosts: "git.example.com ssh-ed25519 AAAA…"   # checked out of band
+    base: main
+    branch_prefix: agent/
+    author: {name: gosidian agent, email: agent@example.com}
+    # The pull requests, through the API of Gitea (or Forgejo), the only
+    # kind for now; the token may open and merge them.
+    pr: {kind: gitea, api: https://git.example.com/api/v1, repo: team/app, token_file: /run/secrets/agents/git_token}

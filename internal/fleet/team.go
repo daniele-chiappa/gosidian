@@ -18,6 +18,7 @@
 package fleet
 
 import (
+	"errors"
 	"fmt"
 	"path"
 	"regexp"
@@ -36,6 +37,14 @@ const (
 	Lang     = "team"
 	TeamType = "team"
 	TaskType = "task"
+	// SkillType is the type of the notes a role's skills name.
+	SkillType = "skill"
+	// ProfileType is the type of a profile's note, ProfileLang the fence
+	// of its block, ProfileFolder where a profile named by its name is
+	// (IMP-233).
+	ProfileType   = "profile"
+	ProfileLang   = "profile"
+	ProfileFolder = "profiles"
 )
 
 // The approvals a role's work may need.
@@ -70,6 +79,8 @@ const (
 	maxList       = 50
 	maxRoundsCap  = 50
 	defaultRounds = 5
+	maxSkills     = 20
+	maxRooms      = 10
 )
 
 // Team is a team as its note declares it.
@@ -89,8 +100,45 @@ type Team struct {
 	ReopenOn  string   `json:"reopen_on"`
 	Alert     []string `json:"alert,omitempty"`
 	Approvers []string `json:"approvers,omitempty"`
+	// Guide is a note of rules every role of the team follows, added to
+	// its agent's system prompt (IMP-233); "" for none.
+	Guide string `json:"guide,omitempty"`
+	// Rooms are the teams of the project this one gives objectives to,
+	// by the name its roles delegate to (IMP-233): each has its own
+	// coordinator, budget and limits, and spends of this team's budget
+	// too. A room has no rooms.
+	Rooms []Room `json:"rooms,omitempty"`
 	// Roles in the order the block writes them.
 	Roles []Role `json:"roles"`
+}
+
+// Room is a team another gives objectives to: its name in the other's
+// delegates_to, and its note.
+type Room struct {
+	Name string `json:"name"`
+	Path string `json:"path"`
+	// line is its key's in the block.
+	line int
+}
+
+// Room returns the room named name.
+func (t Team) Room(name string) (Room, bool) {
+	for _, r := range t.Rooms {
+		if r.Name == name {
+			return r, true
+		}
+	}
+	return Room{}, false
+}
+
+// RoomOf returns the room whose note is path.
+func (t Team) RoomOf(path string) (Room, bool) {
+	for _, r := range t.Rooms {
+		if r.Path == path {
+			return r, true
+		}
+	}
+	return Room{}, false
 }
 
 // Budget is what a team may spend, in dollars as the executors count
@@ -119,7 +167,8 @@ type Role struct {
 	// Access is its agent's level, AccessRead, AccessEdit or AccessExec:
 	// with exec it runs commands, its checks among them, in its
 	// executor's sandbox. "" for the executor's default, which is edit for
-	// a role with a repo.
+	// a role with a repo; read with a repo, the agent reads its files and
+	// changes none (Commits).
 	Access string `json:"access,omitempty"`
 	// Repo is the repository it works on, a name of the executor's preset;
 	// Host the host its commands run on.
@@ -147,7 +196,56 @@ type Role struct {
 	// verdict and its problems, each serious or minor, which the gate
 	// counts (ReviewOf).
 	Review bool `json:"review,omitempty"`
+	// line is its key's in the block.
+	line int
+	// Guide is a note of rules of the role, added to its agent's system
+	// prompt after the team's; Skills are notes type: skill its agent
+	// receives whole, after the guides (IMP-233). Both are notes of the
+	// team's project.
+	Guide  string   `json:"guide,omitempty"`
+	Skills []string `json:"skills,omitempty"`
+	// Profile is the note of the profile whose fields the role takes where
+	// it writes none (IMP-233); "" for none.
+	Profile string `json:"profile,omitempty"`
+	// Tools, when the block names them, are the only plugins' tools the
+	// MCP tokens of its agent see: a plugin's name, for all its tools, or
+	// one tool's (vec-pg_search); [] for none. nil: every plugin exposed
+	// in the project, as without the field (IMP-233).
+	Tools []string `json:"tools"`
 }
+
+// PromptNote is a note added to the system prompt of a role's agent.
+type PromptNote struct {
+	Path string
+	// Skill: a note type: skill; else a guide.
+	Skill bool
+}
+
+// PromptNotes are the notes the agent of role r receives after its agent
+// note, in this order: the team's guide, the role's, the role's skills. A
+// note named twice comes once, where it comes first.
+func (t Team) PromptNotes(r Role) []PromptNote {
+	var out []PromptNote
+	add := func(p string, skill bool) {
+		if p != "" && !slices.ContainsFunc(out, func(n PromptNote) bool { return n.Path == p }) {
+			out = append(out, PromptNote{Path: p, Skill: skill})
+		}
+	}
+	add(t.Guide, false)
+	add(r.Guide, false)
+	for _, s := range r.Skills {
+		add(s, true)
+	}
+	return out
+}
+
+// Line is the line of the role's key in its block, 0 when unknown.
+func (r Role) Line() int { return r.line }
+
+// Commits says whether the role's work is a commit on its repository, the
+// branch of a pull request: a role without a repo, or that reads it
+// (access read), changes no file of one.
+func (r Role) Commits() bool { return r.Repo != "" && r.Access != AccessRead }
 
 // Which problems of a review reopen the work (Team.ReopenOn).
 const (
@@ -212,10 +310,13 @@ func (t Team) Project() string {
 }
 
 // Problem is what keeps a block from reading as a team; Line counts from
-// the block's first line.
+// the block's first line. Role or Room is the role or the room it is
+// about, "" for the team's (IMP-233: the office's map marks them).
 type Problem struct {
 	Line int    `json:"line,omitempty"`
 	Msg  string `json:"message"`
+	Role string `json:"role,omitempty"`
+	Room string `json:"room,omitempty"`
 }
 
 func (p Problem) String() string {
@@ -234,6 +335,9 @@ type Block struct {
 // Find returns the team blocks of a note's body.
 func Find(body []byte) []Block { return findBlocks(body, Lang) }
 
+// FindProfiles returns the profile blocks of a note's body.
+func FindProfiles(body []byte) []Block { return findBlocks(body, ProfileLang) }
+
 // findBlocks returns the blocks of language lang of a note's body.
 func findBlocks(body []byte, lang string) []Block {
 	fenced := parser.FindFenced(body, lang)
@@ -247,30 +351,56 @@ func findBlocks(body []byte, lang string) []Block {
 var (
 	roleName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 	runName  = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}\.run$`)
+	// toolName is a plugin's name (vec-pg) or one of its tools'
+	// (vec-pg_search): the plugin's, _, the tool's.
+	toolName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}(_[A-Za-z0-9_-]{1,64})?$`)
 	lineRe   = regexp.MustCompile(`line (\d+)`)
 	fieldRe  = regexp.MustCompile(`line (\d+): field (\S+) not found in type \S+`)
 )
 
 type rawRole struct {
-	Agent       string   `yaml:"agent"`
-	Run         string   `yaml:"run"`
-	Model       string   `yaml:"model"`
-	Effort      string   `yaml:"effort"`
-	MaxTurns    int      `yaml:"max_turns"`
-	MaxSeconds  int      `yaml:"max_seconds"`
-	MaxTokens   int      `yaml:"max_tokens"`
-	Access      string   `yaml:"access"`
-	Repo        string   `yaml:"repo"`
-	Host        string   `yaml:"host"`
-	Paths       []string `yaml:"paths"`
-	Forbid      []string `yaml:"forbid"`
-	Checks      string   `yaml:"checks"`
-	Preview     string   `yaml:"preview"`
-	Writes      []string `yaml:"writes"`
-	DelegatesTo []string `yaml:"delegates_to"`
-	Approve     string   `yaml:"approve"`
-	Review      bool     `yaml:"review"`
+	Agent       string    `yaml:"agent"`
+	Run         string    `yaml:"run"`
+	Model       string    `yaml:"model"`
+	Effort      string    `yaml:"effort"`
+	MaxTurns    int       `yaml:"max_turns"`
+	MaxSeconds  int       `yaml:"max_seconds"`
+	MaxTokens   int       `yaml:"max_tokens"`
+	Access      string    `yaml:"access"`
+	Repo        string    `yaml:"repo"`
+	Host        string    `yaml:"host"`
+	Paths       []string  `yaml:"paths"`
+	Forbid      []string  `yaml:"forbid"`
+	Checks      string    `yaml:"checks"`
+	Preview     string    `yaml:"preview"`
+	Writes      []string  `yaml:"writes"`
+	DelegatesTo []string  `yaml:"delegates_to"`
+	Approve     string    `yaml:"approve"`
+	Review      bool      `yaml:"review"`
+	Guide       string    `yaml:"guide"`
+	Skills      []string  `yaml:"skills"`
+	Tools       *[]string `yaml:"tools"`
+	Profile     string    `yaml:"profile"`
 }
+
+// rawProfile is the block of a profile: the fields of a role that are not
+// of a team's repository, host or folders.
+type rawProfile struct {
+	Agent      string    `yaml:"agent"`
+	Run        string    `yaml:"run"`
+	Model      string    `yaml:"model"`
+	Effort     string    `yaml:"effort"`
+	MaxTurns   int       `yaml:"max_turns"`
+	MaxSeconds int       `yaml:"max_seconds"`
+	MaxTokens  int       `yaml:"max_tokens"`
+	Access     string    `yaml:"access"`
+	Review     bool      `yaml:"review"`
+	Guide      string    `yaml:"guide"`
+	Skills     []string  `yaml:"skills"`
+	Tools      *[]string `yaml:"tools"`
+}
+
+const profileFields = "agent, run, model, effort, max_turns, max_seconds, max_tokens, access, review, guide, skills, tools"
 
 type rawTeam struct {
 	Coordinator string `yaml:"coordinator"`
@@ -284,14 +414,29 @@ type rawTeam struct {
 	ReopenOn  string    `yaml:"reopen_on"`
 	Alert     []string  `yaml:"alert"`
 	Approvers []string  `yaml:"approvers"`
+	Guide     string    `yaml:"guide"`
+	Rooms     yaml.Node `yaml:"rooms"`
 	Roles     yaml.Node `yaml:"roles"`
 }
 
-const teamFields = "coordinator, split, budget, max_agents, max_rounds, reopen_on, alert, approvers, roles"
+const teamFields = "coordinator, split, budget, max_agents, max_rounds, reopen_on, alert, approvers, guide, rooms, roles"
 
-// Parse reads a block of the team note at notePath. A block that does not
-// read still gives what it could, with its problems.
-func Parse(src, notePath string) (Team, []Problem) {
+// roleFields are the fields of a role, as a problem lists them.
+const roleFields = "profile, agent, run, model, effort, max_turns, max_seconds, max_tokens, access, repo, host, paths, forbid, checks, preview, writes, delegates_to, approve, review, guide, skills, tools"
+
+// Profiles reads the block of the profile note at path, a note of the
+// team's project (ProfilesFrom).
+type Profiles func(path string) (string, error)
+
+// Parse reads a block of the team note at notePath, without the profiles:
+// a role that names one has a problem. The server reads its teams with
+// ParseWith.
+func Parse(src, notePath string) (Team, []Problem) { return ParseWith(src, notePath, nil) }
+
+// ParseWith reads a block of the team note at notePath, each role with
+// the fields of its profile it does not write (IMP-233), read by profiles.
+// A block that does not read still gives what it could, with its problems.
+func ParseWith(src, notePath string, profiles Profiles) (Team, []Problem) {
 	t := Team{Path: notePath, Split: SplitContext, MaxRounds: defaultRounds}
 	var r rawTeam
 	dec := yaml.NewDecoder(strings.NewReader(src))
@@ -302,6 +447,9 @@ func Parse(src, notePath string) (Team, []Problem) {
 	var problems []Problem
 	bad := func(line int, format string, args ...any) {
 		problems = append(problems, Problem{Line: line, Msg: fmt.Sprintf(format, args...)})
+	}
+	badRole := func(ro Role, format string, args ...any) {
+		problems = append(problems, Problem{Line: ro.line, Msg: fmt.Sprintf(format, args...), Role: ro.Name})
 	}
 	project, _, _ := strings.Cut(notePath, "/")
 	t.Coordinator = strings.TrimSpace(r.Coordinator)
@@ -337,9 +485,21 @@ func Parse(src, notePath string) (Team, []Problem) {
 	if len(t.Alert) > maxList || len(t.Approvers) > maxList {
 		bad(0, "alert and approvers: at most %d each", maxList)
 	}
-	roles, rp := parseRoles(&r.Roles, project)
+	var err error
+	if t.Guide, err = projectNote(r.Guide, project); err != nil {
+		bad(0, "guide: %v", err)
+	}
+	roles, rp := parseRoles(&r.Roles, project, profiles)
 	problems = append(problems, rp...)
 	t.Roles = roles
+	rooms, roomProblems := parseRooms(&r.Rooms, project, notePath)
+	problems = append(problems, roomProblems...)
+	t.Rooms = rooms
+	for _, ro := range t.Rooms {
+		if _, ok := t.Role(ro.Name); ok {
+			problems = append(problems, Problem{Line: ro.line, Msg: fmt.Sprintf("room %s: a role has its name", ro.Name), Room: ro.Name})
+		}
+	}
 	if len(t.Roles) == 0 && len(rp) == 0 {
 		bad(0, "roles: a team has at least one role")
 	}
@@ -350,28 +510,82 @@ func Parse(src, notePath string) (Team, []Problem) {
 	}
 	for _, ro := range t.Roles {
 		if ro.Approve != ApproveNone && len(t.Alert) == 0 {
-			bad(0, "role %s: approve %s asks a person, through the team's alert (the notify targets): it names none", ro.Name, ro.Approve)
+			badRole(ro, "role %s: approve %s asks a person, through the team's alert (the notify targets): it names none", ro.Name, ro.Approve)
 			break
 		}
 	}
 	for _, ro := range t.Roles {
 		for _, d := range ro.DelegatesTo {
+			if _, room := t.Room(d); room {
+				continue
+			}
 			to, ok := t.Role(d)
 			switch {
 			case !ok:
-				bad(0, "role %s: delegates_to %s, which is no role of the team", ro.Name, d)
+				badRole(ro, "role %s: delegates_to %s, which is no role nor room of the team", ro.Name, d)
 			case d == ro.Name:
-				bad(0, "role %s: delegates_to itself", ro.Name)
+				badRole(ro, "role %s: delegates_to itself", ro.Name)
 			case len(to.DelegatesTo) > 0:
-				bad(0, "role %s: delegates_to %s, which delegates too: a team delegates one level", ro.Name, d)
+				badRole(ro, "role %s: delegates_to %s, which delegates too: a team delegates one level", ro.Name, d)
 			}
 		}
 	}
 	return t, problems
 }
 
+// parseRooms reads the rooms mapping, name to the room's note, in its
+// order.
+func parseRooms(n *yaml.Node, project, notePath string) ([]Room, []Problem) {
+	if n.Kind == 0 {
+		return nil, nil
+	}
+	if n.Kind != yaml.MappingNode {
+		return nil, []Problem{{Line: n.Line, Msg: "rooms: a mapping of room names to their teams' notes"}}
+	}
+	var rooms []Room
+	var problems []Problem
+	if len(n.Content)/2 > maxRooms {
+		problems = append(problems, Problem{Line: n.Line, Msg: fmt.Sprintf("rooms: at most %d", maxRooms)})
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		k, v := n.Content[i], n.Content[i+1]
+		name := strings.TrimSpace(k.Value)
+		bad := func(format string, args ...any) {
+			problems = append(problems, Problem{Line: k.Line, Msg: "room " + name + ": " + fmt.Sprintf(format, args...), Room: name})
+		}
+		switch {
+		case !roleName.MatchString(name):
+			problems = append(problems, Problem{Line: k.Line, Msg: fmt.Sprintf("room %q: lower-case letters, digits and -, starting with a letter, at most 32", name), Room: name})
+			continue
+		case slices.ContainsFunc(rooms, func(r Room) bool { return r.Name == name }):
+			bad("written twice")
+			continue
+		case v.Kind != yaml.ScalarNode:
+			bad("the link to its team's note")
+			continue
+		}
+		p, err := projectNote(v.Value, project)
+		switch {
+		case err != nil:
+			bad("%v", err)
+			continue
+		case p == "":
+			bad("the link to its team's note")
+			continue
+		case p == notePath:
+			bad("the team itself")
+			continue
+		case slices.ContainsFunc(rooms, func(r Room) bool { return r.Path == p }):
+			bad("%s is another room too", p)
+			continue
+		}
+		rooms = append(rooms, Room{Name: name, Path: p, line: k.Line})
+	}
+	return rooms, problems
+}
+
 // parseRoles reads the roles mapping in its order.
-func parseRoles(n *yaml.Node, project string) ([]Role, []Problem) {
+func parseRoles(n *yaml.Node, project string, profiles Profiles) ([]Role, []Problem) {
 	if n.Kind == 0 {
 		return nil, nil
 	}
@@ -387,32 +601,40 @@ func parseRoles(n *yaml.Node, project string) ([]Role, []Problem) {
 		k, v := n.Content[i], n.Content[i+1]
 		name := strings.TrimSpace(k.Value)
 		bad := func(format string, args ...any) {
-			problems = append(problems, Problem{Line: k.Line, Msg: "role " + name + ": " + fmt.Sprintf(format, args...)})
+			problems = append(problems, Problem{Line: k.Line, Msg: "role " + name + ": " + fmt.Sprintf(format, args...), Role: name})
 		}
 		if !roleName.MatchString(name) {
-			problems = append(problems, Problem{Line: k.Line, Msg: fmt.Sprintf("role %q: lower-case letters, digits and -, starting with a letter, at most 32", name)})
+			problems = append(problems, Problem{Line: k.Line, Msg: fmt.Sprintf("role %q: lower-case letters, digits and -, starting with a letter, at most 32", name), Role: name})
 			continue
 		}
 		if slices.ContainsFunc(roles, func(r Role) bool { return r.Name == name }) {
 			bad("written twice")
 			continue
 		}
+		// The profile's fields first, then the role as it reads with them:
+		// its checks hold for what the role ends up with. A profile that
+		// does not read leaves the role with its own fields.
+		profile, err := withProfile(v, project, profiles)
+		if err != nil {
+			bad("%v", err)
+		}
 		var rr rawRole
 		if err := decodeKnown(v, &rr); err != nil {
-			p := yamlProblem(err, "a role: agent, run, model, effort, max_turns, max_seconds, max_tokens, access, repo, host, paths, forbid, checks, preview, writes, delegates_to, approve, review")
+			p := yamlProblem(err, "a role: "+roleFields)
 			if p.Line == 0 {
 				p.Line = k.Line
 			}
 			p.Msg = "role " + name + ": " + p.Msg
+			p.Role = name
 			problems = append(problems, p)
 			continue
 		}
-		ro := Role{Name: name, Agent: LinkPath(rr.Agent, project), Run: strings.TrimSpace(rr.Run),
+		ro := Role{Name: name, Profile: profile, Agent: LinkPath(rr.Agent, project), Run: strings.TrimSpace(rr.Run),
 			Model: strings.TrimSpace(rr.Model), Effort: strings.TrimSpace(rr.Effort),
 			MaxTurns: rr.MaxTurns, MaxSeconds: rr.MaxSeconds, MaxTokens: rr.MaxTokens, Access: strings.TrimSpace(rr.Access),
 			Repo: strings.TrimSpace(rr.Repo), Host: strings.TrimSpace(rr.Host),
 			Checks: strings.TrimSpace(rr.Checks), Preview: strings.Trim(strings.TrimSpace(rr.Preview), "/"), DelegatesTo: trimList(rr.DelegatesTo),
-			Approve: strings.TrimSpace(rr.Approve), Review: rr.Review}
+			Approve: strings.TrimSpace(rr.Approve), Review: rr.Review, line: k.Line}
 		if !runName.MatchString(ro.Run) {
 			bad("run %q: the node that runs it, a plugin's <name>.run (claude.run, pi.run)", ro.Run)
 		}
@@ -425,19 +647,22 @@ func parseRoles(n *yaml.Node, project string) ([]Role, []Problem) {
 		switch ro.Access {
 		case "", AccessEdit, AccessExec:
 		case AccessRead:
-			if ro.Repo != "" {
-				bad("access read: a role with a repo changes its files (edit or exec)")
+			// A role that reads its repository (a reviewer of an app's
+			// files) changes none of them: no paths to keep it within.
+			if ro.Repo != "" && (len(rr.Paths) > 0 || len(rr.Forbid) > 0) {
+				bad("access read: the role reads its repo and changes nothing in it, paths and forbid have nothing to limit")
 			}
 		default:
 			bad("access %q: read, edit or exec", ro.Access)
 		}
 		if (ro.Checks != "" || ro.Preview != "") && ro.Repo == "" {
 			bad("checks and preview work on a repo: the role has none")
+		} else if (ro.Checks != "" || ro.Preview != "") && !ro.Commits() {
+			bad("checks and preview test the role's changes: with access read it makes none")
 		}
 		if ro.Preview != "" && (ro.Checks == "" || strings.Contains(ro.Preview, "..") || strings.HasPrefix(ro.Preview, "/")) {
 			bad("preview %q: the folder of the build its checks make, in the repository", ro.Preview)
 		}
-		var err error
 		if ro.Paths, err = cleanRepoPaths(rr.Paths); err != nil {
 			bad("paths: %v", err)
 		}
@@ -447,10 +672,21 @@ func parseRoles(n *yaml.Node, project string) ([]Role, []Problem) {
 		if ro.Writes, err = cleanFolders(rr.Writes, project); err != nil {
 			bad("writes: %v", err)
 		}
+		if ro.Guide, err = projectNote(rr.Guide, project); err != nil {
+			bad("guide: %v", err)
+		}
+		if ro.Skills, err = projectNotes(rr.Skills, project); err != nil {
+			bad("skills: %v", err)
+		}
+		if rr.Tools != nil {
+			if ro.Tools, err = cleanTools(*rr.Tools); err != nil {
+				bad("tools: %v", err)
+			}
+		}
 		switch ro.Approve {
 		case "":
 			ro.Approve = ApproveNone
-			if ro.Repo != "" {
+			if ro.Commits() {
 				ro.Approve = ApproveMerge
 			} else if ro.Host != "" {
 				ro.Approve = ApproveOps
@@ -458,6 +694,8 @@ func parseRoles(n *yaml.Node, project string) ([]Role, []Problem) {
 		case ApproveMerge:
 			if ro.Repo == "" {
 				bad("approve merge: the role has no repo whose pull requests a person merges")
+			} else if !ro.Commits() {
+				bad("approve merge: with access read the role opens no pull request")
 			}
 		case ApproveOps, ApproveNone:
 		default:
@@ -514,6 +752,199 @@ func cleanRepoPaths(ps []string) ([]string, error) {
 	}
 	if len(out) > maxList {
 		return nil, fmt.Errorf("at most %d", maxList)
+	}
+	return out, nil
+}
+
+// ProfilePath is the note of the profile a role names: a bare name is in
+// the project's profiles/ folder (analyst: <project>/profiles/analyst.md),
+// a link or a path a note of the project. "" stays "".
+func ProfilePath(v, project string) (string, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return "", nil
+	}
+	if strings.HasPrefix(v, "[[") || strings.Contains(v, "/") {
+		return projectNote(v, project)
+	}
+	name := strings.TrimSuffix(v, ".md")
+	if !roleName.MatchString(name) {
+		return "", fmt.Errorf("profile %q: a name of %s/ (lower-case letters, digits and -) or a link to a note of the project", v, ProfileFolder)
+	}
+	return project + "/" + ProfileFolder + "/" + name + ".md", nil
+}
+
+// withProfile adds to the role v the fields of its profile it does not
+// write, and says the profile's note; "" for a role without one.
+func withProfile(v *yaml.Node, project string, profiles Profiles) (string, error) {
+	if v.Kind != yaml.MappingNode {
+		return "", nil
+	}
+	var name *yaml.Node
+	for i := 0; i+1 < len(v.Content); i += 2 {
+		if v.Content[i].Value == "profile" {
+			name = v.Content[i+1]
+		}
+	}
+	if name == nil {
+		return "", nil
+	}
+	p, err := ProfilePath(name.Value, project)
+	if err != nil || p == "" {
+		return "", err
+	}
+	if profiles == nil {
+		return p, fmt.Errorf("profile %s: the profiles are read by the server", p)
+	}
+	src, err := profiles(p)
+	if err != nil {
+		return p, fmt.Errorf("profile %s: %v", p, err)
+	}
+	fields, problem := readProfile(src)
+	if problem != nil {
+		return p, fmt.Errorf("profile %s: %s", p, problem.Msg)
+	}
+	for i := 0; fields != nil && i+1 < len(fields.Content); i += 2 {
+		k := fields.Content[i].Value
+		if !hasKey(v, k) {
+			v.Content = append(v.Content, fields.Content[i], fields.Content[i+1])
+		}
+	}
+	return p, nil
+}
+
+// hasKey says whether the mapping m has the key k.
+func hasKey(m *yaml.Node, k string) bool {
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == k {
+			return true
+		}
+	}
+	return false
+}
+
+// readProfile reads a profile's block: its mapping of fields, nil when
+// empty, or the problem that keeps it from reading.
+func readProfile(src string) (*yaml.Node, *Problem) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(src), &doc); err != nil {
+		p := yamlProblem(err, "a profile: "+profileFields)
+		return nil, &p
+	}
+	if len(doc.Content) == 0 {
+		return nil, nil
+	}
+	m := doc.Content[0]
+	if m.Kind != yaml.MappingNode {
+		return nil, &Problem{Line: m.Line, Msg: "a profile is a mapping of a role's fields: " + profileFields}
+	}
+	var rp rawProfile
+	if err := decodeKnown(m, &rp); err != nil {
+		p := yamlProblem(err, "a profile: "+profileFields)
+		return nil, &p
+	}
+	return m, nil
+}
+
+// CheckProfile reads the block of a profile note, for the lint: its fields
+// as a role would read them alone.
+func CheckProfile(src, notePath string) []Problem {
+	m, problem := readProfile(src)
+	if problem != nil {
+		return []Problem{*problem}
+	}
+	role := &yaml.Node{Kind: yaml.MappingNode}
+	if m != nil {
+		role.Content = append(role.Content, m.Content...)
+	}
+	if !hasKey(role, "run") {
+		// A profile may leave the executor to its roles.
+		role.Content = append(role.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: "run"}, &yaml.Node{Kind: yaml.ScalarNode, Value: "x.run"})
+	}
+	project, _, _ := strings.Cut(notePath, "/")
+	roles := &yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{{Kind: yaml.ScalarNode, Value: "profile"}, role}}
+	_, problems := parseRoles(roles, project, nil)
+	for i := range problems {
+		problems[i].Line = 0
+		problems[i].Msg = strings.TrimPrefix(problems[i].Msg, "role profile: ")
+	}
+	return problems
+}
+
+// ProfilesFrom reads the profiles a team's roles name with load, which
+// gives a note's content: a note type: profile with one ```profile block.
+func ProfilesFrom(load func(path string) ([]byte, error)) Profiles {
+	return func(p string) (string, error) {
+		content, err := load(p)
+		if err != nil {
+			return "", errors.New("no note of the project")
+		}
+		typ, _ := parser.ParseFrontmatterFields(parser.ExtractFrontmatterRaw(content))["type"].(string)
+		if strings.TrimSpace(typ) != ProfileType {
+			return "", errors.New("no note type: profile")
+		}
+		blocks := FindProfiles(content)
+		if len(blocks) != 1 {
+			return "", fmt.Errorf("a profile holds one ```profile block, this one %d", len(blocks))
+		}
+		return blocks[0].Src, nil
+	}
+}
+
+// cleanTools checks the plugins and tools a role names, each once; none is
+// a list, empty, never nil.
+func cleanTools(ts []string) ([]string, error) {
+	out := []string{}
+	for _, t := range trimList(ts) {
+		if !toolName.MatchString(t) {
+			return nil, fmt.Errorf("%q is no plugin (vec-pg) nor plugin's tool (vec-pg_search)", t)
+		}
+		if slices.Contains(out, t) {
+			return nil, fmt.Errorf("%s is written twice", t)
+		}
+		out = append(out, t)
+	}
+	if len(out) > maxList {
+		return nil, fmt.Errorf("at most %d", maxList)
+	}
+	return out, nil
+}
+
+// projectNote is the vault path of a note a block links to (a guide, a
+// skill), a note of the team's project: a link without the project is
+// inside it, as an agent's (AgentPrompt). "" stays "".
+func projectNote(v, project string) (string, error) {
+	p := LinkPath(v, project)
+	if p == "" {
+		return "", nil
+	}
+	if !strings.HasPrefix(p, project+"/") {
+		p = project + "/" + p
+	}
+	if c := path.Clean(p); c != p || !strings.HasPrefix(c, project+"/") {
+		return "", fmt.Errorf("%q is no note of the project %s", strings.TrimSpace(v), project)
+	}
+	if path.Ext(p) != ".md" {
+		return "", fmt.Errorf("%s is no note: a note ends with .md", p)
+	}
+	return p, nil
+}
+
+// projectNotes checks a list of notes of the project, each once.
+func projectNotes(vs []string, project string) ([]string, error) {
+	var out []string
+	for _, v := range trimList(vs) {
+		p, err := projectNote(v, project)
+		if err != nil {
+			return nil, err
+		}
+		if slices.Contains(out, p) {
+			return nil, fmt.Errorf("%s is written twice", p)
+		}
+		out = append(out, p)
+	}
+	if len(out) > maxSkills {
+		return nil, fmt.Errorf("at most %d", maxSkills)
 	}
 	return out, nil
 }

@@ -585,7 +585,8 @@ compressing it reaches), the bootstrap (25.2 KB, ≤ 20 KB), the full tool
 list (85.8 KB, ≤ 80 KB), the search with one query (R@5 0.71, ≥ 0.76, the
 two lexical questions it misses) and with variants (R@1 0.73, ≥ 0.80,
 dropped on the 14th of November; 3 misses, ≤ 2). Under 5 ms a call's time is lost in the model's seconds:
-those numbers are kept, not chased.
+those numbers are kept, not chased. Where each ended: [M1
+closed](#m1-closed-2026-11-18).
 
 ### The web UI gzipped (2026-10-29)
 
@@ -1144,6 +1145,39 @@ same, and level R too. Their time is the same, in turn twice: a mean of
 35–36 ms with the query, 54–56 with variants. Their notes are long
 converted documents, whose snippets already waited, and their slow
 searches are the short words' (a short word in a query, 2026-10-30).
+
+### M1 closed (2026-11-18)
+
+The roadmap's M1, the base precise and fast, is closed. The bench runs
+every night, and the guard checks each release. Of the objectives of the
+29th of October:
+
+| | Objective | Where it ended |
+|---|---|---|
+| The whole index of the large vault | ≤ 3.5 s | 2.6 s, reached |
+| The web UI's first load | ≤ 200 KB sent | 154 KB, reached |
+| Search, one query: R@5 | ≥ 0.76 | 0.80, reached |
+| Search with variants: misses | ≤ 2 | 1, reached |
+| Search with variants: R@1 | ≥ 0.80 | 0.733, dropped on the 14th of November |
+| The bootstrap | ≤ 20 KB | 21.6 KB, dropped |
+| Search of the large vault, p95 | ≤ 3 ms | 3.3 ms, dropped |
+| The full tool list | ≤ 80 KB | 81.7 KB, dropped |
+
+The four objectives dropped are numbers not to make worse, which the
+guard holds like the others. `bench/base/reference.json` no longer gives
+them an objective.
+
+- **The bootstrap** could reach 20 KB only by dropping rules of the
+  directives, and every rule stays.
+- **The p95 of the search** is half a millisecond short. About 0.45 ms is
+  the cost of a call through MCP, and the rest is FTS5's own work. Under
+  5 ms a call's time is lost in the model's seconds.
+- **The full tool list** went past its objective with `memory_versions`
+  (v2.149.0), by 1,345 bytes then and 1,690 now. That was accepted, to be
+  brought back with the same functions in a work of its own, and then
+  dropped with M1: 1,690 bytes are 2% of the list, about 400 tokens at the
+  start of a session and mostly read from the cache. M2 stays a direction,
+  held by the guard at every release.
 
 ## Limits
 

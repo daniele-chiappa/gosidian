@@ -233,6 +233,8 @@ func (r *Router) registerAuthed() {
 	r.mux.Handle("/api/v1/preview", authed(r.handlePreview))
 	r.mux.Handle("/api/v1/cut/collections", authed(r.handleCutCollections))
 	r.mux.Handle("/api/v1/marks", authed(r.handleMarks))
+	// A team of agents as the office's map draws it (IMP-233).
+	r.mux.Handle("/api/v1/fleet/teams/", authed(r.handleFleetTeam))
 
 	r.mux.Handle("/api/v1/projects", authed(r.handleProjects))
 	r.mux.Handle("/api/v1/projects/", authed(r.handleProjectByName))

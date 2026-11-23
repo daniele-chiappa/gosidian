@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Smoke test of the gosidian presets, base + rag, end to end.
+"""Smoke test of the gosidian presets, base + rag (or base + agents), end
+to end.
 
 It copies deploy/presets to a temporary folder (a real .env is never
 touched), fills .env with init.sh and a fake OpenAI-compatible endpoint
@@ -13,12 +14,23 @@ gosidian-smoke, and checks what an install goes through:
     the cut stores its paragraphs, and a question is answered from them,
     citing the source.
 
+With the argument agents it starts base + agents instead, the fake
+endpoint as pi's model, and checks:
+
+  - plugin accept --pending accepts pi, exec, preview and notify, whose
+    manifests name the install's files;
+  - a team from memory_create_team, whose pipelines load (they name the
+    nodes of exec, preview and notify);
+  - a task of its role runs on pi, through its proxy to the endpoint,
+    and closes with the agent's report.
+
 Then it removes the stack, its volumes and the folder (--keep leaves them).
 Needs Docker with Compose, where a bind mount names a local path (CT 202,
 a GitHub runner; not a runner that talks to another host's daemon).
 
   SMOKE_GOSIDIAN_IMAGE  the gosidian image (default: the preset's)
   SMOKE_DATABASE_IMAGE  the database plugin's image (default: the preset's)
+  SMOKE_PI_IMAGE        pi's image, with agents (default: the preset's)
   SMOKE_PORT            gosidian's port on the loopback (default 18180)
 """
 import json
@@ -122,8 +134,143 @@ def wait(what, check, timeout=300, every=3):
     raise SystemExit("smoke: timed out waiting for " + what)
 
 
+def admin(compose, work):
+    """An MCP token, and a session of the admin with its password changed."""
+    tok_out = run(compose + ["exec", "-T", "gosidian", "/gosidian", "token", "create", "--name", "smoke"], work, quiet=True).stdout
+    token = next(w for w in tok_out.split() if len(w) >= 40)
+    password = run(compose + ["exec", "-T", "gosidian", "cat", "/data/initial-admin-password"], work, quiet=True).stdout.strip()
+    st, body, _ = http("POST", "/api/v1/login", {"username": "admin", "password": password})
+    session = json.loads(body)["token"]
+    new = "smoke-" + secrets.token_urlsafe(12)
+    st, body, _ = http("POST", "/api/v1/me/password", {"current_password": password, "new_password": new}, session)
+    if st != 200:
+        raise SystemExit("smoke: password change: %d %s" % (st, body))
+    return token, json.loads(http("POST", "/api/v1/login", {"username": "admin", "password": new})[1])["token"]
+
+
+def plugin_rows(compose, work):
+    out = run(compose + ["exec", "-T", "gosidian", "/gosidian", "plugin", "list"], work, check=False, quiet=True).stdout
+    return {l.split()[0]: l.split()[1] for l in out.splitlines()[1:] if len(l.split()) > 1}
+
+
+def cleanup(compose, work, keep, project):
+    if keep:
+        log("left up: %s, compose project %s" % (work, project))
+        return
+    run(compose + ["down", "-v", "--remove-orphans"], work, check=False, quiet=True)
+    # The container's files back to whoever runs the test, then away.
+    run(["docker", "run", "--rm", "-v", work + ":/w", "alpine:3.20", "chown", "-R", "%d:%d" % (os.getuid(), os.getgid()), "/w"], work, check=False, quiet=True)
+    shutil.rmtree(work, ignore_errors=True)
+
+
+# The agents preset's files for the fake endpoint: one free model, no
+# repositories, nobody to ask (notify wants a channel: one it never calls).
+PI_YAML = """name: pi
+description: The agents of the smoke test
+endpoint:
+  base_url: http://fake:8090/v1
+models:
+  - id: fake
+    name: agent
+    context: 32768
+    max_output: 4000
+    cost: {input: 0, output: 0}
+default_model: agent
+tools:
+  allowed: [read, grep, find, ls]
+limits:
+  default: {max_turns: 5, max_seconds: 2m, max_tokens: 100000}
+  max: {max_turns: 10, max_seconds: 5m, max_tokens: 200000}
+mcp: [read, write]
+"""
+EXEC_YAML = """name: exec
+description: The checks of the smoke test
+"""
+NOTIFY_YAML = """name: notify
+description: The questions of the smoke test
+gosidian_api: http://gosidian:8080
+store_dir: /var/lib/gosidian-notify
+channels:
+  ntfy: {server: "http://fake:8090"}
+"""
+
+
+def agents(keep):
+    project = PROJECT + "-agents"
+    work = tempfile.mkdtemp(prefix="gosidian-smoke-agents-")
+    shutil.copytree(PRESETS, work, dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns(".env", "vault", "state", "secrets", "keys", "notify-secrets", "*.yaml", "docker-compose.override.yml"))
+    files = ["-f", "docker-compose.yml", "-f", "docker-compose.agents.yml", "-f", "test/docker-compose.smoke-agents.yml"]
+    images = {s: os.environ[e] for s, e in (("gosidian", "SMOKE_GOSIDIAN_IMAGE"), ("pi", "SMOKE_PI_IMAGE")) if os.environ.get(e)}
+    if images:
+        with open(os.path.join(work, "test", "docker-compose.images.yml"), "w") as f:
+            f.write("services:\n" + "".join("  %s:\n    image: %s\n" % kv for kv in images.items()))
+        files += ["-f", "test/docker-compose.images.yml"]
+    compose = ["docker", "compose", "-p", project] + files
+    try:
+        log("folder " + work)
+        run(["sh", "./init.sh"], work, quiet=True)
+        set_env(os.path.join(work, ".env"), {
+            "GOSIDIAN_PORT": PORT, "NOTIFY_PORT": str(int(PORT) + 16), "PREVIEW_PORT": str(int(PORT) + 17), "TZ": "UTC",
+            "GOSIDIAN_PUBLIC_URL": BASE, "AGENTS_AT_ONCE": "2", "PIPELINES_WORKERS": "4",
+        })
+        for name, text in (("pi.yaml", PI_YAML), ("exec.yaml", EXEC_YAML), ("notify.yaml", NOTIFY_YAML)):
+            with open(os.path.join(work, name), "w") as f:
+                f.write(text)
+        run(["docker", "run", "--rm", "-v", work + ":/w", "alpine:3.20", "sh", "-c",
+             "chown -R 65532:65532 /w/vault /w/state /w/secrets && chown -R 0:0 /w/keys && chown -R 1000:1000 /w/notify-secrets"], work, quiet=True)
+        run(compose + ["up", "-d", "--quiet-pull"], work, quiet=True)
+        log("stack up")
+        wait("gosidian's health", lambda: http("GET", "/healthz")[0] == 200 and '"ok"' in http("GET", "/healthz")[1], timeout=180)
+
+        names = ("pi", "exec", "preview", "notify")
+        rows = wait("the agents' plugins up", lambda: (lambda r: r if all(r.get(p) in ("unaccepted", "ok") for p in names) else None)(plugin_rows(compose, work)), timeout=240, every=5)
+        log("plugins %s" % rows)
+        out = run(compose + ["exec", "-T", "gosidian", "/gosidian", "plugin", "accept", "--pending"], work, quiet=True).stdout
+        rows = wait("the agents' plugins accepted", lambda: (lambda r: r if all(r.get(p) == "ok" for p in names) else None)(plugin_rows(compose, work)), timeout=120, every=5)
+        log("accepted %s" % rows)
+
+        token, session = admin(compose, work)
+        mcp_call(token, "memory_project_scaffold", {"project": "crew"})
+        st, body, _ = http("PUT", "/api/v1/projects/crew", {"use_pipelines": True}, session)
+        if st != 200:
+            raise SystemExit("smoke: use_pipelines: %d %s" % (st, body))
+        mcp_call(token, "memory_create_team", {"project": "crew", "name": "team", "roles": ["writer"], "run": "pi.run"})
+        log("team crew/team, its role on pi.run")
+
+        def pipelines_load():
+            st, body, _ = http("GET", "/api/v1/pipelines?project=crew", None, session)
+            ps = json.loads(body).get("pipelines", []) if st == 200 else []
+            work_p = [p for p in ps if p.get("path", "").endswith("team-work.md")]
+            if work_p and work_p[0].get("problem"):
+                raise SystemExit("smoke: the team's work pipeline does not load: %s" % work_p[0]["problem"])
+            return work_p or None
+        wait("the team's pipelines", pipelines_load, timeout=60)
+
+        mcp_call(token, "memory_create", {"path": "crew/tasks/20261118-000000-hello.md", "content":
+                 "---\ntitle: Hello\ntype: task\nstatus: submitted\nteam: \"[[crew/team]]\"\nassignee: writer\ntags: [crew, type:task]\n---\n\n# Hello\n\nSay hello.\n"})
+        log("task submitted")
+
+        def closed():
+            note = mcp_call(token, "memory_get", {"path": "crew/tasks/20261118-000000-hello.md"})
+            content = note.get("content", "") if isinstance(note, dict) else ""
+            for st in ("failed", "canceled", "input-required"):
+                if "\nstatus: %s\n" % st in content:
+                    raise SystemExit("smoke: the task went %s:\n%s" % (st, content[-3000:]))
+            return content if "\nstatus: completed\n" in content else None
+        content = wait("the task closed", closed, timeout=300, every=5)
+        if "The documents do not say." not in content or "## Report" not in content:
+            raise SystemExit("smoke: the task closed without the agent's report:\n" + content[-3000:])
+        log("task completed with the agent's report")
+        log("ok")
+    finally:
+        cleanup(compose, work, keep, project)
+
+
 def main():
     keep = "--keep" in sys.argv
+    if "agents" in sys.argv[1:]:
+        return agents(keep)
     work = tempfile.mkdtemp(prefix="gosidian-smoke-")
     # An install's own files stay where they are.
     shutil.copytree(PRESETS, work, dirs_exist_ok=True,
@@ -144,8 +291,7 @@ def main():
         wait("gosidian's health", lambda: http("GET", "/healthz")[0] == 200 and '"ok"' in http("GET", "/healthz")[1], timeout=180)
 
         def plugins_ok():
-            out = run(compose + ["exec", "-T", "gosidian", "/gosidian", "plugin", "list"], work, check=False, quiet=True).stdout
-            rows = {l.split()[0]: l.split()[1] for l in out.splitlines()[1:] if len(l.split()) > 1}
+            rows = plugin_rows(compose, work)
             return rows if all(rows.get(p) == "ok" for p in ("docling", "images", "chat")) and rows.get("database") in ("unaccepted", "ok") else None
         rows = wait("the pinned plugins accepted", plugins_ok, timeout=240, every=5)
         log("plugins %s" % rows)
@@ -153,16 +299,7 @@ def main():
         if rows.get("database") != "ok" and "Accepted database" not in out:
             raise SystemExit("smoke: accept --pending did not accept the database:\n" + out)
 
-        tok_out = run(compose + ["exec", "-T", "gosidian", "/gosidian", "token", "create", "--name", "smoke"], work, quiet=True).stdout
-        token = next(w for w in tok_out.split() if len(w) >= 40)
-        password = run(compose + ["exec", "-T", "gosidian", "cat", "/data/initial-admin-password"], work, quiet=True).stdout.strip()
-        st, body, _ = http("POST", "/api/v1/login", {"username": "admin", "password": password})
-        session = json.loads(body)["token"]
-        new = "smoke-" + secrets.token_urlsafe(12)
-        st, body, _ = http("POST", "/api/v1/me/password", {"current_password": password, "new_password": new}, session)
-        if st != 200:
-            raise SystemExit("smoke: password change: %d %s" % (st, body))
-        session = json.loads(http("POST", "/api/v1/login", {"username": "admin", "password": new})[1])["token"]
+        token, session = admin(compose, work)
 
         scaffold = mcp_call(token, "memory_project_scaffold", {"project": "docs", "template": "rag"})
         log("scaffolded %d files" % len(scaffold.get("created", [])))
@@ -205,13 +342,7 @@ def main():
         log("answer: " + reply["text"])
         log("ok")
     finally:
-        if keep:
-            log("left up: %s, compose project %s" % (work, PROJECT))
-        else:
-            run(compose + ["down", "-v", "--remove-orphans"], work, check=False, quiet=True)
-            # The container's files back to whoever runs the test, then away.
-            run(["docker", "run", "--rm", "-v", work + ":/w", "alpine:3.20", "chown", "-R", "%d:%d" % (os.getuid(), os.getgid()), "/w"], work, check=False, quiet=True)
-            shutil.rmtree(work, ignore_errors=True)
+        cleanup(compose, work, keep, PROJECT)
 
 
 if __name__ == "__main__":

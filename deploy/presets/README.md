@@ -15,9 +15,11 @@ docker compose exec gosidian /gosidian plugin accept --pending
 | `docker-compose.yml` | gosidian alone |
 | `docker-compose.rag.yml` | answers from a project's documents (docling, images, database on Qdrant, chat) |
 | `docker-compose.storage.yml` | remote stores as sources of the IN folders |
+| `docker-compose.agents.yml` | teams of agents on a project's tasks (pi, exec, preview, notify) |
 | `.env.example` | every setting, with the models' examples |
 | `database.yaml` | the database plugin's preset, filled from `.env` |
 | `storage.yaml.example` | the sources of the storage plugin |
+| `pi.yaml.example`, `exec.yaml.example`, `notify.yaml.example` | the agents preset's models and repositories, checks, people |
 | `test/smoke.py` | the end-to-end test of base + rag, on a fake model |
 
 The whole walk-through is in [docs/deployment.md](../../docs/deployment.md#presets);

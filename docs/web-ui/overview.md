@@ -160,7 +160,9 @@ that lacks some words of the query says which. When nothing is found,
 it suggests checking the spelling, has a button that removes the project
 filter when there is one, and one that looks for the text in the names,
 in the command palette (`Ctrl+K`, see
-[editor → command palette](editor.md#command-palette)).
+[editor → command palette](editor.md#command-palette)). The window keeps
+its text and its project, in the address too: after a look at many other
+tabs, or a reload, Search searches them again.
 
 ## Query window
 

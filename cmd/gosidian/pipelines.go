@@ -139,7 +139,8 @@ func startPipelines(ctx context.Context, cfg *config.Config, sdir string, runner
 		RunTokenRate:   pc.RunTokenRate,
 		Categories:     categories(pc.Categories),
 		Tasks: pipeline.TaskConfig{Lease: cfg.Agents.Lease, MaxAttempts: cfg.Agents.MaxAttempts, MaxTasks: cfg.Agents.MaxTasks, HoldMax: cfg.Agents.HoldMax,
-			MaxReport: cfg.Agents.MaxReport, MaxPromptReport: cfg.Agents.MaxPromptReport},
+			MaxReport: cfg.Agents.MaxReport, MaxPromptReport: cfg.Agents.MaxPromptReport,
+			MaxPromptNotes: cfg.Agents.MaxPromptNotes},
 	}, sec, slog.Default())
 	reg, err := newPlugins(pc, sdir, sec, slog.Default())
 	if err != nil {
@@ -225,6 +226,10 @@ func resourceLimit(pc config.PipelinesConfig, reg *plugins.Registry, engine *pip
 		case strings.HasPrefix(res, pipeline.ResourceTeam):
 			return engine.TeamLimit(strings.TrimPrefix(res, pipeline.ResourceTeam))
 		case strings.HasPrefix(res, pipeline.ResourcePlugin):
+			// plugin:<name>, or plugin:<name>/<tool> for a tool's own limit.
+			if p, tool, ok := strings.Cut(strings.TrimPrefix(res, pipeline.ResourcePlugin), "/"); ok {
+				return reg.ToolMaxConcurrent(p, tool)
+			}
 			return reg.MaxConcurrent(strings.TrimPrefix(res, pipeline.ResourcePlugin))
 		case strings.HasPrefix(res, pipeline.ResourceLLM):
 			name := strings.TrimPrefix(res, pipeline.ResourceLLM)

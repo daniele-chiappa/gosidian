@@ -500,6 +500,10 @@ type AgentsConfig struct {
 	// MaxReport.
 	MaxReport       int `toml:"max_report"`
 	MaxPromptReport int `toml:"max_prompt_report"`
+	// MaxPromptNotes is the most bytes of the guides and skills of a role
+	// its agent receives in its system prompt (IMP-233); default 65536,
+	// from 1024 to 1048576.
+	MaxPromptNotes int `toml:"max_prompt_notes"`
 }
 
 // CategoryConfig is the rules of a category of pipelines.
@@ -1314,6 +1318,9 @@ func (c *Config) applyDefaults() {
 	if c.Agents.MaxPromptReport == 0 {
 		c.Agents.MaxPromptReport = min(16<<10, c.Agents.MaxReport)
 	}
+	if c.Agents.MaxPromptNotes == 0 {
+		c.Agents.MaxPromptNotes = 64 << 10
+	}
 	if c.Webauth.SessionTTL == 0 {
 		c.Webauth.SessionTTL = 24 * time.Hour
 	}
@@ -1757,6 +1764,7 @@ func (c *Config) applyAgentsEnv() error {
 		"GOSIDIAN_AGENTS_MAX_TASKS":         &c.Agents.MaxTasks,
 		"GOSIDIAN_AGENTS_MAX_REPORT":        &c.Agents.MaxReport,
 		"GOSIDIAN_AGENTS_MAX_PROMPT_REPORT": &c.Agents.MaxPromptReport,
+		"GOSIDIAN_AGENTS_MAX_PROMPT_NOTES":  &c.Agents.MaxPromptNotes,
 	} {
 		v := os.Getenv(env)
 		if v == "" {
@@ -1821,6 +1829,8 @@ func checkAgents(a AgentsConfig) error {
 		return fmt.Errorf("[agents] max_report (GOSIDIAN_AGENTS_MAX_REPORT): %d is not between 4096 and 1048576", a.MaxReport)
 	case a.MaxPromptReport < 1<<10 || a.MaxPromptReport > a.MaxReport:
 		return fmt.Errorf("[agents] max_prompt_report (GOSIDIAN_AGENTS_MAX_PROMPT_REPORT): %d is not between 1024 and max_report (%d)", a.MaxPromptReport, a.MaxReport)
+	case a.MaxPromptNotes < 1<<10 || a.MaxPromptNotes > 1<<20:
+		return fmt.Errorf("[agents] max_prompt_notes (GOSIDIAN_AGENTS_MAX_PROMPT_NOTES): %d is not between 1024 and 1048576", a.MaxPromptNotes)
 	}
 	return nil
 }

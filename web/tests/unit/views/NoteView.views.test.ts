@@ -16,6 +16,7 @@ vi.mock('@/api/preview', async (orig) => ({
   renderPreviewData: vi.fn(async () => ({ html: '<div class="gosidian-view"></div>', views: [], diagramLinks: {} })),
 }))
 vi.mock('@/api/marks', () => ({ listMarks: vi.fn(async () => []) }))
+vi.mock('@/composables/pluginApps', () => ({ appForType: vi.fn(async () => null) }))
 const hooks = vi.hoisted(() => ({ note: (_p: { path?: string; etag?: string; action?: string }) => {} }))
 vi.mock('@/composables/useSSE', () => ({
   useSSE: () => ({

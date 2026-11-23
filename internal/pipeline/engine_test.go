@@ -253,9 +253,15 @@ func pipelineNote(src string) string {
 	return "---\ntype: pipeline\n---\n\n# A pipeline\n\n```pipeline\n" + src + "\n```\n"
 }
 
+// waitFor is how long a test waits for what it expects before it fails. A
+// passing test waits only as long as the engine takes: a task's flow of two
+// attempts takes about a second under -race, three or four on a loaded CI
+// runner, past the 3 s that once failed three of them (2026-11-18).
+const waitFor = 20 * time.Second
+
 func waitStatus(t *testing.T, e *Engine, id string, want jobs.Status) jobs.Run {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(waitFor)
 	for {
 		run, err := e.Runner().Store().Run(id)
 		if err != nil {
@@ -287,7 +293,7 @@ func stepOf(t *testing.T, e *Engine, run, name string) jobs.Step {
 // eventually waits for cond, as Ended runs right after the run's status.
 func eventually(t *testing.T, cond func() bool, what string) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(waitFor)
 	for !cond() {
 		if time.Now().After(deadline) {
 			t.Fatalf("never: %s", what)

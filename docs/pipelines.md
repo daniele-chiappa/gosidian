@@ -312,7 +312,9 @@ resources = ["gpu"]
 ```
 
 A step of a plugin's node takes a place in the plugin and in its
-resources while it runs; an `llm.*` step in its provider (the one its
+resources while it runs, and in the node's own limit when the manifest
+gives its node one ([plugins](plugins.md#the-manifest): an agent's runs
+wait for its workers, its merges do not); an `llm.*` step in its provider (the one its
 `provider` names when the step is queued, else the first) and in the
 provider's resources. A step that finds one of them full stays in the
 queue without holding a worker, and the steps after it may go first: a

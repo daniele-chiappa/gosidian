@@ -1,6 +1,8 @@
 package fleet
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -81,9 +83,220 @@ func TestParseTeamProblems(t *testing.T) {
 		"delegates to itself":  "roles:\n  a: {run: claude.run, delegates_to: [a]}\n",
 		"negative max_tokens":  "roles:\n  a: {run: claude.run, max_tokens: -1}\n",
 		"bad access":           "roles:\n  a: {run: claude.run, access: root}\n",
-		"repo read only":       "roles:\n  a: {run: claude.run, repo: r, access: read}\n",
+		"reader with paths":    "roles:\n  a: {run: claude.run, repo: r, access: read, paths: [web/]}\n",
+		"reader with forbid":   "roles:\n  a: {run: claude.run, repo: r, access: read, forbid: [package.json]}\n",
+		"reader with checks":   "roles:\n  a: {run: claude.run, repo: r, access: read, checks: npm test}\n",
+		"reader merges":        "alert: [\"#a\"]\nroles:\n  a: {run: claude.run, repo: r, access: read, approve: merge}\n",
+		"guide dotdot":         "guide: \"[[fitness/../other/rules]]\"\nroles:\n  a: {run: claude.run}\n",
+		"role guide dotdot":    "roles:\n  a: {run: claude.run, guide: \"../x\"}\n",
+		"skill not a note":     "roles:\n  a: {run: claude.run, skills: [fitness/skills/x.png]}\n",
+		"skill twice":          "roles:\n  a: {run: claude.run, skills: [\"[[fitness/skills/x]]\", skills/x]}\n",
+		"too many skills":      "roles:\n  a: {run: claude.run, skills: [s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13, s14, s15, s16, s17, s18, s19, s20, s21]}\n",
 	}
 	for name, src := range cases {
+		if _, problems := Parse(src, "fitness/squadra.md"); len(problems) == 0 {
+			t.Errorf("%s: no problem", name)
+		}
+	}
+}
+
+// A role that reads its repository (a reviewer of an app's files) commits
+// nothing: no pull request, so nobody approves it by default.
+func TestParseTeamReader(t *testing.T) {
+	team, problems := Parse("alert: [\"#lab\"]\nroles:\n  revisore: {run: pi.run, repo: agents-fitness, access: read, review: true}\n  sviluppo: {run: pi.run, repo: agents-fitness}\n", "fitness/squadra.md")
+	if len(problems) > 0 {
+		t.Fatalf("problems: %v", problems)
+	}
+	rev, _ := team.Role("revisore")
+	if rev.Approve != ApproveNone || rev.Commits() || rev.Repo != "agents-fitness" {
+		t.Fatalf("revisore: %+v, commits %v", rev, rev.Commits())
+	}
+	dev, _ := team.Role("sviluppo")
+	if dev.Approve != ApproveMerge || !dev.Commits() {
+		t.Fatalf("sviluppo: %+v, commits %v", dev, dev.Commits())
+	}
+	if (Role{Access: AccessRead}).Commits() || (Role{}).Commits() {
+		t.Fatal("a role without a repo commits")
+	}
+}
+
+// The guides and the skills of a role (IMP-233) are notes of the team's
+// project: a link without the project is inside it. Its agent receives the
+// team's guide, its own, then its skills, each once.
+func TestParseTeamGuidesAndSkills(t *testing.T) {
+	src := "guide: \"[[fitness/regole]]\"\nroles:\n" +
+		"  sviluppo: {run: pi.run, guide: \"[[fitness/guide/codice|il codice]]\", skills: [\"[[fitness/skills/test]]\", skills/build.md, regole]}\n" +
+		"  revisore: {run: pi.run, guide: regole}\n"
+	team, problems := Parse(src, "fitness/squadra.md")
+	if len(problems) > 0 {
+		t.Fatalf("problems: %v", problems)
+	}
+	dev, _ := team.Role("sviluppo")
+	if team.Guide != "fitness/regole.md" || dev.Guide != "fitness/guide/codice.md" ||
+		strings.Join(dev.Skills, " ") != "fitness/skills/test.md fitness/skills/build.md fitness/regole.md" {
+		t.Fatalf("team guide %q, sviluppo %+v", team.Guide, dev)
+	}
+	got := func(r string) string {
+		ro, _ := team.Role(r)
+		var out []string
+		for _, n := range team.PromptNotes(ro) {
+			k := "guide"
+			if n.Skill {
+				k = "skill"
+			}
+			out = append(out, k+" "+n.Path)
+		}
+		return strings.Join(out, ", ")
+	}
+	if g := got("sviluppo"); g != "guide fitness/regole.md, guide fitness/guide/codice.md, skill fitness/skills/test.md, skill fitness/skills/build.md" {
+		t.Fatalf("sviluppo's notes: %s", g)
+	}
+	if g := got("revisore"); g != "guide fitness/regole.md" {
+		t.Fatalf("revisore's notes: %s", g)
+	}
+	if _, problems := Parse("roles:\n  a: {run: claude.run, colour: red}\n", "fitness/squadra.md"); len(problems) != 1 || !strings.Contains(problems[0].Msg, "guide, skills") {
+		t.Fatalf("an unknown field: %v", problems)
+	}
+}
+
+// A role's tools (IMP-233): absent, every plugin of the project (nil);
+// [] none; else the plugins and tools it names.
+func TestParseTeamTools(t *testing.T) {
+	team, problems := Parse("roles:\n  a: {run: pi.run}\n  b: {run: pi.run, tools: []}\n  c: {run: pi.run, tools: [vec-pg, layout_render]}\n", "fitness/squadra.md")
+	if len(problems) > 0 {
+		t.Fatalf("problems: %v", problems)
+	}
+	a, _ := team.Role("a")
+	b, _ := team.Role("b")
+	c, _ := team.Role("c")
+	if a.Tools != nil || b.Tools == nil || len(b.Tools) != 0 || strings.Join(c.Tools, " ") != "vec-pg layout_render" {
+		t.Fatalf("a %#v, b %#v, c %#v", a.Tools, b.Tools, c.Tools)
+	}
+	for _, bad := range []string{"tools: [Vec]", "tools: [vec-pg, vec-pg]", "tools: [\"vec pg\"]", "tools: [_x]", "tools: vec-pg"} {
+		if _, problems := Parse("roles:\n  a: {run: pi.run, "+bad+"}\n", "fitness/squadra.md"); len(problems) == 0 {
+			t.Errorf("%s: no problem", bad)
+		}
+	}
+}
+
+// profileNotes are profile notes of the project fitness, as ProfilesFrom
+// reads them from the vault.
+var profileNotes = map[string]string{
+	"fitness/profiles/analista.md": "---\ntitle: Analista\ntype: profile\n---\n\n# Analista\n\n```profile\nrun: claude.run\nmodel: sonnet\naccess: read\nreview: true\ntools: [vec-pg]\nskills: [skills/sql]\nguide: guide/dati\nagent: \"[[fitness/agents/analista]]\"\n```\n",
+	"fitness/profiles/strano.md":   "---\ntype: profile\n---\n\n```profile\nrun: claude.run\nrepo: agents-fitness\n```\n",
+	"fitness/profiles/nota.md":     "---\ntype: note\n---\n\n```profile\nrun: claude.run\n```\n",
+	"fitness/profiles/due.md":      "---\ntype: profile\n---\n\n```profile\nrun: claude.run\n```\n\n```profile\nrun: pi.run\n```\n",
+	"fitness/altro/vuoto.md":       "---\ntype: profile\n---\n\n```profile\n```\n",
+}
+
+var testProfiles = ProfilesFrom(func(p string) ([]byte, error) {
+	c, ok := profileNotes[p]
+	if !ok {
+		return nil, errors.New("no such note")
+	}
+	return []byte(c), nil
+})
+
+// A role takes the fields of its profile it does not write (IMP-233), and
+// its checks hold for what it ends up with.
+func TestParseTeamProfiles(t *testing.T) {
+	src := "alert: [\"#a\"]\nroles:\n" +
+		"  a: {profile: analista}\n" +
+		"  b: {profile: \"[[fitness/profiles/analista]]\", model: opus, tools: [], review: false}\n" +
+		"  c: {profile: analista, repo: agents-fitness}\n" +
+		"  d: {profile: fitness/altro/vuoto.md, run: pi.run}\n"
+	team, problems := ParseWith(src, "fitness/squadra.md", testProfiles)
+	if len(problems) > 0 {
+		t.Fatalf("problems: %v", problems)
+	}
+	a, _ := team.Role("a")
+	if a.Profile != "fitness/profiles/analista.md" || a.Run != "claude.run" || a.Model != "sonnet" || a.Access != AccessRead || !a.Review ||
+		strings.Join(a.Tools, " ") != "vec-pg" || strings.Join(a.Skills, " ") != "fitness/skills/sql.md" || a.Guide != "fitness/guide/dati.md" ||
+		a.Agent != "fitness/agents/analista.md" {
+		t.Fatalf("a: %+v", a)
+	}
+	b, _ := team.Role("b")
+	if b.Model != "opus" || b.Tools == nil || len(b.Tools) != 0 || b.Review || b.Run != "claude.run" {
+		t.Fatalf("b, its own fields win: %+v", b)
+	}
+	// The profile reads, the role has the repository: it reads it, and
+	// nobody approves what it does not change.
+	c, _ := team.Role("c")
+	if c.Commits() || c.Approve != ApproveNone || c.Repo != "agents-fitness" {
+		t.Fatalf("c: %+v", c)
+	}
+	d, _ := team.Role("d")
+	if d.Profile != "fitness/altro/vuoto.md" || d.Run != "pi.run" {
+		t.Fatalf("d: %+v", d)
+	}
+
+	for name, tc := range map[string]struct{ src, want string }{
+		"missing":       {"roles:\n  a: {profile: nessuno}\n", "role a: profile fitness/profiles/nessuno.md: no note of the project"},
+		"not a profile": {"roles:\n  a: {profile: nota}\n", "role a: profile fitness/profiles/nota.md: no note type: profile"},
+		"two blocks":    {"roles:\n  a: {profile: due}\n", "a profile holds one ```profile block, this one 2"},
+		"team's field":  {"roles:\n  a: {profile: strano}\n", "repo is no field of a profile"},
+		"bad name":      {"roles:\n  a: {profile: Analista, run: pi.run}\n", "profile \"Analista\": a name of profiles/"},
+		"outside":       {"roles:\n  a: {profile: \"../x\", run: pi.run}\n", "is no note of the project fitness"},
+	} {
+		_, problems := ParseWith(tc.src, "fitness/squadra.md", testProfiles)
+		if len(problems) == 0 || !strings.Contains(problems[0].Msg, tc.want) {
+			t.Errorf("%s: %v, want %q", name, problems, tc.want)
+		}
+	}
+	// Without the profiles, a role that names one says so.
+	if _, problems := Parse("roles:\n  a: {profile: analista, run: pi.run}\n", "fitness/squadra.md"); len(problems) != 1 || !strings.Contains(problems[0].Msg, "read by the server") {
+		t.Errorf("Parse: %v", problems)
+	}
+}
+
+// The lint reads a profile's block alone: its fields, and their values as
+// a role's.
+func TestCheckProfile(t *testing.T) {
+	if p := CheckProfile("run: claude.run\naccess: read\ntools: [vec-pg]\n", "fitness/profiles/a.md"); len(p) != 0 {
+		t.Errorf("a good profile: %v", p)
+	}
+	if p := CheckProfile("", "fitness/profiles/a.md"); len(p) != 0 {
+		t.Errorf("an empty profile: %v", p)
+	}
+	for src, want := range map[string]string{
+		"access: root\n":          "access \"root\": read, edit or exec",
+		"repo: x\n":               "repo is no field of a profile",
+		"run: claude\n":           "run \"claude\"",
+		"tools: [Vec]\n":          "tools:",
+		"- a\n":                   "a profile is a mapping",
+		"skills: [\"../../x\"]\n": "skills:",
+	} {
+		if p := CheckProfile(src, "fitness/profiles/a.md"); len(p) == 0 || !strings.Contains(p[0].Msg, want) {
+			t.Errorf("%q: %v, want %q", src, p, want)
+		}
+	}
+}
+
+// A team's rooms (IMP-233): a name its roles delegate to, and the room's
+// note, a note of the project.
+func TestParseTeamRooms(t *testing.T) {
+	src := "coordinator: capo\nrooms:\n  front: \"[[fitness/front]]\"\n  back: squadre/back.md\nroles:\n  capo: {run: pi.run, delegates_to: [dev, front, back]}\n  dev: {run: pi.run}\n"
+	team, problems := Parse(src, "fitness/squadra.md")
+	if len(problems) > 0 {
+		t.Fatalf("problems: %v", problems)
+	}
+	if fmt.Sprint(team.Rooms) != "[{front fitness/front.md 3} {back fitness/squadre/back.md 4}]" {
+		t.Fatalf("rooms: %v", team.Rooms)
+	}
+	if r, ok := team.RoomOf("fitness/squadre/back.md"); !ok || r.Name != "back" {
+		t.Fatalf("RoomOf: %v %v", r, ok)
+	}
+	for name, src := range map[string]string{
+		"a role's name": "rooms:\n  dev: \"[[fitness/front]]\"\nroles:\n  dev: {run: pi.run}\n",
+		"itself":        "rooms:\n  front: \"[[fitness/squadra]]\"\nroles:\n  dev: {run: pi.run}\n",
+		"twice":         "rooms:\n  a: front\n  b: \"[[fitness/front]]\"\nroles:\n  dev: {run: pi.run}\n",
+		"outside":       "rooms:\n  a: \"../x\"\nroles:\n  dev: {run: pi.run}\n",
+		"no link":       "rooms:\n  a: [x]\nroles:\n  dev: {run: pi.run}\n",
+		"a list":        "rooms: [front]\nroles:\n  dev: {run: pi.run}\n",
+		"bad name":      "rooms:\n  Front: front\nroles:\n  dev: {run: pi.run}\n",
+		"to no room":    "roles:\n  capo: {run: pi.run, delegates_to: [front]}\n",
+		"a receiver's":  "rooms:\n  front: front\nroles:\n  capo: {run: pi.run, delegates_to: [lead]}\n  lead: {run: pi.run, delegates_to: [front]}\n",
+	} {
 		if _, problems := Parse(src, "fitness/squadra.md"); len(problems) == 0 {
 			t.Errorf("%s: no problem", name)
 		}

@@ -102,6 +102,17 @@ func (s *Server) layoutVisible(tok *auth.Token) bool {
 	return false
 }
 
+// layoutToolAllowed says whether the tools tok's role names, if any, take
+// the layout tool name: by its own name or by the engine's plugin
+// (IMP-233).
+func (s *Server) layoutToolAllowed(tok *auth.Token, name string) bool {
+	if tok == nil || !tok.LimitTools {
+		return true
+	}
+	plugin, ok := s.layoutPlugin()
+	return ok && tok.AllowsTool(plugin, name)
+}
+
 func (s *Server) registerLayoutTools() {
 	note := mcp.WithString("note", mcp.Required(), mcp.Description("Vault-relative path of the markdown note, e.g. 'proj/booklet.md'."))
 	session := mcp.WithString("session", mcp.Required(), mcp.Description("The session layout_open gave."))
@@ -525,7 +536,7 @@ func (s *Server) engine(ctx context.Context, tok *auth.Token, ls *layoutSession,
 	cctx, cancel := context.WithTimeout(ctx, s.pluginToolTimeout)
 	defer cancel()
 	if gate := s.pluginGate(); gate != nil {
-		res := s.plugins.PluginResources(ls.plugin)
+		res := s.plugins.ToolResources(ls.plugin, tool)
 		if err := gate.Take(cctx, res); err != nil {
 			return nil, fmt.Errorf("plugin %s is busy: its calls at once (max_concurrent) are all under way; try again in a while", ls.plugin)
 		}

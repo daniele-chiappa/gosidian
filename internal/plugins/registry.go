@@ -55,15 +55,28 @@ type Config struct {
 // write token, are the only folders it writes in; none: the whole project
 // (IMP-195).
 type RunTokens interface {
-	MintRun(name, project string, write bool, ttl time.Duration, runID string, writePaths []string) (id, secret string, err error)
+	MintRun(name, project string, write bool, ttl time.Duration, runID string, lim RunLimits) (id, secret string, err error)
 	Revoke(id string) error
 }
 
-// RunScopes says where a run's write token may write (IMP-195).
+// RunLimits narrow the MCP token of a call: WritePaths are the only
+// folders a write token writes in (IMP-195); Tools, with LimitTools, the
+// only plugins' tools it sees, by a plugin's name or a tool's (IMP-233).
+type RunLimits struct {
+	WritePaths []string
+	Tools      []string
+	LimitTools bool
+}
+
+// RunScopes says where a run's write token may write (IMP-195) and which
+// plugins' tools its tokens see (IMP-233).
 type RunScopes interface {
 	// RunWritePaths: scoped is true for a run of a team's task; paths
 	// are its role's folders then, empty when the role writes nowhere.
 	RunWritePaths(runID string) (paths []string, scoped bool, err error)
+	// RunTools: limited is true for a run of a team's task whose role
+	// names its tools; tools are those then, empty for none.
+	RunTools(runID string) (tools []string, limited bool, err error)
 }
 
 // Secrets resolves a secret's name to its value.
@@ -469,7 +482,42 @@ func (r *Registry) Resources(use string) []string {
 	if !ok {
 		return nil
 	}
-	return r.PluginResources(p)
+	out := r.PluginResources(p)
+	if _, a, spec, ok := r.accepted(use); ok && a.Manifest.ToolLimit(spec.Tool) > 0 {
+		out = append(out, ToolResource(p, spec.Tool))
+	}
+	return out
+}
+
+// ToolResources are what a call of the plugin's MCP tool takes a place in:
+// the plugin's, and the tool's own when its manifest gives it a limit.
+func (r *Registry) ToolResources(plugin, tool string) []string {
+	out := r.PluginResources(plugin)
+	if out == nil {
+		return nil
+	}
+	acc, _ := r.store.all()
+	if a, ok := acc[plugin]; ok && a.Manifest.ToolLimit(tool) > 0 {
+		out = append(out, ToolResource(plugin, tool))
+	}
+	return out
+}
+
+// ToolResource names the place of a call of a plugin's MCP tool, apart
+// from the plugin's own: plugin:<plugin>/<tool>.
+func ToolResource(plugin, tool string) string {
+	return "plugin:" + plugin + "/" + tool
+}
+
+// ToolMaxConcurrent is how many calls of the plugin's MCP tool may run at
+// once: its accepted manifest's ToolLimit; 0 for no limit of its own.
+func (r *Registry) ToolMaxConcurrent(plugin, tool string) int {
+	if _, ok := r.plugins[plugin]; !ok {
+		return 0
+	}
+	acc, _ := r.store.all()
+	m := acc[plugin].Manifest
+	return m.ToolLimit(tool)
 }
 
 // PluginResources are what a call of the plugin takes a place in: the

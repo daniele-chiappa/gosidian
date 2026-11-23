@@ -117,7 +117,16 @@ func taskRun(ctx context.Context, env *Env, with map[string]any) (any, error) {
 	if len(c.role.Writes) > 0 {
 		args["mcp"] = "write"
 	}
-	if c.role.Repo != "" {
+	if c.role.Repo != "" && !c.role.Commits() {
+		// A role that reads its repository: a clone of its base, where
+		// the agent changes nothing, so no branch to push and no pull
+		// request.
+		repo := map[string]any{"name": c.role.Repo}
+		if takes(t, "repo", "push") {
+			repo["push"] = false
+		}
+		args["repo"] = repo
+	} else if c.role.Repo != "" {
 		args["access"] = fleet.AccessEdit
 		repo := map[string]any{"name": c.role.Repo, "pr": map[string]any{"title": c.task.Title,
 			"body": fmt.Sprintf("Task %s of the team %s, run %s of %s.", c.task.Path, strings.TrimSuffix(c.team.Path, ".md"), env.Run.ID, env.Run.Ref)}}
@@ -223,7 +232,12 @@ func taskGate(_ context.Context, env *Env, with map[string]any) (any, error) {
 	branch, _ := repo["branch"].(string)
 	pushed, _ := repo["pushed"].(bool)
 	resumed, _ := repo["resumed"].(bool)
-	if c.role.Repo != "" {
+	if c.role.Repo != "" && !c.role.Commits() && repo == nil {
+		// A role that reads its repository is judged on its report, but
+		// one that never had it read nothing.
+		ok = false
+		lines = append(lines, "The executor gave no repository: the agent could not read "+c.role.Repo+".")
+	} else if c.role.Commits() {
 		switch {
 		case repo == nil:
 			ok = false
@@ -237,7 +251,7 @@ func taskGate(_ context.Context, env *Env, with map[string]any) (any, error) {
 	}
 	// The notes the run's MCP token wrote in the role's folders: a role
 	// that writes in the vault and wrote nothing did not do its task (a
-	// role with a repository is judged on its files).
+	// role that commits to a repository is judged on its files).
 	var notes []string
 	if len(c.role.Writes) > 0 {
 		for _, p := range env.Engine.RunWrites(env.Run.ID) {
@@ -261,7 +275,7 @@ func taskGate(_ context.Context, env *Env, with map[string]any) (any, error) {
 		case len(before) > 0:
 			notes = before
 			lines = append(lines, fmt.Sprintf("Notes written by an attempt before this one (%d), none by this one: %s.", len(before), strings.Join(clipList(before, 20), ", ")))
-		case c.role.Repo == "":
+		case !c.role.Commits():
 			ok = false
 			lines = append(lines, "The agent wrote no note in "+strings.Join(c.role.Writes, ", ")+".")
 		}
@@ -339,7 +353,7 @@ func taskGate(_ context.Context, env *Env, with map[string]any) (any, error) {
 	// did not do its task; for the others it is a fact of the report.
 	answer, _ := agent["text"].(string)
 	answer = strings.TrimSpace(answer)
-	words := c.role.Review || c.role.Repo == "" && len(c.role.Writes) == 0 && len(c.role.DelegatesTo) == 0
+	words := c.role.Review || !c.role.Commits() && len(c.role.Writes) == 0 && len(c.role.DelegatesTo) == 0
 	if stop, _ := agent["stop"].(string); stop == "length" {
 		lines = append(lines, "The agent's answer was cut at its model's output limit (stop: length): it is not whole.")
 		if words {
@@ -425,7 +439,7 @@ func taskGate(_ context.Context, env *Env, with map[string]any) (any, error) {
 	// Another attempt continues the branch, which holds this one's work,
 	// when its files were within the paths: one with a file it must not
 	// change starts again from base, which the agent cannot restore.
-	resume := c.role.Repo != "" && branch != "" && (pushed || resumed) && len(forbidden) == 0 && len(outside) == 0
+	resume := c.role.Commits() && branch != "" && (pushed || resumed) && len(forbidden) == 0 && len(outside) == 0
 	return map[string]any{"ok": ok, "checks_ok": checksOK, "files": nonNil(files), "outside": nonNil(outside), "forbidden": nonNil(forbidden),
 		"notes": nonNil(notes), "pr_url": prURL, "branch": branch, "resume": resume, "image": img, "link": link, "text": text, "feedback": report, "report": whole + prLine, "review": review,
 		"title": fmt.Sprintf("%s: %s (attempt %d)", c.role.Name, c.task.Title, c.task.Attempts),
@@ -561,6 +575,9 @@ func taskPR(ctx context.Context, env *Env, with map[string]any) (any, error) {
 	if c.role.Repo == "" {
 		return nil, fmt.Errorf("role %s has no repo", c.role.Name)
 	}
+	if !c.role.Commits() {
+		return nil, fmt.Errorf("role %s reads its repo (access read): it opens no pull request", c.role.Name)
+	}
 	_, t, err := env.executorType(c.role, "pr")
 	if err != nil {
 		return nil, err
@@ -617,6 +634,10 @@ func taskPlan(_ context.Context, env *Env, with map[string]any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	teams, err := fl.Teams(env.Project)
+	if err != nil {
+		return nil, err
+	}
 	known := map[string]bool{}
 	kids := 0
 	for _, t := range tasks {
@@ -641,6 +662,9 @@ func taskPlan(_ context.Context, env *Env, with map[string]any) (any, error) {
 		// replaces the failed or canceled one it takes the place of.
 		same     string
 		replaces string
+		// room is the room the task is for: its team's coordinator
+		// receives it (IMP-233).
+		room string
 	}
 	byPath := map[string]fleet.Task{}
 	var open []fleet.Task
@@ -654,9 +678,17 @@ func taskPlan(_ context.Context, env *Env, with map[string]any) (any, error) {
 	sameWork := func(role, title string) string {
 		return role + "\x00" + strings.ToLower(strings.Join(strings.Fields(title), " "))
 	}
+	// who a sub-task is for, as the plan names it: a role, or a room for
+	// a task of a room's team.
+	who := func(t fleet.Task) string {
+		if r, ok := c.team.RoomOf(t.Team); ok {
+			return r.Name
+		}
+		return t.Assignee
+	}
 	given := map[string]string{}
 	for _, t := range open {
-		given[sameWork(t.Assignee, t.Title)] = t.Path
+		given[sameWork(who(t), t.Title)] = t.Path
 	}
 	var skipped, ignored []map[string]any
 	var plans []item
@@ -677,6 +709,19 @@ func taskPlan(_ context.Context, env *Env, with map[string]any) (any, error) {
 			return nil, fmt.Errorf("plan.tasks[%d]: role %s does not give tasks to %q (delegates_to: %s)", i, c.role.Name, it.task.Assignee, strings.Join(c.role.DelegatesTo, ", "))
 		case keys[it.key]:
 			return nil, fmt.Errorf("plan.tasks[%d]: key %q twice", i, it.key)
+		}
+		if room, ok := c.team.Room(it.task.Assignee); ok {
+			rt, ok := teams[room.Path]
+			switch {
+			case !ok:
+				return nil, fmt.Errorf("plan.tasks[%d]: room %s: %s is no team of the project, or its block does not read", i, room.Name, room.Path)
+			case rt.Coordinator == "":
+				return nil, fmt.Errorf("plan.tasks[%d]: room %s: its team %s has no coordinator to receive the objective", i, room.Name, room.Path)
+			case len(rt.Rooms) > 0:
+				return nil, fmt.Errorf("plan.tasks[%d]: room %s: its team %s has rooms of its own, and a room has none", i, room.Name, room.Path)
+			}
+			it.room = room.Name
+			it.task.Team, it.task.Assignee = room.Path, rt.Coordinator
 		}
 		for _, p := range asList(m["paths"]) {
 			if s, _ := p.(string); s != "" {
@@ -705,11 +750,15 @@ func taskPlan(_ context.Context, env *Env, with map[string]any) (any, error) {
 		}
 		// A task given twice (a small model repeats its plan) is one task:
 		// the open one stands for the key.
-		if p, ok := given[sameWork(it.task.Assignee, it.task.Title)]; ok {
+		name := it.task.Assignee
+		if it.room != "" {
+			name = it.room
+		}
+		if p, ok := given[sameWork(name, it.task.Title)]; ok {
 			it.same = p
 			skipped = append(skipped, map[string]any{"key": it.key, "title": it.task.Title, "same_as": strings.TrimPrefix(p, "key:")})
 		} else {
-			given[sameWork(it.task.Assignee, it.task.Title)] = "key:" + it.key
+			given[sameWork(name, it.task.Title)] = "key:" + it.key
 		}
 		if r := str("replaces"); r != "" && it.same == "" {
 			old, ok := byPath[fleet.LinkPath(r, env.Project)]
@@ -800,7 +849,8 @@ func taskPlan(_ context.Context, env *Env, with map[string]any) (any, error) {
 	}
 	var works []work
 	for _, t := range open {
-		if r, ok := c.team.Role(t.Assignee); ok && r.Repo != "" {
+		// A room's task is its team's: its roles' names may be the same.
+		if r, ok := c.team.Role(t.Assignee); ok && t.Team == c.team.Path && r.Commits() {
 			works = append(works, work{t.Path, r.Repo, t.Paths})
 		}
 	}
@@ -808,7 +858,7 @@ func taskPlan(_ context.Context, env *Env, with map[string]any) (any, error) {
 	for i := range plans {
 		it := &plans[i]
 		r, ok := c.team.Role(it.task.Assignee)
-		if it.same != "" || !ok || r.Repo == "" {
+		if it.same != "" || it.room != "" || !ok || !r.Commits() {
 			continue
 		}
 		me := id(*it)
@@ -844,7 +894,11 @@ func taskPlan(_ context.Context, env *Env, with map[string]any) (any, error) {
 			return nil, fmt.Errorf("writing task %q: %w", it.key, err)
 		}
 		paths[it.key] = t.Path
-		created = append(created, map[string]any{"key": it.key, "path": t.Path, "assignee": t.Assignee, "title": t.Title})
+		made := map[string]any{"key": it.key, "path": t.Path, "assignee": t.Assignee, "title": t.Title}
+		if it.room != "" {
+			made["room"] = it.room
+		}
+		created = append(created, made)
 	}
 	// The tasks that waited for a task now replaced wait for the one in
 	// its place.

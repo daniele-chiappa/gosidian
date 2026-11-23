@@ -73,6 +73,91 @@ func TestRegistry_Limits(t *testing.T) {
 	}
 }
 
+// workersPlugin serves the manifest of an agent with two workers: its node
+// and tool run take two calls at once of their own, its pr and its usage
+// none, and the plugin has no limit.
+func workersPlugin(t *testing.T) *httptest.Server {
+	t.Helper()
+	s := server.NewMCPServer("pi", "1.0.0", server.WithToolCapabilities(false))
+	s.AddTool(mcp.NewTool(ManifestTool), func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		obj := map[string]any{"type": "object"}
+		b, _ := json.Marshal(map[string]any{
+			"name": "pi", "version": "1.0", "gosidian": 1,
+			"nodes": []any{
+				map[string]any{"name": "run", "tool": "run", "max_concurrent": 2, "input_schema": obj},
+				map[string]any{"name": "pr", "tool": "pr", "input_schema": obj},
+			},
+			"tools": []any{
+				map[string]any{"name": "run", "access": "write", "max_concurrent": 2, "input_schema": obj},
+				map[string]any{"name": "usage", "access": "read", "input_schema": obj},
+			},
+			"permissions": map[string]any{"network": []string{}},
+		})
+		return mcp.NewToolResultText(string(b)), nil
+	})
+	ts := httptest.NewServer(server.NewStreamableHTTPServer(s))
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+// TestRegistry_ToolLimits: a node's or a tool's max_concurrent is a place
+// of its MCP tool's own, plugin:<name>/<tool>, beside the plugin's: an
+// agent's run waits for one of its workers, its pr and its usage do not.
+func TestRegistry_ToolLimits(t *testing.T) {
+	ts := workersPlugin(t)
+	ctx := context.Background()
+	reg, err := New([]Config{{Name: "pi", URL: ts.URL + "/mcp"}}, t.TempDir(), nil, "test", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg.Check(ctx)
+	if got := reg.Resources("pi.run"); !slices.Equal(got, []string{"plugin:pi"}) {
+		t.Errorf("before the accept: %v", got)
+	}
+	st, _ := reg.State("pi")
+	if _, err := reg.Accept(ctx, "pi", st.SHA, "test"); err != nil {
+		t.Fatal(err)
+	}
+	if got := reg.Resources("pi.run"); !slices.Equal(got, []string{"plugin:pi", "plugin:pi/run"}) {
+		t.Errorf("the run's resources %v", got)
+	}
+	if got := reg.Resources("pi.pr"); !slices.Equal(got, []string{"plugin:pi"}) {
+		t.Errorf("the pr's resources %v", got)
+	}
+	if got := reg.ToolResources("pi", "run"); !slices.Equal(got, []string{"plugin:pi", "plugin:pi/run"}) {
+		t.Errorf("the run tool's resources %v", got)
+	}
+	if got := reg.ToolResources("pi", "usage"); !slices.Equal(got, []string{"plugin:pi"}) {
+		t.Errorf("the usage tool's resources %v", got)
+	}
+	if reg.ToolMaxConcurrent("pi", "run") != 2 || reg.ToolMaxConcurrent("pi", "pr") != 0 || reg.MaxConcurrent("pi") != 0 {
+		t.Errorf("limits: run %d, pr %d, plugin %d", reg.ToolMaxConcurrent("pi", "run"), reg.ToolMaxConcurrent("pi", "pr"), reg.MaxConcurrent("pi"))
+	}
+	if reg.ToolResources("other", "run") != nil || reg.ToolMaxConcurrent("other", "run") != 0 {
+		t.Error("a plugin that is not there has a tool's place")
+	}
+}
+
+// TestManifest_ToolLimit: the smallest max_concurrent of the nodes and
+// the tool that call an MCP tool; a negative one is refused.
+func TestManifest_ToolLimit(t *testing.T) {
+	m := Manifest{
+		Nodes: []NodeSpec{{Name: "run", Tool: "run", MaxConcurrent: 3}, {Name: "fast", Tool: "run", MaxConcurrent: 2}, {Name: "pr", Tool: "pr"}},
+		Tools: []ToolSpec{{Name: "run", MaxConcurrent: 4}},
+	}
+	if m.ToolLimit("run") != 2 || m.ToolLimit("pr") != 0 || m.ToolLimit("nope") != 0 {
+		t.Errorf("run %d, pr %d, nope %d", m.ToolLimit("run"), m.ToolLimit("pr"), m.ToolLimit("nope"))
+	}
+	for name, raw := range map[string]string{
+		"node": `{"name":"pi","version":"1","gosidian":1,"nodes":[{"name":"run","tool":"run","max_concurrent":-1}],"permissions":{"network":[]}}`,
+		"tool": `{"name":"pi","version":"1","gosidian":1,"tools":[{"name":"run","access":"read","max_concurrent":-1}],"permissions":{"network":[]}}`,
+	} {
+		if _, err := ParseManifest([]byte(raw), "pi"); err == nil || !strings.Contains(err.Error(), "max_concurrent") {
+			t.Errorf("a %s's negative max_concurrent: %v", name, err)
+		}
+	}
+}
+
 // TestStoreFiles_Text: a text file of a type attachments do not take
 // comes back as its text, within the text cap, without being stored; a
 // stored file and a binary one go to the store as before.

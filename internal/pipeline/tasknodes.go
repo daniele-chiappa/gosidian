@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"slices"
 	"strings"
 
@@ -64,7 +65,17 @@ func roleOutput(r fleet.Role) map[string]any {
 	return map[string]any{"name": r.Name, "agent": r.Agent, "run": r.Run, "model": r.Model, "effort": r.Effort,
 		"max_turns": r.MaxTurns, "max_seconds": r.MaxSeconds, "max_tokens": r.MaxTokens, "access": r.Access, "repo": r.Repo, "host": r.Host,
 		"paths": nonNil(r.Paths), "forbid": nonNil(r.Forbid), "checks": r.Checks, "writes": nonNil(r.Writes),
-		"preview": r.Preview, "delegates_to": nonNil(r.DelegatesTo), "approve": r.Approve, "review": r.Review}
+		"preview": r.Preview, "delegates_to": nonNil(r.DelegatesTo), "approve": r.Approve, "review": r.Review,
+		"guide": r.Guide, "skills": nonNil(r.Skills), "tools": toolsOutput(r.Tools)}
+}
+
+// toolsOutput is a role's tools for a node's output: nil (every plugin of
+// the project) stays nil, a list stays a list.
+func toolsOutput(ts []string) any {
+	if ts == nil {
+		return nil
+	}
+	return nonNil(ts)
 }
 
 // body is a note's text below its frontmatter and its title.
@@ -102,6 +113,53 @@ func (env *Env) AgentPrompt(link string) (string, error) {
 	return untitled(nd.Body), nil
 }
 
+// withPromptNotes adds to system, the prompt of a role's agent, the guides
+// and the skills of the role (IMP-233), each whole under a heading of its
+// own, within [agents] max_prompt_notes: a role over it does not run.
+func (env *Env) withPromptNotes(system string, team fleet.Team, role fleet.Role) (string, error) {
+	notes := team.PromptNotes(role)
+	if len(notes) == 0 {
+		return system, nil
+	}
+	var b strings.Builder
+	for _, n := range notes {
+		nd, err := env.Engine.host.ReadNote(env.Project, n.Path)
+		what := "guide"
+		if n.Skill {
+			what = "skill"
+		}
+		if errors.Is(err, ErrNoNote) {
+			return "", fmt.Errorf("role %s: %s %s is no note of the project", role.Name, what, n.Path)
+		} else if err != nil {
+			return "", fmt.Errorf("role %s: %s %s: %w", role.Name, what, n.Path, err)
+		}
+		title := strings.TrimSpace(nd.Title)
+		if title == "" {
+			title = strings.TrimSuffix(path.Base(n.Path), ".md")
+		}
+		if n.Skill {
+			if typ, _ := nd.Frontmatter["type"].(string); strings.TrimSpace(typ) != fleet.SkillType {
+				return "", fmt.Errorf("role %s: skill %s is no note type: skill", role.Name, n.Path)
+			}
+			fmt.Fprintf(&b, "\n\n# Skill: %s (%s)\n\n", title, n.Path)
+			if d, _ := nd.Frontmatter["description"].(string); strings.TrimSpace(d) != "" {
+				b.WriteString(strings.TrimSpace(d) + "\n\n")
+			}
+		} else {
+			fmt.Fprintf(&b, "\n\n# Guide: %s (%s)\n\n", title, n.Path)
+		}
+		b.WriteString(untitled(nd.Body))
+	}
+	added := strings.TrimSpace(b.String())
+	if most := env.Engine.cfg.Tasks.maxPromptNotes(); len(added) > most {
+		return "", fmt.Errorf("role %s: its guides and skills are %d bytes, over [agents] max_prompt_notes (%d): give the role fewer, or raise the setting", role.Name, len(added), most)
+	}
+	if system == "" {
+		return added, nil
+	}
+	return system + "\n\n" + added, nil
+}
+
 // report is the report a task closed with last ("" before it closed), at
 // most max bytes: one cut says so, and where the whole of it is.
 func report(content []byte, path string, max int) string {
@@ -115,9 +173,12 @@ func report(content []byte, path string, max int) string {
 // taskCtx is a task with what its agent needs: its team, its role, the
 // agent's prompt, the reports it builds on.
 type taskCtx struct {
-	task          fleet.Task
-	team          fleet.Team
-	role          fleet.Role
+	task fleet.Task
+	team fleet.Team
+	role fleet.Role
+	// teams are the teams of the project, for the rooms a coordinator
+	// gives objectives to.
+	teams         map[string]fleet.Team
 	system        string
 	prompt        string
 	text          string
@@ -145,7 +206,7 @@ func loadTaskCtx(env *Env, with map[string]any, extra string) (*taskCtx, error) 
 	if err != nil {
 		return nil, err
 	}
-	c := &taskCtx{task: t}
+	c := &taskCtx{task: t, teams: teams}
 	var ok bool
 	if c.team, ok = teams[t.Team]; !ok {
 		return nil, fmt.Errorf("the task's team %s is no team of the project, or its block does not read", t.Team)
@@ -157,6 +218,9 @@ func loadTaskCtx(env *Env, with map[string]any, extra string) (*taskCtx, error) 
 		if c.system, err = env.AgentPrompt(c.role.Agent); err != nil {
 			return nil, fmt.Errorf("the agent of role %s: %w", c.role.Name, err)
 		}
+	}
+	if c.system, err = env.withPromptNotes(c.system, c.team, c.role); err != nil {
+		return nil, err
 	}
 	tasks, err := fl.Tasks(env.Project)
 	if err != nil {
@@ -206,11 +270,20 @@ func (c *taskCtx) writePrompt(extra string) string {
 	if c.text != "" {
 		b.WriteString(c.text + "\n\n")
 	}
-	if len(c.paths) > 0 {
-		b.WriteString("Change only these paths of the repository: " + strings.Join(c.paths, ", ") + ".\n")
-	}
-	if len(c.forbid) > 0 {
-		b.WriteString("Never change: " + strings.Join(c.forbid, ", ") + ".\n")
+	if role.Repo != "" && !role.Commits() {
+		// Its executor clones the base: what a task merged is there, an
+		// open pull request is not.
+		b.WriteString("The repository " + role.Repo + " is there for you to read, as its base branch has it: the work of the tasks merged so far, not that of a pull request still open. You change none of its files.\n")
+		if len(c.paths) > 0 {
+			b.WriteString("The paths of the repository this task is about: " + strings.Join(c.paths, ", ") + ".\n")
+		}
+	} else {
+		if len(c.paths) > 0 {
+			b.WriteString("Change only these paths of the repository: " + strings.Join(c.paths, ", ") + ".\n")
+		}
+		if len(c.forbid) > 0 {
+			b.WriteString("Never change: " + strings.Join(c.forbid, ", ") + ".\n")
+		}
 	}
 	if role.Checks != "" {
 		if role.Access == fleet.AccessExec {
@@ -234,14 +307,21 @@ func (c *taskCtx) writePrompt(extra string) string {
 			fmt.Fprintf(&b, "\n### %s (%s, %s)\n\n%s\n", d["title"], d["assignee"], d["status"], orNone(d["report"].(string)))
 		}
 	}
-	reviews := false
+	reviews, readers := false, false
 	if len(role.DelegatesTo) > 0 {
 		b.WriteString("\nYou coordinate. The roles you give tasks to:\n")
 		for _, name := range role.DelegatesTo {
+			if room, ok := team.Room(name); ok {
+				c.writeRoom(&b, room)
+				continue
+			}
 			r, _ := team.Role(name)
 			fmt.Fprintf(&b, "- %s (%s", r.Name, r.Run)
-			if r.Repo != "" {
+			if r.Commits() {
 				fmt.Fprintf(&b, ", repository %s", r.Repo)
+			} else if r.Repo != "" {
+				fmt.Fprintf(&b, ", reads the repository %s", r.Repo)
+				readers = true
 			}
 			if r.Host != "" {
 				fmt.Fprintf(&b, ", host %s", r.Host)
@@ -251,7 +331,7 @@ func (c *taskCtx) writePrompt(extra string) string {
 			}
 			if len(r.Writes) > 0 {
 				fmt.Fprintf(&b, ", writes %s", strings.Join(r.Writes, " "))
-			} else if r.Repo == "" && r.Host == "" {
+			} else if !r.Commits() && r.Host == "" {
 				b.WriteString(" and writes nothing")
 			}
 			if r.Access == fleet.AccessExec {
@@ -267,10 +347,27 @@ func (c *taskCtx) writePrompt(extra string) string {
 				b.WriteString(", reviews: its report ends with a verdict and its problems, serious or minor, which the pipeline counts")
 				reviews = true
 			}
+			switch {
+			case r.Tools == nil:
+			case len(r.Tools) == 0:
+				b.WriteString(", no plugin's tools")
+			default:
+				fmt.Fprintf(&b, ", tools %s", strings.Join(r.Tools, ", "))
+			}
+			if len(r.Skills) > 0 {
+				names := make([]string, len(r.Skills))
+				for i, s := range r.Skills {
+					names[i] = strings.TrimSuffix(path.Base(s), ".md")
+				}
+				fmt.Fprintf(&b, ", skills %s", strings.Join(names, ", "))
+			}
 			b.WriteString(")\n")
 		}
 		b.WriteString("The pipeline runs a role's checks on the agent's branch and merges after the approval: ask an agent for neither. An agent with a repository edits its files; only one that runs commands can run anything itself.\n")
 		b.WriteString("Give the work on a repository only to a role that has it: a role without one cannot open its files, only the reports about them.\n")
+		if readers {
+			b.WriteString("A role that reads a repository sees its base branch, with the work merged so far: make its task depend on the tasks whose work it reads.\n")
+		}
 		if team.Split == fleet.SplitCraft {
 			b.WriteString("Split the work along a chain of crafts, each task passing its result to the next.\n")
 		} else {
@@ -292,6 +389,24 @@ func (c *taskCtx) writePrompt(extra string) string {
 		b.WriteString("\n" + extra + "\n")
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// writeRoom tells a coordinator of a room it gives objectives to
+// (IMP-233): its team, its coordinator and roles.
+func (c *taskCtx) writeRoom(b *strings.Builder, room fleet.Room) {
+	rt, ok := c.teams[room.Path]
+	if !ok || rt.Coordinator == "" || len(rt.Rooms) > 0 {
+		fmt.Fprintf(b, "- %s (a room whose team %s cannot take an objective: give it nothing)\n", room.Name, strings.TrimSuffix(room.Path, ".md"))
+		return
+	}
+	var roles []string
+	for _, r := range rt.Roles {
+		if r.Name != rt.Coordinator {
+			roles = append(roles, r.Name)
+		}
+	}
+	fmt.Fprintf(b, "- %s (a room, the team %s: give it a whole objective, which its coordinator splits among its roles %s; its summary comes back as the report)\n",
+		room.Name, strings.TrimSuffix(room.Path, ".md"), strings.Join(roles, ", "))
 }
 
 // checksScript is what exec.run runs for the role's checks: in the
@@ -319,7 +434,7 @@ func (c *taskCtx) output() map[string]any {
 		"paths": nonNil(c.paths), "forbid": nonNil(c.forbid), "depends_on": orEmpty(c.deps), "children": orEmpty(c.kids),
 		"checks_script": c.checksScript(),
 		// What a pipeline's when reads: expressions have no operators.
-		"flags": map[string]any{"repo": role.Repo != "", "checks": role.Checks != "", "preview": role.Preview != "",
+		"flags": map[string]any{"repo": role.Repo != "", "commits": role.Commits(), "checks": role.Checks != "", "preview": role.Preview != "",
 			"writes": len(role.Writes) > 0, "coordinator": role.Name == team.Coordinator, "delegates": len(role.DelegatesTo) > 0,
 			"approve_merge": role.Approve == fleet.ApproveMerge, "approve_ops": role.Approve == fleet.ApproveOps,
 			"approve_none": role.Approve == fleet.ApproveNone}}

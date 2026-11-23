@@ -266,6 +266,22 @@ func TestLayoutTools_OnlyWhereTheEngineIsExposed(t *testing.T) {
 			t.Fatalf("%s is gosidian's own", name)
 		}
 	}
+	// A run token of a role that names its tools (IMP-233): the engine's
+	// plugin gives them all, a layout tool's name that one only.
+	run := func(tools ...string) map[string]struct{} {
+		tok := &auth.Token{ID: "x1", Name: "run-x", Project: "p", Scopes: []string{auth.ScopeRead, auth.ScopeWrite},
+			ToolProfile: auth.ToolProfileCore, Kind: auth.KindRun, Tools: tools, LimitTools: true}
+		return listToolNames(t, s, ctxWithToken(tok))
+	}
+	if names := run("layout"); !has(names, "layout_open") || !has(names, "layout_save") {
+		t.Error("a role that names the layout plugin lacks its tools")
+	}
+	if names := run("layout_pieces"); !has(names, "layout_pieces") || has(names, "layout_open") {
+		t.Error("a role that names one layout tool sees others, or not it")
+	}
+	if names := run(); has(names, "layout_open") || !has(names, "memory_get") {
+		t.Error("a role that names no tool sees the layout tools, or lost the memory tools")
+	}
 }
 
 func TestLayoutOpen_FontsBeforeTheDocumentInPieces(t *testing.T) {

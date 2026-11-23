@@ -141,6 +141,7 @@ structured content or as JSON text:
 | `nodes[].mcp` | `true`: the node's setting `mcp` (`read` or `write`) gets, for the call, a token of gosidian's MCP ([below](#gosidians-mcp-for-a-call)) |
 | `permissions.mcp` | the access its nodes may ask gosidian's MCP for: `read`, `write`. Needed by `mcp`; accepting the manifest grants it |
 | `max_concurrent` | how many calls at once the plugin bears (a model on one GPU: `1`): its limit until the server's config sets one ([pipelines](pipelines.md#calls-at-once)) |
+| `nodes[].max_concurrent`, `tools[].max_concurrent` | how many calls at once of the node's MCP tool the plugin bears, apart from its other tools: an agent with three workers says `3` on its `run`, so a fourth run waits in gosidian's queue, where its time does not run, and its `pr` or a tool that reads its quota does not wait for a worker. The smallest of the nodes and the tool that name the same MCP tool counts, beside the plugin's own limit |
 
 The sha that `accept` takes is the SHA-256 of the manifest as gosidian
 reads it: a field it does not know, or the spacing of a schema, changes
@@ -561,6 +562,159 @@ for the notes of a type, such as the page-layout editor (the plugin
 - The window that opens an app is `app:<note path>`, from **Open in the
   editor** on a note of the app's type. A note's design, its window and
   the API it uses are in [page layouts](vault/layouts.md).
+
+#### The bridge office/1
+
+An app of the bridge `office/1` shows a team of agents
+([teams](agents.md#a-team)), a note `type: team`, as a map: the plugin
+`office` (IMP-233). Every message is an object with `bridge: "office/1"`
+and a `type`, and the window takes one only from its frame and from the
+app's origin.
+
+The page changes the team through the window (phase C): it sends the
+changes, the window keeps them as a draft and has the server check them at
+every step, then hands the page the team as the draft makes it. **Only the
+window saves**, with the **Save** of its own bar, which shows while the
+draft has changes: a page cannot write the team by itself, and plancia
+asks before it closes a window with a draft.
+
+From the page:
+
+| `type` | |
+|---|---|
+| `ready` | the page is loaded: the window answers with `team` |
+| `refresh` | the page asks for a fresh `team` |
+| `open` | with `path`: the window opens that note of the team's project in the web UI (a task, an agent note, the team note); a path of another project, or not a note, it leaves alone |
+| `editing` | `on`: true starts the draft, where the team's `editable` says the person may write it; false ends it, only once it has no changes |
+| `edit` | `op`: one change of the team, as `POST /api/v1/fleet/teams/<path>` takes it (below) |
+| `undo` | takes the draft's last change back |
+| `discard` | throws the draft's changes away |
+
+From the window:
+
+| `type` | |
+|---|---|
+| `team` | `team`: the team as the server reads it, the answer of `GET /api/v1/fleet/teams/<path>` (below); `theme`: `light` or `dark`; `lang`: the web UI's language. It comes after `ready`, after a `refresh`, when the team's note or a task of its project changes, and every 10 seconds while the window is on screen |
+| `error` | `message`: the team could not be read (the note is gone, the reader may no longer read it) |
+| `refused` | `index`, `op`, `message`: the server refused a change of the draft, which left it; the others are checked again without it |
+| `saved` | `ok`: the window saved the draft (`creates`: the notes it wrote besides the team's), or not: `error` is `conflict` when the note changed since the last check, else the server's message |
+
+While the draft is on, `team` is the `view` of the draft and carries
+`draft`: `editing`, `ops` (its changes), `rebased` (the note changed under
+the draft since it began, and the changes go on the version it is now),
+`block` and `line`, `creates`, `problems` and `palette`, as the answer of
+`POST` gives them.
+
+`GET /api/v1/fleet/teams/<path>`, the path of the team's note, answers
+the team for whoever may read the note:
+
+```json
+{
+  "path": "fitness/squadra.md",
+  "title": "squadra",
+  "line": 9,
+  "team": {"path": "fitness/squadra.md", "coordinator": "capo", "split": "context",
+           "budget": {"day_usd": 15, "task_usd": 3}, "max_agents": 3, "max_rounds": 5,
+           "reopen_on": "serious", "alert": ["#lab/agents"],
+           "roles": [{"name": "capo", "agent": "fitness/agents/capo.md", "run": "claude.run",
+                      "model": "sonnet", "delegates_to": ["dev"], "approve": "none"}]},
+  "problems": [{"line": 14, "message": "role dev: run must be <plugin>.run"}],
+  "pipelines": true,
+  "spent_today": {"cost_usd": 0.6, "tokens": 3076168, "steps": 4},
+  "roles": {
+    "capo": {"state": "working",
+             "agent": {"path": "fitness/agents/capo.md", "title": "capo", "missing": false},
+             "notes": [{"path": "fitness/rules.md", "title": "Rules", "missing": false, "kind": "team_guide"}],
+             "tasks": [{"path": "fitness/tasks/20261118-090000-app.md", "title": "The app",
+                        "status": "working", "waits": ""}],
+             "spent_today": {"cost_usd": 0.4, "tokens": 2100000, "steps": 2}}
+  },
+  "now": "2026-11-18T16:00:00+01:00"
+}
+```
+
+- `line` is the first line of the ```team block in the note, 0 without
+  one; `team` is null when the note has no block or the block does not
+  read at all, and `problems` give the lines of the note.
+- `team` has the fields of [a team](agents.md#a-team), the roles in the
+  block's order, each role's `agent` a vault path.
+- `rooms` are the team's [rooms](agents.md#rooms), each with its `name`,
+  its `path` and its `view`: the room's team as this message gives a team
+  (without rooms of its own), or null when its note is missing or the
+  person may not read it.
+- `pipelines` is false while the pipelines are off: then no task waits
+  and nothing is spent, and `spent_today` is missing.
+- `roles` has every role of the team. `state` is the first that holds:
+  `waiting` (a task waits for a person, `input-required` or `review`),
+  `held` (a task submitted or at work waits, the reason in its `waits`: a
+  budget spent, a limit of agents, the tasks it depends on), `working` (a
+  run holds a task), `queued` (a task is ready and no run holds it yet),
+  `idle`. `notes` are the [guides and skills](agents.md#guides-and-skills)
+  its agent receives, in their order, after the role's
+  [profile](agents.md#profiles) when it has one, each with its `kind`
+  (`profile`, `team_guide`, `guide`, `skill`), `missing` when it is no
+  note of the project and
+  `not_skill` for a skill whose note is no `type: skill`;
+  `unexposed_tools` the role's [tools](agents.md#a-roles-tools) whose
+  plugin is not exposed in the project. In `team`, a role's `tools` is
+  `null` when the block names none (every plugin of the project) and `[]`
+  for none. `tasks` are its
+  open tasks, at most 20, the most recently
+  changed first; `spent_today` what the steps of its tasks' runs spent
+  today, in the server's [time zone](configuration.md#time-zone).
+  `fields` are the fields the block writes for the role: the others it
+  has come from its profile.
+- `etag` is the version of the team's note, `editable` whether the
+  person may write its project and so change the team from the map.
+
+`POST /api/v1/fleet/teams/<path>` takes a draft of the map: the changes
+of the team's block since the version `etag`, which the server checks,
+and writes when `save` is true, for whoever may write the project
+(IMP-233, phase C):
+
+```json
+{"etag": "1795069…-1204", "save": false, "ops": [
+  {"op": "set", "role": "dev", "field": "model", "value": "sonnet"},
+  {"op": "add_role", "role": "verifica", "profile": "reviewer"},
+  {"op": "set", "role": "capo", "field": "delegates_to", "value": ["dev", "verifica"]}
+]}
+```
+
+| `op` | |
+|---|---|
+| `set` | `role`, `field`, `value`: a field of the role ([a team](agents.md#a-team)); without `role` a field of the team (`coordinator`, `split`, `max_agents`, `max_rounds`, `reopen_on`, `alert`, `approvers`, `guide`, `budget.day_usd`, `budget.task_usd`). `null`, `""` and an empty list (but `tools`'s, which says none) take the field away |
+| `add_role` | `role`, and `profile` and `run` when given: the profile's executor and agent, or the first role's executor and the agent note `agents/<role>.md`, which the save writes when it is missing |
+| `rename_role` | `role`, `to`: the delegations and the coordinator follow |
+| `remove_role` | `role`: it leaves the delegations; not the coordinator |
+| `add_room` | `room`, `path`: a team of the project becomes a [room](agents.md#rooms) |
+| `create_room` | `room`, and `coordinator`, `roles`, `run` when given (lead; lead, dev; the first role's executor): a new team, the notes `memory_create_team` writes, becomes a room |
+| `remove_room` | `room`: it leaves the delegations; its team's note stays |
+
+A role with open tasks is neither renamed nor taken away: the server says
+which tasks to finish or give to another role first.
+
+The server changes the block's YAML and writes again only the entries
+that change: the other lines stay as the note writes them, comments and
+blank lines too, and so do the fields the map does not know. The answer:
+
+- `view`: the team as `GET` gives it, read from the draft, the notes the
+  save writes among them;
+- `block` and `line`: the new block and where it starts in the note;
+- `etag`: the version the changes were made on; `changed`: the note
+  changed since the draft's `etag`, and the changes go on the version it
+  is now;
+- `creates`: the notes the save writes besides the team's (an agent's, a
+  room's team and its pipelines); after a save, those it wrote;
+- `problems`: what keeps the draft from being saved, each with its `line`
+  in the note, and its `role` or `room`: the block's problems, an agent
+  note, guide or skill missing, a skill of another type, a room without a
+  coordinator or with rooms of its own;
+- `palette`, without `save`: the project's `profiles` (each with the
+  `name` a role writes and its `fields`), the `teams` that may become
+  rooms, the executors `runs` of the accepted plugins and the `skills`.
+
+A change that cannot be made answers 422, with `details.op` the index of
+the change; a save on another `etag` 412; a save with problems 422.
 
 ### What gosidian does not do for a plugin
 

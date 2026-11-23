@@ -1,0 +1,41 @@
+# The checks of the agents preset (gosidian-exec): a role's checks run on
+# the branch its agent pushed, in the plugin's sandbox. Copy it to
+# exec.yaml and name the same repositories as pi.yaml. Every field is in
+# the plugin's README; a change of this file changes the plugin's
+# manifest, to accept again (gosidian plugin accept --pending).
+name: exec                     # the plugin's name in gosidian: exec.run
+description: The checks of the agents' branches
+shell: bash
+limits:
+  default:
+    timeout: 10m
+    output_limit: 65536        # bytes of stdout and of stderr kept, their end
+    processes: 512
+    file_size: 2048            # MiB of a file a check writes
+  max:
+    timeout: 15m               # the pipelines give the checks 16 minutes
+    output_limit: 262144
+    processes: 2048
+
+# The hosts the checks reach, the registries of their packages: the
+# container enforces it.
+network:
+  - registry.npmjs.org
+  - proxy.golang.org
+  - sum.golang.org
+  - pypi.org
+  - files.pythonhosted.org
+env:
+  GOPROXY: https://proxy.golang.org,direct
+  GOTOOLCHAIN: local
+cache: project                 # the packages kept per project, in the exec-cache volume
+cache_dir: /var/cache/gosidian-exec
+
+# The repositories the checks read, as pi.yaml names them: a read-only
+# deploy key is enough, root's in ./keys with mode 600.
+repos:
+  - name: app
+    url: git@git.example.com:team/app.git
+    key_file: /run/secrets/agents/app_deploy_key
+    known_hosts: "git.example.com ssh-ed25519 AAAA…"
+    base: main

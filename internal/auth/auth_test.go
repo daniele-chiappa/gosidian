@@ -436,6 +436,48 @@ func TestStore_CreateRun(t *testing.T) {
 	}
 }
 
+// A run of a team's task whose role names its tools gets a token that sees
+// only those, kept on disk; LimitTools with none sees none (IMP-233).
+func TestStore_CreateRunTools(t *testing.T) {
+	s := newStore(t)
+	if _, _, err := s.Create("admin", nil, []string{ScopeRead, ScopeWrite}, 0, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.CreateRunLimited("run-1-a", "p", false, time.Minute, "r1", RunLimits{Tools: []string{"vec"}}); err == nil {
+		t.Error("tools without LimitTools accepted")
+	}
+	for _, bad := range []string{"", "a b", "a/b"} {
+		if _, _, err := s.CreateRunLimited("run-1-a", "p", false, time.Minute, "r1", RunLimits{Tools: []string{bad}, LimitTools: true}); err == nil {
+			t.Errorf("tool %q accepted", bad)
+		}
+	}
+	plain, tok, err := s.CreateRunLimited("run-1-a", "p", false, time.Minute, "r1", RunLimits{Tools: []string{"vec-pg", "layout_render", "vec-pg"}, LimitTools: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !tok.LimitTools || fmt.Sprint(tok.Tools) != "[vec-pg layout_render]" {
+		t.Errorf("run token = %+v", tok)
+	}
+	s2, err := Open(s.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s2.Validate(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.AllowsTool("vec-pg", "vec-pg_search") || !got.AllowsTool("layout", "layout_render") || got.AllowsTool("layout", "layout_open") || got.AllowsTool("vec-qdrant", "vec-qdrant_search") {
+		t.Errorf("reloaded: %+v", got)
+	}
+	_, none, err := s.CreateRunLimited("run-1-b", "p", false, time.Minute, "r1", RunLimits{LimitTools: true})
+	if err != nil || none.AllowsTool("vec-pg", "vec-pg_search") {
+		t.Errorf("a role that names no tool: %+v %v", none, err)
+	}
+	if _, all, err := s.CreateRun("run-1-c", "p", false, time.Minute, "r1", nil); err != nil || !all.AllowsTool("vec-pg", "vec-pg_search") {
+		t.Errorf("a run token without limits: %+v %v", all, err)
+	}
+}
+
 // A run of a team's task gets a token that writes only in its role's
 // folders, kept with its run on disk (IMP-195).
 func TestStore_CreateRunWritePaths(t *testing.T) {

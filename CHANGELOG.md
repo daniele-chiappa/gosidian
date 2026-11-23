@@ -10,6 +10,170 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.170.0] — 2026-11-23 — "the agents' office"
+
+The releases from 2.165.0 to 2.170.0 in one: a team of agents opens as
+the map of an office, where it can be changed and saved; a team gives
+objectives to its rooms, its roles take their fields from profiles and
+see only the tools they name, and receive their guides and skills; a
+preset starts what a team of agents needs. Pull the image and restart;
+nothing to migrate. pi and claude 0.4.3 give their `run` a limit of
+its own, so their manifest changes and is accepted again: coming from
+2.164.1, read the entry 2.165.0 of [docs/upgrading.md](docs/upgrading.md).
+
+### Added
+- **A team of agents as a map**
+  ([docs/agents.md](docs/agents.md#the-office)): a plugin's app of the
+  new bridge `office/1` opens a note `type: team` in a window and draws
+  the team's office from above. Each role has a desk, with the arrows of
+  whom it delegates to and a state: waiting for a person, held by a
+  budget or a limit, at work, queued, idle. It also shows its open tasks
+  and today's spend, and a click opens a task or an agent's note.
+  `GET /api/v1/fleet/teams/<path>` gives the team as the server reads
+  it, its problems on the note's lines, and each role's state and spend,
+  for whoever may read the note. The window hands it to the page when
+  the note, a task or a run changes, and every 10 seconds. The plugin
+  `office` of [gosidian-plugins](https://github.com/daniele-chiappa/gosidian-plugins)
+  is that app; a note of another type never opens in it.
+- **A team changed from the office's map**
+  ([docs/agents.md](docs/agents.md#the-office)): `POST
+  /api/v1/fleet/teams/<path>` takes a draft of changes of a team's block
+  (a field of a role or of the team, a role added from a profile,
+  renamed or taken away, a room linked, created or taken away), checks it
+  as the server reads teams and writes it when saved on the version it
+  began from. Only the entries that change are written again: comments,
+  blank lines and the fields the map does not show stay. A role with
+  open tasks keeps its name; a role added gets its agent note, a room
+  created the notes of a new team. Each problem of a team says its role
+  or room, and the office's API gives the note's etag, whether the person
+  may write it, and the fields each role writes itself.
+  `memory_create_team` and the map write a new team the same way. The
+  bridge `office/1` takes the page's changes (`editing`, `edit`, `undo`,
+  `discard`): the window keeps the draft, the server checks it at every
+  step, and only the window's **Save** writes it; the web UI asks before
+  it closes a window with a draft.
+- **Rooms** ([docs/agents.md](docs/agents.md#rooms)): a team lists in
+  `rooms` the teams its roles give objectives to, by a name in their
+  `delegates_to`. A task for a room (in a coordinator's plan, or
+  `memory_task_create` with the room's name) is an objective of the
+  room's team, for its coordinator, under the team's objective: the room
+  splits it among its roles and its summary comes back as the report.
+  The team's `day_usd` counts its rooms' spend too, and a room's task
+  waits while its team's day is spent. One level more: a room has no
+  rooms and is one team's; the lint rule `team-invalid` reports a room
+  that cannot be one, and the office's API gives each room's view.
+- **Profiles of the roles** ([docs/agents.md](docs/agents.md#profiles)):
+  a note `type: profile` with a ```profile block gives the roles that
+  name it (`profile: reviewer`, from the project's `profiles/`) the
+  fields they do not write themselves: executor, model, effort, limits,
+  access, review, guide, skills, tools. The team reads with them as if
+  the role wrote them, its checks included, and the role's own fields
+  win. A missing profile or one with a team's field (`repo`, `writes`…)
+  is a problem of the team. `memory_create_team` writes three to start
+  from in a project without them (`developer`, `reviewer`, `analyst`),
+  the lint rule `team-invalid` reports a profile that does not read, and
+  the office shows a role's profile first among its notes. The tag
+  `type:profile` joins the vocabulary.
+- **A role's tools** ([docs/agents.md](docs/agents.md#a-roles-tools)): a
+  role's `tools` names the plugins (`vec-pg`) or the plugins' tools
+  (`vec-pg_search`) its agent sees through gosidian's MCP, `[]` none.
+  The MCP tokens of its runs carry the list, so a tool outside it is
+  neither listed nor callable; it only narrows what the project exposes.
+  A role without the field sees every plugin of its project, as before.
+  The coordinator reads each role's tools, and the office says which
+  name a plugin not exposed in the project.
+- **A role's guides and skills**
+  ([docs/agents.md](docs/agents.md#a-team)): a team's `guide` is a note
+  of rules every role follows, a role's `guide` one of its own, and a
+  role's `skills` are notes `type: skill`. Its agent receives them whole
+  in its system prompt, after its agent note: the team's guide, the
+  role's, then the skills, each under a heading with its note's path.
+  They are notes of the team's project, at most 20 skills a role, within
+  `[agents] max_prompt_notes` (64 KiB, `GOSIDIAN_AGENTS_MAX_PROMPT_NOTES`):
+  a role over it, or a skill that is no note `type: skill`, stops its run
+  before the agent with why. The coordinator reads the skills of the
+  roles it gives tasks to, and the lint rule `team-invalid` reports a
+  guide or a skill missing from the project. A team without them is as
+  before.
+- **The agents preset**
+  ([docs/deployment.md](docs/deployment.md#presets)):
+  `deploy/presets/docker-compose.agents.yml` starts, on top of the base,
+  what a team of agents needs: pi for the agents, on the models of your
+  choice (`pi.yaml`), exec for a role's checks (`exec.yaml`), preview for
+  its build, notify for the questions before a merge (`notify.yaml`),
+  each from an example to copy. `AGENTS_AT_ONCE` sets pi's workers and
+  `[agents] max_running`, `PIPELINES_WORKERS` the server's pipeline
+  workers, the agents and two more, since each agent's step holds one
+  while it works. `init.sh` writes the four plugins' tokens and makes
+  `keys/` (root's: the deploy keys and the git token) and
+  `notify-secrets/`. `test/smoke.py agents` runs it on a fake endpoint:
+  the four manifests accepted, a team from `memory_create_team` whose
+  pipelines load, a task closed by an agent of pi. A `.gitignore` keeps
+  an install's `.env`, data, credentials and copied files out of a
+  commit of the repository.
+- **A role that reads its repository**
+  ([docs/agents.md](docs/agents.md#a-team)): a role with a `repo` and
+  `access: read` gets a clone of the repository's base branch to read,
+  the work merged so far, and changes none of its files: no branch
+  pushed, no pull request, `approve` `none` by default, and the gate
+  judges it on its report, as a role without a repository. A reviewer of
+  an app reads the app's files, where before it read only the notes and
+  the reports about them. The coordinator is told which roles read a
+  repository, and to make their tasks depend on the work they read.
+  `paths`, `forbid`, `checks`, `preview` and `approve: merge` are refused
+  on such a role. A team that used `access: read` only without a repo
+  changes nothing.
+- **A node's own calls at once**
+  ([docs/plugins.md](docs/plugins.md#the-manifest)): a manifest may give
+  a node or a tool `max_concurrent`, a limit of its MCP tool's apart
+  from the plugin's. An agent's plugin runs as many steps as its workers
+  (`PI_WORKERS`, `CLAUDE_WORKERS`) and queued the others inside, where
+  gosidian did not see them: a step waited there on its own time, and in
+  a trial with open-weight models one ran out of it after ten minutes in
+  that queue. With its `run` at its workers, a further run waits in
+  gosidian's queue, where its time does not run, while the merge of a
+  task's pull request (`task.pr`, the plugin's `pr`) and a tool that
+  reads a quota take no worker's place. A manifest without it changes
+  nothing. [docs/agents.md](docs/agents.md#limits) now says how the
+  limits of agents at once add up, `[pipelines] workers` among them:
+  each agent's step holds one of them while it works, and with the
+  default 2 two agents held every other pipeline.
+
+### Changed
+- **hot.md at the end of every task** (directives v29): the end-of-task
+  workflow asks to update hot.md even when it is old or does not name
+  the work just done. The outcome goes to the entry the work served,
+  found in the notes that cite it, or to a new one, and what the agent
+  cannot check stays as it is, which is no reason to skip the step. On
+  our writing benchmark an agent that had fixed a bug hot.md did not
+  name updated hot.md 3 times in 10. It now does 12 in 12 (Claude Code
+  2.1.326, sonnet), the other eleven tasks the same, 24 in 24 against
+  23, at the same cost. The block says the same rules in fewer words, 18
+  bytes shorter. Agents read it at their next bootstrap; nothing to do.
+
+### Fixed
+- **Search keeps its text in tabs mode**
+  ([docs/web-ui/overview.md](docs/web-ui/overview.md#search-window)):
+  the web UI keeps five windows alive in tabs mode, and Search held its
+  text and project only in itself, so after a hit opened and a look at
+  more than five other tabs it came back with its field empty. The
+  window now keeps them, in the address too (`search:q=…&p=…`), writing
+  them back at each search: a Search made again, or reloaded, searches
+  them again. The same text asked again from the palette still searches
+  again.
+
+### Security
+- **vue-i18n 10.0.8 and minimatch 9 and 10 out of the web UI's build
+  tools**: `@intlify/unplugin-vue-i18n` 11.2.8 compiles the messages
+  with `vue-i18n-extensions` 9, which takes the app's vue-i18n 11, where
+  11.2.3 brought its own vue-i18n, `@intlify/core-base` and
+  `@intlify/shared` 10.0.8 (GHSA-83rm-6c8r-g728, high, and
+  GHSA-8rc2-428q-7ww3, low, with no fix for 10); typescript-eslint, glob
+  and editorconfig get minimatch 11.0.4 (GHSA-g3hv-75wg-m249, medium)
+  through `overrides`. All were tools of the build and the tests, never
+  in the bundle: its 169 files hold the same code, only the catalogues'
+  pieces are named after them. Nothing to do to upgrade.
+
 ## [2.164.1] — 2026-11-16 — "agent teams on boards"
 
 The releases from 2.159.0 to 2.164.1 in one: a team of agents takes the

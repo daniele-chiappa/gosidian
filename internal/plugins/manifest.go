@@ -166,6 +166,10 @@ type ToolSpec struct {
 	// that checks what the call touches: no agent is offered it, wherever
 	// the plugin is exposed (AppTool).
 	Internal bool `json:"internal,omitempty"`
+	// MaxConcurrent is how many calls of its MCP tool at once the plugin
+	// bears, apart from its other tools (an agent's runs: the plugin's
+	// workers); 0: only the plugin's limit. ToolLimit.
+	MaxConcurrent int `json:"max_concurrent,omitempty"`
 }
 
 // SourceSpec is a source a plugin offers: an archive it reads, set up in
@@ -208,6 +212,11 @@ type NodeSpec struct {
 	// MCP token of gosidian for the run's project, within
 	// permissions.mcp.
 	MCP bool `json:"mcp,omitempty"`
+	// MaxConcurrent is how many calls of its MCP tool at once the plugin
+	// bears, apart from its other nodes: a run of an agent waits for one
+	// of the plugin's workers, its pull request's merge does not. 0: only
+	// the plugin's limit. ToolLimit.
+	MaxConcurrent int `json:"max_concurrent,omitempty"`
 }
 
 // Permissions are what a plugin asks for. Files is enforced by gosidian
@@ -288,6 +297,9 @@ func (m *Manifest) check(name string) error {
 		}
 		if n.MCP && len(m.Permissions.MCP) == 0 {
 			return fmt.Errorf("node %q asks for gosidian's MCP, and the manifest does not ask for permissions.mcp", n.Name)
+		}
+		if n.MaxConcurrent < 0 {
+			return fmt.Errorf("node %q: max_concurrent is a number of calls, 0 for only the plugin's limit", n.Name)
 		}
 	}
 	for _, a := range m.Permissions.MCP {
@@ -413,6 +425,8 @@ func (m *Manifest) checkTools() error {
 			return fmt.Errorf("tool %q: %s_%s is longer than %d characters", t.Name, m.Name, t.Name, MaxToolName)
 		case t.Access != AccessRead && t.Access != AccessWrite:
 			return fmt.Errorf("tool %q: access is read or write", t.Name)
+		case t.MaxConcurrent < 0:
+			return fmt.Errorf("tool %q: max_concurrent is a number of calls, 0 for only the plugin's limit", t.Name)
 		}
 		seen[t.Name] = true
 		if err := checkObjectSchema(t.Input); err != nil {
@@ -503,6 +517,30 @@ func (m *Manifest) Tool(name string) (ToolSpec, bool) {
 		}
 	}
 	return ToolSpec{}, false
+}
+
+// ToolLimit is how many calls at once of the plugin's MCP tool the
+// manifest allows, apart from the plugin's limit: the smallest
+// max_concurrent of the nodes it runs and of the tool of that name; 0 for
+// none.
+func (m *Manifest) ToolLimit(tool string) int {
+	limit := 0
+	take := func(n int) {
+		if n > 0 && (limit == 0 || n < limit) {
+			limit = n
+		}
+	}
+	for _, n := range m.Nodes {
+		if n.Tool == tool {
+			take(n.MaxConcurrent)
+		}
+	}
+	for _, t := range m.Tools {
+		if t.Name == tool {
+			take(t.MaxConcurrent)
+		}
+	}
+	return limit
 }
 
 // Node finds a node by name.

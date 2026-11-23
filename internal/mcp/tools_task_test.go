@@ -139,6 +139,31 @@ func TestTaskTools_ListAndCreateTeam(t *testing.T) {
 			t.Fatalf("written lacks %s: %s", want, text)
 		}
 	}
+	// The starter profiles (IMP-233), with the team's executor; a role that
+	// takes one reads with it, and the lint finds nothing in them.
+	for _, name := range []string{"developer", "reviewer", "analyst"} {
+		p := "p/profiles/" + name + ".md"
+		if !strings.Contains(text, p) {
+			t.Fatalf("written lacks %s: %s", p, text)
+		}
+		n, err := s.vault.Load(p)
+		if err != nil || !strings.Contains(string(n.Content), "```profile\nrun: claude.run\n") || !strings.Contains(string(n.Content), "type: profile") {
+			t.Fatalf("%s: %v\n%s", p, err, n.Content)
+		}
+		if problems := fleet.CheckProfile(fleet.FindProfiles(n.Content)[0].Src, p); len(problems) > 0 {
+			t.Errorf("%s: %v", p, problems)
+		}
+	}
+	if res, _ := s.handleEdit(ctx, call(map[string]any{"path": "p/squadra.md", "old_string": "  test:\n", "new_string": "  test:\n    profile: reviewer\n"})); res.IsError {
+		t.Fatal(expectError(t, res))
+	}
+	teams, err := s.fleetTeams("p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, ok := teams["p/squadra.md"].Role("test"); !ok || !r.Review || r.Access != fleet.AccessRead || r.Profile != "p/profiles/reviewer.md" {
+		t.Fatalf("test with the reviewer's profile: %+v %v", r, ok)
+	}
 	if res := mustCall(s.handleCreateTeam(ctx, call(map[string]any{"project": "p", "name": "squadra"}))); !res.IsError {
 		t.Fatal("the same team twice")
 	}
@@ -147,7 +172,7 @@ func TestTaskTools_ListAndCreateTeam(t *testing.T) {
 	}
 	// A second team keeps the database and the agent notes there are.
 	text = resultText(t, mustCall(s.handleCreateTeam(ctx, call(map[string]any{"project": "p", "name": "altra"}))))
-	if strings.Contains(text, "p/tasks.md") || strings.Contains(text, "p/agents/dev.md") {
+	if strings.Contains(text, "p/tasks.md") || strings.Contains(text, "p/agents/dev.md") || strings.Contains(text, "p/profiles/") {
 		t.Fatalf("written again: %s", text)
 	}
 	if res, _ := s.handleCreate(ctx, call(map[string]any{"path": "p/tasks/a.md", "content": fleetTask("submitted", "")})); res.IsError {
@@ -162,6 +187,59 @@ func TestTaskTools_ListAndCreateTeam(t *testing.T) {
 	}
 	if len(out.Teams) != 1 || len(out.Tasks) != 1 || out.Tasks[0].Assignee != "dev" {
 		t.Fatalf("tasks: %+v", out)
+	}
+}
+
+// A task for a room is an objective of the room's team, for its
+// coordinator, under the objective of the team that delegates; the room's
+// roles take sub-tasks of it, the one sub-task that has some (IMP-233).
+func TestTaskTools_ARoomsObjective(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	ctx := context.Background()
+	squadra := strings.Replace(strings.Replace(testFleetTeam, "```team\n", "```team\nrooms:\n  front: \"[[p/front]]\"\n", 1), "delegates_to: [dev]", "delegates_to: [dev, front]", 1)
+	front := "---\ntitle: front\ntype: team\n---\n\n```team\ncoordinator: lead\nroles:\n  lead:\n    run: claude.run\n    delegates_to: [ui]\n  ui:\n    run: claude.run\n```\n"
+	for rel, body := range map[string]string{"p/squadra.md": squadra, "p/front.md": front} {
+		if res, _ := s.handleCreate(ctx, call(map[string]any{"path": rel, "content": body})); res.IsError {
+			t.Fatalf("seed %s: %s", rel, expectError(t, res))
+		}
+	}
+	create := func(args map[string]any) (fleet.Task, string) {
+		t.Helper()
+		args["project"] = "p"
+		res := mustCall(s.handleTaskCreate(ctx, call(args)))
+		if res.IsError {
+			return fleet.Task{}, expectError(t, res)
+		}
+		var out struct {
+			Task fleet.Task `json:"task"`
+		}
+		if err := json.Unmarshal([]byte(resultText(t, res)), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.Task, ""
+	}
+	obj, msg := create(map[string]any{"team": "squadra", "assignee": "capo", "title": "obiettivo"})
+	if msg != "" {
+		t.Fatal(msg)
+	}
+	room, msg := create(map[string]any{"team": "squadra", "assignee": "front", "title": "la pagina", "parent": obj.Path})
+	if msg != "" || room.Team != "p/front.md" || room.Assignee != "lead" || room.Parent != obj.Path {
+		t.Fatalf("the room's objective: %+v %s", room, msg)
+	}
+	if ui, msg := create(map[string]any{"team": "front", "assignee": "ui", "title": "il bottone", "parent": room.Path}); msg != "" || ui.Parent != room.Path || ui.Team != "p/front.md" {
+		t.Fatalf("the room's task: %+v %s", ui, msg)
+	}
+	for _, c := range []struct {
+		args map[string]any
+		want string
+	}{
+		{map[string]any{"team": "squadra", "assignee": "dev", "title": "x", "parent": room.Path}, "is itself a sub-task"},
+		{map[string]any{"team": "squadra", "assignee": "nessuno", "title": "x"}, "is no role nor room of p/squadra.md"},
+		{map[string]any{"team": "front", "assignee": "ui", "title": "x", "parent": obj.Path}, "is a task of another team"},
+	} {
+		if _, msg := create(c.args); !strings.Contains(msg, c.want) {
+			t.Errorf("%v: %q, want %q", c.args, msg, c.want)
+		}
 	}
 }
 
@@ -225,6 +303,14 @@ func TestTaskTools_ACoordinatorsRunDelegates(t *testing.T) {
 	// Its run's role writes nowhere: a write token is not for it.
 	if paths, scoped, err := e.RunWritePaths(runID); err != nil || !scoped || len(paths) != 0 {
 		t.Fatalf("write paths %v %v %v", paths, scoped, err)
+	}
+	// Its role names no tools: its tokens see every plugin of the project
+	// (IMP-233).
+	if tools, limited, err := e.RunTools(runID); err != nil || limited || tools != nil {
+		t.Fatalf("tools %v %v %v", tools, limited, err)
+	}
+	if tools, limited, err := e.RunTools("none"); err == nil || limited || tools != nil {
+		t.Fatalf("a run that is none: %v %v %v", tools, limited, err)
 	}
 }
 

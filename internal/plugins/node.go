@@ -253,7 +253,9 @@ func (n node) Maximum(path ...string) (float64, bool) {
 // gosidian's MCP: read or write, within what the accepted manifest grants,
 // for the run's project, lasting the call; revoke drops it. No setting, or
 // none: no token. A run of a team's task writes only in its role's
-// folders, and gets no write token when the role writes nowhere (IMP-195).
+// folders, and gets no write token when the role writes nowhere (IMP-195);
+// its tokens see only the plugins' tools its role names, when it names
+// them (IMP-233).
 func (n node) runToken(ctx context.Context, env *pipeline.Env, c Config, acc Accepted, with map[string]any) (token string, revoke func(), err error) {
 	level, _ := with["mcp"].(string)
 	switch level {
@@ -270,6 +272,14 @@ func (n node) runToken(ctx context.Context, env *pipeline.Env, c Config, acc Acc
 		return "", nil, fmt.Errorf("with.mcp %s: gosidian's MCP is not open to plugin %s ([pipelines] mcp_url)", level, c.Name)
 	}
 	write := level == AccessWrite
+	var lim RunLimits
+	if n.r.scopes != nil {
+		tools, limited, err := n.r.scopes.RunTools(env.Run.ID)
+		if err != nil {
+			return "", nil, fmt.Errorf("with.mcp %s: %w", level, err)
+		}
+		lim.Tools, lim.LimitTools = tools, limited
+	}
 	var paths []string
 	if write && n.r.scopes != nil {
 		roleDirs, scoped, err := n.r.scopes.RunWritePaths(env.Run.ID)
@@ -293,7 +303,8 @@ func (n node) runToken(ctx context.Context, env *pipeline.Env, c Config, acc Acc
 	if env.Node != nil {
 		name += "-" + env.Node.ID
 	}
-	id, secret, err := n.r.tokens.MintRun(name, env.Project, write, ttl+runTokenSlack, env.Run.ID, paths)
+	lim.WritePaths = paths
+	id, secret, err := n.r.tokens.MintRun(name, env.Project, write, ttl+runTokenSlack, env.Run.ID, lim)
 	if err != nil {
 		return "", nil, fmt.Errorf("with.mcp %s: %w", level, err)
 	}

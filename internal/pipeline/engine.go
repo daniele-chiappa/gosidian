@@ -949,8 +949,9 @@ func (e *Engine) resources(run jobs.Run, node *Node, sc scope) []string {
 		out = append(out, ResourceTeam+strings.TrimSuffix(run.Team, ".md"), ResourceAgents)
 	}
 	if node.Use == "task.run" || node.Use == "task.pr" {
-		// The executor's plugin, which the node calls.
-		return append(out, e.executorResources(run)...)
+		// The executor's plugin, which the node calls: its run, or its pr,
+		// which waits for none of the agent's places.
+		return append(out, e.executorResources(run, strings.TrimPrefix(node.Use, "task."))...)
 	}
 	return append(out, e.nodeResources(node, sc)...)
 }

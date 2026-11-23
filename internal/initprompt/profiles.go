@@ -232,7 +232,16 @@ const StubVersion = 3
 // v28 (2026-10-31, M1.3): the directives speak of the .html, media and table
 // notes, the IN folder and the tag vocabulary only where they are on; the
 // bootstrap's directives_version names the variant served (DirectivesID).
-const DirectivesVersion = 28
+//
+// v29 (2026-11-18, IMP-236): end-of-task step 2 updates hot.md even when it
+// is old or does not name the work just done: the outcome goes to the entry
+// it served, found in the notes that cite it, or to a new one; what the agent
+// cannot check stays as it is, and is no reason to skip the step. On the writing bench an agent skipped hot.md 7 times in 10, saying it
+// did not name the bug it had fixed or that it could not check the rest. The
+// threshold of hot_oversize moves to step 0, the view and count rule says the
+// same in fewer words, and the cache is named once, in the folder table: the
+// block is 18 bytes shorter for the bench's project.
+const DirectivesVersion = 29
 
 // AnchorVersion is the version of the agent-anchor template/format. It is
 // substituted into the `<!-- gosidian:anchor v=N ... -->` marker so the

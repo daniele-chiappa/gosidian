@@ -94,6 +94,7 @@ and a file per purpose added with `-f`.
 | `docker-compose.yml` | gosidian alone, from its image, with the state dir out of the vault and the container hardened |
 | `docker-compose.rag.yml` | answers from a project's documents: docling (documents to markdown), images, the database plugin on Qdrant (the paragraphs and their embeddings), chat (the bots), the pipelines and git sync on (without a remote) |
 | `docker-compose.storage.yml` | the storage plugin: Nextcloud and other WebDAV servers, S3, Google Drive and local folders as sources of the IN folders |
+| `docker-compose.agents.yml` | [teams of agents](agents.md): pi runs the agents on the models of your choice, exec a role's checks on the agent's branch, preview publishes its build, notify asks a person before a merge |
 
 ```bash
 cd deploy/presets
@@ -123,6 +124,22 @@ docker compose exec gosidian /gosidian plugin accept --pending
 - **Versions**: the images are pinned, and a release of gosidian moves
   them with the manifests they serve; the CI checks that the presets pin
   the release's own image. Pull and restart after you update the files.
+- **Teams of agents** (`docker-compose.agents.yml`): copy
+  `pi.yaml.example`, `exec.yaml.example` and `notify.yaml.example` to
+  `pi.yaml`, `exec.yaml` and `notify.yaml` before the first `up` (a
+  missing file becomes a folder): the models and the repositories, the
+  repositories the checks read, the people who approve and their channel.
+  The deploy keys and the git token go in `keys/`, root's with mode 600;
+  the channels' credentials in `notify-secrets/`, uid 1000's. The four
+  manifests name what your files name, so `plugin accept --pending`
+  accepts them. Then `memory_create_team` writes a team and its
+  pipelines. **Agents at once**: `AGENTS_AT_ONCE` sets pi's workers and
+  `[agents] max_running`; each agent's step also holds one of the
+  server's pipeline workers while it works, so `PIPELINES_WORKERS` is
+  the agents and two more for every other step. Raise them together, and
+  pi's memory with them ([limits](agents.md#limits)). The screenshot of a
+  preview needs a Playwright server, `PREVIEW_PLAYWRIGHT_WS`; without one
+  a role with `preview` goes back.
 - **The smoke test**, `deploy/presets/test/smoke.py`, runs the whole rag
   chain on a fake model endpoint, in a temporary copy (your `.env` stays
   untouched): `SMOKE_GOSIDIAN_IMAGE=<image> python3 test/smoke.py`.

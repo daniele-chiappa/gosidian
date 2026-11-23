@@ -1,0 +1,16 @@
+# The smoke test of the agents preset (test/smoke.py agents): base +
+# agents with a fake OpenAI-compatible endpoint in place of the models.
+# The test writes the images it is given (SMOKE_GOSIDIAN_IMAGE,
+# SMOKE_PI_IMAGE) in an override of its own. Not for a real install.
+
+services:
+  pi:
+    depends_on:
+      fake:
+        condition: service_started
+
+  fake:
+    image: python:3.13-alpine
+    command: ["python3", "/fake-openai.py"]
+    volumes:
+      - ./test/fake-openai.py:/fake-openai.py:ro

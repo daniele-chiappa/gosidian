@@ -17,7 +17,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -272,8 +271,29 @@ func (s *Server) handleTaskCreate(ctx context.Context, req mcp.CallToolRequest) 
 	if !ok {
 		return mcp.NewToolResultErrorf("team %s is no team of project %s, or its block does not read (memory_lint, rule team-invalid)", teamPath, project), nil
 	}
-	if _, ok := team.Role(assignee); !ok {
-		return mcp.NewToolResultErrorf("role %q is no role of %s", assignee, teamPath), nil
+	// A task for a room of the team is an objective of the room's team,
+	// for its coordinator (IMP-233); team stays the one that delegates.
+	given, room := team, ""
+	if _, isRole := team.Role(assignee); !isRole {
+		r, ok := team.Room(assignee)
+		if !ok {
+			return mcp.NewToolResultErrorf("role %q is no role nor room of %s", assignee, teamPath), nil
+		}
+		rt, ok := teams[r.Path]
+		switch {
+		case !ok:
+			return mcp.NewToolResultErrorf("room %s: %s is no team of project %s, or its block does not read", r.Name, r.Path, project), nil
+		case rt.Coordinator == "":
+			return mcp.NewToolResultErrorf("room %s: its team %s has no coordinator to receive the objective", r.Name, r.Path), nil
+		case len(rt.Rooms) > 0:
+			return mcp.NewToolResultErrorf("room %s: its team %s has rooms of its own, and a room has none", r.Name, r.Path), nil
+		}
+		given, room, assignee = rt, r.Name, rt.Coordinator
+	}
+	// roomOf says whether the team at path is a room of the team at of.
+	roomOf := func(path, of string) bool {
+		_, ok := teams[of].RoomOf(path)
+		return ok
 	}
 	parent := fleet.LinkPath(req.GetString("parent", ""), project)
 	if tok.Kind == auth.KindRun && tok.RunID != "" {
@@ -291,8 +311,12 @@ func (s *Server) handleTaskCreate(ctx context.Context, req mcp.CallToolRequest) 
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		mine, ok := team.Role(own.Assignee)
-		if run.Team != team.Path || !ok || !slices.Contains(mine.DelegatesTo, assignee) {
-			return mcp.NewToolResultErrorf("role %s does not give tasks to %s of %s (delegates_to in the team)", own.Assignee, assignee, team.Path), nil
+		to := assignee
+		if room != "" {
+			to = room
+		}
+		if run.Team != team.Path || !ok || !slices.Contains(mine.DelegatesTo, to) {
+			return mcp.NewToolResultErrorf("role %s does not give tasks to %s of %s (delegates_to in the team)", own.Assignee, to, team.Path), nil
 		}
 		if parent == "" {
 			parent = run.Task
@@ -303,7 +327,7 @@ func (s *Server) handleTaskCreate(ctx context.Context, req mcp.CallToolRequest) 
 	} else if _, res := s.authorizeWrite(ctx, project+"/"+fleet.Folder+"/new.md"); res != nil {
 		return res, nil
 	}
-	n := fleet.NewTask{Title: title, Body: req.GetString("body", ""), Team: team.Path, Assignee: assignee, Parent: parent,
+	n := fleet.NewTask{Title: title, Body: req.GetString("body", ""), Team: given.Path, Assignee: assignee, Parent: parent,
 		Paths: req.GetStringSlice("paths", nil), Forbid: req.GetStringSlice("forbid", nil), BudgetUSD: req.GetFloat("budget_usd", 0)}
 	if n.BudgetUSD < 0 {
 		return mcp.NewToolResultError("budget_usd: 0 (the team's task_usd) or more"), nil
@@ -324,8 +348,10 @@ func (s *Server) handleTaskCreate(ctx context.Context, req mcp.CallToolRequest) 
 		switch {
 		case !ok:
 			return mcp.NewToolResultErrorf("parent %s is no task of the project", parent), nil
-		case p.Parent != "":
-			return mcp.NewToolResultErrorf("parent %s is itself a sub-task: a team delegates one level", parent), nil
+		case p.Parent != "" && !(p.Team == team.Path && room == "" && roomOf(p.Team, byPath[p.Parent].Team)):
+			// A room's objective, a sub-task of its team's, is the one
+			// sub-task that has sub-tasks: its room's.
+			return mcp.NewToolResultErrorf("parent %s is itself a sub-task: a team delegates one level, and a room's objective one more", parent), nil
 		case p.Team != team.Path:
 			return mcp.NewToolResultErrorf("parent %s is a task of another team", parent), nil
 		}
@@ -763,8 +789,6 @@ func (s *Server) handleTaskComplete(ctx context.Context, req mcp.CallToolRequest
 	return taskResult(t, nil)
 }
 
-var teamName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,47}$`)
-
 func (s *Server) handleCreateTeam(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	tok := s.tokenFromContext(ctx)
 	if tok == nil {
@@ -775,7 +799,7 @@ func (s *Server) handleCreateTeam(ctx context.Context, req mcp.CallToolRequest) 
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 	name := strings.TrimSpace(req.GetString("name", "team"))
-	if !teamName.MatchString(name) {
+	if !fleet.TeamNameRe.MatchString(name) {
 		return mcp.NewToolResultErrorf("name %q: lower-case letters, digits and -, starting with a letter", name), nil
 	}
 	roles := req.GetStringSlice("roles", []string{"dev"})
@@ -788,48 +812,30 @@ func (s *Server) handleCreateTeam(ctx context.Context, req mcp.CallToolRequest) 
 	}
 	run := strings.TrimSpace(req.GetString("run", "claude.run"))
 	teamPath := project + "/" + name + ".md"
-	content := fleet.TeamNote(project, name, run, roles, coordinator)
-	if _, problems := fleet.Parse(fleet.Find(content)[0].Src, teamPath); len(problems) > 0 {
+	notes := fleet.NewTeamNotes(project, name, run, roles, coordinator)
+	if _, problems := fleet.ParseWith(fleet.Find(notes[0].Content)[0].Src, teamPath, s.fleetProfiles()); len(problems) > 0 {
 		return mcp.NewToolResultErrorf("the team would not read: %s", problems[0]), nil
-	}
-	type note struct {
-		rel     string
-		content []byte
-		missing bool // written only when missing
-	}
-	notes := []note{
-		{teamPath, content, false},
-		{project + "/" + fleet.Database, fleet.DatabaseNote(project), true},
-		{project + "/" + name + "-tasks.md", fleet.ViewNote(project, teamPath), false},
-		{fleet.WorkPath(project, name), fleet.WorkPipeline(teamPath), false},
-		{fleet.AlertPath(project, name), fleet.AlertPipeline(teamPath), false},
-	}
-	if coordinator != "" {
-		notes = append(notes, note{fleet.CoordinatePath(project, name), fleet.CoordinatePipeline(teamPath), false})
-	}
-	for _, r := range roles {
-		notes = append(notes, note{fleet.AgentPath(project, r), fleet.AgentNote(project, r, r == coordinator), true})
 	}
 	// Every note checked before any is written: a team is made whole or
 	// not at all.
 	for _, n := range notes {
-		if _, res := s.authorizeWrite(ctx, n.rel); res != nil {
+		if _, res := s.authorizeWrite(ctx, n.Path); res != nil {
 			return res, nil
 		}
-		if _, err := s.vault.Load(n.rel); err == nil && !n.missing {
-			return mcp.NewToolResultErrorf("%s already exists", n.rel), nil
+		if _, err := s.vault.Load(n.Path); err == nil && !n.IfMissing {
+			return mcp.NewToolResultErrorf("%s already exists", n.Path), nil
 		}
 	}
 	var written []string
 	for _, n := range notes {
-		if _, err := s.vault.Load(n.rel); err == nil {
+		if _, err := s.vault.Load(n.Path); err == nil {
 			continue
 		}
-		if _, werr := s.writeNote(ctx, tok, noteWrite{rel: n.rel, mode: writeCreate, content: fixedContent(n.content), schemaCheck: true}); werr != nil {
+		if _, werr := s.writeNote(ctx, tok, noteWrite{rel: n.Path, mode: writeCreate, content: fixedContent(n.Content), schemaCheck: true}); werr != nil {
 			return werr.result(), nil
 		}
-		written = append(written, n.rel)
+		written = append(written, n.Path)
 	}
 	return mcp.NewToolResultJSON(map[string]any{"team": teamPath, "written": written,
-		"next": "Fill in the team's roles (model, repo, paths, checks, writes, approve), its alert and approvers, and its agents' notes (docs/agents.md); the pipelines take the tasks once the project runs pipelines."})
+		"next": "Fill in the team's roles (model, repo, paths, checks, writes, approve; a profile of profiles/ gives a role its fields: profile: reviewer), its alert and approvers, and its agents' notes (docs/agents.md); the pipelines take the tasks once the project runs pipelines."})
 }

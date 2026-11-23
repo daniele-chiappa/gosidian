@@ -46,8 +46,7 @@
       "name": "Search with any_of: R@1",
       "metric": "retrieval.any_of.r_at_1",
       "ref": 0.733,
-      "higher_better": true,
-      "target": 0.8
+      "higher_better": true
     },
     {
       "name": "Search with any_of: R@5",
@@ -80,8 +79,7 @@
     {
       "name": "tools/list, full (bytes)",
       "metric": "surface.tools_list_bytes_full",
-      "ref": 81690,
-      "target": 80000
+      "ref": 81690
     },
     {
       "name": "tools/list, core (bytes)",
@@ -91,8 +89,7 @@
     {
       "name": "Bootstrap of the project (bytes)",
       "metric": "surface.bootstrap_bytes",
-      "ref": 21604,
-      "target": 20000
+      "ref": 21586
     },
     {
       "name": "Start, cold (ms)",
@@ -226,10 +223,9 @@
     {
       "name": "Large vault: search, p95 (ms)",
       "metric": "large.search.p95_ms",
-      "ref": 4.338,
+      "ref": 3.305,
       "pct": 40,
-      "min": 0.3,
-      "target": 3
+      "min": 0.3
     },
     {
       "name": "Git sync, a round: the whole vault (ms)",
@@ -246,7 +242,7 @@
     {
       "name": "Web UI, first load (bytes sent)",
       "metric": "spa.bytes",
-      "ref": 153899,
+      "ref": 153885,
       "target": 200000
     },
     {
@@ -288,7 +284,7 @@
     {
       "name": "Binary (bytes)",
       "metric": "sizes.binary",
-      "ref": 50970784,
+      "ref": 51994784,
       "pct": 2
     }
   ],
@@ -803,6 +799,58 @@
       "metrics": [
         "surface.tools_core",
         "surface.tools_list_bytes_core"
+      ]
+    },
+    {
+      "set": "2026-11-15",
+      "why": "v2.164.1 (roadmap M1.3): a word common for the partial hits counted by its expression, a phrase's and an inflection's too, every snippet cut for the hits only, and the partial hits' label without the matches it knows: the p95 of a search on the large vault from 4.338 ms to 3.305, the median of three guards of the released code at a load under 4 (3.498, 3.207, 3.305). The median of the search, 1.71-1.79 ms, stays inside its room (1.56, the limit 1.95) and is not moved; the user moved the p95 the same day",
+      "from": [
+        "base-2026-11-15-m1-1.json",
+        "base-2026-11-15-m1-2.json",
+        "base-2026-11-15-v2.164.1.json"
+      ],
+      "metrics": [
+        "large.search.p95_ms"
+      ]
+    },
+    {
+      "set": "2026-11-18",
+      "why": "The web UI's first load from 153,899 bytes sent to 153,883 since v2.165.2, the build tools without vue-i18n 10.0.8 and minimatch 9 and 10: its catalogues' pieces are named after the app's vue-i18n 11, the same code. The guard of v2.166.0 (c27cb73) on 2026-11-18, three runs at a load under 4, measured as the control of the run before it; the user moved it the same day",
+      "from": [
+        "base-2026-11-18-v2.166.0.json"
+      ],
+      "metrics": [
+        "spa.bytes"
+      ]
+    },
+    {
+      "set": "2026-11-18",
+      "why": "The directives v29 (IMP-236, bd74797): hot.md updated at the end of every task, even when it is old or does not name the work, and the end-of-task rules in fewer words: the bootstrap of the benchmark project from 21,604 bytes to 21,586. The guard of main at bd74797 on 2026-11-18, three runs at a load under 4, measured after v2.166.0 as its control; the user moved it the same day",
+      "from": [
+        "base-2026-11-18-bd74797.json"
+      ],
+      "metrics": [
+        "surface.bootstrap_bytes"
+      ]
+    },
+    {
+      "set": "2026-11-18",
+      "why": "The binary from 50,970,784 bytes, set with v2.142.0 on 2026-11-04 (the web UI without its source maps), to 51,994,784: the 26 releases since then added about 1 MB within the 2% (51,945,632 with v2.164.0, 51,962,016 with v2.166.0), and IMP-233's phase A (e58a318: the team's API and the office's window) 32,768 more, 4,584 past the limit. The guard of main at e58a318 on 2026-11-18, three runs at a load under 4; the user moved it the same day",
+      "from": [
+        "base-2026-11-18-e58a318.json"
+      ],
+      "metrics": [
+        "sizes.binary"
+      ]
+    },
+    {
+      "set": "2026-11-18",
+      "why": "The web UI's first load from 153,883 bytes sent to 153,874 with e58a318 (IMP-233, phase A), which adds only code loaded later, the office's window in the plugin apps' piece: the first load changes in the names of the pieces it loads later. The guard of main at e58a318 on 2026-11-18, three runs at a load under 4; the user moved it the same day",
+      "from": [
+        "base-2026-11-18-e58a318.json"
+      ],
+      "metrics": [
+        "spa.bytes"
       ]
     }
   ]

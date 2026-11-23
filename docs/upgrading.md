@@ -7,6 +7,18 @@ one, newest first, and do what each one says. MCP clients keep the tool list
 they read when they connected, so reconnect them after an upgrade to see new
 tools and arguments. The full notes of every release are in `CHANGELOG.md`.
 
+## 2.165.0 — A node's own calls at once
+
+- A plugin's manifest may give a node or a tool `max_concurrent`, read
+  from this release on. pi and claude 0.4.3 give their `run` as many as
+  their workers (`PI_WORKERS`, `CLAUDE_WORKERS`): their manifest changes,
+  so accept it again (`gosidian plugin show`, then `accept`), and again
+  whenever you change the number of workers.
+- With more than one agent at once, mind `[pipelines] workers`
+  (default 2): each agent's step holds one while its agent works. Give it
+  the agents you want at once and room for the other steps
+  ([agents](agents.md#limits)).
+
 ## 2.163.0 — A coordinator's plan kept in order, a review's verdict counted
 
 - `task.plan` now adds dependencies of its own: two open tasks of roles

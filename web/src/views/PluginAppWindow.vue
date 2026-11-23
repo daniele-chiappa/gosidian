@@ -49,6 +49,8 @@ import { useAccessStore } from '@/stores/access'
 import NoteVersionButton from '@/components/domain/NoteVersionButton.vue'
 import PieceEditor from '@/components/domain/PieceEditor.vue'
 import ErrorMessage from '@/components/primitives/ErrorMessage.vue'
+import OfficeAppFrame from '@/components/domain/OfficeAppFrame.vue'
+import { OFFICE_BRIDGE } from '@/composables/officeBridge'
 import OverflowMenu, { type OverflowItem } from '@/components/primitives/OverflowMenu.vue'
 
 // version is a tag of the note: the design as that version holds it, to read
@@ -63,10 +65,13 @@ const sse = useSSE(['note'])
 /** Every app is framed the same way: a plugin does not choose these. */
 const SANDBOX = 'allow-scripts allow-same-origin allow-downloads allow-popups'
 const ALLOW = 'fullscreen; clipboard-read; clipboard-write'
-/** The contracts this window speaks. */
-const BRIDGES = new Set([LAYOUT_BRIDGE])
+/** The contracts this window speaks: layout/2 here, office/1 in its own
+ *  frame (IMP-233). */
+const BRIDGES = new Set([LAYOUT_BRIDGE, OFFICE_BRIDGE])
 
 const app = ref<PluginApp | null>(null)
+/** The app is the office's map: OfficeAppFrame speaks to it, not this. */
+const office = computed(() => app.value?.bridge === OFFICE_BRIDGE)
 const problem = ref('')
 const frame = ref<HTMLIFrameElement | null>(null)
 // Bumped to reload: a new frame, a new editor, the note as it is now.
@@ -268,7 +273,7 @@ async function readValid() {
 
 // The text changes while the design is open, here or in the note's window.
 function onNoteEvent(p: { path?: string }) {
-  if (p.path !== props.path) return
+  if (p.path !== props.path || office.value) return
   void readValid()
   if (state.ready) void bridge.refreshPieces()
 }
@@ -307,6 +312,7 @@ function editLatest() {
 }
 
 function onMessage(e: MessageEvent) {
+  if (office.value) return
   void bridge.handle({ data: e.data, origin: e.origin, source: e.source })
 }
 
@@ -389,8 +395,8 @@ onMounted(async () => {
     const type = noteTypeOf(note.content)
     valid.value = note.valid ?? null
     // Any markdown note can have a design: the app of the layout bridge
-    // lays out those no app claims.
-    const found = apps.find((a) => a.note_type === type) ?? apps.find((a) => BRIDGES.has(a.bridge))
+    // lays out those no app claims. No other bridge does.
+    const found = apps.find((a) => a.note_type === type) ?? apps.find((a) => a.bridge === LAYOUT_BRIDGE)
     if (!found) problem.value = t('plugin_app.no_app', { type: type || '—' })
     else if (!BRIDGES.has(found.bridge))
       problem.value = t('plugin_app.unknown_bridge', { bridge: found.bridge })
@@ -409,7 +415,14 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+  <OfficeAppFrame
+    v-if="app && office"
+    :app="app"
+    :path="path"
+    @dirty="(d: boolean) => emit('dirty', d)"
+  />
   <div
+    v-else
     class="relative flex h-full flex-col"
     data-plugin-app-window
   >

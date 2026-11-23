@@ -244,6 +244,32 @@ func TeamNote(project, name, run string, roles []string, coordinator string) []b
 	return []byte(b.String())
 }
 
+// Profile is a note memory_create_team writes in a project without it.
+type Profile struct {
+	Path    string
+	Content []byte
+}
+
+// StarterProfiles are the profiles memory_create_team writes in a project
+// that lacks them (IMP-233), each run by run: a developer, who changes a
+// repository; a reviewer, who reads the work of others and judges it; an
+// analyst, who reads and searches.
+func StarterProfiles(project, run string) []Profile {
+	mk := func(name, desc, fields string) Profile {
+		var b strings.Builder
+		fmt.Fprintf(&b, "---\ntitle: %s\ndescription: %s\ntype: %s\ntags: [%s, type:profile]\n---\n\n# %s\n\n", name, yamlString(desc), ProfileType, project, name)
+		b.WriteString("A role takes the fields of its profile it does not write itself: `profile: " + name + "` in a team's block. Change the block to change every role that takes it; the format is in docs/agents.md.\n\n")
+		fmt.Fprintf(&b, "```profile\nrun: %s\n%s```\n", run, fields)
+		return Profile{Path: project + "/" + ProfileFolder + "/" + name + ".md", Content: []byte(b.String())}
+	}
+	return []Profile{
+		mk("developer", "A profile of the roles that change a repository (IMP-233).", "access: edit\n"),
+		mk("reviewer", "A profile of the roles that read the work of others and judge it (IMP-233).", "access: read\nreview: true\n"),
+		mk("analyst", "A profile of the roles that read and search, the archives of the project among them (IMP-233).",
+			"access: read\n# tools: [vec-pg]        # the plugins it searches, of those exposed in the project\n# skills: [skills/sql]   # notes type: skill\n"),
+	}
+}
+
 // AgentPath is the agent note of a role of a new team.
 func AgentPath(project, role string) string { return project + "/agents/" + role + ".md" }
 

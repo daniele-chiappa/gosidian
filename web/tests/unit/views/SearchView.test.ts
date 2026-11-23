@@ -5,10 +5,19 @@ import enUI from '@catalogs/ui.en.json'
 import type { SearchHit } from '@/api/search'
 
 vi.mock('@/api/search', () => ({ search: vi.fn() }))
-const windows = vi.hoisted(() => ({ focused: null as { type: string } | null }))
+const windows = vi.hoisted(() => ({
+  focused: null as { type: string } | null,
+  list: [] as { id: string; type: string; key: string }[],
+  identify: (() => {}) as (id: string, key: string, props: Record<string, unknown>) => void,
+}))
 vi.mock('plancia', async (orig) => ({
   ...(await orig<typeof import('plancia')>()),
-  useWindowsStore: () => ({ open: vi.fn(), focused: windows.focused }),
+  useWindowsStore: () => ({
+    open: vi.fn(),
+    focused: windows.focused,
+    windows: windows.list,
+    identify: (id: string, key: string, props: Record<string, unknown>) => windows.identify(id, key, props),
+  }),
 }))
 vi.mock('@vueuse/core', () => ({
   // No debounce in the test: each change searches at once.
@@ -156,6 +165,52 @@ describe('SearchView, a text handed to it (IMP-218, F-06)', () => {
     await flushPromises()
     expect(search).toHaveBeenCalledTimes(2)
     expect(search).toHaveBeenLastCalledWith(expect.objectContaining({ q: 'same' }))
+  })
+})
+
+describe('SearchView, what it searched kept by its window (BUG-161)', () => {
+  let identify: ReturnType<typeof vi.fn>
+  beforeEach(() => {
+    vi.clearAllMocks()
+    identify = vi.fn()
+    windows.identify = identify as unknown as typeof windows.identify
+    windows.list = [{ id: 'win-1', type: 'search', key: 'search' }]
+  })
+
+  it('writes the text and the project back to its window at each search, undefined once empty', async () => {
+    vi.mocked(search).mockResolvedValue([hit('a.md')])
+    const w = mount(SearchView, { global: { plugins: [i18n()] } })
+    await w.find('input[type="search"]').setValue('fitness')
+    await w.find('input[type="text"]').setValue('agile')
+    await flushPromises()
+    expect(identify).toHaveBeenLastCalledWith('win-1', 'search', { q: 'fitness', project: 'agile' })
+    await w.find('input[type="text"]').setValue('')
+    await w.find('input[type="search"]').setValue('')
+    await flushPromises()
+    expect(identify).toHaveBeenLastCalledWith('win-1', 'search', { q: undefined, project: undefined })
+  })
+
+  it('does not search again for the text it wrote back to its window', async () => {
+    vi.mocked(search).mockResolvedValue([hit('a.md')])
+    const w = mount(SearchView, { global: { plugins: [i18n()] } })
+    await w.find('input[type="search"]').setValue('fitness')
+    await flushPromises()
+    expect(search).toHaveBeenCalledTimes(1)
+    // The store hands the props it was given back to the view.
+    await w.setProps({ q: 'fitness', project: undefined })
+    await flushPromises()
+    expect(search).toHaveBeenCalledTimes(1)
+    expect(w.find<HTMLInputElement>('input[type="search"]').element.value).toBe('fitness')
+  })
+
+  it('made again from its window, as the tabs bring it back, finds its text and project and searches', async () => {
+    vi.mocked(search).mockResolvedValue([hit('a.md')])
+    const w = mount(SearchView, { props: { q: 'fitness', project: 'agile' }, global: { plugins: [i18n()] } })
+    await flushPromises()
+    expect(w.find<HTMLInputElement>('input[type="search"]').element.value).toBe('fitness')
+    expect(w.find<HTMLInputElement>('input[type="text"]').element.value).toBe('agile')
+    expect(search).toHaveBeenCalledWith(expect.objectContaining({ q: 'fitness', project: 'agile' }))
+    expect(w.text()).toContain('a.md')
   })
 })
 

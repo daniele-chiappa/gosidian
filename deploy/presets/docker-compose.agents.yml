@@ -1,0 +1,166 @@
+# gosidian presets: agents. Teams of agents work on a project's tasks
+# (docs/agents.md): pi runs the agents on the models of your choice, exec
+# runs a role's checks on the branch an agent pushed, preview publishes
+# its build, notify asks a person before a merge. Use it on top of the
+# base, with or without the others:
+#
+#   cp pi.yaml.example pi.yaml          # the models and the repositories
+#   cp exec.yaml.example exec.yaml      # the repositories the checks read
+#   cp notify.yaml.example notify.yaml  # the people who approve, the channel
+#   docker compose -f docker-compose.yml -f docker-compose.agents.yml up -d
+#
+# The three manifests name what your files name (models' hosts,
+# repositories, channels), so they wait for an owner, once:
+#
+#   docker compose exec gosidian /gosidian plugin accept --pending
+#
+# docs/deployment.md#presets has the whole walk-through, and how the
+# agents at once add up (AGENTS_AT_ONCE below).
+
+services:
+  gosidian:
+    depends_on:
+      pi:
+        condition: service_started
+      exec:
+        condition: service_started
+      notify:
+        condition: service_started
+      preview:
+        condition: service_started
+    environment:
+      GOSIDIAN_PIPELINES_ENABLED: "true"
+      GOSIDIAN_PIPELINES_FILES_URL: http://gosidian:8080
+      GOSIDIAN_PIPELINES_MCP_URL: http://gosidian:8080/mcp
+      # The server's address as a person's browser reaches it: the links
+      # of a question to approve.
+      GOSIDIAN_PIPELINES_PUBLIC_URL: ${GOSIDIAN_PUBLIC_URL:-http://localhost:8080}
+      # An agent's step holds one of the server's workers as long as it
+      # works, minutes: the agents at once, and two for every other step
+      # (the checks, the merge, the other pipelines). Without them two
+      # agents at work held the whole server.
+      GOSIDIAN_PIPELINES_WORKERS: ${PIPELINES_WORKERS:-4}
+      GOSIDIAN_AGENTS_MAX_RUNNING: ${AGENTS_AT_ONCE:-2}
+      GOSIDIAN_PLUGIN_PI_URL: http://pi:8000/mcp
+      GOSIDIAN_PLUGIN_PI_TOKEN: ${PI_TOKEN:?run ./init.sh first}
+      GOSIDIAN_PLUGIN_EXEC_URL: http://exec:8000/mcp
+      GOSIDIAN_PLUGIN_EXEC_TOKEN: ${EXEC_TOKEN:?run ./init.sh first}
+      GOSIDIAN_PLUGIN_NOTIFY_URL: http://notify:8000/mcp
+      GOSIDIAN_PLUGIN_NOTIFY_TOKEN: ${NOTIFY_TOKEN:?run ./init.sh first}
+      GOSIDIAN_PLUGIN_PREVIEW_URL: http://preview:8000/mcp
+      GOSIDIAN_PLUGIN_PREVIEW_TOKEN: ${PREVIEW_TOKEN:?run ./init.sh first}
+
+  # The agents: pi on an OpenAI-compatible endpoint (OpenRouter, Ollama,
+  # vLLM, llama.cpp), each step in a folder and a user of its own. Its run
+  # bears AGENTS_AT_ONCE steps (its manifest says so, and gosidian queues
+  # the others).
+  pi:
+    image: ghcr.io/daniele-chiappa/gosidian-pi:0.4.3
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=${PI_TMP:-1g}
+    cap_drop:
+      - ALL
+    # To run each step as the user of its place.
+    cap_add:
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${PI_MEMORY:-3g}
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    volumes:
+      - ./pi.yaml:/etc/gosidian-pi/preset.yaml:ro
+      # The repositories' deploy keys and the token that opens pull
+      # requests: root's files, mode 600.
+      - ./keys:/run/secrets/agents:ro
+    environment:
+      GOSIDIAN_PLUGIN_TOKEN: ${PI_TOKEN:?run ./init.sh first}
+      PI_WORKERS: ${AGENTS_AT_ONCE:-2}
+      AGENTS_API_KEY: ${AGENTS_API_KEY:-}
+
+  # A role's checks (npm test && npm run build) on the agent's branch, in a
+  # sandbox whose network reaches the registries of exec.yaml.
+  exec:
+    image: ghcr.io/daniele-chiappa/gosidian-exec:0.1.3
+    restart: unless-stopped
+    read_only: true
+    # The steps' folders: they run what they build.
+    tmpfs:
+      - /tmp:size=${EXEC_TMP:-4g},exec
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: ${EXEC_MEMORY:-4g}
+    pids_limit: 4096
+    volumes:
+      - ./exec.yaml:/etc/gosidian-exec/preset.yaml:ro
+      - ./keys:/run/secrets/agents:ro
+      - exec-cache:/var/cache/gosidian-exec
+    environment:
+      GOSIDIAN_PLUGIN_TOKEN: ${EXEC_TOKEN:?run ./init.sh first}
+      EXEC_WORKERS: ${EXEC_WORKERS:-2}
+
+  # The build of a role with `preview`, published at PREVIEW_PUBLIC_URL for
+  # a few days and looked at in a browser before a person approves. The
+  # teams' pipelines name its nodes, so it is here even when no role has a
+  # preview: it waits. The screenshot needs a Playwright server
+  # (PREVIEW_PLAYWRIGHT_WS); without one, a role with a preview goes back.
+  preview:
+    image: ghcr.io/daniele-chiappa/gosidian-preview:0.1.3
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 512m
+    pids_limit: 256
+    ports:
+      - "${PREVIEW_BIND:-127.0.0.1}:${PREVIEW_PORT:-8097}:8080"
+    volumes:
+      - preview-store:/var/lib/gosidian-preview
+    environment:
+      GOSIDIAN_PLUGIN_TOKEN: ${PREVIEW_TOKEN:?run ./init.sh first}
+      PREVIEW_PUBLIC_URL: ${PREVIEW_PUBLIC_URL:-http://localhost:8097}
+      PREVIEW_PLAYWRIGHT_WS: ${PREVIEW_PLAYWRIGHT_WS:-}
+
+  # The questions before a merge, to the people of notify.yaml (Telegram,
+  # ntfy, email), with a reply page that their browsers reach at
+  # NOTIFY_PUBLIC_URL.
+  notify:
+    image: ghcr.io/daniele-chiappa/gosidian-notify:0.2.2
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    pids_limit: 128
+    ports:
+      - "${NOTIFY_BIND:-127.0.0.1}:${NOTIFY_PORT:-8098}:8080"
+    volumes:
+      - ./notify.yaml:/etc/gosidian-notify/preset.yaml:ro
+      # The channels' credentials (telegram-bot-token, ntfy-token, smtp-user,
+      # smtp-password), readable by the image's user, uid 1000.
+      - ./notify-secrets:/run/secrets:ro
+      - notify-state:/var/lib/gosidian-notify
+    environment:
+      GOSIDIAN_PLUGIN_TOKEN: ${NOTIFY_TOKEN:?run ./init.sh first}
+      NOTIFY_PUBLIC_URL: ${NOTIFY_PUBLIC_URL:-http://localhost:8098}
+
+volumes:
+  exec-cache: {}
+  notify-state: {}
+  preview-store: {}

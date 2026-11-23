@@ -43,9 +43,3 @@ reason = "Only ZipArchive::extract aborts, and the page-layout editor never call
 id = "RUSTSEC-2026-0367"
 ignoreUntil = 2026-12-08
 reason = "SUID and SGID bits matter only to an extraction to disk, which the page-layout editor never does: it reads archives in memory. Upstream already uses zip 9.1.1, which comes with the next update of the editor."
-
-# filelock 3.32.3 in the docling plugin's image.
-[[IgnoredVulns]]
-id = "GHSA-v4x8-3wr5-3wq8"
-ignoreUntil = 2027-02-08
-reason = "Only filelock's ReadWriteLock (SQLite) is affected; in the docling plugin's image huggingface_hub, transformers and torch use FileLock. 4.x is a major release, taken when it is tested for another reason."

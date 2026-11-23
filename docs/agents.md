@@ -15,6 +15,8 @@ change the team by editing a note.
   is ready, gosidian takes it for a new run of the pipeline, which gives
   it to its agent and closes it with the agent's report.
 
+The [agents preset](deployment.md#presets) starts gosidian with what a
+team needs: pi for the agents, exec for the checks, preview and notify.
 `memory_create_team` writes a team to start from: its note, an agent
 note per role, the [pipelines](#the-pipelines-of-a-team) that give its
 tasks to their agents and its objectives to its coordinator and tell its
@@ -31,6 +33,7 @@ max_agents: 3                # agents of the team at work at once
 max_rounds: 5                # the coordinator's runs on an objective
 alert: ["#lab/agents"]       # where the pipelines send what they tell
 approvers: [alice]
+guide: "[[fitness/rules]]"   # the rules every role follows
 roles:
   capo:
     agent: "[[fitness/agents/capo]]"
@@ -45,6 +48,7 @@ roles:
     paths: [web/, src/]
     forbid: [package.json]
     checks: npm test && npm run build
+    skills: ["[[fitness/skills/vitest]]"]
   knowledge:
     agent: "[[fitness/agents/knowledge]]"
     run: pi.run
@@ -60,29 +64,123 @@ roles:
 | `max_rounds` | how many times the coordinator runs on one objective after its sub-tasks closed (default 5): then a person decides |
 | `reopen_on` | which problems of a review (a role with `review: true`) reopen the work. `serious` (default): the coordinator is told to give no task for a review that leaves only minor problems open, to list them in its summary as left open, and to bring what is made from the reviewed work in line with it once, after the review that leaves no serious problem. `any`: every problem reopens it. It changes what the coordinator is told: the plan stays its agent's |
 | `alert`, `approvers` | for the pipelines: where they tell, who approves |
+| `guide` | a note of rules every role follows: its agent receives it [in its system prompt](#guides-and-skills) |
+| `rooms` | the [rooms](#rooms) its roles give objectives to: a name, and the note of the room's team (`front: "[[fitness/front]]"`) |
 | `roles` | the roles, by name |
 
 A role:
 
 | Field | |
 |---|---|
+| `profile` | a [profile](#profiles) whose fields the role takes where it writes none: its name in the project's `profiles/` folder (`reviewer`), or a link to a note of the project |
 | `agent` | its agent note: the note's body, below its title, is the agent's system prompt |
 | `run` | the node that runs it: a plugin's `<name>.run` of the [agent-run contract](plugins.md#agent-nodes-agent-run1) (`claude.run`, `pi.run`) |
 | `model`, `effort`, `max_turns`, `max_seconds`, `max_tokens` | for the executor, within its preset (`max_tokens` counts the cache reads too: a role that reads and writes much, as an app's, may need more than the preset's default) |
-| `access` | its agent's level of the agent-run contract: `read`, `edit` (also writes files) or `exec` (also runs commands, in its executor's sandbox: its checks too, before the pipeline runs them again); default the executor's, `edit` with a `repo`. `exec` needs a preset that allows it (Bash for `claude`), and the commands reach what the executor's container reaches: give it on purpose. The commit takes every file the agent leaves that the repository does not ignore: the agent is told to delete what its checks built, and a `.gitignore` with the build's folder (`dist/`) spares it |
-| `repo` or `host` | the repository its executor works on, or the host its commands run on |
-| `paths`, `forbid` | the paths of the repository it may and may not change (a folder ends with `/`) |
+| `access` | its agent's level of the agent-run contract: `read`, `edit` (also writes files) or `exec` (also runs commands, in its executor's sandbox: its checks too, before the pipeline runs them again); default the executor's, `edit` with a `repo`. `read` with a `repo`: the agent reads a clone of its base branch, the work merged so far, and changes none of its files: no commit, no pull request, nothing for a person to approve, and the gate judges it on its report, as a role without a repository (a reviewer of an app's files: make its task depend on the tasks whose work it reads). `exec` needs a preset that allows it (Bash for `claude`), and the commands reach what the executor's container reaches: give it on purpose. The commit takes every file the agent leaves that the repository does not ignore: the agent is told to delete what its checks built, and a `.gitignore` with the build's folder (`dist/`) spares it |
+| `repo` or `host` | the repository its executor works on (or reads, with `access: read`), or the host its commands run on |
+| `paths`, `forbid` | the paths of the repository it may and may not change (a folder ends with `/`); none for a role that reads it |
 | `checks` | the script that tests its work, in the repository's folder (`npm test && npm run build`) |
 | `preview` | the folder of the build its checks make (`dist`): it is published and looked at before a person approves |
 | `writes` | the folders of the vault its MCP token may write. Without, a run of the role gets no write token. A role that writes must write: a task whose agent wrote no note there goes back, as a repository's that changed nothing |
-| `delegates_to` | the roles it may give tasks to. One level: a role that receives from another gives to none |
-| `approve` | `merge` (a person approves before its pull request is merged), `ops` (before a command runs on a host) or `none`; default `merge` with `repo`, `ops` with `host`, else `none` |
+| `delegates_to` | the roles it may give tasks to, and the [rooms](#rooms) it may give objectives to. One level: a role that receives from another gives to none |
+| `approve` | `merge` (a person approves before its pull request is merged), `ops` (before a command runs on a host) or `none`; default `merge` with a `repo` it changes, `ops` with `host`, else `none` |
+| `guide` | a note of rules of the role, after the team's [in its agent's system prompt](#guides-and-skills) |
+| `skills` | notes `type: skill` its agent receives whole, after the guides; at most 20 |
+| `tools` | the [plugins' tools](#a-roles-tools) its agent sees through gosidian's MCP: a plugin's name (`vec-pg`, all its tools) or one tool's (`vec-pg_search`); `[]` for none. Without it, every plugin exposed in the project, as before |
 | `review` | `true`: the role judges the work of others. Its prompt asks it to end its report with a list item for each problem left open, starting with `[serious]` or `[minor]`, and a line `VERDICT: passed` or `VERDICT: to correct`. The gate counts them among the pipeline's findings (`The review: to correct, 2 serious and 1 minor problems left open.`, and `review` in its output: `verdict`, `serious`, `minor`); a report without the verdict line, empty or cut goes back |
 
-A role with `checks` or `preview` needs a `repo`, `approve: merge` too,
+A role with `checks` or `preview` needs a `repo` it changes (not
+`access: read`), `approve: merge` too,
 and a role whose work a person approves needs the team's `alert`. The
 lint rule `team-invalid` reports a block that does not read, on its line,
-and a role whose agent note is missing.
+a role whose agent note is missing, and a guide or a skill missing from
+the project or a skill that is no note `type: skill`.
+
+### Profiles
+
+A profile is a note `type: profile` of the project with one ```profile
+block: the fields of a role that are not of a team's repository, host or
+folders. A role that names it takes those it does not write itself, so
+one note gives several roles, in several teams, their executor and model,
+their guide, skills and tools.
+
+```profile
+run: claude.run
+model: sonnet
+access: read
+tools: [vec-pg]
+skills: [skills/sql]
+guide: guides/data
+```
+
+```team
+roles:
+  numbers:
+    profile: analyst           # profiles/analyst.md
+    model: opus                # the role's own field wins
+```
+
+| Field | |
+|---|---|
+| `agent`, `run`, `model`, `effort`, `max_turns`, `max_seconds`, `max_tokens`, `access`, `review`, `guide`, `skills`, `tools` | as a role's; a role's own field wins, a list too (`tools: []` in the role, none) |
+
+The team reads with the profile's fields as if the role wrote them, and
+its checks hold for what the role ends up with: a profile with `access:
+read` given to a role with a `repo` makes it read the repository, and a
+reviewer's profile makes it judge. A profile that is missing, or holds a
+field of a team's repository (`repo`, `paths`, `writes`…), is a problem
+of the team, on the role's line: the team does not run until it reads. A
+profile changed changes every role that takes it, at its next run.
+
+`memory_create_team` writes three profiles to start from in a project
+without them, each with the team's executor: `developer` (`access:
+edit`), `reviewer` (`access: read`, `review: true`) and `analyst`
+(`access: read`, with the tools and skills to fill in). The lint rule
+`team-invalid` reports a profile note that does not read too.
+
+### A role's tools
+
+The plugins a project's owner exposed in it (`gosidian plugin expose`)
+offer their tools to the agents of the project: an archive's search
+(`vec-pg_search`), the layout engine's (`layout_open`, `layout_render`).
+A role's `tools` narrows what its agent sees of them:
+
+```yaml
+  analyst:
+    run: claude.run
+    tools: [vec-pg, layout_render]   # every tool of vec-pg, one of layout
+  writer:
+    run: pi.run
+    tools: []                         # no plugin's tool
+```
+
+The MCP tokens of the role's runs carry the list: a tool outside it is
+neither listed nor callable (`tools/list`, `tools/call`). It narrows and
+never widens: a plugin not exposed in the project stays out, and so does
+a write tool for a role that reads. gosidian's own tools (`memory_*`, the
+task tools) stay. The executor's own tools (Claude Code's Bash, pi's
+read) are something else: its preset and the role's `access` set them.
+The coordinator reads a role's tools (`tools vec-pg, layout_render`, `no
+plugin's tools`), and [the office](#the-office) says which of them name a
+plugin not exposed in the project.
+
+### Guides and skills
+
+A role's agent receives in its system prompt, after its agent note's
+body: the team's `guide`, the role's own `guide`, then its `skills`, each
+whole below a heading with its title and path (`# Guide: Rules
+(fitness/rules.md)`, `# Skill: Vitest (fitness/skills/vitest.md)`, with
+the skill's `description` first). A note the team and the role both name
+comes once. They are notes of the team's project: a link without the
+project (`skills/vitest`) is in it. Their bodies, below their titles,
+together at most `[agents] max_prompt_notes` (64 KiB): a role over it,
+a skill that is no note `type: skill`, or a note that is missing stops
+the run before its agent, and the attempt fails with why. A coordinator
+reads the skills of the roles it gives tasks to (`skills vitest`), to
+pick the role for a task. The system prompt is the same in every turn
+of a step, which a provider that caches prompts reads again for less;
+still, each skill is in every step of the role: give it the few its
+tasks need.
 
 ## A task
 
@@ -185,10 +283,10 @@ person set back by hand gets a new run, not its old one.
 
 | Node | `with` | Output |
 |---|---|---|
-| `task.context` | `task` (default `{{ trigger.task }}`), `prompt` (text added at the end) | `task`, `body`, `team`, `role`, `system` (the agent note's body), `prompt` (the task for its agent: the role, the task, its paths, the reports of the tasks it depends on; for a coordinator, the roles it gives tasks to, with the repository or host each sees, or the vault only, and its sub-tasks' reports), `max_cost` (the task's budget, or the team's `task_usd`), `paths`, `forbid`, `depends_on`, `children` |
+| `task.context` | `task` (default `{{ trigger.task }}`), `prompt` (text added at the end) | `task`, `body`, `team`, `role`, `system` (the agent note's body, with the role's [guides and skills](#guides-and-skills)), `prompt` (the task for its agent: the role, the task, its paths, the reports of the tasks it depends on; for a coordinator, the roles it gives tasks to, with the repository or host each sees, or the vault only, and its sub-tasks' reports), `max_cost` (the task's budget, or the team's `task_usd`), `paths`, `forbid`, `depends_on`, `children` |
 | `task.update` | `task`, `status` (`working`, `input-required`, `review`, `submitted`), `message` (a dated section of the task), `branch` (the branch the next attempt continues, `{{ verdict.branch }}`; empty for none) | `task` |
 | `task.complete` | `task`, `status` (`completed`, the default, `failed`, `canceled`), `report` | `task` |
-| `task.run` | `task`, `prompt` (added at the end), `plan` (for a coordinator: ask for a plan); any other setting goes to the executor and wins | the executor's output: it runs the role's `run` node with the prompt of `task.context`, the agent note as `system`, the role's model, effort and limits, the task's budget as `max_cost`, the role's `access`, the role's `repo` (with `access: edit` unless the role says another, a pull request titled as the task, and the task's `branch` with `resume` when an attempt sent back left one and the executor's plugin takes it) and `mcp: write` when the role `writes`, `read` otherwise; and `next`: `checks` and `preview`, true when the role has them and the agent pushed a branch, for the `when` of the nodes that run them |
+| `task.run` | `task`, `prompt` (added at the end), `plan` (for a coordinator: ask for a plan); any other setting goes to the executor and wins | the executor's output: it runs the role's `run` node with the prompt of `task.context`, the agent note with the role's guides and skills as `system`, the role's model, effort and limits, the task's budget as `max_cost`, the role's `access`, the role's `repo` (with `access: edit` unless the role says another, a pull request titled as the task, and the task's `branch` with `resume` when an attempt sent back left one and the executor's plugin takes it) and `mcp: write` when the role `writes`, `read` otherwise; and `next`: `checks` and `preview`, true when the role has them and the agent pushed a branch, for the `when` of the nodes that run them |
 | `task.gate` | `agent` (`{{ agent }}`), `checks` (`{{ checks }}`, exec.run's output), `preview` (`{{ look }}`, preview.check's), `choices` (the labels of `approve`, `redo`, `discard`) | `ok`, and what follows: `close` (no approval needed), `ask` (a person approves), `redo` (another attempt is left), `fail`; `files`, `outside`, `forbidden` (the files the agent changed against the role's and task's paths and forbid), `notes` (the notes the run wrote in the role's `writes`), `pr_url`, `branch`, `resume` (another attempt may continue the branch: the agent pushed it, within its paths), `image` (the preview's screenshot), `link`, `title`, `text` (for the person: the pipeline's findings and the beginning of the agent's report), `report` (the same with the whole report, for the task's note; `task.verdict` reads it), `feedback` (for another attempt), `choices` |
 | `task.verdict` | `gate`, `answer` (wait.call's: `choice`, `by`, `comment`) | `close` with `status`, `merge`, `close_pr`, `redo`, `report`, `feedback`; `branch` (the branch the next attempt continues, for `task.update`; empty when it starts from the base) and `delete_branch` (for `task.pr`: closing the pull request deletes its branch) |
 | `task.pr` | `url`, `action` (`merge`, `close`), `delete_branch` (default true) | the output of the executor plugin's `pr` node, which merges or closes with its preset's credentials |
@@ -248,12 +346,13 @@ the coordinator (`coordinator: false`):
    request is closed, instead of a run that fails with the pull request
    open;
 3. `task.gate` looks at what the agent did: a file in `forbid` or
-   outside `paths`, a role with a repo whose agent changed nothing, a role
+   outside `paths`, a role that changes a repo whose agent changed nothing, a role
    that writes in the vault whose agent wrote no note there (the notes
    of an attempt before, ended at a limit, count: the server remembers
-   them until the task closes or it restarts), a role with neither a
-   repository nor `writes` whose answer is empty or cut (its report is
-   its work), checks that
+   them until the task closes or it restarts), a role that changes no
+   repository and has no `writes` whose answer is empty or cut (its
+   report is its work), a role that reads a repository its executor did
+   not give it, checks that
    fail (an exit code other than 0, a signal, the time out) or did not
    run, a preview that was not published or does not open, and the work
    goes back;
@@ -318,7 +417,41 @@ takes its role's `ready` and `children_done`:
 
 A coordinator's agent may also give tasks itself, with
 `memory_task_create`: its MCP token, even a read one, creates tasks only
-for the roles it delegates to, under its own task.
+for the roles and rooms it delegates to, under its own task.
+
+### Rooms
+
+A room is a team that another gives objectives to: a sub-team with its
+own coordinator, budget and limits, and its own pipelines. The team lists
+it in `rooms`, by a name its roles delegate to:
+
+```team
+coordinator: capo
+budget: {day_usd: 20}
+rooms:
+  front: "[[fitness/front]]"     # a note type: team with a coordinator
+roles:
+  capo:
+    run: claude.run
+    delegates_to: [knowledge, front]
+```
+
+- A task the coordinator gives to `front` (in its plan, or with
+  `memory_task_create` and `assignee: front`) is an objective of the
+  room's team, for the room's coordinator, a sub-task of the team's
+  objective. The room's coordinator splits it among its roles as any
+  objective, and its summary closes it: the team's coordinator then reads
+  it as the report of that sub-task. The coordinator's prompt says what
+  the room is: its team and its roles.
+- The room's runs spend of the team's budget too: the team's `day_usd`
+  counts what the team and its rooms spent today, and a room's task waits
+  while either its own day or its team's is spent (`memory_tasks` says
+  which). Its `max_agents` and `max_rounds` are its own.
+- One level more: a room has no rooms, it is one team's, and only a
+  room's objective, a sub-task, has sub-tasks of its own.
+- The lint rule `team-invalid` reports a room whose note is missing, does
+  not read as a team, has no coordinator or rooms of its own, or is the
+  room of two teams. The office draws a team's rooms beside it.
 
 A coordinator's run that neither closes the objective nor gives it new
 tasks puts it in `input-required`, and so does the `max_rounds`-th round.
@@ -365,11 +498,22 @@ coordinator runs on what is there.
 - **Agents at once.** The steps of a task's run that run an agent take a
   place in `team:<project>/<team>` (`max_agents`) and in `agents`
   (`[agents] max_running`, for the whole server) of the
-  [queue](pipelines.md#calls-at-once): the Runs window shows them.
-- **One level** of delegation, `max_rounds`, `[agents] max_tasks`
-  sub-tasks of an objective (50), `max_attempts`.
+  [queue](pipelines.md#calls-at-once): the Runs window shows them. They
+  also take a place in their executor's plugin, whose `run` bears as
+  many steps at once as its workers (`PI_WORKERS`, `CLAUDE_WORKERS`,
+  [plugins](plugins.md#the-manifest)), while the merge of a pull request
+  takes none of them. And each holds one of the server's `[pipelines]
+  workers` (default 2) as long as its agent works, minutes: give
+  `workers` the agents you want at once and room for the other steps,
+  or two agents at work hold every other pipeline of the server. The
+  smallest of the four says how many agents work together.
+- **One level** of delegation, and one more through a [room](#rooms),
+  `max_rounds`, `[agents] max_tasks` sub-tasks of an objective (50),
+  `max_attempts`.
 - **Writes.** A run of a team's task gets an MCP token that writes only in
   its role's `writes` (the task tools aside), and none without them.
+- **Tools.** Its tokens see only the plugins' tools of its role's
+  `tools`, when the role names them.
 
 `[agents]` in the [configuration](configuration.md#agent-teams) sets the
 server's limits.
@@ -407,3 +551,39 @@ team, which an agent in a session takes one after the other and a person
 drags in the web UI. A card with a team and a role is that team's task
 too: its runs take it in the board's order and within its limits, and an
 objective's sub-tasks go on its board ([Teams](board.md#teams)).
+
+## The office
+
+The plugin `office` (IMP-233) shows a team as a map of its office: **Open
+in the editor** on the team's note opens it in a window. Seen from above,
+each role has a desk, with the coordinator at the head and arrows to the
+roles it delegates to. Each role shows its state, its open tasks and what
+its runs spent today. A list of the roles, with the keys, does the same
+without the map.
+
+| State | |
+|---|---|
+| waiting | a task waits for a person: `input-required`, `review` |
+| held | a task waits for a budget, a limit of agents or the tasks it depends on: its `waits` |
+| working | a run holds a task |
+| queued | a task is ready and no run holds it yet |
+| idle | no open task |
+
+The map reads the team as the server does, with the problems of its
+block on their lines. A click on a task or on an agent opens its note.
+
+Whoever may write the project changes the team on the map too: roles,
+executors and models, delegations, folders, profiles, rooms. The changes
+are a draft the server checks at every step without writing, with each
+problem on its role and line; **Save**, in the window's bar, writes the
+block when the note did not change meanwhile: the office's page proposes
+the changes, it does not write them. The server writes again only the entries that
+change, so the comments, the blank lines and the fields the map does not
+show stay as they are: the team is still its note. A role with open
+tasks keeps its name until they are finished or given to another role. A
+role added writes its agent note `agents/<role>.md` when it is missing,
+and a room created the notes of a new team, as `memory_create_team`
+does. The window gives the page
+the team again when the note or a task changes, when a run changes, and
+every 10 seconds. The page holds no credentials: it gets what the person
+at the window may read ([the bridge office/1](plugins.md#the-bridge-office1)).

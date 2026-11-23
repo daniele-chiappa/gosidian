@@ -71,6 +71,14 @@ type Token struct {
 	// unchanged. A run of a team's task gets its role's folders (IMP-195).
 	// See AllowsWrite.
 	WritePaths []string `json:"write_paths,omitempty"`
+	// Tools, with LimitTools, are the only plugins' tools the token sees:
+	// a plugin's name, for all its tools, or one tool's name
+	// (vec-pg_search). A run of a team's task whose role names its tools
+	// gets them (IMP-233); LimitTools without Tools sees none. A run token
+	// lasts its call: an older binary that reads it sees every tool. See
+	// AllowsTool.
+	Tools      []string `json:"tools,omitempty"`
+	LimitTools bool     `json:"limit_tools,omitempty"`
 	// writeFilter, when set, narrows the write scope per project on top of
 	// Scopes: the runtime derives it for a token whose owning account may
 	// write some of the token's projects but only read others (per-project
@@ -187,6 +195,13 @@ func ProjectOf(path string) string {
 		return path[:i]
 	}
 	return path
+}
+
+// AllowsTool says whether the token sees the tool name of plugin: any,
+// unless LimitTools; then only one its Tools name, by the plugin or by
+// the tool (IMP-233).
+func (t *Token) AllowsTool(plugin, name string) bool {
+	return !t.LimitTools || slices.Contains(t.Tools, plugin) || slices.Contains(t.Tools, name)
 }
 
 // AllowsWrite reports whether the token may mutate the given vault-relative
@@ -462,6 +477,24 @@ func (s *Store) CreateGrant(name string, projects []string, scopes []string, ttl
 // refuses: its first token would turn MCP's tokens on for every client of
 // a server that runs without them.
 func (s *Store) CreateRun(name, project string, write bool, ttl time.Duration, runID string, writePaths []string) (plaintext string, tok Token, err error) {
+	return s.CreateRunLimited(name, project, write, ttl, runID, RunLimits{WritePaths: writePaths})
+}
+
+// RunLimits narrow a run token: WritePaths are the only folders a write
+// token writes in (IMP-195); Tools, with LimitTools, the only plugins'
+// tools it sees (IMP-233).
+type RunLimits struct {
+	WritePaths []string
+	Tools      []string
+	LimitTools bool
+}
+
+// maxRunTools is the most tools a run token names.
+const maxRunTools = 50
+
+// CreateRunLimited is CreateRun with the limits of a run of a team's task.
+func (s *Store) CreateRunLimited(name, project string, write bool, ttl time.Duration, runID string, lim RunLimits) (plaintext string, tok Token, err error) {
+	writePaths := lim.WritePaths
 	if ttl <= 0 {
 		return "", Token{}, errors.New("a run token needs an expiry")
 	}
@@ -486,6 +519,22 @@ func (s *Store) CreateRun(name, project string, write bool, ttl time.Duration, r
 	if err != nil {
 		return "", Token{}, err
 	}
+	var tools []string
+	if lim.LimitTools {
+		if len(lim.Tools) > maxRunTools {
+			return "", Token{}, fmt.Errorf("a run token names at most %d tools", maxRunTools)
+		}
+		for _, t := range lim.Tools {
+			if t == "" || strings.ContainsAny(t, " \t\n/") {
+				return "", Token{}, fmt.Errorf("%q is no plugin nor tool", t)
+			}
+			if !slices.Contains(tools, t) {
+				tools = append(tools, t)
+			}
+		}
+	} else if len(lim.Tools) > 0 {
+		return "", Token{}, errors.New("a run token's tools limit it: LimitTools")
+	}
 	if s.Empty() {
 		return "", Token{}, errors.New("the server has no MCP tokens: a run token would turn them on for every client")
 	}
@@ -509,6 +558,7 @@ func (s *Store) CreateRun(name, project string, write bool, ttl time.Duration, r
 		t.ToolProfile = ToolProfileCore
 		t.RunID = runID
 		t.WritePaths = cleanPaths
+		t.Tools, t.LimitTools = tools, lim.LimitTools
 	})
 	if err != nil {
 		return "", Token{}, err

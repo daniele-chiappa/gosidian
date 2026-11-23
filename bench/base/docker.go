@@ -37,7 +37,11 @@ type volume string
 // files belong to the image's user and the host keeps no trace of them.
 // The files are dated at the copy, not as the checkout has them: the
 // bootstrap reads their age (hot.md's, the stale notes), and a checkout a
-// month old made it 112 bytes longer than a fresh one (2026-10-29).
+// month old made it 112 bytes longer than a fresh one (2026-10-29). And
+// all at one second, the copy's start: the index keeps mtimes in seconds
+// and recent_notes takes the newest five, then by path, so a copy across a
+// second put the files after it first, and the bootstrap read up to 77
+// bytes more, 70 once in a guard under load (2026-11-17).
 func newVolume(name, src string) (volume, error) {
 	if _, err := docker("volume", "create", name); err != nil {
 		return "", err
@@ -46,7 +50,7 @@ func newVolume(name, src string) (volume, error) {
 	args := []string{"run", "--rm", "--cpus=1", "-v", name + ":/v"}
 	if src != "" {
 		args = append(args, "-v", src+":/src:ro")
-		script = "cp -R /src/. /v/ && chown -R " + imageUser + " /v"
+		script = "t=$(date +%s) && cp -R /src/. /v/ && find /v -exec touch -d @$t {} + && chown -R " + imageUser + " /v"
 	}
 	if _, err := docker(append(args, helperImage, "sh", "-c", script)...); err != nil {
 		removeVolume(volume(name))

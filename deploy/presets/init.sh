@@ -32,13 +32,14 @@ fill() {
 }
 
 fill GOSIDIAN_SECRETS_KEY "$(rand_b64 32)"
-for name in DOCLING_TOKEN IMAGES_TOKEN CHAT_TOKEN DATABASE_TOKEN STORAGE_TOKEN QDRANT_API_KEY; do
+for name in DOCLING_TOKEN IMAGES_TOKEN CHAT_TOKEN DATABASE_TOKEN STORAGE_TOKEN QDRANT_API_KEY \
+	PI_TOKEN EXEC_TOKEN NOTIFY_TOKEN PREVIEW_TOKEN; do
 	fill "$name" "$(rand_hex 24)"
 done
 chmod 600 .env
 echo "Keys and tokens are in .env."
 
-mkdir -p vault state secrets
+mkdir -p vault state secrets keys notify-secrets
 # The image runs as uid 65532: the vault and the state dir must be its.
 if [ "$(stat -c %u vault 2>/dev/null || stat -f %u vault)" != 65532 ]; then
 	if [ "$(id -u)" = 0 ]; then
@@ -46,6 +47,20 @@ if [ "$(stat -c %u vault 2>/dev/null || stat -f %u vault)" != 65532 ]; then
 	else
 		echo "Give the folders to the container's user, once:"
 		echo "  sudo chown -R 65532:65532 vault state secrets"
+	fi
+fi
+# The agents preset: the deploy keys and the git token of ./keys are read
+# by pi and exec as root (their files mode 600), the channels' credentials
+# of ./notify-secrets by notify's user, uid 1000.
+chmod 700 keys 2>/dev/null || true
+if [ "$(stat -c %u keys 2>/dev/null || stat -f %u keys)" != 0 ] || [ "$(stat -c %u notify-secrets 2>/dev/null || stat -f %u notify-secrets)" != 1000 ]; then
+	if [ "$(id -u)" = 0 ]; then
+		chown -R 0:0 keys
+		chown -R 1000:1000 notify-secrets
+	else
+		echo "For the agents preset, once the keys are in place:"
+		echo "  sudo chown -R 0:0 keys && sudo chmod 600 keys/*"
+		echo "  sudo chown -R 1000:1000 notify-secrets"
 	fi
 fi
 

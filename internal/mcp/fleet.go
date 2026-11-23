@@ -62,11 +62,22 @@ func (s *Server) fleetTeams(project string) (map[string]fleet.Team, error) {
 		if len(blocks) != 1 {
 			continue
 		}
-		if t, problems := fleet.Parse(blocks[0].Src, p); len(problems) == 0 {
+		if t, problems := fleet.ParseWith(blocks[0].Src, p, s.fleetProfiles()); len(problems) == 0 {
 			out[p] = t
 		}
 	}
 	return out, nil
+}
+
+// fleetProfiles reads the profiles the roles of a team name (IMP-233).
+func (s *Server) fleetProfiles() fleet.Profiles {
+	return fleet.ProfilesFrom(func(p string) ([]byte, error) {
+		n, err := s.vault.Load(p)
+		if err != nil {
+			return nil, err
+		}
+		return n.Content, nil
+	})
 }
 
 // fleetTasks are the tasks of project.

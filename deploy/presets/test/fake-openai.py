@@ -5,8 +5,9 @@
 numbers and made length 1, so that a question and the paragraph that
 shares its words are close. /v1/chat/completions answers with the first
 line of source [1] of the prompt and cites it, which is what the test
-checks: the answer comes from the documents, through the pipelines.
-Standard library only; no model, no network.
+checks: the answer comes from the documents, through the pipelines. With
+stream it sends the answer as server-sent events, its usage last, as an
+agent (pi) asks for it. Standard library only; no model, no network.
 """
 import hashlib
 import json
@@ -63,6 +64,19 @@ class Handler(BaseHTTPRequestHandler):
             tokens = sum(len(t.split()) for t in texts)
             self._send(200, {"object": "list", "data": data, "model": req.get("model") or "fake",
                              "usage": {"prompt_tokens": tokens, "total_tokens": tokens}})
+        elif self.path == "/v1/chat/completions" and req.get("stream"):
+            text = answer(req.get("messages") or [])
+            usage = {"prompt_tokens": 10, "completion_tokens": len(text.split()), "total_tokens": 10 + len(text.split())}
+            base = {"id": "fake", "object": "chat.completion.chunk", "model": req.get("model") or "fake"}
+            events = [dict(base, choices=[{"index": 0, "delta": {"role": "assistant", "content": text}, "finish_reason": None}]),
+                      dict(base, choices=[{"index": 0, "delta": {}, "finish_reason": "stop"}]),
+                      dict(base, choices=[], usage=usage)]
+            b = "".join("data: %s\n\n" % json.dumps(e) for e in events).encode() + b"data: [DONE]\n\n"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
         elif self.path == "/v1/chat/completions":
             text = answer(req.get("messages") or [])
             self._send(200, {"id": "fake", "object": "chat.completion", "model": req.get("model") or "fake",

@@ -876,7 +876,7 @@ describe('NoteView, the valid version (IMP-201)', () => {
   async function mountNote(mode?: 'edit') {
     const w = mount(NoteView, {
       props: { path: 'p/a.md', ...(mode ? { mode } : {}) },
-      global: { plugins: [i18n()] },
+      global: { plugins: [i18n()], stubs: { PropertiesPanel: true, RowViews: true } },
       attachTo: document.body,
     })
     await flushPromises()

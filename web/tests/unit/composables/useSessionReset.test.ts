@@ -47,13 +47,27 @@ describe('resetSessionState (BUG-116)', () => {
   })
 
   it('does not throw when the storage refuses', () => {
-    const remove = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
-      throw new Error('SecurityError')
+    // The page's storage itself refuses, as with site data blocked: a spy on
+    // Storage.prototype could miss the object happy-dom hands out, and pass
+    // without a refusal (IMP-235). The calls prove this one happened.
+    const refuse = vi.fn((): never => {
+      throw new DOMException('The operation is insecure.', 'SecurityError')
+    })
+    vi.stubGlobal('localStorage', {
+      getItem: refuse,
+      setItem: refuse,
+      removeItem: refuse,
+      key: refuse,
+      clear: refuse,
+      get length() {
+        return refuse()
+      },
     })
     try {
       expect(() => resetSessionState()).not.toThrow()
+      expect(refuse).toHaveBeenCalled()
     } finally {
-      remove.mockRestore()
+      vi.unstubAllGlobals()
     }
   })
 })

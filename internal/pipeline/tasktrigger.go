@@ -107,6 +107,16 @@ type TaskConfig struct {
 	// report in a prompt (0: 16 KiB).
 	MaxReport       int
 	MaxPromptReport int
+	// MaxPromptNotes is the most bytes of the guides and skills a role's
+	// agent receives in its system prompt (0: 64 KiB).
+	MaxPromptNotes int
+}
+
+func (c TaskConfig) maxPromptNotes() int {
+	if c.MaxPromptNotes <= 0 {
+		return 64 << 10
+	}
+	return c.MaxPromptNotes
 }
 
 func (c TaskConfig) maxReport() int {
@@ -283,10 +293,46 @@ func (e *Engine) TaskWaits(project string) map[string]string {
 	return out
 }
 
-// TeamSpend is what team (its note's path) spent today, in the notes' zone.
+// TeamSpend is what team (its note's path) spent today, in the notes'
+// zone, with what its rooms spent: they spend of its budget (IMP-233).
 func (e *Engine) TeamSpend(project, team string) (jobs.Spend, error) {
-	return e.runner.Store().TeamSpend(project, team, e.dayStart(e.now()))
+	var rooms []fleet.Room
+	if fl, ok := e.host.(Fleet); ok {
+		if teams, err := fl.Teams(project); err == nil {
+			rooms = teams[team].Rooms
+		}
+	}
+	return e.teamSpend(project, team, rooms)
 }
+
+// teamSpend is what team and its rooms spent today.
+func (e *Engine) teamSpend(project, team string, rooms []fleet.Room) (jobs.Spend, error) {
+	since := e.dayStart(e.now())
+	s, err := e.runner.Store().TeamSpend(project, team, since)
+	if err != nil {
+		return s, err
+	}
+	for _, r := range rooms {
+		rs, err := e.runner.Store().TeamSpend(project, r.Path, since)
+		if err != nil {
+			return s, err
+		}
+		s.CostUSD += rs.CostUSD
+		s.Tokens += rs.Tokens
+		s.Steps += rs.Steps
+	}
+	return s, nil
+}
+
+// TeamSpendByTask is TeamSpend by the task each run executed, "" for runs
+// without one (IMP-233).
+func (e *Engine) TeamSpendByTask(project, team string) (map[string]jobs.Spend, error) {
+	return e.runner.Store().TeamSpendByTask(project, team, e.dayStart(e.now()))
+}
+
+// Now is the engine's clock, in the notes' zone: the office's map dates its
+// answer with it.
+func (e *Engine) Now() time.Time { return e.now().In(e.cfg.Location) }
 
 func (e *Engine) dayStart(now time.Time) time.Time {
 	l := now.In(e.cfg.Location)
@@ -389,17 +435,37 @@ func (e *Engine) tickProject(fl Fleet, project string, pipes []Pipeline, teams m
 		}
 	}
 	spent := map[string]bool{}
-	budgetOK := func(team fleet.Team) (bool, string) {
-		if team.Budget.DayUSD <= 0 {
-			return true, ""
+	// A room's team: the team that gives it objectives (IMP-233).
+	parentOf := map[string]fleet.Team{}
+	for _, t := range teams {
+		for _, r := range t.Rooms {
+			parentOf[r.Path] = t
 		}
-		s, err := e.TeamSpend(project, team.Path)
+	}
+	overBudget := func(team fleet.Team) string {
+		if team.Budget.DayUSD <= 0 {
+			return ""
+		}
+		s, err := e.teamSpend(project, team.Path, team.Rooms)
 		if err != nil {
-			return false, "the team's spend does not read: " + err.Error()
+			return "the team's spend does not read: " + err.Error()
 		}
 		if s.CostUSD >= team.Budget.DayUSD {
 			spent[team.Path] = true
-			return false, fmt.Sprintf("the team spent its budget of the day (%.2f of %.2f USD)", s.CostUSD, team.Budget.DayUSD)
+			return fmt.Sprintf("the team spent its budget of the day (%.2f of %.2f USD)", s.CostUSD, team.Budget.DayUSD)
+		}
+		return ""
+	}
+	// A team's budget holds its rooms' runs too: a room waits while its
+	// team's day is spent.
+	budgetOK := func(team fleet.Team) (bool, string) {
+		if why := overBudget(team); why != "" {
+			return false, why
+		}
+		if parent, ok := parentOf[team.Path]; ok {
+			if why := overBudget(parent); why != "" {
+				return false, "it is a room of " + parent.Name() + ": " + why
+			}
 		}
 		return true, ""
 	}
@@ -499,7 +565,7 @@ func (e *Engine) tickProject(fl Fleet, project string, pipes []Pipeline, teams m
 		if sent {
 			continue
 		}
-		s, _ := e.TeamSpend(project, team.Path)
+		s, _ := e.teamSpend(project, team.Path, team.Rooms)
 		input := map[string]any{"event": EventBudget, "team": team.Path, "project": project, "day": day,
 			"spent_usd": s.CostUSD, "budget_usd": team.Budget.DayUSD, "alert": anyList(team.Alert),
 			"title": "Team " + team.Name() + ": the day's budget is spent",
@@ -989,39 +1055,61 @@ func (e *Engine) agentNode(node *Node) bool {
 // folders (writes), and nowhere when the role names none; another run is
 // not scoped.
 func (e *Engine) RunWritePaths(runID string) ([]string, bool, error) {
-	run, err := e.runner.Store().Run(runID)
-	if err != nil {
-		return nil, false, err
-	}
-	if run.Task == "" {
-		return nil, false, nil
-	}
-	fl, ok := e.host.(Fleet)
-	if !ok {
-		return nil, true, nil
-	}
-	t, _, err := fl.ReadTask(run.Task)
-	if err != nil {
-		return nil, true, fmt.Errorf("the run's task %s: %w", run.Task, err)
-	}
-	teams, err := fl.Teams(run.Project)
-	if err != nil {
-		return nil, true, err
-	}
-	team, ok := teams[run.Team]
-	if !ok {
-		return nil, true, fmt.Errorf("the run's team %s is no team of the project, or its block does not read", run.Team)
-	}
-	role, ok := team.Role(t.Assignee)
-	if !ok {
-		return nil, true, fmt.Errorf("role %s is no role of %s", t.Assignee, run.Team)
+	role, task, err := e.runRole(runID)
+	if !task || err != nil {
+		return nil, task, err
 	}
 	return role.Writes, true, nil
 }
 
-// executorResources are the places the executor's plugin of a run's task
-// takes (task.run, task.pr call it): its plugin and shared resources.
-func (e *Engine) executorResources(run jobs.Run) []string {
+// RunTools says which plugins' tools the MCP tokens of a run's agent see
+// (plugins.RunScopes, IMP-233): for a run of a team's task whose role
+// names its tools, only those; else every plugin exposed in the project.
+func (e *Engine) RunTools(runID string) ([]string, bool, error) {
+	role, task, err := e.runRole(runID)
+	if !task || err != nil || role.Tools == nil {
+		return nil, false, err
+	}
+	return role.Tools, true, nil
+}
+
+// runRole is the role of the task a run holds; task is false for a run of
+// no team's task.
+func (e *Engine) runRole(runID string) (role fleet.Role, task bool, err error) {
+	run, err := e.runner.Store().Run(runID)
+	if err != nil {
+		return fleet.Role{}, false, err
+	}
+	if run.Task == "" {
+		return fleet.Role{}, false, nil
+	}
+	fl, ok := e.host.(Fleet)
+	if !ok {
+		return fleet.Role{}, true, nil
+	}
+	t, _, err := fl.ReadTask(run.Task)
+	if err != nil {
+		return fleet.Role{}, true, fmt.Errorf("the run's task %s: %w", run.Task, err)
+	}
+	teams, err := fl.Teams(run.Project)
+	if err != nil {
+		return fleet.Role{}, true, err
+	}
+	team, ok := teams[run.Team]
+	if !ok {
+		return fleet.Role{}, true, fmt.Errorf("the run's team %s is no team of the project, or its block does not read", run.Team)
+	}
+	role, ok = team.Role(t.Assignee)
+	if !ok {
+		return fleet.Role{}, true, fmt.Errorf("role %s is no role of %s", t.Assignee, run.Team)
+	}
+	return role, true, nil
+}
+
+// executorResources are the places a node of the executor's plugin of a
+// run's task takes (task.run calls the role's run, task.pr its plugin's
+// pr): its plugin's, its shared resources, and the node's own limit's.
+func (e *Engine) executorResources(run jobs.Run, node string) []string {
 	fl, ok := e.host.(Fleet)
 	if !ok || run.Task == "" {
 		return nil
@@ -1038,9 +1126,10 @@ func (e *Engine) executorResources(run jobs.Run) []string {
 	if !ok {
 		return nil
 	}
+	// The node executorType calls.
 	plugin, _, _ := strings.Cut(role.Run, ".")
 	if x, ok := e.types.ext.(interface{ Resources(use string) []string }); ok {
-		return x.Resources(plugin + ".run")
+		return x.Resources(plugin + "." + node)
 	}
 	return nil
 }

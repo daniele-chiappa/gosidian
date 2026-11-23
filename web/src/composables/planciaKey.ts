@@ -109,6 +109,33 @@ function graphPropsFromArg(a: string | null): Record<string, unknown> {
 }
 
 /**
+ * Search window arg (`q=…&p=…`): the text it searched and its project
+ * filter, which the window writes back after each search. A Search the
+ * tabs' cache let go, or a reload, finds them again: in tabs mode the
+ * plancia keeps five windows alive, and Search came back with its field
+ * empty (BUG-161). It stays the one `search` window whatever the text.
+ */
+function searchArgFromProps(p: Record<string, unknown>): string | null {
+  const parts: string[] = []
+  const q = str(p.q)
+  const project = str(p.project)
+  if (q) parts.push('q=' + encodeURIComponent(q))
+  if (project) parts.push('p=' + encodeURIComponent(project))
+  return parts.length ? parts.join('&') : null
+}
+
+function searchPropsFromArg(a: string | null): Record<string, unknown> {
+  if (!a) return {}
+  const sp = new URLSearchParams(a)
+  const props: Record<string, unknown> = {}
+  const q = sp.get('q')
+  if (q) props.q = q
+  const p = sp.get('p')
+  if (p) props.project = p
+  return props
+}
+
+/**
  * De-dup key for a decoded graph window, mirroring the opener conventions:
  * project-anchored views reuse ProjectsView's `graph:project:<name>` key so
  * they survive reloads as distinct windows; everything else is the sidebar
@@ -235,8 +262,12 @@ const types: Record<string, ArgTypeSpec> = {
       return section ? `${tr('nav.admin')} · ${trOr(`admin.tab.${section}`, section)}` : tr('nav.admin')
     },
   },
+  search: {
+    arg: searchArgFromProps,
+    props: searchPropsFromArg,
+    title: () => tr('nav.search'),
+  },
   // Singletons with a fixed display title.
-  search: { arg: () => null, title: () => tr('nav.search') },
   projects: { arg: () => null, title: () => tr('nav.projects') },
   settings: { arg: () => null, title: () => tr('nav.settings') },
   trash: { arg: () => null, title: () => tr('nav.trash') },
@@ -270,7 +301,7 @@ export const codec: PlanciaCodec = {
     if (spec.type === 'graph' && spec.props?.global === true) {
       return graphKeyForProps(spec.props)
     }
-    if (spec.type === 'query' || spec.type === 'admin') return planciaKey(spec.type)
+    if (spec.type === 'query' || spec.type === 'admin' || spec.type === 'search') return planciaKey(spec.type)
     if (spec.type === 'create') return createKeyForProps(spec.props ?? {})
     return baseCodec.key(spec)
   },
@@ -289,7 +320,7 @@ export const codec: PlanciaCodec = {
     if (spec?.type === 'graph' && spec.props?.global === true) {
       return { ...spec, key: graphKeyForProps(spec.props) }
     }
-    if (spec?.type === 'query' || spec?.type === 'admin') return { ...spec, key: planciaKey(spec.type) }
+    if (spec?.type === 'query' || spec?.type === 'admin' || spec?.type === 'search') return { ...spec, key: planciaKey(spec.type) }
     if (spec?.type === 'create') return { ...spec, key: createKeyForProps(spec.props ?? {}) }
     return spec
   },
